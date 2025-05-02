@@ -1,0 +1,9 @@
+tensorflow[and-cuda]
+astropy
+fastapi
+uvicorn
+psycopg2-binary
+pandas
+numpy
+python-dotenv
+pytest
