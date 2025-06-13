@@ -82,10 +82,11 @@ uvicorn src.app.main:app --reload
 ### Example API Endpoints
 
 - `GET /status`: Health check and database connectivity
-- `POST /nodes`: Add nodes to the graph database
-- `POST /edges`: Define relationships between nodes
-- `GET /graph`: Retrieve full or partial graph structure
-- `GET /simulate`: Trigger simulation models
+- `POST /nodes`: Creates a new node in the graph database.
+- `GET /nodes/{node_id}`: Retrieves a specific node by its ID.
+- `POST /edges`: Creates an edge to define a relationship between two nodes.
+- `POST /metrics`: Ingests a new time-series data point.
+- `GET /`: Root endpoint for basic API health check.
 
 ## Testing
 
