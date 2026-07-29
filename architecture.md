@@ -93,7 +93,7 @@ Three states, strictly ordered. **"Commit" throughout this document means the pe
 
 **Rule: nothing is presented externally as permanent until durable.** Internal simulation may proceed on accepted events; any externally visible guarantee of permanence waits for durability.
 
-**Crash semantics:** recovery rolls back to the durable frontier — last durable snapshot plus the durable log suffix. The crash-loss window is therefore *precisely* the accepted-but-not-durable set, bounded by the flush policy's stated maximum. Recovery is the same code path as the replay test.
+**Crash semantics:** recovery rolls back to the durable frontier — the newest snapshot whose covered endpoint is at or before `F` (§9), plus the durable log suffix from that endpoint to `F`. The crash-loss window is therefore *precisely* the accepted-but-not-durable set, bounded by the flush policy's stated maximum. Recovery is the same code path as the replay test.
 
 ## 6. Time
 
@@ -133,6 +133,9 @@ Four artifacts: an append-only event log, periodic snapshots, one **world manife
 
   The recovery point is therefore always exactly `F` — a verified group boundary by construction. The crash-loss window is *precisely* the accepted-but-not-durable set, matching §5 verbatim; no failure at or before an acknowledged offset is ever repaired silently; and the two failure modes are distinguished positionally by the frontier, not structurally by framing.
 - **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the manifest and log are. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
+- **Snapshot eligibility is subordinated to the frontier.** The snapshotter reads live state, and live state contains accepted-but-not-durable events — so an unconstrained snapshot could cover history beyond `F`, and restoring it after strict rollback would resurrect exactly what the rollback discarded. Two rules close this:
+  - **Publication:** a snapshot's covered endpoint must be at or before the durable frontier *at publication time* — snapshots capture only durable history. Since `F` is monotone, every legally published snapshot remains valid forever.
+  - **Recovery:** select the newest snapshot with covered endpoint ≤ `F`. A snapshot claiming coverage beyond `F` can only mean a publication bug or corruption: it is never used, and its presence is surfaced as an integrity warning — declining a snapshot is always safe, because snapshots are cache and never truth.
 - **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
 ## 10. Implementation order
