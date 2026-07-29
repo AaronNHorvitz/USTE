@@ -26,7 +26,7 @@ Every property test in the project is a restatement of this equation.
 
 ## 2. Canonical force model
 
-**Rule: a body's model-segment history is a pure function of `(seed, rules, ordered_event_log)`. The first segment is determined by `(seed, rules, address)`; every later segment arises only at a committed event boundary (§5). Activation, fidelity level, and observation never decide which canonical forces exist.**
+**Rule: a body's model-segment history is a pure function of `(seed, rules, address, ordered_event_log)`. The first segment is determined by `(seed, rules, address)`; every later segment arises only at a committed event boundary (§5). Activation, fidelity level, and observation never decide which canonical forces exist.**
 
 The canonical baseline is not synonymous with two-body Kepler. It is assigned per body at generation, in tiers:
 
@@ -85,7 +85,7 @@ Wake/sleep transitions themselves are not events. Only commits are.
 
 ## 5. Event lifecycle
 
-Three states, strictly ordered:
+Three states, strictly ordered. **"Commit" throughout this document means the pending → accepted transition.** Simulation state, encounter queues, and model segments advance at acceptance; durability governs only externally visible permanence, never internal progress.
 
 1. **Pending** — produced within a frame, not yet ordered. Invisible to canonical history.
 2. **Accepted** — assigned its `(tick, region, sequence)` position in the total order. Part of canonical history; replay includes it; simulation proceeds on it. Multi-body consequences (coupled model-segment updates, §2) are accepted as one **atomic event group**: replay observes all of it or none of it, never an interleaving.
@@ -123,7 +123,11 @@ Three states, strictly ordered:
 Append-only event log + periodic snapshots + one **world manifest**, written asynchronously except the manifest, which is written synchronously at world creation.
 
 - **World manifest:** immutable, checksummed, written once at creation: `world_format_version`, the full numerical profile (including target triple, CPU feature set, dependency lock hash, serialization version), `seed`, and `rules`. The invariant names four inputs beyond the log; the manifest is where they live. **Truth on disk is the manifest plus the log.** Snapshots and log segments reference the manifest's checksum; a log without its manifest is not a world.
-- **Group record — the unit of the log:** `(sequence_number, tick, region, member_events[], schema_version, checksum)` in canonical serialization. A plain event is a group of size one. One checksum covers the whole group; recovery verifies checksums forward and truncates a trailing partial or corrupt record, so the durable frontier always lands on a group boundary.
+- **Group record — the unit of the log:** length-prefixed and footer-terminated: `(length, sequence_number, tick, region, member_events[], schema_version, checksum, footer)` in canonical serialization. A plain event is a group of size one; one checksum covers the whole group. The explicit framing exists so recovery can tell two failure modes apart:
+  - **Structurally incomplete tail** (declared length not present, or footer missing) — a crash tail. Discarded silently; this is exactly the accepted-but-not-durable window the flush policy already prices in.
+  - **Structurally complete record with a failing checksum** — corruption of possibly-acknowledged durable history. **Hard recovery error.** The world refuses to open; truncating here would silently break the durability promise. Repair is an explicit operator action against backups, never an automatic one.
+
+  The durable frontier therefore always lands on a verified group boundary, and only genuine crash tails are ever dropped.
 - **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the manifest and log are. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
 - **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
@@ -134,7 +138,7 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 1. Repository cleanup; Rust workspace (`uste-core`, `uste-time`, `uste-gen`, `uste-orbits`, `uste-sim`, `uste-log`).
 2. Versioned hierarchical addresses and deterministic seed derivation.
 3. Integer simulation time (§6) and canonical event ordering (§5).
-4. Canonical serialization (§8), replay, and state hashing.
+4. Canonical serialization (§8), replay, and state hashing — with crash-injection tests at every group-record boundary, distinguishing tail-discard from hard corruption error (§9).
 5. Two-body analytical propagation (tier-1 canonical model).
 6. One numerical integrator with the full reconciliation contract (§4), two-body scope.
 7. Property tests across replays, thread counts, and transition schedules; golden event logs as committed fixtures under `tests/fixtures/`.
