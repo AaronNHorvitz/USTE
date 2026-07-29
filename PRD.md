@@ -22,7 +22,9 @@ USTE is a deterministic, multiscale, event-sourced simulation kernel written in 
 state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event_log)
 ```
 
-The product is the **kernel itself**: a set of Rust crates, their documented contracts, and the test harnesses that prove the contracts hold. USTE is domain-agnostic by design — it does not know what its entities mean. Anything domain-specific lives above it and is out of scope for this document.
+The product is the **kernel itself**: a set of Rust crates, their documented contracts, and the test harnesses that prove the contracts hold.
+
+**Scope honesty:** USTE's *core contracts* are application-agnostic — `uste-core`, `uste-time`, and `uste-log` know entities, baselines, deviations, events, and replay, and nothing celestial. But v1 ships exactly one baseline-model family, and it is celestial: the tiered orbital models in `uste-orbits` (FR-3). USTE v1 is therefore accurately described as an **application-agnostic simulation core with celestial mechanics as its first and only baseline-model family** — genericity is enforced at the crate boundary (model families implement core traits), not claimed as a v1 deliverable. Application semantics above the model families remain out of scope entirely.
 
 ## 2. Product definition
 
@@ -40,7 +42,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 
 1. **The kernel developer** — needs every contract enforceable by a test, so regressions are caught by CI rather than by users.
 2. **Downstream application developers** — embed the kernel; need stable, documented APIs, a versioned world format, and the reproducibility guarantees stated per numerical profile.
-3. **Auditors/reviewers** — need to verify any world's history independently: manifest + log in, bit-identical state hash out, on commodity hardware.
+3. **Auditors/reviewers** — need to verify any world's history independently: manifest + log in, bit-identical state hash out. Under the baseline profile this requires **the exact binary the profile identifies by build hash** (or a bit-identical rebuild from the pinned toolchain, flags, features, and lockfile); hardware-independent verification on any commodity machine is a *portable-profile* capability, not a baseline one.
 
 ### 2.3 Explicit non-goals (v1)
 
@@ -60,7 +62,7 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 - **FR-1.1** Given identical `(world_format_version, numerical_profile, seed, rules, ordered_event_log)`, the kernel SHALL produce bit-identical state at every tick.
 - **FR-1.2** The baseline numerical profile SHALL guarantee per-binary determinism; a `portable` profile guaranteeing cross-platform bit-equality MAY be provided later and SHALL be separately named and versioned.
-- **FR-1.3** The numerical profile SHALL bind: integrator selections and step sizes, floating-point mode (FMA policy, no reassociation), math-library versions, target triple, allowed CPU features, dependency lock hash, and canonical serialization version.
+- **FR-1.3** The numerical profile SHALL bind: integrator selections and step sizes, floating-point mode (FMA policy, no reassociation), math-library versions, target triple, allowed CPU features, **compiler version, build flags, enabled Cargo features,** dependency lock hash, canonical serialization version, **and the build hash of the released binary it identifies**.
 - **FR-1.4** State iterated during simulation SHALL never use randomized iteration order (no default `HashMap` iteration over state).
 - **FR-1.5** Parallel stages SHALL be pure maps with deterministic merges or deterministically scheduled; results SHALL be identical across thread counts.
 - **FR-1.6** Hierarchical PRNG streams SHALL be keyed by address path; regenerating any node SHALL NOT require or disturb its siblings.
@@ -82,10 +84,11 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 ### FR-4 — Layered simulation and sleep/wake *(architecture §3, §4)*
 
-- **FR-4.1** The kernel SHALL implement the five layers: procedural, analytical, active, contact, historical. (Contact-layer physics is Milestone ≥ 2; the layer boundary SHALL exist from Milestone 0.)
+- **FR-4.1a** The five layer *boundaries* — procedural, analytical, active, contact, historical — SHALL exist as interfaces from Milestone 0, so no later milestone changes the kernel's shape.
+- **FR-4.1b** Layer *implementations* are milestone-scoped: analytical + active (two-body) and historical in M0; procedural generation in M1; contact physics in M2+. A boundary whose implementation is absent SHALL fail explicitly, never silently no-op.
 - **FR-4.2** Wake SHALL initialize numerical state as a pure function of `(model, tick)`; no integrator state survives dormancy.
 - **FR-4.3** Sleep with no committed interaction SHALL discard the deviation and write nothing.
-- **FR-4.4** Sleep after a committed interaction SHALL write one deviation event carrying: address, epoch tick, cause, epoch state vector, reference-model identifier, and the model-specific invariant audit.
+- **FR-4.4** Sleep after a committed interaction SHALL write **one atomic event group containing one deviation member per affected body**, each member carrying: address, epoch tick, cause, epoch state vector, reference-model identifier, and the model-specific invariant audit. A single-body commit is a group of size one (FR-6.3).
 - **FR-4.5** The two-body invariant audit SHALL verify energy and angular momentum of the fitted conic against the numerical state at epoch within profile tolerance, recording the residual in the event.
 - **FR-4.6** Transitions SHALL be governed by hysteresis: minimum dwell ticks and wake radius strictly inside sleep radius; thrash rate SHALL be a monitored metric.
 

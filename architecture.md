@@ -16,7 +16,9 @@ state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event
   - floating-point mode: FMA policy, no reassociation
   - math-library implementations and versions
   - target triple and allowed CPU feature set (e.g., `x86-64-v3`)
+  - compiler version, build flags, and enabled Cargo features
   - dependency lock state (`Cargo.lock` hash)
+  - the build hash of the binary the profile identifies
   - canonical serialization version (§8)
 
   The baseline profile guarantees **per-binary determinism**. A stricter `portable` profile (fixed-point or strict-arithmetic authoritative layer) guarantees cross-platform bit-equality and is adopted only where required.
@@ -70,7 +72,7 @@ Wake/sleep transitions themselves are not events. Only commits are.
 
 **Active → analytical (sleep):**
 - No committed deviation → discard δ, resume canonical model. Nothing written.
-- Committed deviation → write one deviation event containing:
+- Committed deviation → write **one atomic event group with one deviation member per affected body** (a single-body commit is a group of size one, §5), each member containing:
   - `address`, `epoch_tick`, `cause`
   - **epoch state vector** (position, velocity in the frame of record)
   - **reference-model identifier** — which baseline tier and parameters apply from this epoch
@@ -157,4 +159,4 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 
 - No storage engine on the frame path.
 - No rendering in the authoritative loop.
-- No application semantics: the kernel does not know what its entities mean. Anything domain-specific lives above it.
+- No application semantics: the *core* does not know what its entities mean — model families (v1: the celestial models of `uste-orbits`) plug into core traits, and anything above the model families lives outside the kernel entirely.
