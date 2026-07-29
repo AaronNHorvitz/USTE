@@ -11,74 +11,123 @@ state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event
 ```
 
 - **`world_format_version`** — the schema of state, addresses, and events. Any breaking change bumps it; replay across versions is migration, never reinterpretation.
-- **`numerical_profile`** — a named, versioned bundle: integrator selections and step sizes, floating-point mode (FMA policy, no reassociation), math-library implementations and versions, SIMD width assumptions. The baseline profile guarantees **per-binary determinism**. A stricter `portable` profile (fixed-point or strict-arithmetic authoritative layer) guarantees cross-platform bit-equality and is adopted only where required.
+- **`numerical_profile`** — a named, versioned bundle covering *numerics and execution compatibility*:
+  - integrator selections and step sizes
+  - floating-point mode: FMA policy, no reassociation
+  - math-library implementations and versions
+  - target triple and allowed CPU feature set (e.g., `x86-64-v3`)
+  - dependency lock state (`Cargo.lock` hash)
+  - canonical serialization version (§8)
+
+  The baseline profile guarantees **per-binary determinism**. A stricter `portable` profile (fixed-point or strict-arithmetic authoritative layer) guarantees cross-platform bit-equality and is adopted only where required.
 - **`ordered_event_log`** — the total order over events is part of the state definition. Two logs with the same events in different order are different histories.
 
 Every property test in the project is a restatement of this equation.
 
-## 2. Observer independence
+## 2. Canonical force model
 
-**Rule: fidelity is presentation; deviations require causation.** Merely simulating a region at higher fidelity must be side-effect-free on canonical state.
+**Rule: a body's canonical force model is a pure function of `(seed, rules, address)`. Activation, fidelity level, and observation never decide which canonical forces exist.**
 
-Mechanism — reference-relative integration (Encke's method):
+The canonical baseline is not synonymous with two-body Kepler. It is assigned per body at generation, in tiers:
 
-- The analytical baseline (Keplerian elements per body) is canonical at all times for untouched bodies.
-- The active layer integrates the *deviation* from that reference, not the absolute trajectory. Awake behavior is `baseline(t) + δ(t)`.
-- **Sleep with no interaction:** `δ` is discarded. The canonical trajectory was never perturbed. No event is emitted. Two runs that differ only in who looked at what produce identical canonical histories.
-- **Sleep after interaction:** the interaction *committed* a deviation. New osculating elements are fitted from the final numerical state at a recorded epoch, and the fit becomes a deviation event in the log. The body's baseline is now the new elements from that epoch forward.
+1. **Conic** — pure Keplerian elements, for bodies whose perturbations are below the rules' significance threshold.
+2. **Precessing conic** — Keplerian elements plus secular rates (node regression, apsidal precession, mean-motion correction), capturing dominant N-body effects analytically. This is how real approximate ephemerides are published.
+3. **Generated ephemeris table** — for strongly interacting cases (resonances, close binaries), a one-time deterministic numerical integration performed *at system generation*, producing a tabulated canonical trajectory. Derived data: cacheable, discardable, regenerable, observation-independent — because generation is.
 
-Consequence: wake/sleep transitions themselves are not events. Only commits are.
+Every force in the simulation is classified as **canonical** (present in the assigned baseline model) or **presentational** (existing only in the active layer's richer integration). The presentational residual is *always* discarded. There is no third category.
 
-## 3. Sleep/wake reconciliation contract
+**Interactions commit state changes, never model changes.** An interaction is a coupling exceeding the rules-defined significance threshold ε (momentum/energy transfer); below ε, influence is presentational by definition. ε is part of `rules`, hence part of the invariant.
+
+## 3. Observer independence
+
+**Rule: fidelity is presentation; deviations require causation.** Merely simulating a region at higher fidelity is side-effect-free on canonical state.
+
+Mechanism — reference-relative integration (Encke's method) *against the canonical model of §2*:
+
+- The canonical baseline is the truth, at all times, for every body that nothing has touched.
+- The active layer integrates the *deviation* from that baseline, not the absolute trajectory. Awake behavior is `baseline(t) + δ(t)`. With tiered baselines, δ contains only sub-threshold residuals and genuine interactions — not the dominant physics.
+- **Sleep with no committed interaction:** δ is discarded. No event. Two runs differing only in who observed what produce identical canonical histories.
+- **Sleep after a committed interaction:** the commit records the new canonical state (§4). The body's baseline forks from that epoch forward.
+
+Wake/sleep transitions themselves are not events. Only commits are.
+
+## 4. Sleep/wake reconciliation contract
 
 **Analytical → active (wake):**
-- Initialize numerical state exactly from the analytical elements evaluated at the wake tick. The initialization is a pure function of `(elements, tick)` — no accumulated integrator state survives dormancy.
+- Initialize numerical state exactly from the canonical model evaluated at the wake tick. Pure function of `(model, tick)`; no integrator state survives dormancy.
 
 **Active → analytical (sleep):**
-- No committed deviation → discard `δ`, resume canonical elements. Nothing written.
-- Committed deviation → fit osculating elements from final numerical state at the sleep tick; write one deviation event `(address, epoch_tick, new_elements, cause)`.
+- No committed deviation → discard δ, resume canonical model. Nothing written.
+- Committed deviation → write one deviation event containing:
+  - `address`, `epoch_tick`, `cause`
+  - **epoch state vector** (position, velocity in the frame of record)
+  - **reference-model identifier** — which baseline tier and parameters apply from this epoch
+  - **model-specific invariant audit** (see below)
 
-**Continuity requirements at commit:**
-- Position and velocity are continuous by construction (the fit is exact at epoch).
-- Energy and angular momentum of the fitted conic must match the numerical state at epoch to within the profile's stated tolerance; the residual is recorded in the event for drift auditing.
+**Invariant audit, scoped honestly:**
+- *Two-body contract (Milestone 0):* the fitted conic's energy and angular momentum relative to the primary must match the numerical state at epoch within the profile's tolerance; the residual is recorded in the event.
+- *General contract:* independent conics cannot preserve total N-body invariants. For tier-2/3 models the audit records the model's own conserved or slowly-varying quantities and their residuals at epoch. What is audited is part of the model definition, not an afterthought.
 
 **Hysteresis:**
-- Minimum dwell ticks in each state before a transition is permitted, and a wake-radius / sleep-radius pair with sleep_radius > wake_radius, so boundary-hovering observers cannot oscillate a system. Thrash-rate is a monitored metric.
+- Minimum dwell ticks in each state; wake radius strictly inside sleep radius, so boundary-hovering observers cannot oscillate a system. Thrash rate is a monitored metric.
 
-## 4. Time and event ordering
+## 5. Event lifecycle
 
-- Integer master clock. All region rates are integer divisors/multiples of it.
-- Every event carries `(tick, region_id, sequence_within_tick)`; the triple is the total order.
-- Cross-region events (a contact-region outcome affecting an active-region body) are scheduled onto the master clock, never applied mid-step.
+Three states, strictly ordered:
 
-## 5. Coordinate frames
+1. **Pending** — produced within a frame, not yet ordered. Invisible to canonical history.
+2. **Accepted** — assigned its `(tick, region, sequence)` position in the total order. Part of canonical history; replay includes it; simulation proceeds on it.
+3. **Durable** — flushed to storage per the explicit flush policy.
 
-- Nested reference frames (root → system → body-local), 64-bit positions, frame transitions at defined boundaries with hysteresis (same pattern as sleep/wake).
+**Rule: nothing is presented externally as permanent until durable.** Internal simulation may proceed on accepted events; any externally visible guarantee of permanence waits for durability.
+
+**Crash semantics:** recovery rolls back to the durable frontier — last durable snapshot plus the durable log suffix. The crash-loss window is therefore *precisely* the accepted-but-not-durable set, bounded by the flush policy's stated maximum. Recovery is the same code path as the replay test.
+
+## 6. Time
+
+- **Representation:** `u64` ticks. Checked arithmetic; overflow is a deterministic panic, not a wrap.
+- **Quantum (v0):** 1/3600 second, chosen so all region rates are integer divisors (240 Hz = 15 ticks/step, 120 Hz = 30, 60 Hz = 60, 10 Hz = 360, 1 Hz = 3600). Changing the quantum is a `world_format_version` bump.
+- **Epoch:** tick 0 is world creation. No external calendar in the kernel.
+- **Maximum duration:** `u64` at 3600 ticks/s ≈ 1.6 × 10⁸ years. Stated, tested, and absurdly sufficient.
+- Region clocks are integer divisors/multiples of the master clock; cross-region events are scheduled onto master ticks, never applied mid-step.
+
+## 7. Space, units, and frames
+
+- **Positions (baseline profile):** `f64`, frame-local, SI meters. Frame extents are bounded (≤ ~10⁹ m from origin) so `f64` resolution stays below one micrometer everywhere in-frame.
+- **Positions (portable profile):** `i64` fixed-point micrometers (±9.2 × 10¹² m ≈ 61 AU per frame) where bit-equality across platforms is required.
+- **Units:** SI throughout, enforced by dimensional newtypes (`Meters`, `MetersPerTick`, `Kilograms`) — unit errors are compile errors.
+- **Frames:** identified by hierarchical address; nesting root → system → body-local. Transforms are deterministic functions of the canonical models of the bodies involved. Frame transitions occur at defined boundaries with hysteresis (same pattern as sleep/wake).
 - **Authoritative state is frame-local and observer-independent.** Floating-origin recentering exists only in render projection, per client. No simulation-side quantity may depend on any observer's position except through explicit, logged interaction.
 
-## 6. Persistence and durability
+## 8. Canonical serialization
+
+- Little-endian, field-by-field defined encoding. In-memory `struct` layout (including padding) never touches the wire or the hash.
+- **NaN is forbidden in canonical state.** Producing one is a checked, deterministic failure — a bug surfaced, not a value stored.
+- State hashes are computed over canonical bytes only.
+- The serialization rules carry their own version, referenced by the numerical profile.
+
+## 9. Persistence and durability
 
 Append-only event log + periodic snapshots, written asynchronously.
 
-- **Event record:** `(sequence_number, tick, region, payload, schema_version, checksum)`. Serialization is canonical (deterministic byte layout) so logs are comparable across runs.
-- **Snapshots:** written to a temp file, fsynced, atomically renamed. A snapshot names the log sequence number it covers. Publication is all-or-nothing.
-- **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks, not an accident of buffering. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
-- **Recovery:** last durable snapshot + replay of the log suffix. Recovery is the same code path as the replay test, so it is exercised constantly rather than only in disasters.
+- **Event record:** `(sequence_number, tick, region, payload, schema_version, checksum)` in canonical serialization.
+- **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the log is. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
+- **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
-## 7. Implementation order
+## 10. Implementation order
 
 The replay kernel precedes the universe generator. A tiny world that survives replay perfectly proves more of the thesis than a billion generated stars.
 
 1. Repository cleanup; Rust workspace (`uste-core`, `uste-time`, `uste-gen`, `uste-orbits`, `uste-sim`, `uste-log`).
 2. Versioned hierarchical addresses and deterministic seed derivation.
-3. Integer simulation time and canonical event ordering.
-4. Deterministic event serialization, replay, and state hashing.
-5. Two-body analytical propagation.
-6. One numerical integrator with the full sleep/wake reconciliation contract (§3).
-7. Property tests across replays, thread counts, and transition schedules.
-8. Only then: the procedural galaxy generator and visualization (Milestone 1).
+3. Integer simulation time (§6) and canonical event ordering (§5).
+4. Canonical serialization (§8), replay, and state hashing.
+5. Two-body analytical propagation (tier-1 canonical model).
+6. One numerical integrator with the full reconciliation contract (§4), two-body scope.
+7. Property tests across replays, thread counts, and transition schedules; golden event logs as committed fixtures under `tests/fixtures/`.
+8. Only then: the procedural galaxy generator, tier-2/3 canonical models, and visualization (Milestone 1).
 
-## 8. Non-goals of the kernel
+## 11. Non-goals of the kernel
 
 - No storage engine on the frame path.
 - No rendering in the authoritative loop.

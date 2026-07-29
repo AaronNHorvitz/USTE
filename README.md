@@ -8,7 +8,7 @@ USTE represents an enormous simulated space with compact rules, and computes onl
 Universe = seed + rules + simulation time + sparse deviations
 ```
 
-Nothing that can be regenerated is stored. Given a hierarchical address and a seed, the engine reproduces a body's stable properties on demand, identically, every time. Persistent storage holds only what deviates from that generated baseline — modifications, exceptional events — plus periodic checkpoints.
+Nothing that can be regenerated is **canonical**. Given a hierarchical address and a seed, the engine reproduces a body's stable properties on demand, identically, every time. The truth on disk is the deviation log — modifications, exceptional events; checkpoints merely *cache* regenerable state to bound recovery time, and can always be discarded and rebuilt.
 
 ---
 
@@ -82,10 +82,10 @@ Switching a system between analytical and numerical physics must not, by itself,
 
 USTE resolves this with two rules:
 
-1. **The analytical baseline is canonical.** Dormant propagation is not an approximation of a truer numerical trajectory; it is the truth, at all times, for every body that nothing has touched.
-2. **The active layer integrates deviations *relative to* the analytical reference** (Encke's method, rather than absolute integration). While a system is awake, full-fidelity behavior is computed as baseline-plus-deviation. If no physical interaction occurs, the deviation is discarded on sleep and the canonical trajectory was never perturbed — observation leaves no fingerprints. Only a genuine interaction **commits** a deviation event to the log, at which point the body's canonical trajectory forks from baseline by exactly that recorded delta.
+1. **Every body's canonical force model is assigned at generation** — a pure function of `(seed, rules, address)`, never of activation or observation. Baselines come in tiers (pure conic; precessing conic with secular rates; deterministic ephemeris table generated with the system), so the *dominant* physics is canonical rather than an artifact of who is watching. Every force is classified canonical or presentational; there is no third category.
+2. **The active layer integrates deviations *relative to* that canonical baseline** (Encke's method, rather than absolute integration). Awake behavior is baseline-plus-deviation; the deviation holds only sub-threshold residuals and genuine interactions. If no interaction exceeds the rules-defined significance threshold, the deviation is discarded on sleep and the canonical trajectory was never perturbed — observation leaves no fingerprints. Only a committed interaction forks a body's canonical trajectory, by exactly the recorded delta. **Interactions commit state changes, never model changes.**
 
-Replay reproduces committed deviations; observation alone produces none. The full sleep/wake reconciliation contract — initialization, element fitting on commit, conserved-quantity continuity, and hysteresis against wake thrashing — is specified in [architecture.md](./architecture.md).
+Replay reproduces committed deviations; observation alone produces none. The force classification, the tiered canonical models, the sleep/wake reconciliation contract, and the event lifecycle (pending → accepted → durable, with external permanence requiring durability) are specified in [architecture.md](./architecture.md).
 
 ### Determinism policy
 
@@ -112,7 +112,7 @@ Human-scale precision and astronomical-scale extent cannot coexist in one flat c
 
 The authoritative simulation is **CPU-resident**. This is a design conclusion, not a limitation:
 
-- Dynamics are small-N sequential ODE integration — a workload CPUs win outright until batches reach the hundred-thousand range.
+- Dynamics are small-N sequential ODE integration — a CPU-shaped workload. Where the CPU/GPU crossover sits depends on force complexity and hardware, and is a benchmark question, not a slogan.
 - Event scheduling, sparse graphs, branching, and shifting workloads are CPU-shaped problems.
 - Reproducibility is materially easier to guarantee on CPU.
 - Compact layout, SIMD, and cache-conscious design do more here than raw arithmetic throughput.

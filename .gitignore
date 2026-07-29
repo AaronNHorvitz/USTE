@@ -8,6 +8,8 @@
 /runs/
 /snapshots/
 *.uste-log
+# ...except small golden replay fixtures, which are deliberately committed
+!tests/fixtures/**
 /benchmarks/results/
 
 # Environment and editors
