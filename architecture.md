@@ -36,7 +36,9 @@ The canonical baseline is not synonymous with two-body Kepler. It is assigned pe
 
 Every force in the simulation is classified as **canonical** (present in the assigned baseline model) or **presentational** (existing only in the active layer's richer integration). The presentational residual is *always* discarded. There is no third category.
 
-**Interactions commit state changes, never model changes.** An interaction is a coupling exceeding the rules-defined significance threshold ε (momentum/energy transfer); below ε, influence is presentational by definition. ε is part of `rules`, hence part of the invariant.
+**Interactions commit state changes; model changes occur only as committed segment boundaries.** An interaction is a coupling exceeding the rules-defined significance threshold ε (momentum/energy transfer); below ε, influence is presentational by definition. ε is part of `rules`, hence part of the invariant.
+
+**Model segments.** A body's canonical model is *piecewise*: a sequence of model segments, each valid from an epoch. The first segment is assigned at generation; every subsequent segment boundary is a committed event. When an interaction invalidates a tier assignment (a conic that no longer describes the body; a tier-3 table made stale), the committing event re-invokes the *same pure assignment function* on the post-interaction state, producing new segments for **all coupled bodies atomically in a single event group** (§5). A tier-3 rebuild is deterministic regeneration from the epoch state vector. At no point does activation, fidelity, or observation decide a segment boundary — only generation and committed events do.
 
 ## 3. Observer independence
 
@@ -48,6 +50,12 @@ Mechanism — reference-relative integration (Encke's method) *against the canon
 - The active layer integrates the *deviation* from that baseline, not the absolute trajectory. Awake behavior is `baseline(t) + δ(t)`. With tiered baselines, δ contains only sub-threshold residuals and genuine interactions — not the dominant physics.
 - **Sleep with no committed interaction:** δ is discarded. No event. Two runs differing only in who observed what produce identical canonical histories.
 - **Sleep after a committed interaction:** the commit records the new canonical state (§4). The body's baseline forks from that epoch forward.
+
+**Canonical events are detected from canonical state — δ is never a cause.** Event-acceptance predicates (ε-crossings, encounters, collisions) evaluate over baselines plus committed deviations only. Presentational residuals are invisible to them: no matter what the active layer's richer physics appears to show, an interaction is canonical if and only if canonical state predicts it.
+
+**Causal waking is observer-independent.** The kernel runs deterministic encounter detection over canonical trajectories on the master clock and wakes systems whose baselines predict an interaction — whether or not any observer is present. A collision between two dormant bodies happens, and commits, unwitnessed. Observers trigger *presentational* wakes only; causality triggers *canonical* wakes; the two are independent wake reasons and only canonical causes can commit.
+
+**Observers act through presence, not through observation.** An observer that physically enters a system does so as a canonical entity whose arrival is itself committed state — presence is an interaction; looking is not.
 
 Wake/sleep transitions themselves are not events. Only commits are.
 
@@ -76,7 +84,7 @@ Wake/sleep transitions themselves are not events. Only commits are.
 Three states, strictly ordered:
 
 1. **Pending** — produced within a frame, not yet ordered. Invisible to canonical history.
-2. **Accepted** — assigned its `(tick, region, sequence)` position in the total order. Part of canonical history; replay includes it; simulation proceeds on it.
+2. **Accepted** — assigned its `(tick, region, sequence)` position in the total order. Part of canonical history; replay includes it; simulation proceeds on it. Multi-body consequences (coupled model-segment updates, §2) are accepted as one **atomic event group**: replay observes all of it or none of it, never an interleaving.
 3. **Durable** — flushed to storage per the explicit flush policy.
 
 **Rule: nothing is presented externally as permanent until durable.** Internal simulation may proceed on accepted events; any externally visible guarantee of permanence waits for durability.
@@ -108,10 +116,11 @@ Three states, strictly ordered:
 
 ## 9. Persistence and durability
 
-Append-only event log + periodic snapshots, written asynchronously.
+Append-only event log + periodic snapshots + one **world manifest**, written asynchronously except the manifest, which is written synchronously at world creation.
 
+- **World manifest:** immutable, checksummed, written once at creation: `world_format_version`, the full numerical profile (including target triple, CPU feature set, dependency lock hash, serialization version), `seed`, and `rules`. The invariant names four inputs beyond the log; the manifest is where they live. **Truth on disk is the manifest plus the log.** Snapshots and log segments reference the manifest's checksum; a log without its manifest is not a world.
 - **Event record:** `(sequence_number, tick, region, payload, schema_version, checksum)` in canonical serialization.
-- **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the log is. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
+- **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the manifest and log are. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
 - **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
 ## 10. Implementation order

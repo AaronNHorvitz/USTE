@@ -8,7 +8,7 @@ USTE represents an enormous simulated space with compact rules, and computes onl
 Universe = seed + rules + simulation time + sparse deviations
 ```
 
-Nothing that can be regenerated is **canonical**. Given a hierarchical address and a seed, the engine reproduces a body's stable properties on demand, identically, every time. The truth on disk is the deviation log — modifications, exceptional events; checkpoints merely *cache* regenerable state to bound recovery time, and can always be discarded and rebuilt.
+Nothing that can be regenerated is **canonical**. Given a hierarchical address and a seed, the engine reproduces a body's stable properties on demand, identically, every time. The truth on disk is a small immutable **world manifest** (format version, numerical profile, seed, rules) plus the deviation log — modifications, exceptional events; checkpoints merely *cache* regenerable state to bound recovery time, and can always be discarded and rebuilt.
 
 ---
 
@@ -85,7 +85,9 @@ USTE resolves this with two rules:
 1. **Every body's canonical force model is assigned at generation** — a pure function of `(seed, rules, address)`, never of activation or observation. Baselines come in tiers (pure conic; precessing conic with secular rates; deterministic ephemeris table generated with the system), so the *dominant* physics is canonical rather than an artifact of who is watching. Every force is classified canonical or presentational; there is no third category.
 2. **The active layer integrates deviations *relative to* that canonical baseline** (Encke's method, rather than absolute integration). Awake behavior is baseline-plus-deviation; the deviation holds only sub-threshold residuals and genuine interactions. If no interaction exceeds the rules-defined significance threshold, the deviation is discarded on sleep and the canonical trajectory was never perturbed — observation leaves no fingerprints. Only a committed interaction forks a body's canonical trajectory, by exactly the recorded delta. **Interactions commit state changes, never model changes.**
 
-Replay reproduces committed deviations; observation alone produces none. The force classification, the tiered canonical models, the sleep/wake reconciliation contract, and the event lifecycle (pending → accepted → durable, with external permanence requiring durability) are specified in [architecture.md](./architecture.md).
+Two corollaries complete the rule. **Canonical events are detected from canonical state** — presentational residuals are invisible to event predicates, so richer active physics can never reveal-and-commit an interaction the canonical model does not predict. And **causal waking is observer-independent**: the kernel wakes systems whose canonical trajectories predict an interaction whether or not anyone is watching, so a collision between dormant bodies happens, and commits, unwitnessed. Observers participate through *presence* — a committed canonical fact — never through observation itself.
+
+Replay reproduces committed deviations; observation alone produces none. The force classification, tiered canonical models with piecewise model segments, the sleep/wake reconciliation contract, and the event lifecycle (pending → accepted → durable, with external permanence requiring durability) are specified in [architecture.md](./architecture.md).
 
 ### Determinism policy
 
