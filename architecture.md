@@ -26,7 +26,7 @@ Every property test in the project is a restatement of this equation.
 
 ## 2. Canonical force model
 
-**Rule: a body's canonical force model is a pure function of `(seed, rules, address)`. Activation, fidelity level, and observation never decide which canonical forces exist.**
+**Rule: a body's model-segment history is a pure function of `(seed, rules, ordered_event_log)`. The first segment is determined by `(seed, rules, address)`; every later segment arises only at a committed event boundary (§5). Activation, fidelity level, and observation never decide which canonical forces exist.**
 
 The canonical baseline is not synonymous with two-body Kepler. It is assigned per body at generation, in tiers:
 
@@ -53,7 +53,11 @@ Mechanism — reference-relative integration (Encke's method) *against the canon
 
 **Canonical events are detected from canonical state — δ is never a cause.** Event-acceptance predicates (ε-crossings, encounters, collisions) evaluate over baselines plus committed deviations only. Presentational residuals are invisible to them: no matter what the active layer's richer physics appears to show, an interaction is canonical if and only if canonical state predicts it.
 
-**Causal waking is observer-independent.** The kernel runs deterministic encounter detection over canonical trajectories on the master clock and wakes systems whose baselines predict an interaction — whether or not any observer is present. A collision between two dormant bodies happens, and commits, unwitnessed. Observers trigger *presentational* wakes only; causality triggers *canonical* wakes; the two are independent wake reasons and only canonical causes can commit.
+**Natural encounters are baseline history, not events.** If `(seed, rules)` implies it, it is not an event: an encounter between untouched bodies is a deterministic consequence of the seed, hence regenerable, hence part of generated baseline history — computed lazily during generation like everything else procedural, and never logged. The log records exactly what the seed cannot imply. This is what keeps the log sparse at universe scale by definition rather than by hope.
+
+This imposes a closure obligation on the generator: it may not emit a state whose own baseline implies an un-reflected past encounter. Two mechanisms, v0 adopting the first: (a) **generate baseline-stable systems by construction** — configurations whose baselines self-intersect are deterministically rejected or adjusted at generation, which is physically defensible since observed long-lived systems are the survivors; (b) generated natural-event history as derived, regenerable data (the tier-3 pattern), reserved for later.
+
+**Causal waking is observer-independent and scoped to the deviation frontier.** Only committed deviations can produce futures the seed does not imply, so encounter detection watches only deviated bodies and their coupling neighborhoods: a deterministic encounter queue populated at commit time, plus a spatial broad phase over the deviation set. Ungenerated, untouched space is never scanned — its entire history is implied. Systems whose deviated trajectories predict an interaction wake and commit whether or not any observer is present. Observers trigger *presentational* wakes only; causality triggers *canonical* wakes; deviations beget deviations, and the seed's universe never does.
 
 **Observers act through presence, not through observation.** An observer that physically enters a system does so as a canonical entity whose arrival is itself committed state — presence is an interaction; looking is not.
 
@@ -85,7 +89,7 @@ Three states, strictly ordered:
 
 1. **Pending** — produced within a frame, not yet ordered. Invisible to canonical history.
 2. **Accepted** — assigned its `(tick, region, sequence)` position in the total order. Part of canonical history; replay includes it; simulation proceeds on it. Multi-body consequences (coupled model-segment updates, §2) are accepted as one **atomic event group**: replay observes all of it or none of it, never an interleaving.
-3. **Durable** — flushed to storage per the explicit flush policy.
+3. **Durable** — flushed to storage per the explicit flush policy. **The unit of the log is the event group**: a group is written as one checksummed record (a plain event is a group of size one), and the durable frontier advances only past complete groups. A crash can therefore truncate the log only at a group boundary — never inside a multi-body update.
 
 **Rule: nothing is presented externally as permanent until durable.** Internal simulation may proceed on accepted events; any externally visible guarantee of permanence waits for durability.
 
@@ -119,7 +123,7 @@ Three states, strictly ordered:
 Append-only event log + periodic snapshots + one **world manifest**, written asynchronously except the manifest, which is written synchronously at world creation.
 
 - **World manifest:** immutable, checksummed, written once at creation: `world_format_version`, the full numerical profile (including target triple, CPU feature set, dependency lock hash, serialization version), `seed`, and `rules`. The invariant names four inputs beyond the log; the manifest is where they live. **Truth on disk is the manifest plus the log.** Snapshots and log segments reference the manifest's checksum; a log without its manifest is not a world.
-- **Event record:** `(sequence_number, tick, region, payload, schema_version, checksum)` in canonical serialization.
+- **Group record — the unit of the log:** `(sequence_number, tick, region, member_events[], schema_version, checksum)` in canonical serialization. A plain event is a group of size one. One checksum covers the whole group; recovery verifies checksums forward and truncates a trailing partial or corrupt record, so the durable frontier always lands on a group boundary.
 - **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the manifest and log are. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
 - **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
