@@ -1,183 +1,85 @@
-# USTE: Universal-Spatial Temporal Engine - Architecture
+# USTE — Design Decisions
 
-This document outlines the architecture of the Universal-Spatial Temporal Engine (USTE), detailing its file and folder structure, the purpose of each component, how state is managed, and how its services connect.
+Companion to [README.md](./README.md). The README states the shape of the system; this document specifies the contracts that make it hold. Implementation has not started; everything here is normative for when it does.
 
-## 1. Overview
+---
 
-USTE is a GPU-accelerated graph database and analytics engine designed for real-time spatial-temporal data processing and large-scale graph analytics. It integrates TensorFlow GPU, TimescaleDB, and ArangoDB to manage structured and unstructured data. Key capabilities include Graph Neural Networks (GNNs), NLP via Hugging Face Transformers, LLM integration, GPU-accelerated Bayesian modeling, and real-time APIs via FastAPI. The system is designed for containerized deployment using Docker.
-
-## 2. File and Folder Structure
+## 1. The invariant, versioned
 
 ```
-USTE/
-├── docker-compose.yml      # Docker Compose configuration for TimescaleDB and ArangoDB
-├── README.md               # Project documentation
-├── requirements.txt        # Python dependencies
-├── data/                   # Persistent database storage
-│   ├── arango/             # Persistent storage for ArangoDB
-│   └── timescale/          # Persistent storage for TimescaleDB
-├── images/                 # Project-related images for documentation
-├── notebooks/              # Jupyter notebooks for exploration and prototyping
-├── sandbox/                # Experimental scripts and temporary tests
-├── src/                    # Main application source code
-│   ├── app/                # Core application and API layer
-│   │   ├── main.py         # FastAPI application entry point, defines API routes
-│   │   ├── models.py       # Data models, Pydantic schemas for API validation
-│   │   └── utils.py        # Utility functions for the application
-│   ├── database/           # Database interaction layer
-│   │   └── db.py           # Database connection logic and helper functions for TimescaleDB & ArangoDB
-│   └── embeddings/         # Embedding generation and management
-│       └── embedding.py    # Code for generating embeddings (Hugging Face, TensorFlow)
-└── tests/                  # Unit and integration tests
-└── test_app.py         # Tests for the FastAPI application and its endpoints
+state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event_log)
 ```
 
-## 3. Component Descriptions
+- **`world_format_version`** — the schema of state, addresses, and events. Any breaking change bumps it; replay across versions is migration, never reinterpretation.
+- **`numerical_profile`** — a named, versioned bundle: integrator selections and step sizes, floating-point mode (FMA policy, no reassociation), math-library implementations and versions, SIMD width assumptions. The baseline profile guarantees **per-binary determinism**. A stricter `portable` profile (fixed-point or strict-arithmetic authoritative layer) guarantees cross-platform bit-equality and is adopted only where required.
+- **`ordered_event_log`** — the total order over events is part of the state definition. Two logs with the same events in different order are different histories.
 
-### Root Directory (`USTE/`)
+Every property test in the project is a restatement of this equation.
 
-* **`docker-compose.yml`**:
-    * **Purpose**: Defines and configures the multi-container Docker application, specifically for spinning up and managing the TimescaleDB and ArangoDB services.
-    * **Functionality**: Ensures that the databases are run in isolated environments with persistent storage and defined network configurations, making setup and deployment consistent.
+## 2. Observer independence
 
-* **`README.md`**:
-    * **Purpose**: Provides a comprehensive overview of the project, including its features, installation instructions, usage guidelines, and contribution information.
-    * **Functionality**: Serves as the primary entry point for developers and users to understand and get started with USTE.
+**Rule: fidelity is presentation; deviations require causation.** Merely simulating a region at higher fidelity must be side-effect-free on canonical state.
 
-* **`requirements.txt`**:
-    * **Purpose**: Lists all Python packages and their versions required for the project to run.
-    * **Functionality**: Used by `pip` to install dependencies, ensuring a consistent Python environment.
+Mechanism — reference-relative integration (Encke's method):
 
-### `data/` Directory
+- The analytical baseline (Keplerian elements per body) is canonical at all times for untouched bodies.
+- The active layer integrates the *deviation* from that reference, not the absolute trajectory. Awake behavior is `baseline(t) + δ(t)`.
+- **Sleep with no interaction:** `δ` is discarded. The canonical trajectory was never perturbed. No event is emitted. Two runs that differ only in who looked at what produce identical canonical histories.
+- **Sleep after interaction:** the interaction *committed* a deviation. New osculating elements are fitted from the final numerical state at a recorded epoch, and the fit becomes a deviation event in the log. The body's baseline is now the new elements from that epoch forward.
 
-* **Purpose**: Provides mount points for persistent storage for the databases, ensuring data is not lost when Docker containers are stopped or restarted.
-* **`data/arango/`**: Stores data files for the ArangoDB instance.
-* **`data/timescale/`**: Stores data files for the TimescaleDB instance.
+Consequence: wake/sleep transitions themselves are not events. Only commits are.
 
-### `images/` Directory
+## 3. Sleep/wake reconciliation contract
 
-* **Purpose**: Contains static image files (e.g., diagrams, screenshots) used in the `README.md` or other documentation.
+**Analytical → active (wake):**
+- Initialize numerical state exactly from the analytical elements evaluated at the wake tick. The initialization is a pure function of `(elements, tick)` — no accumulated integrator state survives dormancy.
 
-### `notebooks/` Directory
+**Active → analytical (sleep):**
+- No committed deviation → discard `δ`, resume canonical elements. Nothing written.
+- Committed deviation → fit osculating elements from final numerical state at the sleep tick; write one deviation event `(address, epoch_tick, new_elements, cause)`.
 
-* **Purpose**: Houses Jupyter notebooks.
-    * **Functionality**: Used for exploratory data analysis, prototyping machine learning models (GNNs, NLP), developing algorithms, and visualizing data before integrating them into the main application.
+**Continuity requirements at commit:**
+- Position and velocity are continuous by construction (the fit is exact at epoch).
+- Energy and angular momentum of the fitted conic must match the numerical state at epoch to within the profile's stated tolerance; the residual is recorded in the event for drift auditing.
 
-### `sandbox/` Directory
+**Hysteresis:**
+- Minimum dwell ticks in each state before a transition is permitted, and a wake-radius / sleep-radius pair with sleep_radius > wake_radius, so boundary-hovering observers cannot oscillate a system. Thrash-rate is a monitored metric.
 
-* **Purpose**: A directory for experimental scripts, temporary tests, or proof-of-concept code.
-    * **Functionality**: Allows developers to try out new ideas or libraries without cluttering the main source code or test suites.
+## 4. Time and event ordering
 
-### `src/` Directory (Main Application Source Code)
+- Integer master clock. All region rates are integer divisors/multiples of it.
+- Every event carries `(tick, region_id, sequence_within_tick)`; the triple is the total order.
+- Cross-region events (a contact-region outcome affecting an active-region body) are scheduled onto the master clock, never applied mid-step.
 
-* **Purpose**: Contains all the core logic for the USTE application.
+## 5. Coordinate frames
 
-    * **`src/app/`**: Handles the API layer and primary application logic.
-        * **`main.py`**: The entry point for the FastAPI web application. It defines API endpoints (e.g., `/status`, `/nodes`, `/graph`), handles incoming requests, and orchestrates responses.
-        * **`models.py`**: Defines Pydantic models for request and response data validation and serialization. It may also include other data structures or schemas used within the application.
-        * **`utils.py`**: Contains general-purpose utility functions used across the `app` module to promote code reusability and maintainability.
+- Nested reference frames (root → system → body-local), 64-bit positions, frame transitions at defined boundaries with hysteresis (same pattern as sleep/wake).
+- **Authoritative state is frame-local and observer-independent.** Floating-origin recentering exists only in render projection, per client. No simulation-side quantity may depend on any observer's position except through explicit, logged interaction.
 
-    * **`src/database/`**: Manages all interactions with the databases.
-        * **`db.py`**: Contains functions to establish connections to TimescaleDB and ArangoDB. It abstracts database query logic (e.g., CRUD operations, complex graph queries, spatial-temporal queries) and provides a clean interface for the rest of the application to interact with the data stores.
+## 6. Persistence and durability
 
-    * **`src/embeddings/`**: Responsible for generating and managing data embeddings.
-        * **`embedding.py`**: Implements the logic for creating vector embeddings from data (e.g., text, graph nodes). It leverages libraries like Hugging Face Transformers for NLP tasks and potentially TensorFlow for other embedding techniques. These embeddings are crucial for GNNs and semantic search/querying.
+Append-only event log + periodic snapshots, written asynchronously.
 
-### `tests/` Directory
+- **Event record:** `(sequence_number, tick, region, payload, schema_version, checksum)`. Serialization is canonical (deterministic byte layout) so logs are comparable across runs.
+- **Snapshots:** written to a temp file, fsynced, atomically renamed. A snapshot names the log sequence number it covers. Publication is all-or-nothing.
+- **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks, not an accident of buffering. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
+- **Recovery:** last durable snapshot + replay of the log suffix. Recovery is the same code path as the replay test, so it is exercised constantly rather than only in disasters.
 
-* **Purpose**: Contains all automated tests for the application.
-    * **`test_app.py`**: Includes unit and integration tests for the FastAPI application, ensuring API endpoints function as expected, data validation works correctly, and core logic is sound. Tests are typically run using `pytest`.
+## 7. Implementation order
 
-## 4. State Management
+The replay kernel precedes the universe generator. A tiny world that survives replay perfectly proves more of the thesis than a billion generated stars.
 
-State in USTE is managed across several components:
+1. Repository cleanup; Rust workspace (`uste-core`, `uste-time`, `uste-gen`, `uste-orbits`, `uste-sim`, `uste-log`).
+2. Versioned hierarchical addresses and deterministic seed derivation.
+3. Integer simulation time and canonical event ordering.
+4. Deterministic event serialization, replay, and state hashing.
+5. Two-body analytical propagation.
+6. One numerical integrator with the full sleep/wake reconciliation contract (§3).
+7. Property tests across replays, thread counts, and transition schedules.
+8. Only then: the procedural galaxy generator and visualization (Milestone 1).
 
-* **Persistent State (Primary Data Stores):**
-    * **TimescaleDB**:
-        * **Role**: Stores structured data, particularly time-series and spatial-temporal data.
-        * **Location**: Data is persisted on disk within the Docker volume mapped to `data/timescale/`.
-    * **ArangoDB**:
-        * **Role**: Stores unstructured data, graph data (nodes, edges, their properties), and potentially document-based information.
-        * **Location**: Data is persisted on disk within the Docker volume mapped to `data/arango/`.
+## 8. Non-goals of the kernel
 
-* **In-Memory State (Processing & Computation):**
-    * **FastAPI Application (`src/app/main.py`)**: Primarily stateless, but can hold temporary state related to ongoing requests or maintain short-lived caches for performance.
-    * **TensorFlow & Hugging Face Transformers (`src/embeddings/embedding.py`, and implied analytics modules):**
-        * **Role**: These components process data in memory (CPU RAM and GPU VRAM for TensorFlow). This includes loading data from databases, building and training GNNs, performing NLP tasks, generating embeddings, and running Bayesian models.
-        * **Location**: Intermediate results and models are held in memory during computation. Trained models might be serialized and persisted back to disk (potentially in a dedicated models directory or a database).
-    * **LLMs (Large Language Models):**
-        * **Role**: If local LLMs are used, they will consume significant memory. If cloud-based LLMs are used, state related to the API interaction (e.g., context windows) is managed by the LLM service, with USTE handling the local context.
-
-* **Ephemeral State:**
-    * **Docker Containers**: The running instances of TimescaleDB, ArangoDB, and potentially the FastAPI application (if containerized for production) have ephemeral state related to their runtime processes.
-
-## 5. Service Connections & Data Flow
-
-1.  **Client Interaction**:
-    * External users or services interact with USTE via **Real-time APIs** exposed by the **FastAPI application** (`src/app/main.py`). Requests are typically HTTP-based (e.g., GET, POST).
-
-2.  **API Layer Processing (FastAPI)**:
-    * `src/app/main.py` receives requests and uses Pydantic models from `src/app/models.py` for data validation.
-    * Based on the endpoint, it orchestrates calls to other internal services or modules.
-
-3.  **Database Interaction (`src/database/db.py`)**:
-    * The FastAPI application, through `src/database/db.py`, connects to:
-        * **TimescaleDB** (accessible at `localhost:5432` as per README) for operations on structured spatial-temporal data (e.g., storing sensor readings, trajectories).
-        * **ArangoDB** (accessible at `http://localhost:8529` as per README) for graph operations (creating nodes/edges, querying graph structures using AQL), and managing unstructured or semi-structured documents.
-
-4.  **Analytics and Computation Engine**:
-    * **Embedding Generation (`src/embeddings/embedding.py`)**: For tasks requiring embeddings (e.g., NLP, GNN input), this module uses **Hugging Face Transformers** or **TensorFlow** to convert data (fetched from databases) into vector representations.
-    * **GPU-Accelerated Analytics (TensorFlow)**: For GNNs, Bayesian modeling (MCMC via TensorFlow Probability), and other numeric computations, USTE leverages **TensorFlow GPU**. Data is typically loaded from TimescaleDB/ArangoDB, processed on the GPU, and results might be stored back or returned via the API.
-    * **Spatial-Temporal Processing**: Logic (likely within `src/` but not explicitly detailed as a separate file) handles specialized queries and analysis of spatial-temporal data, combining capabilities of TimescaleDB (for efficient time-series and spatial queries) and graph analytics (for relationships).
-
-5.  **LLM Integration**:
-    * USTE integrates with **Large Language Models**. This can involve:
-        * Sending data (e.g., unstructured text from ArangoDB, user queries) to an LLM API (either external or a locally hosted model).
-        * Receiving processed information, insights, or generated queries from the LLM.
-        * Using LLM outputs to enhance data querying (natural language to database queries), automate analysis, or facilitate scenario modeling.
-
-6.  **Containerization (Docker)**:
-    * **`docker-compose.yml`** manages the **TimescaleDB** and **ArangoDB** services. These services communicate over a Docker-managed network.
-    * The FastAPI application (run via `uvicorn` on the host during development) connects to these database services via their exposed ports (`localhost:5432` for TimescaleDB, `localhost:8529` for ArangoDB). In a fully containerized production setup, the FastAPI app would also be a Docker service on the same network.
-
-### Simplified Data Flow Example (Adding a Node):
-
-1.  Client sends `POST /nodes` request with node data to FastAPI.
-2.  FastAPI (`main.py`) validates data using `models.py`.
-3.  If node involves text for NLP, FastAPI may call `embedding.py` to generate embeddings using Hugging Face.
-4.  FastAPI calls `db.py` to store the node and its properties (including embeddings) in ArangoDB.
-5.  `db.py` executes the AQL query against ArangoDB.
-6.  FastAPI returns a success/failure response to the client.
-
-### Service Connection Diagram
-
-+---------------+
-|  FastAPI      |
-|  Application  |
-+---------------+
-       |
-       |
-       v
-+---------------+
-|  Database     |
-|  (TimescaleDB |
-|  and ArangoDB)|
-+---------------+
-       |
-       |
-       v
-+---------------+
-|  Embedding    |
-|  Generation   |
-|  (Hugging Face|
-| Transformers) |
-+---------------+
-       |
-       |
-       v
-+---------------+
-|  GPU          |
-|  Acceleration |
-|  (TensorFlow  |
-|   GPU)        |
-+---------------+
+- No storage engine on the frame path.
+- No rendering in the authoritative loop.
+- No application semantics: the kernel does not know what its entities mean. Anything domain-specific lives above it.
