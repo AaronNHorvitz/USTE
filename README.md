@@ -155,4 +155,13 @@ A tiny world that survives replay perfectly proves more of USTE's thesis than a 
 
 ## License
 
-All rights reserved. See [LICENSE](./LICENSE).
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](./LICENSE-MIT))
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions. Contributions must carry a Developer Certificate of Origin sign-off (`git commit -s`).
