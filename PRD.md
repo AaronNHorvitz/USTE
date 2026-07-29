@@ -118,6 +118,7 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 - **FR-7.7** Recovery SHALL be strict rollback: truncate at `F` unconditionally. Malformation at or before `F`, or loss of both frontier slots, SHALL be a hard recovery error — the world refuses to open; repair is an explicit operator action.
 - **FR-7.8** Snapshots SHALL be derived, not captured: produced by replaying durable artifacts through endpoint `E` outside the live process. Snapshot state SHALL equal `f(manifest, log ≤ E)` bit-for-bit. A live COW capture MAY replace this later only if its state hash matches the replay-derived hash for the same `E`.
 - **FR-7.9** Snapshot endpoints SHALL be recorded as both group sequence number and log byte offset on a verified group boundary; eligibility SHALL be `E ≤ F` at publication time; recovery SHALL select the newest snapshot with `E ≤ F` and SHALL decline and flag any snapshot claiming coverage beyond `F`.
+- **FR-7.11** Snapshots SHALL record the canonical state hash of their contents. Recovery SHALL recompute and compare before use; on mismatch the snapshot SHALL be declined and flagged, and recovery SHALL fall back to an older snapshot or genesis replay. A periodic **scrub audit** SHALL re-derive published snapshots and compare hashes, catching the consistent-but-wrong class no recovery-time check can see.
 - **FR-7.10** Log-writer backpressure SHALL slow the simulation rather than drop events.
 
 ### FR-8 — Time *(architecture §6)*
@@ -145,9 +146,9 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 ## 4. Non-functional requirements
 
-- **NFR-1 (Budgets, not claims).** Performance figures are budgets until Criterion evidence exists: analytical propagation sub-microsecond per body; active region milliseconds for thousands of bodies; log writes off the frame path. Each budget SHALL have a benchmark; benchmarks SHALL run in CI with recorded baselines.
+- **NFR-1 (Budgets, not claims).** Performance figures are budgets until Criterion evidence exists: analytical propagation sub-microsecond per body; active region milliseconds for thousands of bodies; log writes off the frame path. Each budget SHALL have a benchmark. **Benchmarks gate the build only on pinned CI hardware** — a dedicated runner with a fixed CPU model, pinned frequency governor, and recorded machine identity in the baseline. On shared or unpinned runners benchmarks run informationally and SHALL NOT gate, because a performance gate on noisy hardware is a flakiness generator, not a guarantee.
 - **NFR-2 (Reproducibility).** The replay guarantee SHALL hold across runs and across thread counts on the same binary/profile. Cross-platform equality is out of scope until the portable profile exists.
-- **NFR-3 (Crash safety).** The crash-injection matrix (§6.3 below) SHALL pass at every group-record boundary, against the frontier record (torn write, single-slot corruption, dual-slot loss), and against planted ineligible snapshots.
+- **NFR-3 (Crash safety).** The crash-injection matrix (§6.3 below) SHALL pass at every group-record boundary, against the frontier record (torn write, single-slot corruption, dual-slot loss), against planted ineligible snapshots (`E > F`), **and against a planted snapshot with legal `E ≤ F` but incorrect contents** — which SHALL be declined via state-hash mismatch with recovery falling back cleanly.
 - **NFR-4 (Versioning discipline).** Any change to state schema, addresses, events, quantum, or serialization SHALL bump `world_format_version`. Any change to integrators, FP behavior, or dependencies affecting arithmetic SHALL produce a new numerical profile.
 - **NFR-5 (Licensing).** All dependencies SHALL be compatible with dual MIT/Apache-2.0 distribution; a CI license check SHALL enforce this.
 - **NFR-6 (Single-machine scope).** All v1 targets assume one commodity desktop; nothing in the design may *require* more.
@@ -192,8 +193,8 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 
 - **6.1 Property tests** — every FR with a SHALL is cited by at least one test; the invariant (FR-1.1) is exercised by randomized schedules of wake/sleep/commit under fixed seeds.
 - **6.2 Golden fixtures** — small committed `(manifest, log, expected-hash)` triples under `tests/fixtures/`; any hash change is a reviewed, deliberate `world_format_version` or profile event, never a drive-by.
-- **6.3 Crash injection** — kill/truncate/corrupt at: every group-record boundary; mid-group; each frontier slot; both slots; each step of creation's publication sequence; snapshot temp files; planted ineligible snapshots.
-- **6.4 Benchmarks** — Criterion, in CI, with stored baselines; regressions fail the build.
+- **6.3 Crash injection** — kill/truncate/corrupt at: every group-record boundary; mid-group; each frontier slot; both slots; each step of creation's publication sequence; snapshot temp files; planted ineligible snapshots (`E > F`); planted snapshots with legal `E ≤ F` but contents failing their recorded state hash.
+- **6.4 Benchmarks** — Criterion with stored baselines. Gating runs execute only on the pinned runner (fixed CPU, pinned governor, machine identity recorded alongside the baseline); regressions there fail the build. Runs on any other hardware are informational only.
 - **6.5 Concurrency** — the full replay suite runs at 1, 2, N threads and compares hashes.
 
 ---
