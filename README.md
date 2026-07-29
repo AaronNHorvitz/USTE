@@ -14,7 +14,7 @@ Nothing that can be regenerated is **canonical**. Given a hierarchical address a
 
 ## Status
 
-**Redesign in progress; implementation has not started.** Earlier revisions of this repository described a GPU-accelerated graph database built on TensorFlow, TimescaleDB, and ArangoDB. That framing has been retired: it described a storage layer, not an engine, and it put databases on the simulation's critical path. The old design documents have been removed so they cannot be mistaken for the build plan; they remain in git history. The design below, together with [architecture.md](./architecture.md), replaces them.
+**Redesign in progress; implementation has not started.** Earlier revisions of this repository described a GPU-accelerated graph database built on TensorFlow, TimescaleDB, and ArangoDB. That framing has been retired: it described a storage layer, not an engine, and it put databases on the simulation's critical path. The old design documents have been removed so they cannot be mistaken for the build plan; they remain in git history. The design below, together with [architecture.md](./architecture.md) (normative contracts) and [PRD.md](./PRD.md) (numbered requirements, milestones, and exit criteria), replaces them.
 
 ---
 
