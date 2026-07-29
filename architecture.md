@@ -145,7 +145,7 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 1. Repository cleanup; Rust workspace (`uste-core`, `uste-time`, `uste-gen`, `uste-orbits`, `uste-sim`, `uste-log`).
 2. Versioned hierarchical addresses and deterministic seed derivation.
 3. Integer simulation time (§6) and canonical event ordering (§5).
-4. Canonical serialization (§8), replay, and state hashing — with crash-injection tests at every group-record boundary and against the frontier record itself (torn frontier write, single-slot corruption, dual-slot loss), distinguishing tail-discard from hard corruption error (§9).
+4. Canonical serialization (§8), replay, and state hashing — with crash-injection tests at every group-record boundary, against the frontier record itself (torn frontier write, single-slot corruption, dual-slot loss), and against snapshot eligibility (a planted snapshot claiming coverage beyond `F` must be declined and flagged), distinguishing tail-discard from hard corruption error (§9).
 5. Two-body analytical propagation (tier-1 canonical model).
 6. One numerical integrator with the full reconciliation contract (§4), two-body scope.
 7. Property tests across replays, thread counts, and transition schedules; golden event logs as committed fixtures under `tests/fixtures/`.
