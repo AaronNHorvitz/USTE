@@ -123,7 +123,7 @@ The GPU is retained for what it is actually built for: **rendering**, particles,
 
 ### Persistence
 
-Storage is **asynchronous and off the critical path**: an append-only event log plus periodic snapshots. Durability is contractual, not incidental — sequence-numbered, checksummed, schema-versioned events; atomic checkpoint publication; an explicit flush policy defining the maximum crash-loss window; recovery by replaying the log suffix over the last durable checkpoint. Details in [architecture.md](./architecture.md). Databases are a later concern, appropriate for historical analysis and exploration tooling rather than for participating in a simulation frame.
+Storage is three artifacts: an immutable **world manifest** — written synchronously, once, at world creation, carrying the invariant's non-log inputs — plus an append-only event log and periodic snapshots, both written **asynchronously, off the critical path**. Durability is contractual, not incidental — group-framed, checksummed, schema-versioned records; an independently persisted durable frontier; atomic checkpoint publication; an explicit flush policy defining the maximum crash-loss window; recovery by replaying the log suffix over the last durable checkpoint, with corruption of acknowledged history a hard error rather than a silent truncation. Details in [architecture.md](./architecture.md). Databases are a later concern, appropriate for historical analysis and exploration tooling rather than for participating in a simulation frame.
 
 ---
 
