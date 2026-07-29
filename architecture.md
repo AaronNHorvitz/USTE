@@ -123,11 +123,15 @@ Three states, strictly ordered. **"Commit" throughout this document means the pe
 Append-only event log + periodic snapshots + one **world manifest**, written asynchronously except the manifest, which is written synchronously at world creation.
 
 - **World manifest:** immutable, checksummed, written once at creation: `world_format_version`, the full numerical profile (including target triple, CPU feature set, dependency lock hash, serialization version), `seed`, and `rules`. The invariant names four inputs beyond the log; the manifest is where they live. **Truth on disk is the manifest plus the log.** Snapshots and log segments reference the manifest's checksum; a log without its manifest is not a world.
-- **Group record — the unit of the log:** length-prefixed and footer-terminated: `(length, sequence_number, tick, region, member_events[], schema_version, checksum, footer)` in canonical serialization. A plain event is a group of size one; one checksum covers the whole group. The explicit framing exists so recovery can tell two failure modes apart:
-  - **Structurally incomplete tail** (declared length not present, or footer missing) — a crash tail. Discarded silently; this is exactly the accepted-but-not-durable window the flush policy already prices in.
-  - **Structurally complete record with a failing checksum** — corruption of possibly-acknowledged durable history. **Hard recovery error.** The world refuses to open; truncating here would silently break the durability promise. Repair is an explicit operator action against backups, never an automatic one.
+- **Group record — the unit of the log:** length-prefixed and footer-terminated: `(length, sequence_number, tick, region, member_events[], schema_version, checksum, footer)` in canonical serialization. A plain event is a group of size one; one checksum covers the whole group.
+- **The durable frontier is persisted independently of the data it protects.** Framing alone cannot distinguish a crash tail from corruption: a corrupted length or footer in the final acknowledged record would masquerade as a structurally incomplete tail and be silently discarded. Therefore the frontier — the byte offset up to which durability has been acknowledged — is its own record, written **dual-slot** (two alternating slots, each independently checksummed, highest valid slot wins), so a torn write of the frontier itself is survivable.
+- **Durability ordering:** fsync the log through offset `F` → write and fsync the frontier record `F` → only then acknowledge durability externally. The acknowledgment is never earlier than the frontier; the frontier is never earlier than the flushed bytes it names.
+- **Recovery rules, in terms of the frontier `F`:**
+  - Any structural malformation or checksum failure **at or before `F`** — corruption of acknowledged history. **Hard recovery error.** The world refuses to open; repair is an explicit operator action against backups, never automatic.
+  - Bytes **after `F`**: verify forward; complete, checksum-valid groups are retained (they are valid accepted history whose durability was simply never acknowledged — keeping them loses nothing and is deterministic), and the log is truncated at the first malformation. That truncated remainder is the genuine crash tail, priced in by the flush policy.
+  - **Both frontier slots invalid** — the frontier itself cannot be established. Hard recovery error, same rule as corrupted history.
 
-  The durable frontier therefore always lands on a verified group boundary, and only genuine crash tails are ever dropped.
+  The durable frontier therefore always lands on a verified group boundary, only genuine crash tails are ever dropped, and no failure at or before an acknowledged offset is ever repaired silently.
 - **Snapshots** are an optimization: they *cache* regenerable and replayable state to bound recovery time. They are never the truth — the manifest and log are. Written to a temp file, fsynced, atomically renamed; each names the log sequence it covers.
 - **Flush policy:** explicit and configurable; the maximum crash-loss window is a stated number of ticks. Backpressure: if the log writer falls behind its bound, the simulation *slows* rather than drops events — losing history is worse than losing frame rate.
 
@@ -138,7 +142,7 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 1. Repository cleanup; Rust workspace (`uste-core`, `uste-time`, `uste-gen`, `uste-orbits`, `uste-sim`, `uste-log`).
 2. Versioned hierarchical addresses and deterministic seed derivation.
 3. Integer simulation time (§6) and canonical event ordering (§5).
-4. Canonical serialization (§8), replay, and state hashing — with crash-injection tests at every group-record boundary, distinguishing tail-discard from hard corruption error (§9).
+4. Canonical serialization (§8), replay, and state hashing — with crash-injection tests at every group-record boundary and against the frontier record itself (torn frontier write, single-slot corruption, dual-slot loss), distinguishing tail-discard from hard corruption error (§9).
 5. Two-body analytical propagation (tier-1 canonical model).
 6. One numerical integrator with the full reconciliation contract (§4), two-body scope.
 7. Property tests across replays, thread counts, and transition schedules; golden event logs as committed fixtures under `tests/fixtures/`.
