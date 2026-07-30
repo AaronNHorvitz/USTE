@@ -3,14 +3,28 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.1 |
+| **Version** | Draft v0.2 |
 | **Author** | Aaron N. Horvitz |
-| **Date** | 2026-07-29 |
+| **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
 | **License** | Dual MIT / Apache-2.0 |
 | **Companion documents** | [README.md](./README.md) (shape and lineage) · [architecture.md](./architecture.md) (normative contracts) |
 
 This PRD restates the design as **numbered, testable requirements** and defines what "done" means for each milestone. Where this document and `architecture.md` conflict, `architecture.md` is normative and this document has a bug.
+
+### Versioning vocabulary
+
+The word "version" is overloaded; these terms are distinct and never interchangeable:
+
+| Term | Means | Example |
+|---|---|---|
+| Document version | Revision of a design document only | this PRD, Draft v0.2 |
+| `world_format_version` | On-disk schema of state, addresses, events; part of the invariant | starts at `1` |
+| Numerical profile | Named, versioned numerics/execution bundle; part of the invariant | `baseline-1`, `portable-1` |
+| "v0 decision" | An initial normative choice in `architecture.md`, revisable by explicit commit until the first release tag | quantum = 1/3600 s |
+| Milestone (M0, M1, …) | Engineering gate with exit criteria; not a release | M0 = replay kernel |
+| Release version | Crate semver; `1.0.0` requires M0 and M1 exits green | — |
+| AS version | Version of Appendix A's acceptance/benchmark vectors | `AS-v0` |
 
 ---
 
@@ -36,7 +50,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 | Contracts | `architecture.md`, kept normative and current |
 | Proof of contracts | Property-test suites, golden replay fixtures, crash-injection suite |
 | Performance evidence | Criterion benchmark suite with recorded results |
-| Reference binary | A minimal CLI driving Milestone 0/1 scenarios (create world, run, crash, recover, replay, hash) |
+| Reference binary | A minimal CLI driving Milestone 0/1 scenarios (create world, run, crash, recover, replay, hash, scrub) |
 
 ### 2.2 Consumers
 
@@ -118,8 +132,8 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 - **FR-7.7** Recovery SHALL be strict rollback: truncate at `F` unconditionally. Malformation at or before `F`, or loss of both frontier slots, SHALL be a hard recovery error — the world refuses to open; repair is an explicit operator action.
 - **FR-7.8** Snapshots SHALL be derived, not captured: produced by replaying durable artifacts through endpoint `E` outside the live process. Snapshot state SHALL equal `f(manifest, log ≤ E)` bit-for-bit. A live COW capture MAY replace this later only if its state hash matches the replay-derived hash for the same `E`.
 - **FR-7.9** Snapshot endpoints SHALL be recorded as both group sequence number and log byte offset on a verified group boundary; eligibility SHALL be `E ≤ F` at publication time; recovery SHALL select the newest snapshot with `E ≤ F` and SHALL decline and flag any snapshot claiming coverage beyond `F`.
-- **FR-7.11** Snapshots SHALL record the canonical state hash of their contents. Recovery SHALL recompute and compare before use; on mismatch the snapshot SHALL be declined and flagged, and recovery SHALL fall back to an older snapshot or genesis replay. A periodic **scrub audit** SHALL re-derive published snapshots and compare hashes, catching the consistent-but-wrong class no recovery-time check can see.
-- **FR-7.10** Log-writer backpressure SHALL slow the simulation rather than drop events.
+- **FR-7.10** Snapshots SHALL record the canonical state hash of their contents. Recovery SHALL recompute and compare before use; on mismatch the snapshot SHALL be declined and flagged, and recovery SHALL fall back to an older snapshot or genesis replay. The **scrub audit** SHALL exist as an explicit product surface — a library operation and `uste scrub` in the reference CLI — re-deriving published snapshots, comparing hashes, emitting a machine-readable report, and exiting nonzero on any mismatch. Scheduling cadence belongs to the consumer; M0's CI SHALL run scrub as part of the snapshot suite (TV-E).
+- **FR-7.11** Log-writer backpressure SHALL slow the simulation rather than drop events (BENCH-C2).
 
 ### FR-8 — Time *(architecture §6)*
 
@@ -146,9 +160,9 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 ## 4. Non-functional requirements
 
-- **NFR-1 (Budgets, not claims).** Performance figures are budgets until Criterion evidence exists: analytical propagation sub-microsecond per body; active region milliseconds for thousands of bodies; log writes off the frame path. Each budget SHALL have a benchmark. **Benchmarks gate the build only on pinned CI hardware** — a dedicated runner with a fixed CPU model, pinned frequency governor, and recorded machine identity in the baseline. On shared or unpinned runners benchmarks run informationally and SHALL NOT gate, because a performance gate on noisy hardware is a flakiness generator, not a guarantee.
+- **NFR-1 (Budgets, not claims).** Every performance budget is defined as an exact, gateable scenario in **Appendix A (AS-v0)** — entity counts, timestep counts, thread counts, statistic, and pass/fail threshold on the pinned runner: BENCH-A (analytical), BENCH-B (active region), BENCH-C/C2 (log path and backpressure). Prose figures anywhere in these documents are informal restatements of those vectors. **Benchmarks gate the build only on pinned CI hardware** — a dedicated runner with a fixed CPU model, pinned frequency governor, and recorded machine identity in the baseline. On shared or unpinned runners benchmarks run informationally and SHALL NOT gate, because a performance gate on noisy hardware is a flakiness generator, not a guarantee.
 - **NFR-2 (Reproducibility).** The replay guarantee SHALL hold across runs and across thread counts on the same binary/profile. Cross-platform equality is out of scope until the portable profile exists.
-- **NFR-3 (Crash safety).** The crash-injection matrix (§6.3 below) SHALL pass at every group-record boundary, against the frontier record (torn write, single-slot corruption, dual-slot loss), against planted ineligible snapshots (`E > F`), **and against a planted snapshot with legal `E ≤ F` but incorrect contents** — which SHALL be declined via state-hash mismatch with recovery falling back cleanly.
+- **NFR-3 (Crash safety).** The crash-injection matrix (§6.3, TV-CRASH) SHALL pass at every group-record boundary, against the frontier record (torn write, single-slot corruption, dual-slot loss), against planted ineligible snapshots (`E > F`), **and against a planted snapshot with legal `E ≤ F` but incorrect contents** — which SHALL be declined via state-hash mismatch with recovery falling back cleanly.
 - **NFR-4 (Versioning discipline).** Any change to state schema, addresses, events, quantum, or serialization SHALL bump `world_format_version`. Any change to integrators, FP behavior, or dependencies affecting arithmetic SHALL produce a new numerical profile.
 - **NFR-5 (Licensing).** All dependencies SHALL be compatible with dual MIT/Apache-2.0 distribution; a CI license check SHALL enforce this.
 - **NFR-6 (Single-machine scope).** All v1 targets assume one commodity desktop; nothing in the design may *require* more.
@@ -165,11 +179,11 @@ Build order *(architecture §10)*: workspace → addresses/seeds → time and ev
 
 **Exit criteria (all required):**
 
-1. **The replay test.** A trivial world simulated through a long interval with mixed sleep/wake transitions and ≥ 1 committed deviation replays cold from `(manifest, log)` to a bit-identical state hash — across runs and across thread counts. *(FR-1.1, FR-1.5)*
-2. **The observation test.** Two runs differing only in wake/sleep schedule, with no committed interactions, produce bit-identical canonical histories. *(FR-5.1)*
-3. **Crash-injection matrix green.** Every case in NFR-3, including durable-or-absent creation (kill at every step of the publication sequence). *(FR-7.x)*
-4. **Snapshot equivalence.** Derived snapshot at every tested `E` hashes identically to direct replay to `E`; planted beyond-`F` snapshot is declined and flagged. *(FR-7.8, FR-7.9)*
-5. **Reconciliation audit.** Two-body commit events carry correct epoch state vectors and invariant residuals within tolerance. *(FR-4.4, FR-4.5)*
+1. **The replay test — TV-REPLAY (Appendix A).** The specified world (64 two-body systems, 1,000,000 ticks, seeded wake/sleep schedule, committed deviations at fixed ticks) replays cold from `(manifest, log)` to a bit-identical state hash — across runs and across thread counts {1, 2, 8}. *(FR-1.1, FR-1.5)*
+2. **The observation test — TV-OBS (Appendix A).** Two runs differing only in wake/sleep schedule, with no committed interactions, produce bit-identical canonical histories at every checkpoint. *(FR-5.1)*
+3. **Crash-injection matrix green — TV-CRASH (Appendix A).** Every enumerated case lands in its specified outcome, including durable-or-absent creation (kill at every step of the publication sequence). *(FR-7.x)*
+4. **Snapshot equivalence — TV-E (Appendix A).** Derived snapshots at every endpoint in the TV-E matrix hash identically to direct replay; the planted beyond-`F` and legal-`E`/wrong-contents snapshots are declined and flagged with clean fallback. *(FR-7.8, FR-7.9, FR-7.10)*
+5. **Reconciliation audit — TV-KEPLER (Appendix A).** Two-body commit events carry correct epoch state vectors, with relative energy and angular-momentum residuals ≤ 1e-9 across the AS-v0 eccentricity sweep. *(FR-4.4, FR-4.5)*
 6. Golden fixtures committed under `tests/fixtures/`; CI runs the full suite plus license check.
 
 ### Milestone 1 — the galaxy demonstration
@@ -181,7 +195,7 @@ Scope: `uste-gen` (hierarchical galaxy/system/body generation, baseline-stable b
 1. A stable galaxy generates from one seed; any address regenerates identically and lazily. *(FR-2.1, FR-2.2)*
 2. A selected system runs the full procedural → analytical → active cycle; leaving and revisiting reproduces identical properties; unvisited systems are provably untouched (state hash of their regenerated baseline unchanged). *(FR-4.x, FR-5.1)*
 3. One committed modification persists while the untouched remainder stores nothing. *(FR-2.4, FR-7.x)*
-4. Criterion evidence recorded against every NFR-1 budget; numerical drift vs. the analytical baseline measured and published.
+4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2); numerical drift vs. the analytical baseline measured and published.
 
 ### Beyond M1 (listed, not committed)
 
@@ -222,8 +236,34 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 
 ---
 
-## 9. Change log
+## 9. Appendix A — Acceptance and benchmark vectors (AS-v0)
+
+This appendix is the objective content behind every qualitative phrase in the gates. It is versioned independently (**AS-v0**); any change is an explicit commit bumping the AS version — a failing gate is revised by commit, never by silently editing the threshold. Gates cite these IDs.
+
+### Test vectors
+
+| ID | Scenario | Pass condition |
+|---|---|---|
+| **TV-REPLAY** | 64 two-body systems (tier-1); 1,000,000 ticks (≈ 277.8 s of sim time at quantum 1/3600 s); wake/sleep schedule derived from the world seed; committed deviations at ticks 250,000 / 500,000 / 750,000 touching 1, 2, and 3 bodies respectively | Cold replay from `(manifest, log)` yields a bit-identical state hash across runs and across thread counts {1, 2, 8} |
+| **TV-OBS** | Same world, two runs: schedule A (no wakes) vs. schedule B (every system woken and slept 10× at seeded ticks); zero committed interactions | Bit-identical canonical state hashes at every 100,000-tick checkpoint |
+| **TV-E** | Snapshot endpoints over the TV-REPLAY log: E ∈ {genesis, first group, ⌊n/2⌋ group, last durable group = F}; plus two adversarial plants: `E > F`, and legal `E` with wrong contents | Each derived snapshot's hash equals the direct-replay-to-E hash; both plants are declined and flagged; recovery falls back cleanly |
+| **TV-KEPLER** | Eccentricity sweep e ∈ {0, 0.1, 0.5, 0.9, 0.99}. M0 supported domain is elliptical 0 ≤ e ≤ 0.99; near-parabolic and hyperbolic are deferred, and out-of-domain input is a checked error | Kepler-equation residual ≤ 1e-12 rad; reconciliation-audit residuals (relative energy and angular momentum of the fitted conic at epoch) ≤ 1e-9 |
+| **TV-CRASH** | The §6.3 injection matrix, enumerated per artifact and per publication step | Every case lands in its specified outcome — tail-discard, hard error, or decline-and-flag; no third outcome observed |
+
+### Benchmark vectors (gating only on the pinned runner)
+
+| ID | Scenario | Statistic | Threshold |
+|---|---|---|---|
+| **BENCH-A** analytical | 100,000 tier-1 bodies evaluated at 100 distinct ticks (10⁷ element→state evaluations), single thread | mean per evaluation; p95 per-tick batch vs. median batch | mean ≤ 1.0 µs; p95 ≤ 1.5 × median |
+| **BENCH-B** active | 5,000 active bodies, Encke deviation integration, 10,000 steps at 60 Hz region rate, 8 threads | p95 and p99.9 step wall time | p95 ≤ 8 ms; p99.9 ≤ 16 ms |
+| **BENCH-C** log | 50,000 events/s sustained for 60 s under normal I/O | p99 frame-path enqueue stall; event loss | stall ≤ 50 µs; loss = 0 |
+| **BENCH-C2** backpressure | Same load, writer artificially throttled to 10 MB/s | behavior | simulation slows; zero events dropped (FR-7.11) |
+
+Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity (CPU model, governor, memory configuration) is recorded alongside every baseline; changing the runner is an AS-version event.
+
+## 10. Change log
 
 | Version | Date | Change |
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
+| 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
