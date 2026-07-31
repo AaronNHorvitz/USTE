@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.2 |
+| **Version** | Draft v0.3 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
@@ -70,7 +70,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 
 ## 3. Functional requirements
 
-Requirement IDs are stable and cited by tests. Each requirement cites its normative source.
+Requirement IDs are stable and cited by tests. Each requirement cites its normative source. Requirements tagged **[Post-1.0]** are normative for their feature when it is built, but are not required for release 1.0.0 — which requires exactly the M0 and M1 exit criteria.
 
 ### FR-1 — Determinism and the invariant *(architecture §1)*
 
@@ -92,7 +92,7 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 - **FR-3.1** A body's model-segment history SHALL be a pure function of `(seed, rules, address, ordered_event_log)`.
 - **FR-3.2** The first segment SHALL be assigned at generation; every later segment boundary SHALL be a committed event.
-- **FR-3.3** Supported baseline tiers: (1) conic, (2) precessing conic with secular rates, (3) generated ephemeris table produced deterministically at generation. Milestone 0 SHALL implement tier 1 only.
+- **FR-3.3** The celestial model family defines three baseline tiers: (1) conic, (2) precessing conic with secular rates, (3) generated ephemeris table produced deterministically at generation. Release 1.0.0 SHALL implement tier 1 only; tiers 2 and 3 are **[Post-1.0]**.
 - **FR-3.4** Every force SHALL be classified canonical or presentational; no third category SHALL exist.
 - **FR-3.5** Coupled model-segment updates SHALL be committed atomically in a single event group.
 
@@ -144,7 +144,7 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 ### FR-9 — Space, units, frames *(architecture §7)*
 
 - **FR-9.1** Baseline positions SHALL be `f64`, frame-local, SI meters, with frame extents bounded (≤ ~10⁹ m) to keep resolution sub-micrometer in-frame.
-- **FR-9.2** The portable profile SHALL use `i64` fixed-point micrometers.
+- **FR-9.2 [Post-1.0]** When the portable profile is introduced, it SHALL use `i64` fixed-point micrometers.
 - **FR-9.3** Quantities SHALL use dimensional newtypes; unit errors SHALL be compile errors.
 - **FR-9.4** Authoritative state SHALL be frame-local and observer-independent; floating-origin recentering SHALL exist only in render projection, per client.
 - **FR-9.5** Frame transitions SHALL occur at defined boundaries with hysteresis; transforms SHALL be deterministic functions of the canonical models involved.
@@ -192,10 +192,10 @@ Scope: `uste-gen` (hierarchical galaxy/system/body generation, baseline-stable b
 
 **Exit criteria:**
 
-1. A stable galaxy generates from one seed; any address regenerates identically and lazily. *(FR-2.1, FR-2.2)*
-2. A selected system runs the full procedural → analytical → active cycle; leaving and revisiting reproduces identical properties; unvisited systems are provably untouched (state hash of their regenerated baseline unchanged). *(FR-4.x, FR-5.1)*
-3. One committed modification persists while the untouched remainder stores nothing. *(FR-2.4, FR-7.x)*
-4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2); numerical drift vs. the analytical baseline measured and published.
+1. **TV-GEN (Appendix A) passes in full**: generation at the specified scale, the laziness check, regeneration identity across fresh processes, and the sparse-storage check. *(FR-2.1, FR-2.2, FR-2.4, FR-7.x)*
+2. A selected system runs the full procedural → analytical → active cycle; leaving and revisiting reproduces identical properties; unvisited systems are provably untouched (TV-GEN regeneration-identity check). *(FR-4.x, FR-5.1)*
+3. Numerical drift of a woken system against its tier-1 baseline stays within the TV-GEN drift threshold. *(FR-5.2)*
+4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2) on the pinned runner.
 
 ### Beyond M1 (listed, not committed)
 
@@ -220,7 +220,7 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 | Floating-point drift across dependency/toolchain upgrades silently breaks replay | High — it's the core promise | Profile binds lock hash and toolchain; golden fixtures catch any change; upgrades are deliberate profile bumps |
 | Kepler solver edge cases (near-parabolic, hyperbolic, high-eccentricity) | Medium | Property-test the solver across eccentricity sweep; define supported domain in tier-1 model spec |
 | Hysteresis tuning produces wake thrash or stale physics | Medium | Thrash rate is a monitored metric from M0; dwell/radius are `rules` parameters, not constants |
-| Scope creep toward renderer/applications before M0 exits | High — historical pattern | PRD non-goals; milestone gates; the replay test as the only M0 definition of done |
+| Scope creep toward renderer/applications before M0 exits | High — historical pattern | PRD non-goals; milestone gates; the M0 exit criteria as the only definition of done |
 | Single-maintainer bandwidth | High | Milestones sized to evenings; M0 has no research unknowns — every contract is already specified |
 
 ---
@@ -240,26 +240,29 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 
 This appendix is the objective content behind every qualitative phrase in the gates. It is versioned independently (**AS-v0**); any change is an explicit commit bumping the AS version — a failing gate is revised by commit, never by silently editing the threshold. Gates cite these IDs.
 
+**Vector files.** Each row is completed by a canonical, committed vector file set under `tests/vectors/<id>/` containing its full literal inputs — seeds, rules and profile identities, orbital elements, schedule algorithms, state grids, payload definitions. This table records each file set's SHA-256 once committed (M0 build-order step 7 for TV-REPLAY/OBS/E/KEPLER/CRASH and the BENCH vectors; M1 for TV-GEN). **Until its hash is recorded here, a vector is DRAFT and cannot gate.** The parameters below are normative constraints on the files' construction; the files are normative for everything else.
+
 ### Test vectors
 
-| ID | Scenario | Pass condition |
-|---|---|---|
-| **TV-REPLAY** | 64 two-body systems (tier-1); 1,000,000 ticks (≈ 277.8 s of sim time at quantum 1/3600 s); wake/sleep schedule derived from the world seed; committed deviations at ticks 250,000 / 500,000 / 750,000 touching 1, 2, and 3 bodies respectively | Cold replay from `(manifest, log)` yields a bit-identical state hash across runs and across thread counts {1, 2, 8} |
-| **TV-OBS** | Same world, two runs: schedule A (no wakes) vs. schedule B (every system woken and slept 10× at seeded ticks); zero committed interactions | Bit-identical canonical state hashes at every 100,000-tick checkpoint |
-| **TV-E** | Snapshot endpoints over the TV-REPLAY log: E ∈ {genesis, first group, ⌊n/2⌋ group, last durable group = F}; plus two adversarial plants: `E > F`, and legal `E` with wrong contents | Each derived snapshot's hash equals the direct-replay-to-E hash; both plants are declined and flagged; recovery falls back cleanly |
-| **TV-KEPLER** | Eccentricity sweep e ∈ {0, 0.1, 0.5, 0.9, 0.99}. M0 supported domain is elliptical 0 ≤ e ≤ 0.99; near-parabolic and hyperbolic are deferred, and out-of-domain input is a checked error | Kepler-equation residual ≤ 1e-12 rad; reconciliation-audit residuals (relative energy and angular momentum of the fitted conic at epoch) ≤ 1e-9 |
-| **TV-CRASH** | The §6.3 injection matrix, enumerated per artifact and per publication step | Every case lands in its specified outcome — tail-discard, hard error, or decline-and-flag; no third outcome observed |
+| ID | Scenario (literal constraints) | Pass condition | Vector hash |
+|---|---|---|---|
+| **TV-REPLAY** | Seed `0x5EED0001`; profile `baseline-1`; rules `rules-tv1`. 64 tier-1 two-body systems, elements enumerated in the vector file (e ≤ 0.9, a ∈ [10⁷, 10⁹] m). 1,000,000 ticks (≈ 277.8 s at quantum 1/3600 s). Wake/sleep schedule generated by the hierarchical PRNG stream keyed `("tv-replay-sched", system_address)`, algorithm defined in the vector file. Committed deviations at ticks 250,000 / 500,000 / 750,000 touching 1, 2, 3 bodies. | Cold replay from `(manifest, log)` yields a bit-identical state hash across runs and thread counts {1, 2, 8} | DRAFT |
+| **TV-OBS** | The TV-REPLAY world; two runs: schedule A (no wakes) vs. schedule B (every system woken/slept 10× at ticks from stream `("tv-obs-sched", system_address)`); zero committed interactions | Bit-identical canonical state hashes at every 100,000-tick checkpoint | DRAFT |
+| **TV-E** | Snapshot endpoints over the TV-REPLAY log: E ∈ {genesis, first group, ⌊n/2⌋ group, last durable group = F}; two adversarial plants: `E > F`, and legal `E` with wrong contents | Each derived snapshot's hash equals the direct-replay-to-E hash; both plants declined and flagged; recovery falls back cleanly | DRAFT |
+| **TV-KEPLER** | State grid: e ∈ {0, 0.1, 0.5, 0.9, 0.99} × mean anomaly M ∈ {0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°} × a ∈ {10⁷ m, 10⁹ m} = 80 cases, enumerated in the vector file. M0 domain is elliptical 0 ≤ e ≤ 0.99; out-of-domain input is a checked error. | Kepler-equation residual ≤ 1e-12 rad on all 80 cases; reconciliation-audit residuals (relative energy and angular momentum at epoch) ≤ 1e-9 | DRAFT |
+| **TV-CRASH** | The §6.3 injection matrix, enumerated per artifact and per publication step in the vector file | Every case lands in its specified outcome — tail-discard, hard error, or decline-and-flag; no third outcome observed | DRAFT |
+| **TV-GEN** *(M1)* | Seed `0x5EED0002`; profile `baseline-1`; rules `rules-tv1`. Galaxy of 2²⁰ addressable systems; K = 1,000 addresses sampled by the stream `("tv-gen-sample")`. | (a) **Laziness:** generating the samples performs zero generation work outside the sampled subtrees (instrumented generation counter). (b) **Regeneration identity:** each sampled address regenerated in a fresh process yields identical canonical bytes. (c) **Sparse storage:** after exactly one committed modification, on-disk artifacts are exactly manifest + log (one event group) + frontier (+ eligible snapshots), log < 4 KiB. (d) **Drift:** a woken sampled system with no committed interaction tracks its tier-1 baseline within relative position deviation ≤ 1e-9 over 10,000 ticks. | DRAFT |
 
 ### Benchmark vectors (gating only on the pinned runner)
 
-| ID | Scenario | Statistic | Threshold |
-|---|---|---|---|
-| **BENCH-A** analytical | 100,000 tier-1 bodies evaluated at 100 distinct ticks (10⁷ element→state evaluations), single thread | mean per evaluation; p95 per-tick batch vs. median batch | mean ≤ 1.0 µs; p95 ≤ 1.5 × median |
-| **BENCH-B** active | 5,000 active bodies, Encke deviation integration, 10,000 steps at 60 Hz region rate, 8 threads | p95 and p99.9 step wall time | p95 ≤ 8 ms; p99.9 ≤ 16 ms |
-| **BENCH-C** log | 50,000 events/s sustained for 60 s under normal I/O | p99 frame-path enqueue stall; event loss | stall ≤ 50 µs; loss = 0 |
-| **BENCH-C2** backpressure | Same load, writer artificially throttled to 10 MB/s | behavior | simulation slows; zero events dropped (FR-7.11) |
+| ID | Scenario (literal constraints) | Statistic | Threshold | Vector hash |
+|---|---|---|---|---|
+| **BENCH-A** analytical | 100,000 tier-1 bodies (elements from the vector file, seed `0x5EEDB001`) evaluated at 100 distinct ticks (10⁷ element→state evaluations), single thread | mean per evaluation; p95 per-tick batch vs. median batch | mean ≤ 1.0 µs; p95 ≤ 1.5 × median | DRAFT |
+| **BENCH-B** active | 5,000 active bodies as **100 independent systems × 50 bodies**, Encke deviations integrated against each system's tier-1 primary baseline, no cross-system coupling; 10,000 steps at 60 Hz region rate, 8 threads | p95 and p99.9 step wall time | p95 ≤ 8 ms; p99.9 ≤ 16 ms | DRAFT |
+| **BENCH-C** log | 50,000 events/s sustained 60 s; 256-byte member payloads, groups of size one; writer batches ≤ 4 MiB or ≤ 10 ms, one fsync per batch | p99 frame-path enqueue stall; event loss | stall ≤ 50 µs; loss = 0 | DRAFT |
+| **BENCH-C2** backpressure | BENCH-C load with the writer throttled to 10 MB/s | steady-state behavior within 5 s of throttle onset | accepted-event rate equals writer drain rate ± 5%; loss = 0 (FR-7.11) | DRAFT |
 
-Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity (CPU model, governor, memory configuration) is recorded alongside every baseline; changing the runner is an AS-version event.
+Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity — CPU model, frequency governor, memory configuration, **filesystem, and storage device** — is recorded alongside every baseline; changing any of it is an AS-version event.
 
 ## 10. Change log
 
@@ -267,3 +270,4 @@ Thresholds are **initial calibration targets** — chosen to be falsifiable, not
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
 | 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
+| 0.3 | 2026-07-30 | Appendix A vectors made reproducible: committed vector files under `tests/vectors/` with SHA-256 recorded per row, DRAFT-cannot-gate rule, literal seeds and profile/rules identities, TV-KEPLER state grid, BENCH-B force topology, BENCH-C payload/batching/fsync policy, BENCH-C2 measurable slowdown condition, runner identity extended to filesystem and storage. Release scope reconciled: [Post-1.0] tag introduced; FR-3.3 tiers 2–3 and FR-9.2 portable profile marked Post-1.0. TV-GEN added and M1 exits bound to it. Risk-table wording: the M0 exit criteria, plural, are the definition of done. |
