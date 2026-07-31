@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.5 |
+| **Version** | Draft v0.6 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
@@ -51,7 +51,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 | Proof of contracts | Property-test suites, golden replay fixtures, crash-injection suite |
 | Performance evidence | Criterion benchmark suite with recorded results |
 | Reference binary | A minimal CLI driving Milestone 0/1 scenarios (create world, run, crash, recover, replay, hash, scrub) |
-| Demo viewer | `uste-view` (Bevy, dual MIT/Apache): read-only 3D consumer — bodies, orbit conics, trajectory display, zoom, fly camera. Outside the kernel workspace's gates; Milestone V. |
+| Demo viewer | `uste-view` (Bevy + `bevy_egui`, dual MIT/Apache): read-only 3D consumer — bodies, orbit conics, trajectory display, zoom, fly camera, and a minimal HUD (labels, time control, selection panel). Outside the kernel workspace's gates; Milestone V. |
 
 ### 2.2 Consumers
 
@@ -208,7 +208,8 @@ Scope: `uste-view`, a read-only 3D consumer built on Bevy. Not part of the kerne
 2. **True rendering of a TV-GEN system.** Bodies at analytical positions; orbits drawn as exact conics *from the elements* (the math, not sampled polylines); a deviated body renders its canonical baseline and its deviated trajectory as two visually distinct curves — the Encke split, on screen.
 3. **Scale traversal.** Continuous zoom spanning ≥ 6 orders of magnitude (moon close-up to whole system) using render-side floating-origin recentering only; authoritative state is untouched and observer-independent throughout. *(FR-9.4)*
 4. **Fly camera.** Free flight plus focus-on-body, with frame-rate-independent controls.
-5. **Performance.** Median ≥ 60 fps, p5 ≥ 30 fps viewing a TV-GEN system on the pinned runner (recorded, viewer-gating only).
+5. **Performance.** Median ≥ 60 fps, p5 ≥ 30 fps viewing a TV-GEN system on the pinned runner (recorded, viewer-gating only) — measured with the HUD visible.
+6. **Minimal HUD** (`bevy_egui` overlay, read-only like everything else): body name labels in the viewport; a time control with pause, speed multiplier, and current-tick readout; and a selection panel that, for a clicked body, shows its orbital elements, model tier, and deviation status (baseline vs. committed deviation, with the deviation event's tick and cause when present). The HUD displays kernel truth; it never mutates it.
 
 ### Beyond M1 and V (listed, not committed)
 
@@ -285,6 +286,7 @@ Thresholds are **initial calibration targets** — chosen to be falsifiable, not
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
 | 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
+| 0.6 | 2026-07-30 | Milestone V gains exit criterion 6: minimal HUD via `bevy_egui` — body labels, time control (pause / speed / tick readout), and a selection panel showing elements, model tier, and deviation status. Performance criterion measured with HUD visible. |
 | 0.5 | 2026-07-30 | Milestone V added: `uste-view` demo viewer (Bevy, read-only, gated on M0, parallel to M1, never gating the kernel) with five exit criteria including the Encke-split visualization and a ≥ 6-orders-of-magnitude floating-origin zoom. Renderer non-goal amended accordingly; scope-creep mitigation updated. |
 | 0.4 | 2026-07-30 | BENCH-M added: memory footprint with a scale-independence gate (2²⁰-system world within 10% of a 2¹⁰ control at idle) plus active-scenario limit. BENCH-C2 units reconciled to byte rates with events/s derived from canonical group size, and a bounded-backlog requirement added. File-set SHA-256 defined canonically over a sorted path/hash manifest. |
 | 0.3 | 2026-07-30 | Appendix A vectors made reproducible: committed vector files under `tests/vectors/` with SHA-256 recorded per row, DRAFT-cannot-gate rule, literal seeds and profile/rules identities, TV-KEPLER state grid, BENCH-B force topology, BENCH-C payload/batching/fsync policy, BENCH-C2 measurable slowdown condition, runner identity extended to filesystem and storage. Release scope reconciled: [Post-1.0] tag introduced; FR-3.3 tiers 2–3 and FR-9.2 portable profile marked Post-1.0. TV-GEN added and M1 exits bound to it. Risk-table wording: the M0 exit criteria, plural, are the definition of done. |
