@@ -153,7 +153,9 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 5. Two-body analytical propagation (tier-1 canonical model).
 6. One numerical integrator with the full reconciliation contract (§4), two-body scope.
 7. Property tests across replays, thread counts, and transition schedules; golden event logs as committed fixtures under `tests/fixtures/`.
-8. Only then: the procedural galaxy generator, tier-2/3 canonical models, and visualization (Milestone 1).
+8. The public read API (PRD FR-11) and the CLI `inspect` command exercising every query — the final Milestone 0 step.
+9. After M0: the V1 read-only demo viewer — a separate crate consuming only the read API; never a kernel gate.
+10. Milestone 1: the procedural galaxy generator and tier-1 assignment at scale. After M1: the V2 viewer increment (scale traversal, dual-trajectory rendering, BENCH-V). Tier-2/3 canonical models follow later milestones.
 
 ## 11. Non-goals of the kernel
 
