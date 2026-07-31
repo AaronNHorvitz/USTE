@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.6 |
+| **Version** | Draft v0.7 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
@@ -157,6 +157,12 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 - **FR-10.3** State hashes SHALL be computed over canonical bytes only.
 - **FR-10.4** Serialization rules SHALL carry their own version, referenced by the numerical profile.
 
+### FR-11 — Public read API *(M0 deliverable)*
+
+- **FR-11.1** The kernel SHALL expose an immutable read-only view API in `uste-core`, sufficient for external consumers without private access: world identity (manifest data) and current tick; the frame tree; body enumeration by address; each body's current model segment (tier, elements, epoch); canonical state evaluation `state_at(address, tick)`; active-region status with any current deviation δ, marked presentational; and committed-event metadata (tick, cause) for a body's segment boundaries.
+- **FR-11.2** The view API SHALL offer no mutation path, enforced structurally by the borrow system (shared references / snapshot views), not by convention.
+- **FR-11.3** The reference CLI SHALL include an `inspect` command exercising every FR-11.1 query, so the API is proven sufficient before any viewer exists — the viewer consumes an API that already has a test, rather than designing one by accident.
+
 ---
 
 ## 4. Non-functional requirements
@@ -186,6 +192,7 @@ Build order *(architecture §10)*: workspace → addresses/seeds → time and ev
 4. **Snapshot equivalence — TV-E (Appendix A).** Derived snapshots at every endpoint in the TV-E matrix hash identically to direct replay; the planted beyond-`F` and legal-`E`/wrong-contents snapshots are declined and flagged with clean fallback. *(FR-7.8, FR-7.9, FR-7.10)*
 5. **Reconciliation audit — TV-KEPLER (Appendix A).** Two-body commit events carry correct epoch state vectors, with relative energy and angular-momentum residuals ≤ 1e-9 across the AS-v0 eccentricity sweep. *(FR-4.4, FR-4.5)*
 6. Golden fixtures committed under `tests/fixtures/`; CI runs the full suite plus license check.
+7. **Read-API proof.** The FR-11 view API exists and `uste inspect` exercises every FR-11.1 query against the TV-REPLAY world. *(FR-11)*
 
 ### Milestone 1 — the galaxy demonstration
 
@@ -198,18 +205,23 @@ Scope: `uste-gen` (hierarchical galaxy/system/body generation, baseline-stable b
 3. Numerical drift of a woken system against its tier-1 baseline stays within the TV-GEN drift threshold. *(FR-5.2)*
 4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2/M) on the pinned runner.
 
-### Milestone V — the demo viewer *(gated on M0; runs parallel to M1)*
+### Milestone V — the demo viewer *(incremental: V1 gated on M0, V2 gated on M1)*
 
-Scope: `uste-view`, a read-only 3D consumer built on Bevy. Not part of the kernel workspace; viewer defects never gate kernel milestones. Its purpose is demonstration plus three engineering proofs: the public read API is sufficient for a real consumer, the render-side floating origin works as specified, and the canonical/presentational split is visible.
+Scope: `uste-view` (Bevy + `bevy_egui`), a read-only 3D consumer. Not part of the kernel workspace; viewer defects never gate kernel milestones. Purpose: demonstration, plus three engineering proofs — the FR-11 read API suffices for a real consumer, the render-side floating origin works as specified, and the canonical/presentational split is visible.
 
-**Exit criteria:**
+**V1 — the basic viewer (after M0; this is the quick MVP):**
 
-1. **Read-only proof.** The viewer consumes only the public read API; the kernel workspace builds, tests, and gates with the viewer crate absent. *(FR-9.4)*
-2. **True rendering of a TV-GEN system.** Bodies at analytical positions; orbits drawn as exact conics *from the elements* (the math, not sampled polylines); a deviated body renders its canonical baseline and its deviated trajectory as two visually distinct curves — the Encke split, on screen.
-3. **Scale traversal.** Continuous zoom spanning ≥ 6 orders of magnitude (moon close-up to whole system) using render-side floating-origin recentering only; authoritative state is untouched and observer-independent throughout. *(FR-9.4)*
-4. **Fly camera.** Free flight plus focus-on-body, with frame-rate-independent controls.
-5. **Performance.** Median ≥ 60 fps, p5 ≥ 30 fps viewing a TV-GEN system on the pinned runner (recorded, viewer-gating only) — measured with the HUD visible.
-6. **Minimal HUD** (`bevy_egui` overlay, read-only like everything else): body name labels in the viewport; a time control with pause, speed multiplier, and current-tick readout; and a selection panel that, for a clicked body, shows its orbital elements, model tier, and deviation status (baseline vs. committed deviation, with the deviation event's tick and cause when present). The HUD displays kernel truth; it never mutates it.
+1. **Read-only proof.** The viewer consumes only the FR-11 API; the kernel workspace builds, tests, and gates with the viewer crate absent. *(FR-9.4, FR-11)*
+2. **Renders the TV-REPLAY world** — an M0 artifact, so V1 has no M1 dependency: bodies at analytical positions; orbit curves **derived directly from canonical elements with bounded screen-space error ≤ 1 pixel** (provenance from the math is required; tessellation strategy is the implementer's).
+3. **Fly camera.** Free flight plus focus-on-body, frame-rate-independent controls.
+4. **Minimal HUD** (`bevy_egui`, read-only): body name labels; time control with pause, speed multiplier, and current-tick readout (driving viewer playback only); selection panel showing a clicked body's elements, model tier, and deviation status including the committing event's tick and cause. The HUD displays kernel truth; it never mutates it.
+
+**V2 — scale and deviation (after M1):**
+
+5. **TV-GEN system view.**
+6. **Scale traversal.** Continuous zoom ≥ 6 orders of magnitude via render-side floating-origin recentering only; authoritative state untouched and observer-independent throughout. *(FR-9.4)*
+7. **Dual-trajectory rendering.** A deviated body draws its canonical baseline and its deviated trajectory as two visually distinct curves — the Encke split, on screen.
+8. **Performance — BENCH-V (Appendix A).** Viewer-gating only, on the pinned runner, HUD visible.
 
 ### Beyond M1 and V (listed, not committed)
 
@@ -278,7 +290,9 @@ This appendix is the objective content behind every qualitative phrase in the ga
 
 | **BENCH-M** memory | TV-GEN world (2²⁰ systems) opened idle; the same world with 100 systems woken (BENCH-B topology, 5,000 active bodies); control: an otherwise identical 2¹⁰-system world opened idle. Measured via instrumented global allocator plus OS-reported peak RSS at defined points. | peak RSS; allocator live bytes | idle open ≤ 128 MiB **and within 10% of the 2¹⁰ control** — memory must not scale with apparent universe size; active scenario ≤ 512 MiB | DRAFT |
 
-Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity — CPU model, frequency governor, memory configuration, **filesystem, and storage device** — is recorded alongside every baseline; changing any of it is an AS-version event.
+| **BENCH-V** viewer *(V2 gate)* | TV-GEN system scene at 1920×1080, vsync off, wgpu Vulkan backend, HUD visible; seeded 60 s camera path defined in the vector file (system sweep → dive to a moon → selection with panel open) | median and p5 fps over the path | median ≥ 60; p5 ≥ 30 | DRAFT |
+
+Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity — CPU model, frequency governor, memory configuration, **filesystem, and storage device** — is recorded alongside every baseline; BENCH-V baselines additionally record GPU model, driver version, render backend, resolution, and vsync policy. Changing any of it is an AS-version event.
 
 ## 10. Change log
 
@@ -286,6 +300,7 @@ Thresholds are **initial calibration targets** — chosen to be falsifiable, not
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
 | 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
+| 0.7 | 2026-07-30 | Viewer review applied: Milestone V split into V1 (after M0, views the TV-REPLAY world — removing the TV-GEN/M1 contradiction) and V2 (after M1: TV-GEN view, six-order zoom, dual-trajectory, performance). FR-11 public read API added as an M0 deliverable with `uste inspect` proof and a new M0 exit criterion. "Exact conics" relaxed to element-derived curves with ≤ 1 px screen-space error. BENCH-V graphics acceptance vector added (resolution, backend, vsync, seeded camera path) with GPU/driver identity recorded in baselines. |
 | 0.6 | 2026-07-30 | Milestone V gains exit criterion 6: minimal HUD via `bevy_egui` — body labels, time control (pause / speed / tick readout), and a selection panel showing elements, model tier, and deviation status. Performance criterion measured with HUD visible. |
 | 0.5 | 2026-07-30 | Milestone V added: `uste-view` demo viewer (Bevy, read-only, gated on M0, parallel to M1, never gating the kernel) with five exit criteria including the Encke-split visualization and a ≥ 6-orders-of-magnitude floating-origin zoom. Renderer non-goal amended accordingly; scope-creep mitigation updated. |
 | 0.4 | 2026-07-30 | BENCH-M added: memory footprint with a scale-independence gate (2²⁰-system world within 10% of a 2¹⁰ control at idle) plus active-scenario limit. BENCH-C2 units reconciled to byte rates with events/s derived from canonical group size, and a bounded-backlog requirement added. File-set SHA-256 defined canonically over a sorted path/hash manifest. |

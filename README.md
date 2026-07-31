@@ -147,7 +147,7 @@ A tiny world that survives replay perfectly proves more of USTE's thesis than a 
 
 ---
 
-**Milestone V — the demo viewer** *(gated on M0, parallel to M1)*: `uste-view`, a read-only 3D consumer — planets and moons at true analytical positions, orbits drawn as exact conics from the elements, continuous zoom across six orders of magnitude on the render-side floating origin, and a fly camera, with a minimal HUD — body labels, a time control with tick readout, and a selection panel showing a body's elements and deviation status. A deviated body shows its canonical baseline and its actual trajectory as two distinct curves, making the kernel's central design decision visible on screen. The viewer consumes the public read API only and can never gate the kernel.
+**Milestone V — the demo viewer** *(incremental: V1 after M0, V2 after M1)*: `uste-view`, a read-only 3D consumer. **V1, the quick MVP:** the TV-REPLAY world rendered from canonical elements (≤ 1 px screen-space error), a fly camera, and a minimal HUD — body labels, a time control with tick readout, and a selection panel showing a body's elements and deviation status. **V2:** the TV-GEN system view, continuous zoom across six orders of magnitude on the render-side floating origin, and dual-trajectory rendering — a deviated body shows its canonical baseline and actual path as two distinct curves, making the kernel's central design decision visible on screen. The viewer consumes the public read API (FR-11) only and can never gate the kernel.
 
 ## What this is not
 
