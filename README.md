@@ -143,7 +143,7 @@ A tiny world that survives replay perfectly proves more of USTE's thesis than a 
 4. Move seamlessly between procedural, analytical, and active fidelity levels.
 5. Leave the system and return; regenerated properties must be identical, and unvisited systems must be provably untouched.
 6. Persist one committed modification without storing the untouched remainder.
-7. Benchmark (Criterion): entities per second, memory footprint, numerical drift against the analytical baseline.
+7. Benchmark per PRD Appendix A (BENCH-A/B/C/C2/M): throughput, memory footprint, and numerical drift against the analytical baseline.
 
 ---
 

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.3 |
+| **Version** | Draft v0.4 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
@@ -160,7 +160,7 @@ Requirement IDs are stable and cited by tests. Each requirement cites its normat
 
 ## 4. Non-functional requirements
 
-- **NFR-1 (Budgets, not claims).** Every performance budget is defined as an exact, gateable scenario in **Appendix A (AS-v0)** — entity counts, timestep counts, thread counts, statistic, and pass/fail threshold on the pinned runner: BENCH-A (analytical), BENCH-B (active region), BENCH-C/C2 (log path and backpressure). Prose figures anywhere in these documents are informal restatements of those vectors. **Benchmarks gate the build only on pinned CI hardware** — a dedicated runner with a fixed CPU model, pinned frequency governor, and recorded machine identity in the baseline. On shared or unpinned runners benchmarks run informationally and SHALL NOT gate, because a performance gate on noisy hardware is a flakiness generator, not a guarantee.
+- **NFR-1 (Budgets, not claims).** Every performance budget is defined as an exact, gateable scenario in **Appendix A (AS-v0)** — entity counts, timestep counts, thread counts, statistic, and pass/fail threshold on the pinned runner: BENCH-A (analytical), BENCH-B (active region), BENCH-C/C2 (log path and backpressure), BENCH-M (memory footprint and scale-independence). Prose figures anywhere in these documents are informal restatements of those vectors. **Benchmarks gate the build only on pinned CI hardware** — a dedicated runner with a fixed CPU model, pinned frequency governor, and recorded machine identity in the baseline. On shared or unpinned runners benchmarks run informationally and SHALL NOT gate, because a performance gate on noisy hardware is a flakiness generator, not a guarantee.
 - **NFR-2 (Reproducibility).** The replay guarantee SHALL hold across runs and across thread counts on the same binary/profile. Cross-platform equality is out of scope until the portable profile exists.
 - **NFR-3 (Crash safety).** The crash-injection matrix (§6.3, TV-CRASH) SHALL pass at every group-record boundary, against the frontier record (torn write, single-slot corruption, dual-slot loss), against planted ineligible snapshots (`E > F`), **and against a planted snapshot with legal `E ≤ F` but incorrect contents** — which SHALL be declined via state-hash mismatch with recovery falling back cleanly.
 - **NFR-4 (Versioning discipline).** Any change to state schema, addresses, events, quantum, or serialization SHALL bump `world_format_version`. Any change to integrators, FP behavior, or dependencies affecting arithmetic SHALL produce a new numerical profile.
@@ -195,7 +195,7 @@ Scope: `uste-gen` (hierarchical galaxy/system/body generation, baseline-stable b
 1. **TV-GEN (Appendix A) passes in full**: generation at the specified scale, the laziness check, regeneration identity across fresh processes, and the sparse-storage check. *(FR-2.1, FR-2.2, FR-2.4, FR-7.x)*
 2. A selected system runs the full procedural → analytical → active cycle; leaving and revisiting reproduces identical properties; unvisited systems are provably untouched (TV-GEN regeneration-identity check). *(FR-4.x, FR-5.1)*
 3. Numerical drift of a woken system against its tier-1 baseline stays within the TV-GEN drift threshold. *(FR-5.2)*
-4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2) on the pinned runner.
+4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2/M) on the pinned runner.
 
 ### Beyond M1 (listed, not committed)
 
@@ -240,7 +240,7 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 
 This appendix is the objective content behind every qualitative phrase in the gates. It is versioned independently (**AS-v0**); any change is an explicit commit bumping the AS version — a failing gate is revised by commit, never by silently editing the threshold. Gates cite these IDs.
 
-**Vector files.** Each row is completed by a canonical, committed vector file set under `tests/vectors/<id>/` containing its full literal inputs — seeds, rules and profile identities, orbital elements, schedule algorithms, state grids, payload definitions. This table records each file set's SHA-256 once committed (M0 build-order step 7 for TV-REPLAY/OBS/E/KEPLER/CRASH and the BENCH vectors; M1 for TV-GEN). **Until its hash is recorded here, a vector is DRAFT and cannot gate.** The parameters below are normative constraints on the files' construction; the files are normative for everything else.
+**Vector files.** Each row is completed by a canonical, committed vector file set under `tests/vectors/<id>/` containing its full literal inputs — seeds, rules and profile identities, orbital elements, schedule algorithms, state grids, payload definitions. This table records each file set's SHA-256 once committed (M0 build-order step 7 for TV-REPLAY/OBS/E/KEPLER/CRASH and the BENCH vectors; M1 for TV-GEN). A directory has no portable hash, so **the file-set hash is defined canonically**: SHA-256 over a manifest of UTF-8 lines `<hex sha256 of file> <relative path>`, paths forward-slashed, sorted bytewise by path, LF-terminated. **Until its hash is recorded here, a vector is DRAFT and cannot gate.** The parameters below are normative constraints on the files' construction; the files are normative for everything else.
 
 ### Test vectors
 
@@ -260,7 +260,9 @@ This appendix is the objective content behind every qualitative phrase in the ga
 | **BENCH-A** analytical | 100,000 tier-1 bodies (elements from the vector file, seed `0x5EEDB001`) evaluated at 100 distinct ticks (10⁷ element→state evaluations), single thread | mean per evaluation; p95 per-tick batch vs. median batch | mean ≤ 1.0 µs; p95 ≤ 1.5 × median | DRAFT |
 | **BENCH-B** active | 5,000 active bodies as **100 independent systems × 50 bodies**, Encke deviations integrated against each system's tier-1 primary baseline, no cross-system coupling; 10,000 steps at 60 Hz region rate, 8 threads | p95 and p99.9 step wall time | p95 ≤ 8 ms; p99.9 ≤ 16 ms | DRAFT |
 | **BENCH-C** log | 50,000 events/s sustained 60 s; 256-byte member payloads, groups of size one; writer batches ≤ 4 MiB or ≤ 10 ms, one fsync per batch | p99 frame-path enqueue stall; event loss | stall ≤ 50 µs; loss = 0 | DRAFT |
-| **BENCH-C2** backpressure | BENCH-C load with the writer throttled to 10 MB/s | steady-state behavior within 5 s of throttle onset | accepted-event rate equals writer drain rate ± 5%; loss = 0 (FR-7.11) | DRAFT |
+| **BENCH-C2** backpressure | BENCH-C load with the writer throttled to 10 MB/s | steady-state behavior within 5 s of throttle onset | accepted **byte** rate equals drained **byte** rate ± 5% (expected events/s derived from the canonical encoded group size, recorded in the vector file); accepted-but-not-durable backlog remains ≤ its configured bound thereafter — no unbounded growth; loss = 0 (FR-7.11) | DRAFT |
+
+| **BENCH-M** memory | TV-GEN world (2²⁰ systems) opened idle; the same world with 100 systems woken (BENCH-B topology, 5,000 active bodies); control: an otherwise identical 2¹⁰-system world opened idle. Measured via instrumented global allocator plus OS-reported peak RSS at defined points. | peak RSS; allocator live bytes | idle open ≤ 128 MiB **and within 10% of the 2¹⁰ control** — memory must not scale with apparent universe size; active scenario ≤ 512 MiB | DRAFT |
 
 Thresholds are **initial calibration targets** — chosen to be falsifiable, not certified achievable; a miss triggers an explicit AS revision with rationale. The pinned runner's machine identity — CPU model, frequency governor, memory configuration, **filesystem, and storage device** — is recorded alongside every baseline; changing any of it is an AS-version event.
 
@@ -270,4 +272,5 @@ Thresholds are **initial calibration targets** — chosen to be falsifiable, not
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
 | 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
+| 0.4 | 2026-07-30 | BENCH-M added: memory footprint with a scale-independence gate (2²⁰-system world within 10% of a 2¹⁰ control at idle) plus active-scenario limit. BENCH-C2 units reconciled to byte rates with events/s derived from canonical group size, and a bounded-backlog requirement added. File-set SHA-256 defined canonically over a sorted path/hash manifest. |
 | 0.3 | 2026-07-30 | Appendix A vectors made reproducible: committed vector files under `tests/vectors/` with SHA-256 recorded per row, DRAFT-cannot-gate rule, literal seeds and profile/rules identities, TV-KEPLER state grid, BENCH-B force topology, BENCH-C payload/batching/fsync policy, BENCH-C2 measurable slowdown condition, runner identity extended to filesystem and storage. Release scope reconciled: [Post-1.0] tag introduced; FR-3.3 tiers 2–3 and FR-9.2 portable profile marked Post-1.0. TV-GEN added and M1 exits bound to it. Risk-table wording: the M0 exit criteria, plural, are the definition of done. |
