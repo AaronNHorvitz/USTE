@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Product** | USTE — Universal Spatial-Temporal Engine |
-| **Version** | Draft v0.4 |
+| **Version** | Draft v0.5 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
 | **Status** | For review — design complete, implementation not started |
@@ -51,6 +51,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 | Proof of contracts | Property-test suites, golden replay fixtures, crash-injection suite |
 | Performance evidence | Criterion benchmark suite with recorded results |
 | Reference binary | A minimal CLI driving Milestone 0/1 scenarios (create world, run, crash, recover, replay, hash, scrub) |
+| Demo viewer | `uste-view` (Bevy, dual MIT/Apache): read-only 3D consumer — bodies, orbit conics, trajectory display, zoom, fly camera. Outside the kernel workspace's gates; Milestone V. |
 
 ### 2.2 Consumers
 
@@ -61,7 +62,7 @@ The product is the **kernel itself**: a set of Rust crates, their documented con
 ### 2.3 Explicit non-goals (v1)
 
 - No storage engine on the frame path; no database dependencies.
-- No rendering in the authoritative loop; no renderer deliverable.
+- No rendering in the authoritative loop — absolute and permanent. (A read-only **demo viewer** is a deliverable as of v0.5 — Milestone V — but it consumes the public read API only, lives outside the kernel's gates, and can never block or alter a kernel milestone.)
 - No physics library ambitions — existing integrators/engines are dependencies where used.
 - No application semantics of any kind.
 - No networking, no multi-process authority, no distributed consensus.
@@ -197,9 +198,21 @@ Scope: `uste-gen` (hierarchical galaxy/system/body generation, baseline-stable b
 3. Numerical drift of a woken system against its tier-1 baseline stays within the TV-GEN drift threshold. *(FR-5.2)*
 4. Criterion evidence recorded against every Appendix A benchmark vector (BENCH-A/B/C/C2/M) on the pinned runner.
 
-### Beyond M1 (listed, not committed)
+### Milestone V — the demo viewer *(gated on M0; runs parallel to M1)*
 
-Tier-2/3 canonical models and their invariant audits · contact-layer physics integration · portable numerical profile · COW snapshotter (gated on FR-7.8's equivalence test) · rendering consumer · multi-observer support.
+Scope: `uste-view`, a read-only 3D consumer built on Bevy. Not part of the kernel workspace; viewer defects never gate kernel milestones. Its purpose is demonstration plus three engineering proofs: the public read API is sufficient for a real consumer, the render-side floating origin works as specified, and the canonical/presentational split is visible.
+
+**Exit criteria:**
+
+1. **Read-only proof.** The viewer consumes only the public read API; the kernel workspace builds, tests, and gates with the viewer crate absent. *(FR-9.4)*
+2. **True rendering of a TV-GEN system.** Bodies at analytical positions; orbits drawn as exact conics *from the elements* (the math, not sampled polylines); a deviated body renders its canonical baseline and its deviated trajectory as two visually distinct curves — the Encke split, on screen.
+3. **Scale traversal.** Continuous zoom spanning ≥ 6 orders of magnitude (moon close-up to whole system) using render-side floating-origin recentering only; authoritative state is untouched and observer-independent throughout. *(FR-9.4)*
+4. **Fly camera.** Free flight plus focus-on-body, with frame-rate-independent controls.
+5. **Performance.** Median ≥ 60 fps, p5 ≥ 30 fps viewing a TV-GEN system on the pinned runner (recorded, viewer-gating only).
+
+### Beyond M1 and V (listed, not committed)
+
+Tier-2/3 canonical models and their invariant audits · contact-layer physics integration · portable numerical profile · COW snapshotter (gated on FR-7.8's equivalence test) · multi-observer support.
 
 ---
 
@@ -220,7 +233,7 @@ Tier-2/3 canonical models and their invariant audits · contact-layer physics in
 | Floating-point drift across dependency/toolchain upgrades silently breaks replay | High — it's the core promise | Profile binds lock hash and toolchain; golden fixtures catch any change; upgrades are deliberate profile bumps |
 | Kepler solver edge cases (near-parabolic, hyperbolic, high-eccentricity) | Medium | Property-test the solver across eccentricity sweep; define supported domain in tier-1 model spec |
 | Hysteresis tuning produces wake thrash or stale physics | Medium | Thrash rate is a monitored metric from M0; dwell/radius are `rules` parameters, not constants |
-| Scope creep toward renderer/applications before M0 exits | High — historical pattern | PRD non-goals; milestone gates; the M0 exit criteria as the only definition of done |
+| Scope creep toward renderer/applications before M0 exits | High — historical pattern | The viewer is now *sanctioned but caged*: Milestone V is read-only, gated on M0 completion, outside the kernel workspace, and can never block a kernel gate. Everything else remains a non-goal. |
 | Single-maintainer bandwidth | High | Milestones sized to evenings; M0 has no research unknowns — every contract is already specified |
 
 ---
@@ -272,5 +285,6 @@ Thresholds are **initial calibration targets** — chosen to be falsifiable, not
 |---|---|---|
 | 0.1 | 2026-07-29 | Initial PRD: requirements FR-1…FR-10, NFR-1…6, milestones M0/M1 with exit criteria, test strategy, risks, open questions. Derived from README.md and architecture.md after five external design-review rounds converged. |
 | 0.2 | 2026-07-30 | Versioning vocabulary added. FR-7.10/7.11 reordered: snapshot content-hash + scrub surface (`uste scrub`) is FR-7.10, backpressure FR-7.11. All qualitative gates bound to Appendix A (AS-v0) exact vectors and thresholds; NFR-1 defined by BENCH IDs. README slogan reversal fixed (canonical by derivation, not by storage) and status lines reconciled — tracked here for traceability. |
+| 0.5 | 2026-07-30 | Milestone V added: `uste-view` demo viewer (Bevy, read-only, gated on M0, parallel to M1, never gating the kernel) with five exit criteria including the Encke-split visualization and a ≥ 6-orders-of-magnitude floating-origin zoom. Renderer non-goal amended accordingly; scope-creep mitigation updated. |
 | 0.4 | 2026-07-30 | BENCH-M added: memory footprint with a scale-independence gate (2²⁰-system world within 10% of a 2¹⁰ control at idle) plus active-scenario limit. BENCH-C2 units reconciled to byte rates with events/s derived from canonical group size, and a bounded-backlog requirement added. File-set SHA-256 defined canonically over a sorted path/hash manifest. |
 | 0.3 | 2026-07-30 | Appendix A vectors made reproducible: committed vector files under `tests/vectors/` with SHA-256 recorded per row, DRAFT-cannot-gate rule, literal seeds and profile/rules identities, TV-KEPLER state grid, BENCH-B force topology, BENCH-C payload/batching/fsync policy, BENCH-C2 measurable slowdown condition, runner identity extended to filesystem and storage. Release scope reconciled: [Post-1.0] tag introduced; FR-3.3 tiers 2–3 and FR-9.2 portable profile marked Post-1.0. TV-GEN added and M1 exits bound to it. Risk-table wording: the M0 exit criteria, plural, are the definition of done. |

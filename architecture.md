@@ -158,5 +158,5 @@ The replay kernel precedes the universe generator. A tiny world that survives re
 ## 11. Non-goals of the kernel
 
 - No storage engine on the frame path.
-- No rendering in the authoritative loop.
+- No rendering in the authoritative loop. (A read-only demo viewer exists as a separate consumer crate — it exercises the public read API and the render-side floating origin, and can never gate the kernel.)
 - No application semantics: the *core* does not know what its entities mean — model families (v1: the celestial models of `uste-orbits`) plug into core traits, and anything above the model families lives outside the kernel entirely.
