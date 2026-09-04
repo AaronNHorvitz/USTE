@@ -1,8 +1,8 @@
-# USTE — Product Requirements Document
+# the engine — Product Requirements Document
 
 | | |
 |---|---|
-| **Product** | USTE — Universal Spatial-Temporal Engine |
+| **Product** | the engine — Universal Spatial-Temporal Engine |
 | **Version** | Draft v0.8 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
@@ -30,7 +30,7 @@ The word "version" is overloaded; these terms are distinct and never interchange
 
 ## 1. Summary
 
-USTE is a deterministic, multiscale, event-sourced simulation kernel written in Rust. It represents an enormous simulated space with compact rules and computes only what matters at the present moment, under one invariant:
+The engine is a deterministic, multiscale, event-sourced simulation kernel written in Rust. It represents an enormous simulated space with compact rules and computes only what matters at the present moment, under one invariant:
 
 ```
 state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event_log)
@@ -38,7 +38,7 @@ state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event
 
 The product is the **kernel itself**: a set of Rust crates, their documented contracts, and the test harnesses that prove the contracts hold.
 
-**Scope honesty:** USTE's *core contracts* are application-agnostic — `uste-core`, `uste-time`, and `uste-log` know entities, baselines, deviations, events, and replay, and nothing celestial. But v1 ships exactly one baseline-model family, and it is celestial: the tiered orbital models in `uste-orbits` (FR-3). USTE v1 is therefore accurately described as an **application-agnostic simulation core with celestial mechanics as its first and only baseline-model family** — genericity is enforced at the crate boundary (model families implement core traits), not claimed as a v1 deliverable. Application semantics above the model families remain out of scope entirely.
+**Scope honesty:** the engine's *core contracts* are application-agnostic — `uste-core`, `uste-time`, and `uste-log` know entities, baselines, deviations, events, and replay, and nothing celestial. But v1 ships exactly one baseline-model family, and it is celestial: the tiered orbital models in `uste-orbits` (FR-3). The engine v1 is therefore accurately described as an **application-agnostic simulation core with celestial mechanics as its first and only baseline-model family** — genericity is enforced at the crate boundary (model families implement core traits), not claimed as a v1 deliverable. Application semantics above the model families remain out of scope entirely.
 
 ## 2. Product definition
 

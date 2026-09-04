@@ -1,4 +1,4 @@
-# USTE — Design Decisions
+# the engine — Design Decisions
 
 Companion to [README.md](./README.md). The README states the shape of the system; this document specifies the contracts that make it hold. Implementation has not started; everything here is normative for when it does.
 

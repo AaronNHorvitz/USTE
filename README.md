@@ -1,8 +1,8 @@
-# USTE: Universal Spatial-Temporal Engine
+# Universal Spatial-Temporal Engine
 
-The whole universe is a seed, a rulebook, and a clock. USTE is the kernel that turns them into worlds: a deterministic, multiscale, event-sourced simulation engine in Rust that computes only what matters at this moment and stores only what deviates.
+The whole universe is a seed, a rulebook, and a clock. The Universal Spatial-Temporal Engine is the kernel that turns them into worlds: a deterministic, multiscale, event-sourced simulation engine in Rust that computes only what matters at this moment and stores only what deviates.
 
-USTE represents an enormous simulated space with compact rules, and computes only what matters at the present moment. It is not a database and not a rendering engine. It is the kernel underneath both: the part that decides what exists, what changes, and how any past state can be reconstructed exactly.
+The engine represents an enormous simulated space with compact rules, and computes only what matters at the present moment. It is not a database and not a rendering engine. It is the kernel underneath both: the part that decides what exists, what changes, and how any past state can be reconstructed exactly.
 
 ```
 Universe = seed + rules + simulation time + sparse deviations
@@ -80,7 +80,7 @@ Objects sleep when they cannot affect anything. On revisit, the engine either ad
 
 Switching a system between analytical and numerical physics must not, by itself, change the universe — otherwise two observers visiting different systems would fork physical history merely by looking.
 
-USTE resolves this with two rules:
+The engine resolves this with two rules:
 
 1. **Every body's canonical force model is assigned at generation** — a pure function of `(seed, rules, address)`, never of activation or observation. Baselines come in tiers (pure conic; precessing conic with secular rates; deterministic ephemeris table generated with the system), so the *dominant* physics is canonical rather than an artifact of who is watching. Every force is classified canonical or presentational; there is no third category.
 2. **The active layer integrates deviations *relative to* that canonical baseline** (Encke's method, rather than absolute integration). Awake behavior is baseline-plus-deviation; the deviation holds only sub-threshold residuals and genuine interactions. If no interaction exceeds the rules-defined significance threshold, the deviation is discarded on sleep and the canonical trajectory was never perturbed — observation leaves no fingerprints. Only a committed interaction forks a body's canonical trajectory, by exactly the recorded delta. **Interactions commit state changes; model changes occur only as committed segment boundaries** — a body's model history is itself a pure function of `(seed, rules, address, event_log)`.
@@ -106,7 +106,7 @@ The contact region, the active region, and the analytical layer advance at diffe
 
 ### Coordinate frames
 
-Human-scale precision and astronomical-scale extent cannot coexist in one flat coordinate system; single-precision error at astronomical distance is catastrophic. USTE uses nested reference frames with 64-bit positions.
+Human-scale precision and astronomical-scale extent cannot coexist in one flat coordinate system; single-precision error at astronomical distance is catastrophic. The engine uses nested reference frames with 64-bit positions.
 
 **Authoritative state lives in stable, frame-local coordinates and never moves for anyone's convenience.** Floating-origin recentering is strictly a rendering-side projection, applied per client — with multiple observers, each render context recenters independently and none of it touches simulation state. Rounding must never depend on viewpoint.
 
@@ -133,7 +133,7 @@ Storage is four artifacts: an immutable **world manifest** carrying the invarian
 
 > Simulate a trivial world through a long interval with mixed sleep/wake transitions and at least one committed deviation. Hash the state. Replay cold from `(world_format, numerical_profile, seed, rules, event_log)`. The hashes must be bit-identical — across runs, and across thread counts.
 
-A tiny world that survives replay perfectly proves more of USTE's thesis than a billion generated stars. **This milestone precedes the universe generator on purpose.**
+A tiny world that survives replay perfectly proves more of the engine's thesis than a billion generated stars. **This milestone precedes the universe generator on purpose.**
 
 **Milestone 1 — the galaxy demonstration.**
 
