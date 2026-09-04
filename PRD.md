@@ -1,8 +1,8 @@
-# the engine — Product Requirements Document
+# Universal Spatial-Temporal Engine — Product Requirements Document
 
 | | |
 |---|---|
-| **Product** | the engine — Universal Spatial-Temporal Engine |
+| **Product** | Universal Spatial-Temporal Engine |
 | **Version** | Draft v0.8 |
 | **Author** | Aaron N. Horvitz |
 | **Date** | 2026-07-30 |
