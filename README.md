@@ -1,6 +1,6 @@
 # USTE: Universal Spatial-Temporal Engine
 
-A deterministic, multiscale, event-sourced simulation kernel written in Rust.
+The whole universe is a seed, a rulebook, and a clock. USTE is the kernel that turns them into worlds: a deterministic, multiscale, event-sourced simulation engine in Rust that computes only what matters at this moment and stores only what deviates.
 
 USTE represents an enormous simulated space with compact rules, and computes only what matters at the present moment. It is not a database and not a rendering engine. It is the kernel underneath both: the part that decides what exists, what changes, and how any past state can be reconstructed exactly.
 
