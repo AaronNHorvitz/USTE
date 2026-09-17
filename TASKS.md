@@ -67,7 +67,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | [Encrypted blob-store qualification](docs/evidence/blob-store-foundation.md): staging/finalization/resume/cleanup and inventory | T-15 slice of VT-08 plus blob-specific VT-03 pass: exact unknown-binary round-trip, 12 GiB at 267,636 KiB peak RSS, no committed dangling object; BM-04 throughput target remains unmet |
 | [x] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | [`uste-policy`](crates/uste-policy) and [authorization foundation evidence](docs/evidence/authorization-foundation.md) | VT-06 namespace/blob/outcome slice proves default denial, no cross-scope/existence leakage and exact-byte quotas; T-17 repeats through real graph paths |
 | [x] T-17 | Graph records, evidence and transactional adjacency; FR-01/04/06 | T-10, T-14, T-16 | [`uste-graph`](crates/uste-graph) and [transactional graph evidence](docs/evidence/transactional-evidence-graph.md) | T-17 adjacency/reference/rebuild slice of VT-05 and encrypted restart cover create/correct/delete/conflict; VT-06 graph concealment passes |
-| [ ] T-18 | Deterministic replay and verified cache snapshots; FR-03/07 | T-13, T-17 | uste-replay, checkpoint and scrub prototypes | VT-04/14 show exact logical equivalence, no model/parser/network dependency |
+| [x] T-18 | Deterministic replay and verified cache snapshots; FR-03/07 | T-13, T-17 | [`uste-replay`, encrypted checkpoints and evidence](docs/evidence/replay-checkpoints.md) | VT-04/14 show cold/checkpoint logical equivalence, exact journal anchors, suffix recovery and fail-closed fallback without model/parser/network dependencies |
 | [ ] T-45 | Shared UTC/time types, normalization, source envelopes and replay integration; FR-26 | T-09, T-12, T-18 | Versioned time codec, pinned local timezone profile and golden vectors | VT-17 kernel cases pass: no silent guessing, clock rollback does not reorder commits, replay preserves accepted interpretation |
 | [ ] T-48 | World/frame/geometry/observation schemas and typed units; FR-27/28 | T-09, T-45 | uste-types spatial records and reference histories | VT-18/19 schema subset rejects invalid units, frame cycles, nonfinite values and invented missing positions |
 | [ ] T-49 | Bounded import transaction contracts and durable checkpoints; FR-34 | T-14, T-15, T-48 | Mapping types, batch IDs, checkpoint/outcome records | VT-23 transaction subset proves atomic batches, retry identity, changed-source refusal and no dangling references |
@@ -93,6 +93,14 @@ abort, opaque inventory names, commit-gated range reads and canonical certificat
 Complete modeled publication fault, short-I/O, corruption/context-replay, retry/restart and storage-
 profile hard-limit cases pass. A release-built, normally encrypted and durable 12 GiB commit/reopen/
 full-hash probe used 267,636 KiB peak RSS; its 95.923 MiB/s ingest misses BM-04's 250 MiB/s target.
+
+T-18 completion: Decision 0020 adds contiguous cold replay, canonical graph/coordinator checkpoint
+codecs, exact historical certificate anchoring and an encrypted two-slot cache. Seeded open
+reauthenticates the journal, compares complete prefix retry/transaction/blob-owner metadata and
+applies only the reducer suffix. The 28-case publication crash matrix, 21-case authenticated
+malformed-carrier matrix, older-slot fallback and encrypted graph restart equivalence pass. The
+journal is currently opened twice and checkpoints remain capped in-memory caches; BM-06 and disk
+projections remain T-20 work rather than implied performance results.
 
 ## R2 — Developer alpha
 

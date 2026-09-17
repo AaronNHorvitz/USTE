@@ -136,6 +136,15 @@ one-mutation-per-record revisions with read-stable correction targets, durable p
 reducer-owned authorized projections. Current indexes are rebuildable
 in-memory correctness structures; T-20 owns disk runs and bounded caches.
 
+Decision 0020 adds deterministic cold replay and optional journal-anchored encrypted checkpoints.
+The journal writer alternates two namespace-scoped cache slots made of authenticated 1 MiB chunks
+and a terminal manifest. An opaque recovered candidate must match an exact historical certificate,
+reducer profile and logical digest before it can seed recovery. Seeded open authenticates the full
+journal, reconstructs and compares all retry/transaction/blob-owner metadata through the anchor,
+then applies the normal reducer only to the suffix. Invalid candidates fall back to the other slot
+or cold replay; they never create commits or replace journal authority. The current two-open handoff
+and 256 MiB in-memory cache cap are correctness choices, not T-20/BM-06 performance claims.
+
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.
 The exact binary layout and index algorithm are gated by D-01; no other database engine is

@@ -2,15 +2,14 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed task evidence: `cd4badd` (completed local T-17 transactional evidence graph over
-the T-13–T-16 journal/transaction/blob/authorization foundation). Review was performed by Codex
-agents and does not represent independent external security certification.
+Latest completed implementation: `595c47a` (local T-18 deterministic replay and encrypted,
+journal-anchored checkpoint recovery over the T-13–T-17 foundation). Decision 0020 and the linked
+evidence bind closure in the following documentation commit. Review was performed by Codex agents
+and does not represent independent external security certification.
 
-T-18 is in progress. The current implementation increment adds deterministic cold replay,
-fallible canonical reducer-checkpoint contracts and a graph checkpoint codec that preserves record
-and policy histories while rebuilding derived indexes. It is not yet a durable snapshot: encrypted
-publication, journal-certificate anchoring, coordinator retry/blob-ownership state, suffix replay,
-scrub/fallback and crash evidence remain before T-18 can close.
+T-18 is complete at its local correctness scope. T-45 shared UTC/time normalization and source
+timestamp provenance is the next dependency-permitted R1 task. T-62 remains an independent,
+unverified external distribution prerequisite.
 
 ## Completed this increment
 
@@ -113,6 +112,18 @@ scrub/fallback and crash evidence remain before T-18 can close.
   record history revisions fail explicitly. The production reducer agrees on shared modeled record
   state with the independent ordered-map oracle after each of 160 generated transactions, validates
   its derived-index rebuild separately, and restores graph/policy state after encrypted restart.
+- Completed T-18 with Decision 0020 and `uste-replay`: contiguous cold replay verifies result
+  digests before publish, graph checkpoints preserve all record/policy history, and canonical
+  coordinator checkpoints bind retained outcomes and first-commit blob ownership.
+- Added opaque storage-authenticated candidates, exact historical certificate anchors and seeded
+  coordinator open. Recovery reauthenticates the full journal, exactly compares prefix coordinator
+  metadata at the anchor and applies the ordinary reducer only to the suffix.
+- Added alternating encrypted 1 MiB checkpoint chunks with a 256 MiB cap and terminal manifests.
+  The 28-case crash matrix, 21-case authenticated malformed-carrier matrix, missing/corrupt/swapped
+  chunk fallback and encrypted graph checkpoint/suffix restart equivalence pass.
+- Closed review findings for split-brain generations, frontier-only anchor matching, forgeable
+  seed provenance, infallible large-frame allocation and encoder/decoder invariant drift. Final
+  code/evidence review reported no remaining high- or medium-severity T-18 finding.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -177,8 +188,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 152 workspace tests including 64 uste-storage, 13
-# uste-crypto, 13 uste-graph, 4 uste-policy and 25 uste-txn tests;
+# workspace format/clippy/test/doc pass; 175 workspace tests including 69 uste-storage, 13
+# uste-crypto, 23 uste-graph, 8 uste-replay, 4 uste-policy and 25 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -206,14 +217,14 @@ remaining mixed workload have not passed.
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
 - The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
-  journal, transaction/blob coordinator, authorization foundation and transactional graph reducer
-  are implemented, but there is no database executable, disk graph index, durable checkpoint or
-  production qualification. The in-progress replay crate and graph checkpoint bytes are not yet a
-  storage recovery path. Graph policy is durable; the trusted adapter must supply its exact
-  current copy at open. Production graph snapshots still retain full record history and derived
-  indexes in memory until T-20. The oracle intentionally scans records and is not a scalable
-  implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined to
-  development tooling.
+  journal, transaction/blob coordinator, authorization foundation, transactional graph reducer and
+  encrypted checkpoint recovery path are implemented, but there is no database executable, disk
+  graph index or production qualification. Checkpoint discovery and seeded open each authenticate
+  the journal, and the 256 MiB cache still retains full graph history in memory; T-20 owns disk
+  indexes, bounded caches and BM-06. Graph policy is durable; the trusted adapter must supply its
+  exact current copy at authorized open. The oracle intentionally scans records and is not a
+  scalable implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined
+  to development tooling.
 - T-13 local acceptance is complete on the reference Btrfs runner and the independently identified
   ext4 mount `/var/mnt/archive_vault` (`/dev/sda1`). These SIGKILL tests do not simulate controller
   cache loss or actual power loss. The certificate log fails closed at 1 GiB pending later
@@ -221,9 +232,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-18 by wrapping canonical graph bytes with coordinator retry/transaction/blob-ownership
-state, encrypted chunk publication and a journal-certificate anchor; then add verified suffix replay,
-scrub/corruption fallback and crash tests without model/parser/network dependency.
+Continue with T-45: implement versioned shared UTC/time normalization, source timestamp envelopes,
+the pinned local-timezone profile and replay-preserved interpretation with VT-17 edge cases.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

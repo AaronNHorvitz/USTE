@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.7 · 2026-09-17 · R0 design ready; T-08–T-16 foundation implemented
+Design draft 1.8 · 2026-09-17 · R0 design ready; T-08–T-18 foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -106,6 +106,13 @@ For each task: pin fixtures and failure cases; implement the reference behavior;
 production path; compare results; inject cancellation, quota, permission and crash failures;
 measure relevant workloads; document limitations; attach reviewed evidence before checking off.
 Preserve exact source/tree, toolchain, dependency versions and test commands in the result.
+
+Decision 0020 completes T-18 with capability-free cold replay, canonical reducer/coordinator
+checkpoints and alternating encrypted cache slots bound to exact journal certificates. Recovery
+authenticates the journal before accepting an opaque candidate, verifies prefix coordinator state
+and replays the reducer suffix; damaged or unsupported candidates fall back to the other slot or
+cold replay. The current double-open handoff and 256 MiB in-memory limit are explicit correctness
+constraints pending T-20/BM-06 rather than capacity claims.
 
 Required end-to-end slices are raw binary round-trip; source-backed temporal assertion;
 moving object with attached document; combined location/content/relationship query; navigation
