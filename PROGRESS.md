@@ -2,7 +2,7 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `bbe4341` (T-11 authenticated crypto/key boundary). Review was
+Latest reviewed implementation: `00d0b1a` (T-12 I/O capability and deterministic fault harness). Review was
 performed by Codex agents and does not represent independent external security certification.
 
 ## Completed this increment
@@ -33,6 +33,14 @@ performed by Codex agents and does not represent independent external security c
 - Corrected review findings before binding evidence: caller-sized crypto buffers now reserve
   fallibly, rejected credentials zeroize, resource failures remain retryable, guarded-memory is not
   claimed and future clone/restore/rotation/hardening responsibilities stay explicit.
+- Completed T-12 with Decision 0014 and safe handle-relative filesystem, clock and randomness
+  capabilities plus a deterministic volatile/durable memory adapter and per-operation fault plans.
+- Covered interrupted and short I/O, zero/over-reported progress, disk full, failed file/directory
+  sync, crash-before/after rename and data flush, sticky crash/restart, stale handles, wall rollback,
+  random failure and exact repeatability. Crash state cannot be cleared without adapter restart.
+- Added a guarded real-process scenario under Btrfs-backed Cargo target scratch: the child flushes
+  file bytes and the directory, signals over a pipe, is killed with SIGKILL, and exact bytes reopen.
+  This is process-loss harness evidence, not a power-loss or production-filesystem claim.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -97,7 +105,7 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 45 workspace tests including 12 uste-crypto tests;
+# workspace format/clippy/test/doc pass; 56 workspace tests including 11 uste-storage tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles: zero advisory/license/source errors; documented miniz_oxide warnings only
@@ -128,9 +136,13 @@ policy checks; no benchmark measurement exists yet.
   oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
+- T-12 intentionally has no production host filesystem adapter or exclusive lock. The memory model
+  and one Btrfs SIGKILL/reopen test do not satisfy T-13's encrypted journal crash matrix; ext4 and
+  actual power-loss behavior remain untested.
 
 ## Next dependency-permitted work
 
-Implement T-12's deterministic I/O fault harness. T-10/T-11 are complete; T-12 completion unblocks
-T-13 journal/publication/recovery. T-62 remains independent and must not be represented as complete
-without owner-administered evidence.
+Implement T-13 journal creation, exclusive ownership, encrypted transaction groups, commit
+certificates and fail-closed recovery using the completed T-10/T-12 oracle/fault foundations and
+T-11 crypto boundary. T-62 remains independent and must not be represented as complete without
+owner-administered evidence.
