@@ -65,6 +65,10 @@ state. The scalable path therefore requires new versioned graph/ingest state pro
 - streaming checkpoint recovery or equivalent root-based reconstruction whose admitted state is
   verified against sequential replay without holding the complete logical history in RAM.
 
+Decision 0027 subsequently implements the graph write-path delta/affected-record portion without
+changing this decision's formats. Disk-backed state roots, bounded delete reverse-reference reads,
+ingest deltas and full-memory decoder removal remain open.
+
 Authoritative baseline promotion, root rollover and orphan reclamation remain T-35. The optional
 T-20 state/index structures cannot become a second commit authority.
 

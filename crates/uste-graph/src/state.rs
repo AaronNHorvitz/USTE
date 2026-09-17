@@ -298,7 +298,7 @@ impl GraphState {
             transaction.policy_mutation(),
         )?;
 
-        let mut next = self.snapshot.clone();
+        let mut records = RecordOverlay::new(&self.snapshot.records);
         let mut affected = BTreeSet::new();
         let mut protected_correction_targets = BTreeSet::new();
         for operation in transaction.operations() {
@@ -323,12 +323,7 @@ impl GraphState {
                 return Err(GraphError::DuplicateMutation(target));
             }
             let mut operation_affected = BTreeSet::new();
-            apply_operation(
-                &mut next.records,
-                operation,
-                revision,
-                &mut operation_affected,
-            )?;
+            apply_operation(&mut records, operation, revision, &mut operation_affected)?;
             if let Some(duplicate) = operation_affected.iter().find(|record| {
                 affected.contains(*record) || protected_correction_targets.contains(*record)
             }) {
@@ -339,36 +334,126 @@ impl GraphState {
                 protected_correction_targets.insert(target);
             }
         }
-        if let Some(mutation) = transaction.policy_mutation() {
-            let policy = match mutation {
+        let policy_change = transaction
+            .policy_mutation()
+            .map(|mutation| match mutation {
                 DurablePolicyMutation::Install { policy }
                 | DurablePolicyMutation::Replace { policy, .. } => policy.clone(),
-            };
-            next.policy = Some(policy.clone());
-            next.policy_history.insert(revision, policy);
-        }
-        validate_state(next.scope, &next.records)?;
-        next.revision = Some(revision);
-        rebuild_indexes(&mut next);
-        for id in &affected {
-            let record = next
-                .records
-                .get(id)
-                .cloned()
-                .ok_or(GraphError::IndexCorrupt(*id))?;
-            next.history.entry(*id).or_default().push(record);
-        }
+            });
+        validate_changed_state(self.scope(), &records, &affected)?;
+        let changes = records.into_changes();
+        debug_assert_eq!(
+            changes.iter().map(|change| change.id).collect::<Vec<_>>(),
+            affected.into_iter().collect::<Vec<_>>()
+        );
+        let next_policy = policy_change.as_ref().or(self.snapshot.policy.as_ref());
+        let result_digest = graph_result_digest(
+            revision,
+            changes.iter().map(|change| &change.after),
+            next_policy,
+        );
         Ok(PreparedGraph {
-            snapshot: next,
-            affected: affected.into_iter().collect(),
+            scope: self.scope(),
+            base_revision: self.snapshot.revision,
+            revision,
+            changes,
+            policy_change,
+            result_digest,
         })
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// Transaction-local record view. Only records actually mutated by the request are cloned.
+/// Untouched records remain borrowed from the last journal-certified state.
+struct RecordOverlay<'a> {
+    base: &'a BTreeMap<RecordRef, Record>,
+    changed: BTreeMap<RecordRef, Record>,
+}
+
+impl<'a> RecordOverlay<'a> {
+    fn new(base: &'a BTreeMap<RecordRef, Record>) -> Self {
+        Self {
+            base,
+            changed: BTreeMap::new(),
+        }
+    }
+
+    fn get(&self, id: &RecordRef) -> Option<&Record> {
+        self.changed.get(id).or_else(|| self.base.get(id))
+    }
+
+    fn contains_key(&self, id: &RecordRef) -> bool {
+        self.changed.contains_key(id) || self.base.contains_key(id)
+    }
+
+    fn get_mut(&mut self, id: &RecordRef) -> Option<&mut Record> {
+        if !self.changed.contains_key(id) {
+            self.changed.insert(*id, self.base.get(id)?.clone());
+        }
+        self.changed.get_mut(id)
+    }
+
+    fn insert(&mut self, id: RecordRef, record: Record) {
+        self.changed.insert(id, record);
+    }
+
+    fn values(&self) -> impl Iterator<Item = &Record> {
+        self.base
+            .iter()
+            .filter(|(id, _)| !self.changed.contains_key(id))
+            .map(|(_, record)| record)
+            .chain(self.changed.values())
+    }
+
+    fn into_changes(self) -> Vec<RecordChange> {
+        self.changed
+            .into_iter()
+            .map(|(id, after)| RecordChange {
+                id,
+                before: self.base.get(&id).cloned(),
+                after,
+            })
+            .collect()
+    }
+}
+
+fn graph_result_digest<'a>(
+    revision: CommitRevision,
+    records: impl ExactSizeIterator<Item = &'a Record>,
+    policy: Option<&NamespacePolicy>,
+) -> [u8; 32] {
+    let mut digest = Sha256::new();
+    digest.update(b"USTE-GRAPH-RESULT-V1\0");
+    digest.update(revision.get().to_be_bytes());
+    digest.update((records.len() as u64).to_be_bytes());
+    for record in records {
+        let encoded = encode_result_record(record)
+            .expect("validated prepared graph record has a canonical encoding");
+        digest.update((encoded.len() as u64).to_be_bytes());
+        digest.update(encoded);
+    }
+    let policy = encode_result_policy(policy)
+        .expect("validated prepared graph policy has a canonical encoding");
+    digest.update((policy.len() as u64).to_be_bytes());
+    digest.update(policy);
+    digest.finalize().into()
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct PreparedGraph {
-    snapshot: GraphSnapshot,
-    affected: Vec<RecordRef>,
+    scope: NamespaceRef,
+    base_revision: Option<CommitRevision>,
+    revision: CommitRevision,
+    changes: Vec<RecordChange>,
+    policy_change: Option<NamespacePolicy>,
+    result_digest: [u8; 32],
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RecordChange {
+    id: RecordRef,
+    before: Option<Record>,
+    after: Record,
 }
 
 impl TransactionState for GraphState {
@@ -394,34 +479,34 @@ impl TransactionState for GraphState {
     }
 
     fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
-        let revision = prepared
-            .snapshot
-            .revision
-            .expect("prepared graph always has a revision");
-        let mut digest = Sha256::new();
-        digest.update(b"USTE-GRAPH-RESULT-V1\0");
-        digest.update(revision.get().to_be_bytes());
-        digest.update((prepared.affected.len() as u64).to_be_bytes());
-        for record in &prepared.affected {
-            let record = prepared
-                .snapshot
-                .records
-                .get(record)
-                .expect("affected graph record exists in prepared snapshot");
-            let encoded = encode_result_record(record)
-                .expect("validated prepared graph record has a canonical encoding");
-            digest.update((encoded.len() as u64).to_be_bytes());
-            digest.update(encoded);
-        }
-        let policy = encode_result_policy(prepared.snapshot.policy.as_ref())
-            .expect("validated prepared graph policy has a canonical encoding");
-        digest.update((policy.len() as u64).to_be_bytes());
-        digest.update(policy);
-        digest.finalize().into()
+        prepared.result_digest
     }
 
     fn publish(&mut self, prepared: Self::Prepared) {
-        self.snapshot = prepared.snapshot;
+        assert_eq!(
+            (self.snapshot.scope, self.snapshot.revision),
+            (prepared.scope, prepared.base_revision),
+            "prepared graph delta must publish on its exact base state"
+        );
+        for change in prepared.changes {
+            if let Some(before) = &change.before {
+                remove_index_contributions(&mut self.snapshot, before);
+            }
+            add_index_contributions(&mut self.snapshot, &change.after);
+            self.snapshot
+                .history
+                .entry(change.id)
+                .or_default()
+                .push(change.after.clone());
+            self.snapshot.records.insert(change.id, change.after);
+        }
+        if let Some(policy) = prepared.policy_change {
+            self.snapshot.policy = Some(policy.clone());
+            self.snapshot
+                .policy_history
+                .insert(prepared.revision, policy);
+        }
+        self.snapshot.revision = Some(prepared.revision);
     }
 
     fn snapshot(&self) -> Self::Snapshot {
@@ -1589,7 +1674,7 @@ fn evaluate_predicate_current(snapshot: &GraphSnapshot, predicate: &Predicate) -
 }
 
 fn apply_operation(
-    records: &mut BTreeMap<RecordRef, Record>,
+    records: &mut RecordOverlay<'_>,
     operation: &Operation,
     revision: CommitRevision,
     affected: &mut BTreeSet<RecordRef>,
@@ -1647,7 +1732,7 @@ fn apply_operation(
 }
 
 fn create_record(
-    records: &mut BTreeMap<RecordRef, Record>,
+    records: &mut RecordOverlay<'_>,
     new: &NewRecord,
     revision: CommitRevision,
     affected: &mut BTreeSet<RecordRef>,
@@ -1734,7 +1819,7 @@ fn relationship_record(
 }
 
 fn apply_assertion_action(
-    records: &mut BTreeMap<RecordRef, Record>,
+    records: &mut RecordOverlay<'_>,
     target: RecordRef,
     action: AssertionAction,
     correction: Option<&NewAssertion>,
@@ -1778,7 +1863,7 @@ fn apply_assertion_action(
 }
 
 fn apply_relationship_action(
-    records: &mut BTreeMap<RecordRef, Record>,
+    records: &mut RecordOverlay<'_>,
     target: RecordRef,
     action: AssertionAction,
     correction: Option<&NewRelationship>,
@@ -1837,7 +1922,7 @@ fn transition(
 }
 
 fn delete_entity(
-    records: &mut BTreeMap<RecordRef, Record>,
+    records: &mut RecordOverlay<'_>,
     target: RecordRef,
     policy: DeletePolicy,
     declared: &[RecordRef],
@@ -1849,64 +1934,47 @@ fn delete_entity(
         Some(Record::Entity(_)) => return Err(GraphError::NotVisible(target)),
         _ => return Err(wrong_kind_or_missing(records, target, "entity")),
     }
-    let accepted_relationships: Vec<RecordRef> = records
-        .values()
-        .filter_map(|record| match record {
-            Record::Relationship(relationship)
-                if relationship.status == AssertionStatus::Accepted
-                    && (relationship.from == target
-                        || relationship.to == target
-                        || value_contains(&relationship.properties, target)) =>
-            {
-                Some(relationship.id)
-            }
-            _ => None,
-        })
-        .collect();
-    let accepted_assertions: Vec<RecordRef> = records
-        .values()
-        .filter_map(|record| match record {
+    let mut accepted = 0_usize;
+    let mut proposed = 0_usize;
+    let mut entity_references = 0_usize;
+    let mut accepted_are_declared = true;
+    for record in records.values() {
+        let (is_accepted, is_proposed) = match record {
             Record::Assertion(assertion)
-                if assertion.status == AssertionStatus::Accepted
-                    && (assertion.subject == target
-                        || value_contains(&assertion.object, target)) =>
+                if assertion.subject == target || value_contains(&assertion.object, target) =>
             {
-                Some(assertion.id)
+                (
+                    assertion.status == AssertionStatus::Accepted,
+                    assertion.status == AssertionStatus::Proposed,
+                )
             }
-            _ => None,
-        })
-        .collect();
-    let proposed = records
-        .values()
-        .filter(|record| match record {
-            Record::Assertion(assertion) => {
-                assertion.status == AssertionStatus::Proposed
-                    && (assertion.subject == target || value_contains(&assertion.object, target))
+            Record::Relationship(relationship)
+                if relationship.from == target
+                    || relationship.to == target
+                    || value_contains(&relationship.properties, target) =>
+            {
+                (
+                    relationship.status == AssertionStatus::Accepted,
+                    relationship.status == AssertionStatus::Proposed,
+                )
             }
-            Record::Relationship(relationship) => {
-                relationship.status == AssertionStatus::Proposed
-                    && (relationship.from == target
-                        || relationship.to == target
-                        || value_contains(&relationship.properties, target))
-            }
-            _ => false,
-        })
-        .count();
-    let entity_references = records
-        .values()
-        .filter(|record| match record {
-            Record::Entity(entity) => {
-                entity.id != target
+            Record::Entity(entity)
+                if entity.id != target
                     && entity.lifecycle == EntityLifecycle::Active
-                    && value_contains(&entity.properties, target)
+                    && value_contains(&entity.properties, target) =>
+            {
+                entity_references = entity_references.saturating_add(1);
+                (false, false)
             }
-            _ => false,
-        })
-        .count();
-    let dependents = accepted_relationships
-        .len()
-        .saturating_add(accepted_assertions.len())
-        .saturating_add(entity_references);
+            _ => (false, false),
+        };
+        if is_accepted {
+            accepted = accepted.saturating_add(1);
+            accepted_are_declared &= declared.binary_search(&record.id()).is_ok();
+        }
+        proposed = proposed.saturating_add(usize::from(is_proposed));
+    }
+    let dependents = accepted.saturating_add(entity_references);
 
     match policy {
         DeletePolicy::Reject if dependents != 0 || proposed != 0 => {
@@ -1943,32 +2011,38 @@ fn delete_entity(
                     maximum,
                 });
             }
-            let actual: BTreeSet<RecordRef> = accepted_relationships
-                .iter()
-                .chain(&accepted_assertions)
-                .copied()
-                .collect();
-            let declared_set: BTreeSet<RecordRef> = declared.iter().copied().collect();
-            if declared.len() != declared_set.len() || declared_set != actual {
+            if declared.len() != accepted || !accepted_are_declared {
                 return Err(GraphError::CascadeDeclarationChanged);
             }
-            for id in accepted_relationships {
-                let Some(Record::Relationship(record)) = records.get_mut(&id) else {
-                    unreachable!("collected relationship")
-                };
-                record.status = AssertionStatus::Retracted;
-                record.version = next_version(record.version, id)?;
-                record.modified_revision = revision;
-                affected.insert(id);
-            }
-            for id in accepted_assertions {
-                let Some(Record::Assertion(record)) = records.get_mut(&id) else {
-                    unreachable!("collected assertion")
-                };
-                record.status = AssertionStatus::Retracted;
-                record.version = next_version(record.version, id)?;
-                record.modified_revision = revision;
-                affected.insert(id);
+            // Preserve the format-1.0 reducer's deterministic failure order: relationships first,
+            // then assertions, with identifiers ordered inside each kind.
+            for relationships in [true, false] {
+                for id in declared {
+                    let matches_pass = matches!(
+                        (relationships, records.get(id)),
+                        (true, Some(Record::Relationship(_))) | (false, Some(Record::Assertion(_)))
+                    );
+                    if !matches_pass {
+                        continue;
+                    }
+                    let record = records
+                        .get_mut(id)
+                        .expect("declared record was verified during dependency scan");
+                    match record {
+                        Record::Assertion(assertion) => {
+                            assertion.status = AssertionStatus::Retracted;
+                            assertion.version = next_version(assertion.version, *id)?;
+                            assertion.modified_revision = revision;
+                        }
+                        Record::Relationship(relationship) => {
+                            relationship.status = AssertionStatus::Retracted;
+                            relationship.version = next_version(relationship.version, *id)?;
+                            relationship.modified_revision = revision;
+                        }
+                        _ => unreachable!("declared dependency kind was verified during scan"),
+                    }
+                    affected.insert(*id);
+                }
             }
         }
     }
@@ -1987,59 +2061,97 @@ fn validate_state(
     records: &BTreeMap<RecordRef, Record>,
 ) -> Result<(), GraphError> {
     for (id, record) in records {
-        validate_scope(scope, *id)?;
-        match record {
-            Record::Entity(entity) => {
-                if entity.schema_version == 0 {
-                    return Err(GraphError::InvalidSchemaVersion(entity.id));
-                }
-                validate_value_scope(scope, &entity.properties)?;
-                if entity.lifecycle == EntityLifecycle::Active {
-                    validate_value(records, scope, &entity.properties)?;
-                }
+        validate_record(scope, *id, record, records)?;
+    }
+    Ok(())
+}
+
+fn validate_changed_state(
+    scope: NamespaceRef,
+    records: &RecordOverlay<'_>,
+    affected: &BTreeSet<RecordRef>,
+) -> Result<(), GraphError> {
+    for id in affected {
+        let record = records.get(id).ok_or(GraphError::IndexCorrupt(*id))?;
+        validate_record(scope, *id, record, records)?;
+    }
+    Ok(())
+}
+
+trait RecordLookup {
+    fn lookup(&self, id: &RecordRef) -> Option<&Record>;
+}
+
+impl RecordLookup for BTreeMap<RecordRef, Record> {
+    fn lookup(&self, id: &RecordRef) -> Option<&Record> {
+        self.get(id)
+    }
+}
+
+impl RecordLookup for RecordOverlay<'_> {
+    fn lookup(&self, id: &RecordRef) -> Option<&Record> {
+        self.get(id)
+    }
+}
+
+fn validate_record(
+    scope: NamespaceRef,
+    id: RecordRef,
+    record: &Record,
+    records: &impl RecordLookup,
+) -> Result<(), GraphError> {
+    validate_scope(scope, id)?;
+    match record {
+        Record::Entity(entity) => {
+            if entity.schema_version == 0 {
+                return Err(GraphError::InvalidSchemaVersion(entity.id));
             }
-            Record::Evidence(_) => {}
-            Record::Assertion(assertion) => {
-                validate_scope(scope, assertion.subject)?;
-                validate_value_scope(scope, &assertion.object)?;
-                validate_evidence(records, scope, assertion.id, &assertion.evidence)?;
-                if !assertion.valid_time.is_valid() {
-                    return Err(GraphError::InvalidInterval(assertion.id));
-                }
-                if matches!(
-                    assertion.status,
-                    AssertionStatus::Proposed | AssertionStatus::Accepted
-                ) {
-                    require_active_entity(records, assertion.subject)?;
-                    validate_value(records, scope, &assertion.object)?;
-                }
-                if let Some(previous) = assertion.correction_of
-                    && !matches!(records.get(&previous), Some(Record::Assertion(_)))
-                {
-                    return Err(GraphError::ReferenceNotVisible(previous));
-                }
+            validate_value_scope(scope, &entity.properties)?;
+            if entity.lifecycle == EntityLifecycle::Active {
+                validate_value(records, scope, &entity.properties)?;
             }
-            Record::Relationship(relationship) => {
-                validate_scope(scope, relationship.from)?;
-                validate_scope(scope, relationship.to)?;
-                validate_value_scope(scope, &relationship.properties)?;
-                validate_evidence(records, scope, relationship.id, &relationship.evidence)?;
-                if !relationship.valid_time.is_valid() {
-                    return Err(GraphError::InvalidInterval(relationship.id));
-                }
-                if matches!(
-                    relationship.status,
-                    AssertionStatus::Proposed | AssertionStatus::Accepted
-                ) {
-                    require_active_entity(records, relationship.from)?;
-                    require_active_entity(records, relationship.to)?;
-                    validate_value(records, scope, &relationship.properties)?;
-                }
-                if let Some(previous) = relationship.correction_of
-                    && !matches!(records.get(&previous), Some(Record::Relationship(_)))
-                {
-                    return Err(GraphError::ReferenceNotVisible(previous));
-                }
+        }
+        Record::Evidence(_) => {}
+        Record::Assertion(assertion) => {
+            validate_scope(scope, assertion.subject)?;
+            validate_value_scope(scope, &assertion.object)?;
+            validate_evidence(records, scope, assertion.id, &assertion.evidence)?;
+            if !assertion.valid_time.is_valid() {
+                return Err(GraphError::InvalidInterval(assertion.id));
+            }
+            if matches!(
+                assertion.status,
+                AssertionStatus::Proposed | AssertionStatus::Accepted
+            ) {
+                require_active_entity(records, assertion.subject)?;
+                validate_value(records, scope, &assertion.object)?;
+            }
+            if let Some(previous) = assertion.correction_of
+                && !matches!(records.lookup(&previous), Some(Record::Assertion(_)))
+            {
+                return Err(GraphError::ReferenceNotVisible(previous));
+            }
+        }
+        Record::Relationship(relationship) => {
+            validate_scope(scope, relationship.from)?;
+            validate_scope(scope, relationship.to)?;
+            validate_value_scope(scope, &relationship.properties)?;
+            validate_evidence(records, scope, relationship.id, &relationship.evidence)?;
+            if !relationship.valid_time.is_valid() {
+                return Err(GraphError::InvalidInterval(relationship.id));
+            }
+            if matches!(
+                relationship.status,
+                AssertionStatus::Proposed | AssertionStatus::Accepted
+            ) {
+                require_active_entity(records, relationship.from)?;
+                require_active_entity(records, relationship.to)?;
+                validate_value(records, scope, &relationship.properties)?;
+            }
+            if let Some(previous) = relationship.correction_of
+                && !matches!(records.lookup(&previous), Some(Record::Relationship(_)))
+            {
+                return Err(GraphError::ReferenceNotVisible(previous));
             }
         }
     }
@@ -2047,7 +2159,7 @@ fn validate_state(
 }
 
 fn validate_evidence(
-    records: &BTreeMap<RecordRef, Record>,
+    records: &impl RecordLookup,
     scope: NamespaceRef,
     owner: RecordRef,
     evidence: &[RecordRef],
@@ -2061,7 +2173,7 @@ fn validate_evidence(
         if !unique.insert(*evidence) {
             return Err(GraphError::DuplicateEvidence(*evidence));
         }
-        if !matches!(records.get(evidence), Some(Record::Evidence(_))) {
+        if !matches!(records.lookup(evidence), Some(Record::Evidence(_))) {
             return Err(GraphError::MissingEvidence(*evidence));
         }
     }
@@ -2069,14 +2181,14 @@ fn validate_evidence(
 }
 
 fn validate_value(
-    records: &BTreeMap<RecordRef, Record>,
+    records: &impl RecordLookup,
     scope: NamespaceRef,
     value: &Value,
 ) -> Result<(), GraphError> {
     match value {
         Value::RecordRef(record) => {
             validate_scope(scope, *record)?;
-            if !records.get(record).is_some_and(is_visible_record) {
+            if !records.lookup(record).is_some_and(is_visible_record) {
                 return Err(GraphError::ReferenceNotVisible(*record));
             }
         }
@@ -2113,11 +2225,8 @@ fn validate_value_scope(scope: NamespaceRef, value: &Value) -> Result<(), GraphE
     Ok(())
 }
 
-fn require_active_entity(
-    records: &BTreeMap<RecordRef, Record>,
-    id: RecordRef,
-) -> Result<(), GraphError> {
-    if matches!(records.get(&id), Some(Record::Entity(entity)) if entity.lifecycle == EntityLifecycle::Active)
+fn require_active_entity(records: &impl RecordLookup, id: RecordRef) -> Result<(), GraphError> {
+    if matches!(records.lookup(&id), Some(Record::Entity(entity)) if entity.lifecycle == EntityLifecycle::Active)
     {
         Ok(())
     } else {
@@ -2163,6 +2272,78 @@ fn rebuild_indexes(snapshot: &mut GraphSnapshot) {
             }
             _ => {}
         }
+    }
+}
+
+fn remove_index_contributions(snapshot: &mut GraphSnapshot, record: &Record) {
+    match record {
+        Record::Relationship(relationship) => {
+            if relationship.status == AssertionStatus::Accepted {
+                remove_index_value(&mut snapshot.outgoing, relationship.from, relationship.id);
+                remove_index_value(&mut snapshot.incoming, relationship.to, relationship.id);
+            }
+            for evidence in &relationship.evidence {
+                remove_index_value(&mut snapshot.provenance, *evidence, relationship.id);
+            }
+        }
+        Record::Assertion(assertion) => {
+            for evidence in &assertion.evidence {
+                remove_index_value(&mut snapshot.provenance, *evidence, assertion.id);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_index_contributions(snapshot: &mut GraphSnapshot, record: &Record) {
+    match record {
+        Record::Relationship(relationship) => {
+            if relationship.status == AssertionStatus::Accepted {
+                snapshot
+                    .outgoing
+                    .entry(relationship.from)
+                    .or_default()
+                    .insert(relationship.id);
+                snapshot
+                    .incoming
+                    .entry(relationship.to)
+                    .or_default()
+                    .insert(relationship.id);
+            }
+            for evidence in &relationship.evidence {
+                snapshot
+                    .provenance
+                    .entry(*evidence)
+                    .or_default()
+                    .insert(relationship.id);
+            }
+        }
+        Record::Assertion(assertion) => {
+            for evidence in &assertion.evidence {
+                snapshot
+                    .provenance
+                    .entry(*evidence)
+                    .or_default()
+                    .insert(assertion.id);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn remove_index_value(
+    index: &mut BTreeMap<RecordRef, BTreeSet<RecordRef>>,
+    key: RecordRef,
+    value: RecordRef,
+) {
+    let remove_key = if let Some(values) = index.get_mut(&key) {
+        values.remove(&value);
+        values.is_empty()
+    } else {
+        false
+    };
+    if remove_key {
+        index.remove(&key);
     }
 }
 
@@ -2224,7 +2405,7 @@ fn next_version(version: RecordVersion, record: RecordRef) -> Result<RecordVersi
 }
 
 fn wrong_kind_or_missing(
-    records: &BTreeMap<RecordRef, Record>,
+    records: &RecordOverlay<'_>,
     target: RecordRef,
     expected: &'static str,
 ) -> GraphError {
@@ -2341,6 +2522,159 @@ impl fmt::Display for GraphError {
 }
 
 impl std::error::Error for GraphError {}
+
+#[cfg(test)]
+mod delta_tests {
+    use super::*;
+    use crate::NewEntity;
+    use uste_types::BoundedString;
+
+    fn scope() -> NamespaceRef {
+        NamespaceRef::new(
+            DatabaseId::from_bytes([91; 16]),
+            NamespaceId::from_bytes([92; 16]),
+        )
+    }
+
+    fn id(value: u64) -> RecordRef {
+        let mut bytes = [0_u8; 16];
+        bytes[8..].copy_from_slice(&value.to_be_bytes());
+        let scope = scope();
+        RecordRef::new(
+            scope.database(),
+            scope.namespace(),
+            RecordId::from_bytes(bytes),
+        )
+    }
+
+    fn entity(id: RecordRef) -> Operation {
+        Operation::Create {
+            expected: Expected::Absent,
+            record: NewRecord::Entity(NewEntity {
+                id,
+                entity_type: BoundedString::new("delta-fixture".to_owned()).unwrap(),
+                schema_version: 1,
+                properties: Value::Null,
+            }),
+        }
+    }
+
+    fn full_rebuild_publish(
+        mut snapshot: GraphSnapshot,
+        prepared: &PreparedGraph,
+    ) -> GraphSnapshot {
+        for change in &prepared.changes {
+            snapshot.records.insert(change.id, change.after.clone());
+            snapshot
+                .history
+                .entry(change.id)
+                .or_default()
+                .push(change.after.clone());
+        }
+        if let Some(policy) = &prepared.policy_change {
+            snapshot.policy = Some(policy.clone());
+            snapshot
+                .policy_history
+                .insert(prepared.revision, policy.clone());
+        }
+        snapshot.revision = Some(prepared.revision);
+        rebuild_indexes(&mut snapshot);
+        snapshot
+    }
+
+    fn legacy_result_digest(snapshot: &GraphSnapshot, prepared: &PreparedGraph) -> [u8; 32] {
+        let mut digest = Sha256::new();
+        digest.update(b"USTE-GRAPH-RESULT-V1\0");
+        digest.update(prepared.revision.get().to_be_bytes());
+        digest.update((prepared.changes.len() as u64).to_be_bytes());
+        for change in &prepared.changes {
+            let record = snapshot.records.get(&change.id).unwrap();
+            let encoded = encode_result_record(record).unwrap();
+            digest.update((encoded.len() as u64).to_be_bytes());
+            digest.update(encoded);
+        }
+        let policy = encode_result_policy(snapshot.policy.as_ref()).unwrap();
+        digest.update((policy.len() as u64).to_be_bytes());
+        digest.update(policy);
+        digest.finalize().into()
+    }
+
+    #[test]
+    fn one_record_update_prepares_one_sorted_delta_and_matches_full_rebuild() {
+        let mut state = GraphState::new(scope());
+        let create = GraphTransaction::new(
+            scope(),
+            (1..=1_024).map(|value| entity(id(value))).collect(),
+        );
+        let prepared = state
+            .prepare_transaction(&create, CommitRevision::FIRST)
+            .unwrap();
+        TransactionState::publish(&mut state, prepared);
+
+        let target = id(512);
+        let update = GraphTransaction::new(
+            scope(),
+            vec![Operation::ReplaceEntity {
+                target,
+                expected: Expected::Version(RecordVersion::FIRST),
+                properties: Value::Unsigned(7),
+            }],
+        );
+        let prepared = state
+            .prepare_transaction(&update, CommitRevision::new(2).unwrap())
+            .unwrap();
+        assert_eq!(prepared.changes.len(), 1);
+        assert_eq!(prepared.changes[0].id, target);
+        assert!(prepared.changes[0].before.is_some());
+        assert_eq!(prepared.changes[0].after.id(), target);
+
+        let expected = full_rebuild_publish(state.snapshot(), &prepared);
+        assert_eq!(
+            prepared.result_digest,
+            legacy_result_digest(&expected, &prepared)
+        );
+        TransactionState::publish(&mut state, prepared);
+        assert_eq!(state.snapshot(), expected);
+        state.snapshot().validate_derived_indexes().unwrap();
+    }
+
+    #[test]
+    fn stale_prepared_delta_panics_before_mutating_live_state() {
+        let mut state = GraphState::new(scope());
+        let prepared = state
+            .prepare_transaction(
+                &GraphTransaction::new(scope(), vec![entity(id(1)), entity(id(2))]),
+                CommitRevision::FIRST,
+            )
+            .unwrap();
+        TransactionState::publish(&mut state, prepared);
+
+        let replace = |target, value| {
+            GraphTransaction::new(
+                scope(),
+                vec![Operation::ReplaceEntity {
+                    target,
+                    expected: Expected::Version(RecordVersion::FIRST),
+                    properties: Value::Unsigned(value),
+                }],
+            )
+        };
+        let first = state
+            .prepare_transaction(&replace(id(1), 11), CommitRevision::new(2).unwrap())
+            .unwrap();
+        let stale = state
+            .prepare_transaction(&replace(id(2), 22), CommitRevision::new(2).unwrap())
+            .unwrap();
+        TransactionState::publish(&mut state, first);
+        let published = state.snapshot();
+
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            TransactionState::publish(&mut state, stale);
+        }));
+        assert!(rejected.is_err());
+        assert_eq!(state.snapshot(), published);
+    }
+}
 
 #[cfg(test)]
 mod checkpoint_history_tests {

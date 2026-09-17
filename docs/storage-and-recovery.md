@@ -167,9 +167,13 @@ The follow-on streaming recovery transport authenticates candidate manifests and
 encrypted chunks without a complete plaintext allocation. Opaque candidates are filtered against
 the authenticated certificate chain; selected bytes are revalidated and emitted while the journal
 owner/key context remains live. Consumers must discard partial decoded state if the final digest or
-sink fails. The legacy collecting API remains available. Current reducer decoders and write
-preparation still materialize/clone complete logical state; new versioned state profiles, not a
-mutation of frozen `graph-current-v1`, must remove those assumptions before BM-06 can qualify.
+sink fails. The legacy collecting API remains available. Current reducer decoders still materialize
+complete logical state. Decision 0027 removes the graph write-path clone/rebuild by preparing
+ordered before/after record deltas and updating derived-index contributions incrementally; ingest
+writes and explicit snapshots remain materialized. Graph delete still scans all retained records
+until a new versioned state profile adds general reverse-reference runs. That profile, not a
+mutation of frozen `graph-current-v1`, must remove the remaining assumptions before BM-06 can
+qualify.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

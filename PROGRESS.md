@@ -2,12 +2,13 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Pushed commits
-through `acde6bb` add T-20's encrypted disk-index, authorized-read, bounded checkpoint-publication
-and deterministic benchmark-fixture foundations. The current Decision 0026 extension adds bounded
-checkpoint recovery transport; T-20 remains open pending streaming larger-than-memory reducer state
-and qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
-independent external security certification.
+Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
+through `ad1522e` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport
+and deterministic benchmark-fixture foundations. The current Decision 0027 increment removes
+full-state graph prepare/publish clones and rebuilds with exact bounded transaction deltas. T-20
+remains open pending disk-backed larger-than-memory reducer state and qualifying BM-01/BM-06
+results. Review was performed by Codex agents and does not represent independent external security
+certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -197,6 +198,14 @@ unverified external distribution prerequisite.
   retaining complete plaintext, filters opaque metadata against the verified certificate chain and
   revalidates a selected chunk stream under the live owner/key context. Partial sink output is never
   publishable unless the terminal digest succeeds; current reducer decoders remain full-state.
+- Added Decision 0027 and bounded graph transaction overlays. Successful preparation clones and
+  validates only changed records; publication applies exact history, adjacency and provenance
+  contributions instead of replacing/rebuilding the complete snapshot. Prepared deltas are
+  non-cloneable and bound to their exact scope/base revision before any live mutation.
+- Proved a one-record update in a 1,024-record graph retains one ordered before/after change, matches
+  the prior canonical result digest and a full-rebuild reference snapshot, and rejects a stale
+  same-base prepared delta without mutation. Cascade retraction removes adjacency but retains
+  provenance. Final agent review found no remaining high- or medium-severity finding.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -268,10 +277,14 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 235 workspace tests including 74 uste-storage, 13
-# uste-crypto, 28 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
-# 8 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
-# docs=ok; task graph=ok; R0/fixture tests pass
+# workspace format/clippy/test/doc pass; 239 workspace tests including 74 uste-storage, 13
+# uste-crypto, 30 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# 10 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
+# docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
+cargo test -p uste-graph --all-targets --locked --offline
+# 30 passed; 0 failed
+cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
+# passed
 cargo test -p uste-spatial --all-targets --locked
 # 26 passed; 0 failed
 cargo test -p uste-types --test spatial_primitives --locked
@@ -312,7 +325,8 @@ remaining mixed workload have not passed.
   disk APIs remain separate from the new authorization-preserving current-graph consumer path.
   Checkpoint discovery and seeded open each authenticate the journal, and publication can now stream
   with a one-new-payload-chunk buffer, and checkpoint transport can recover through a bounded chunk
-  stream. Reducer decoding and writes still materialize/clone full graph history in memory;
+  stream. Ordinary graph prepare/publish is now change-bounded, but checkpoint decoding, explicit
+  snapshots, graph deletion scans and composite ingest writes remain full-state boundaries.
   BM-01/BM-06 have not run. Graph policy is durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
@@ -335,9 +349,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with new versioned disk-backed state profiles, delta validation and streaming
-larger-than-memory recovery, then connect the pinned fixture to exact BM-01 and define/run BM-06's
-10-million-event protocol. Then return to T-19's remaining VT gaps and
+Continue T-20 with new versioned disk-backed state profiles, general reverse-reference runs,
+ingest deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
+BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's remaining VT gaps and
 BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

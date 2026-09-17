@@ -400,6 +400,15 @@ fn exact_declared_cascade_retracts_edge_and_delete_conflicts_are_atomic() {
             .unwrap()
             .is_empty()
     );
+    assert_eq!(
+        snapshot
+            .supported_by(evidence, 10)
+            .unwrap()
+            .into_iter()
+            .map(Record::id)
+            .collect::<Vec<_>>(),
+        vec![relationship]
+    );
     let Record::Relationship(relationship) = snapshot.record(relationship).unwrap() else {
         panic!("relationship")
     };

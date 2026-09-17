@@ -61,8 +61,8 @@ remained after the final review.
 ## Limits and next owners
 
 The journal is scanned twice during candidate selection and seeded reopen. This favors a closed
-ownership race over recovery speed; BM-06 is not claimed. Checkpoints remain capped in-memory
-correctness caches and do not satisfy T-20 disk-index/cache pressure. T-35 owns retained-baseline
+ownership race over recovery speed; BM-06 is not claimed. Checkpoint reducer decoding remains a
+capped in-memory correctness cache and does not satisfy T-20 disk-index/cache pressure. T-35 owns retained-baseline
 promotion, compaction and cache cleanup policy; T-38/T-39 own backup/restore epochs and migrations.
 Unsupported or damaged caches fall back to an older candidate or cold replay.
 

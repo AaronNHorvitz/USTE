@@ -79,6 +79,12 @@ callers must not publish partial decoded state before the final digest succeeds.
 collector remains byte-identical. Reducer decoders still require complete logical state and
 therefore do not yet provide BM-06's larger-than-memory property.
 
+Decision 0027 separately removes full-state graph cloning and index rebuilding from successful
+transaction prepare/publish. Its ordered before/after deltas are the input contract for a future
+disk-backed state root, but explicit snapshot/checkpoint decoding, ingest preparation and graph
+delete scans remain full-state boundaries. See
+[`bounded-graph-deltas.md`](bounded-graph-deltas.md).
+
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
 stops after the first delivered entry in the regression.

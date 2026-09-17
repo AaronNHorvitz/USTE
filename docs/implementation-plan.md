@@ -62,9 +62,11 @@ publication, visitor-based index scans and the exact `bm01-materialization-v1` f
 contract. Its content-free
 manifest explicitly is not engine benchmark evidence. Opaque checkpoint candidates can now be
 authenticated and streamed without a complete transport buffer, but reducer decoding and
-graph/ingest writes still materialize/clone full candidates, so T-20 next requires new versioned
-state profiles, delta validation and a genuine state-larger-than-memory BM-06 path before running
-the qualifying BM-01/BM-06 protocols.
+Decision 0027 replaces graph prepared snapshots with ordered before/after deltas, changed-record
+validation and incremental derived-index publication. Graph deletion still scans the merged record
+set, ingest writes still clone full candidates and reducer decoding remains full-memory. T-20 next
+requires new versioned state profiles with general reverse references plus a genuine
+state-larger-than-memory BM-06 path before running the qualifying BM-01/BM-06 protocols.
 
 ## Architectural decomposition
 

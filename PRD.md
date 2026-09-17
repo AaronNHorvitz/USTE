@@ -117,6 +117,13 @@ The checkpoint transport now discovers authenticated opaque candidates and strea
 candidate under its live journal/key context without retaining the complete plaintext payload.
 Reducer decoders still require complete state, so this narrows but does not close the recovery gap.
 
+Decision 0027 removes full graph snapshot cloning, full-state validation and full derived-index
+rebuilds from ordinary successful graph transactions. Preparation retains only ordered before/after
+changes and validates them against a merged view; publication updates history and index
+contributions incrementally without changing canonical bytes or the frozen current projection.
+Explicit snapshots, checkpoint decoding, ingest writes and graph deletion scans remain full-state
+boundaries, so T-20 and both qualifying benchmarks remain open.
+
 ## Release gates
 
 | Gate | Required outcome |
