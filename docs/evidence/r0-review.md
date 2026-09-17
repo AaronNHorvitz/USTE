@@ -23,6 +23,8 @@ tasks are not checked.
   complete-certificate data loss/corruption fails closed.
 - Nineteen generated parser fixtures have pinned byte lengths/SHA-256 values; smoke tests read
   positive PDF/ZIP/PNG/JPEG/WAV/Y4M samples and inspect archive traversal/link negatives.
+- A bubblewrap 0.11.0/prlimit worker probe verifies read-only explicit input, private scratch,
+  absent home/host files, no TCP egress and in-worker basic resource limits on the runner.
 
 ## Commands and results
 
@@ -48,6 +50,9 @@ test result: ok. 4 passed; 0 failed
 $ cargo-deny ... --frozen check all --show-stats
 # dependency candidates: advisories/licenses/sources clean; one recorded duplicate-version warning
 # fixture generator: all checks clean
+
+$ bash experiments/worker-sandbox.sh
+sandbox_probe=ok input_bytes=2725
 ~~~
 
 Crates.io metadata was inspected with `cargo search`/`cargo info`; this selected candidates,

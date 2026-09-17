@@ -18,6 +18,12 @@ read-only source descriptor, output descriptor, no ambient environment, no socke
 and Linux namespaces/seccomp/cgroup limits. Failure to establish every selected isolation
 control refuses the job. The engine revalidates lease, output schema, provenance and quota.
 
+The R0 bubblewrap/rlimit feasibility result is recorded in
+[`worker-sandbox-feasibility.md`](../evidence/worker-sandbox-feasibility.md). It proves the
+namespace, mount, no-egress and basic resource-limit subset on the reference runner. Seccomp,
+delegated cgroup/process-tree enforcement and the complete supervisor remain T-23 evidence;
+their absence must refuse parsing rather than weaken this profile.
+
 Strict workers are offline Rust binaries. No macros, scripts, formulas, external entities,
 links, fonts, embedded objects, archive links or document actions execute. Sniffing is subject
 to the same byte/time limits. Default per-job caps are in Decision 0007.

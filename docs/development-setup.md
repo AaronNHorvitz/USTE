@@ -48,10 +48,13 @@ cargo test --manifest-path experiments/content-fixtures/Cargo.toml --locked
 cargo fmt --manifest-path experiments/dependency-audit/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/fixture-generator/Cargo.toml -- --check
 rustfmt --edition 2024 --check experiments/storage-publication.rs tests/r0_vectors.rs
+bash experiments/worker-sandbox.sh
 ~~~
 
 The candidate dependency graph currently emits one expected duplicate-version warning for
 `miniz_oxide`; every advisory, license and source check must have zero errors.
+The sandbox probe requires unprivileged user/network namespaces and bubblewrap 0.11.0; it
+fails rather than falling back to an unsandboxed worker.
 
 ## Runnable synthetic example
 
