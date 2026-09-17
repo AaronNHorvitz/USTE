@@ -17,6 +17,7 @@ uste-types = { path = "../uste-types", version = "=0.1.0" }
 
 [dev-dependencies]
 uste-crypto = { path = "../uste-crypto", version = "=0.1.0" }
+uste-replay = { path = "../uste-replay", version = "=0.1.0" }
 uste-testkit = { path = "../uste-testkit", version = "=0.1.0" }
 
 [lints]

@@ -13,9 +13,10 @@ use uste_types::{
 };
 
 use crate::{
-    AssertionAction, AssertionStatus, DeletePolicy, DurablePolicyMutation, EntityLifecycle,
-    Expected, GraphTransaction, IntervalBound, NewAssertion, NewEntity, NewEvidence, NewRecord,
-    NewRelationship, Operation, Predicate, Record, RecordVersion, ValidTime,
+    AssertionAction, AssertionRecord, AssertionStatus, DeletePolicy, DurablePolicyMutation,
+    EntityLifecycle, EntityRecord, EvidenceRecord, Expected, GraphTransaction, IntervalBound,
+    NewAssertion, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, Predicate, Record,
+    RecordVersion, RelationshipRecord, ValidTime,
 };
 
 const PROFILE: &str = "uste-graph-request-v1";
@@ -335,6 +336,64 @@ pub(crate) fn encode_result_record(record: &Record) -> Result<Vec<u8>, GraphCode
     encode_value(&value).map_err(GraphCodecError::Encode)
 }
 
+pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecError> {
+    let mut fields = Fields::new(decode_value(input).map_err(GraphCodecError::Decode)?)?;
+    let kind = take_text(fields.take("kind")?)?;
+    let record = match kind.as_str() {
+        "entity" => Record::Entity(EntityRecord {
+            id: take_record(fields.take("id")?)?,
+            version: take_record_version(fields.take("version")?)?,
+            lifecycle: match take_text(fields.take("lifecycle")?)?.as_str() {
+                "active" => EntityLifecycle::Active,
+                "deleted" => EntityLifecycle::Deleted,
+                _ => return Err(GraphCodecError::InvalidEnum),
+            },
+            entity_type: take_bounded_text(fields.take("entity_type")?)?,
+            schema_version: take_u64(fields.take("schema_version")?)?,
+            properties: fields.take("properties")?,
+            created_revision: take_revision(fields.take("created_revision")?)?,
+            modified_revision: take_revision(fields.take("modified_revision")?)?,
+        }),
+        "evidence" => Record::Evidence(EvidenceRecord {
+            id: take_record(fields.take("id")?)?,
+            version: take_record_version(fields.take("version")?)?,
+            digest: take_digest(fields.take("digest")?)?,
+            locator: take_bounded_text(fields.take("locator")?)?,
+            created_revision: take_revision(fields.take("created_revision")?)?,
+        }),
+        "assertion" => Record::Assertion(AssertionRecord {
+            id: take_record(fields.take("id")?)?,
+            version: take_record_version(fields.take("version")?)?,
+            subject: take_record(fields.take("subject")?)?,
+            predicate: take_bounded_text(fields.take("predicate")?)?,
+            object: fields.take("object")?,
+            evidence: decode_refs(fields.take("evidence")?)?,
+            status: decode_assertion_status(fields.take("status")?)?,
+            valid_time: decode_valid_time(fields.take("valid_time")?)?,
+            correction_of: decode_optional(fields.take("correction_of")?, take_record)?,
+            recorded_revision: take_revision(fields.take("recorded_revision")?)?,
+            modified_revision: take_revision(fields.take("modified_revision")?)?,
+        }),
+        "relationship" => Record::Relationship(RelationshipRecord {
+            id: take_record(fields.take("id")?)?,
+            version: take_record_version(fields.take("version")?)?,
+            from: take_record(fields.take("from")?)?,
+            to: take_record(fields.take("to")?)?,
+            relationship_type: take_bounded_text(fields.take("relationship_type")?)?,
+            properties: fields.take("properties")?,
+            evidence: decode_refs(fields.take("evidence")?)?,
+            status: decode_assertion_status(fields.take("status")?)?,
+            valid_time: decode_valid_time(fields.take("valid_time")?)?,
+            correction_of: decode_optional(fields.take("correction_of")?, take_record)?,
+            recorded_revision: take_revision(fields.take("recorded_revision")?)?,
+            modified_revision: take_revision(fields.take("modified_revision")?)?,
+        }),
+        _ => return Err(GraphCodecError::InvalidEnum),
+    };
+    fields.finish()?;
+    Ok(record)
+}
+
 pub(crate) fn encode_result_policy(
     policy: Option<&NamespacePolicy>,
 ) -> Result<Vec<u8>, GraphCodecError> {
@@ -343,6 +402,15 @@ pub(crate) fn encode_result_policy(
         .transpose()?
         .unwrap_or(Value::Null);
     encode_value(&value).map_err(GraphCodecError::Encode)
+}
+
+pub(crate) fn decode_result_policy(
+    input: &[u8],
+) -> Result<Option<NamespacePolicy>, GraphCodecError> {
+    decode_optional(
+        decode_value(input).map_err(GraphCodecError::Decode)?,
+        decode_policy,
+    )
 }
 
 const fn assertion_status_name(status: AssertionStatus) -> &'static str {
@@ -354,6 +422,19 @@ const fn assertion_status_name(status: AssertionStatus) -> &'static str {
         AssertionStatus::Superseded => "superseded",
         AssertionStatus::Retracted => "retracted",
         AssertionStatus::Expired => "expired",
+    }
+}
+
+fn decode_assertion_status(value: Value) -> Result<AssertionStatus, GraphCodecError> {
+    match take_text(value)?.as_str() {
+        "proposed" => Ok(AssertionStatus::Proposed),
+        "accepted" => Ok(AssertionStatus::Accepted),
+        "rejected" => Ok(AssertionStatus::Rejected),
+        "disputed" => Ok(AssertionStatus::Disputed),
+        "superseded" => Ok(AssertionStatus::Superseded),
+        "retracted" => Ok(AssertionStatus::Retracted),
+        "expired" => Ok(AssertionStatus::Expired),
+        _ => Err(GraphCodecError::InvalidEnum),
     }
 }
 
@@ -975,6 +1056,14 @@ fn take_u32(value: Value) -> Result<u32, GraphCodecError> {
         Value::Unsigned(value) => u32::try_from(value).map_err(|_| GraphCodecError::InvalidNumber),
         _ => Err(GraphCodecError::WrongType),
     }
+}
+
+fn take_revision(value: Value) -> Result<CommitRevision, GraphCodecError> {
+    CommitRevision::new(take_u64(value)?).map_err(|_| GraphCodecError::InvalidNumber)
+}
+
+fn take_record_version(value: Value) -> Result<RecordVersion, GraphCodecError> {
+    RecordVersion::new(take_u64(value)?).map_err(|_| GraphCodecError::InvalidNumber)
 }
 
 fn take_digest(value: Value) -> Result<[u8; 32], GraphCodecError> {

@@ -1,0 +1,17 @@
+[package]
+name = "uste-replay"
+description = "Deterministic replay and verified checkpoint primitives for USTE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+uste-storage = { path = "../uste-storage", version = "=0.1.0" }
+uste-txn = { path = "../uste-txn", version = "=0.1.0" }
+uste-types = { path = "../uste-types", version = "=0.1.0" }
+
+[lints]
+workspace = true

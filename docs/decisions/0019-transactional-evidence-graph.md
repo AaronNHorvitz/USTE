@@ -15,6 +15,13 @@ bounded operations and an optional policy mutation. Unknown, missing, duplicate,
 trailing fields fail closed. A transaction admits at most 10,000 operations and 100,000 counted
 record-reference occurrences before reducer state is cloned.
 
+One committed revision contains at most one mutation of any record. Direct operations and implicit
+cascade effects may not overlap; a correction target is also read-stable and may not be changed by
+another operation in the same transaction. An overlap is a typed conflict and publishes nothing.
+This keeps each retained version a complete per-revision state and deliberately rejects sequential
+same-record request semantics such as accept-then-correct in one request; callers split those steps
+across revisions with explicit version preconditions.
+
 The implemented records are typed entities, immutable evidence descriptors, assertions and
 directed relationships. Every record has a scoped stable identity and nonzero version. Assertions
 and relationships retain evidence identities, explicit valid-time state, recorded/modified

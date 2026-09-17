@@ -8,6 +8,8 @@ independent security certification
 - Added the safe-Rust `uste-graph` production reducer with typed entity, evidence, assertion and
   relationship records; version/valid-time/recorded-revision history; corrections; lifecycle
   transitions; exact declared deletion cascades; and same-scope final-state reference closure.
+- Enforced one mutation per record and revision across direct/implicit effects, with read-stable
+  correction targets. Overlaps reject as atomic conflicts and publish no compressed history.
 - Added strict canonical graph transaction and durable-policy encoding with exhaustive truncation,
   unknown/extra/missing-field and policy-chunk canonicality checks.
 - Added symmetric ordered outgoing/incoming adjacency and evidence-provenance indexes, atomic

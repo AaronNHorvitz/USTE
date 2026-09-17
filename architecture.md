@@ -132,7 +132,8 @@ can enumerate every uncommitted reservation; known evidenced tokens remain recov
 
 Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
 revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,
-durable policy records and reducer-owned authorized projections. Current indexes are rebuildable
+one-mutation-per-record revisions with read-stable correction targets, durable policy records and
+reducer-owned authorized projections. Current indexes are rebuildable
 in-memory correctness structures; T-20 owns disk runs and bounded caches.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds

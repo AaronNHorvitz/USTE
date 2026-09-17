@@ -83,6 +83,37 @@ pub trait TransactionState {
     fn snapshot(&self) -> Self::Snapshot;
 }
 
+/// Canonical reducer state used by trusted replay/checkpoint maintenance.
+///
+/// Derived indexes may be omitted only when decoding deterministically rebuilds and validates
+/// them. This hook does not grant persistence authority or make a checkpoint authoritative.
+pub trait CheckpointState: TransactionState + Sized {
+    const REDUCER_PROFILE: [u8; 32];
+
+    fn checkpoint_scope(snapshot: &Self::Snapshot) -> NamespaceRef;
+
+    fn checkpoint_revision(snapshot: &Self::Snapshot) -> Option<CommitRevision>;
+
+    /// Digest every coherent reducer state, including the pre-commit genesis state. Implementations
+    /// must not impose a checkpoint-publication size cap on this streaming logical digest.
+    fn logical_state_digest(snapshot: &Self::Snapshot) -> Result<[u8; 32], CheckpointStateError>;
+
+    fn encode_checkpoint(snapshot: &Self::Snapshot) -> Result<Vec<u8>, CheckpointStateError>;
+
+    fn decode_checkpoint(
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        encoded: &[u8],
+    ) -> Result<Self, CheckpointStateError>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckpointStateError {
+    Invalid,
+    ResourceLimit,
+    UnsupportedProfile,
+}
+
 /// Closed logical validation failures that precede journal publication.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApplyError {

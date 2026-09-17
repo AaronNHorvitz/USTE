@@ -2,9 +2,15 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest verified implementation: `8f035d7` (completed local T-17 transactional evidence graph over
+Latest completed task evidence: `cd4badd` (completed local T-17 transactional evidence graph over
 the T-13–T-16 journal/transaction/blob/authorization foundation). Review was performed by Codex
 agents and does not represent independent external security certification.
+
+T-18 is in progress. The current implementation increment adds deterministic cold replay,
+fallible canonical reducer-checkpoint contracts and a graph checkpoint codec that preserves record
+and policy histories while rebuilding derived indexes. It is not yet a durable snapshot: encrypted
+publication, journal-certificate anchoring, coordinator retry/blob-ownership state, suffix replay,
+scrub/fallback and crash evidence remain before T-18 can close.
 
 ## Completed this increment
 
@@ -201,8 +207,9 @@ remaining mixed workload have not passed.
   remain later-gate work.
 - The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
   journal, transaction/blob coordinator, authorization foundation and transactional graph reducer
-  are implemented, but there is no database executable, disk graph index, replay checkpoint or
-  production qualification. Graph policy is durable; the trusted adapter must supply its exact
+  are implemented, but there is no database executable, disk graph index, durable checkpoint or
+  production qualification. The in-progress replay crate and graph checkpoint bytes are not yet a
+  storage recovery path. Graph policy is durable; the trusted adapter must supply its exact
   current copy at open. Production graph snapshots still retain full record history and derived
   indexes in memory until T-20. The oracle intentionally scans records and is not a scalable
   implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined to
@@ -214,9 +221,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Begin dependency-permitted T-18 deterministic replay and verified cache snapshots over the T-17
-graph reducer. Bind checkpoint identity to journal frontier, reducer/profile versions and canonical
-state, prove rebuild equivalence and corruption fallback without model/parser/network dependency.
+Continue T-18 by wrapping canonical graph bytes with coordinator retry/transaction/blob-ownership
+state, encrypted chunk publication and a journal-certificate anchor; then add verified suffix replay,
+scrub/corruption fallback and crash tests without model/parser/network dependency.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.
