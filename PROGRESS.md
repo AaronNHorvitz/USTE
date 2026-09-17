@@ -2,9 +2,8 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest pushed implementation base: `76a634c` (T-15 encrypted blob-store foundation); the current
-worktree completes its local qualification and will be committed after the recorded full gate.
-Review was performed by Codex agents and
+Latest verified and pushed implementation: `62637a9` (completed local T-15 encrypted blob-store
+qualification over the T-13/T-14 journal and transaction foundation). Review was performed by Codex agents and
 does not represent independent external security certification.
 
 ## Completed this increment
