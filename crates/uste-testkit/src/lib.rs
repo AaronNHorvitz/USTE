@@ -9,6 +9,7 @@
 mod generator;
 mod model;
 mod record;
+mod spatial;
 
 pub use generator::{
     GeneratedHistory, GenerationError, MAX_GENERATED_ENTITY_TRANSACTIONS,
@@ -23,3 +24,4 @@ pub use record::{
     EvidenceRecord, IntervalBound, NewAssertion, NewEntity, NewEvidence, NewRecord,
     NewRelationship, Record, RecordVersion, RecordVersionError, RelationshipRecord, ValidTime,
 };
+pub use spatial::{ReferenceFrame, ReferenceFrameError, ReferenceFrameHistory};

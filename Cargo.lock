@@ -504,6 +504,7 @@ dependencies = [
  "uste-crypto",
  "uste-policy",
  "uste-replay",
+ "uste-spatial",
  "uste-storage",
  "uste-testkit",
  "uste-time",
@@ -524,6 +525,19 @@ version = "0.1.0"
 dependencies = [
  "uste-crypto",
  "uste-storage",
+ "uste-txn",
+ "uste-types",
+]
+
+[[package]]
+name = "uste-spatial"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "uste-replay",
+ "uste-storage",
+ "uste-testkit",
+ "uste-time",
  "uste-txn",
  "uste-types",
 ]

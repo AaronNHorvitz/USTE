@@ -10,6 +10,7 @@ mod error;
 mod id;
 mod instant;
 mod revision;
+pub mod spatial;
 mod value;
 
 pub use codec::{
