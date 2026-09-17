@@ -2,12 +2,15 @@ use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_graph::{
-    AdjacencyDirection, AssertionAction, Expected, GRAPH_STATE_PROFILE_V1, GraphDiskError,
-    GraphState, GraphTransaction, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation,
-    Record, ValidTime, disk_adjacent_ids, disk_record, disk_supported_ids, encode_transaction,
-    load_current_graph_index_roots, load_graph_state_roots, publish_current_graph_index,
-    publish_graph_state_root, scrub_current_graph_index, scrub_graph_state_root,
+    AdjacencyDirection, AssertionAction, DurablePolicyMutation, Expected, GRAPH_STATE_PROFILE_V1,
+    GraphDiskError, GraphState, GraphStateLoadLimits, GraphTransaction, NewEntity, NewEvidence,
+    NewRecord, NewRelationship, Operation, Record, ValidTime, disk_adjacent_ids, disk_record,
+    disk_supported_ids, encode_stored_record, encode_transaction, load_current_graph_index_roots,
+    load_graph_state_root_candidates, load_graph_state_roots, publish_current_graph_index,
+    publish_graph_state_root, reconstruct_graph_state_candidate, scrub_current_graph_index,
+    scrub_graph_state_root,
 };
+use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
 use uste_storage::{
     ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexRootInput, PageCache,
     fault::ScriptedClock, journal::DurableKeyEnvelope, memory::MemoryFileSystem,
@@ -16,8 +19,8 @@ use uste_txn::{
     CheckpointState, CommitCoordinator, NeverCancel, RetentionDays, TransactionRequest,
 };
 use uste_types::{
-    BoundedString, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, RecordId, RecordRef,
-    TransactionId, UtcInstant, Value,
+    BoundedString, CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, RecordId,
+    RecordRef, TransactionId, UtcInstant, Value,
 };
 
 fn scope() -> NamespaceRef {
@@ -97,7 +100,7 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         &mut coordinator,
         &mut filesystem,
         1,
-        GraphTransaction::new(
+        GraphTransaction::with_policy_mutation(
             scope(),
             vec![
                 Operation::Create {
@@ -127,6 +130,13 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
                     }),
                 },
             ],
+            DurablePolicyMutation::Install {
+                policy: NamespacePolicy::new(
+                    scope(),
+                    PolicyVersion::new(1).unwrap(),
+                    QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
+                ),
+            },
         ),
     );
     commit(
@@ -229,11 +239,202 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
     ));
 
     publish_current_graph_index(&mut coordinator, &mut filesystem, &snapshot).unwrap();
-    let state_publication =
+    let mut state_publication =
         publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
     let state_roots = load_graph_state_roots(&coordinator, &mut filesystem, &snapshot).unwrap();
     assert_eq!(state_roots.len(), 1);
     assert_eq!(state_roots[0].generation(), state_publication.generation);
+    let state_candidates = load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    assert_eq!(state_candidates.len(), 1);
+    let reconstruction_limits =
+        GraphStateLoadLimits::new(10, 20, 10, 100, 100, 1024 * 1024).unwrap();
+    let other_scope = NamespaceRef::new(scope().database(), NamespaceId::from_bytes([0x85; 16]));
+    let mut other_filesystem = MemoryFileSystem::new(4 * 1024 * 1024);
+    let other_coordinator = CommitCoordinator::create(
+        &mut other_filesystem,
+        other_scope,
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("other-state-root").unwrap(),
+        create_vault(other_scope.database(), 12_000),
+        CounterEntropy(13_000),
+        GraphState::new(other_scope),
+    )
+    .unwrap();
+    assert!(matches!(
+        reconstruct_graph_state_candidate(
+            &other_coordinator,
+            &mut other_filesystem,
+            &state_candidates[0],
+            reconstruction_limits,
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
+    let (reconstructed, reconstruction) = reconstruct_graph_state_candidate(
+        &coordinator,
+        &mut filesystem,
+        &state_candidates[0],
+        reconstruction_limits,
+    )
+    .unwrap();
+    assert_eq!(reconstructed.snapshot(), snapshot);
+    assert_eq!(reconstruction.runs, 8);
+    assert_eq!(reconstruction.entries, 18);
+    assert!(reconstruction.pages_read >= reconstruction.runs);
+    assert!(reconstruction.logical_bytes > 0);
+    let too_few_records = GraphStateLoadLimits::new(3, 20, 10, 100, 100, 1024 * 1024).unwrap();
+    assert!(matches!(
+        reconstruct_graph_state_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            too_few_records,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let too_few_pages = GraphStateLoadLimits::new(10, 20, 10, 100, 1, 1024 * 1024).unwrap();
+    assert!(matches!(
+        reconstruct_graph_state_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            too_few_pages,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+
+    // Storage authentication and descriptor digests are necessary but not sufficient. Build a
+    // self-consistent run whose current relationship is the valid prior version while its history
+    // still ends at the accepted version. Reconstruction must reject the semantic mismatch.
+    let (state_revision, state_certificate_digest) =
+        coordinator.checkpoint_anchor().unwrap().unwrap();
+    let recovered_state_root = coordinator
+        .load_index_roots(&mut filesystem, GRAPH_STATE_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|root| root.generation() == state_publication.generation)
+        .unwrap();
+    let canonical_runs = recovered_state_root.runs().copied().collect::<Vec<_>>();
+    let prior_relationship = snapshot
+        .record_at(CommitRevision::new(2).unwrap(), relationship)
+        .unwrap()
+        .unwrap();
+    let malformed_current = snapshot
+        .records()
+        .map(|(id, record)| IndexEntry {
+            key: id.record().as_bytes().to_vec(),
+            value: encode_stored_record(if *id == relationship {
+                prior_relationship
+            } else {
+                record
+            })
+            .unwrap(),
+        })
+        .collect::<Vec<_>>();
+    let malformed_current_run = coordinator
+        .publish_index_run(
+            &mut filesystem,
+            state_revision,
+            GRAPH_STATE_PROFILE_V1,
+            2,
+            malformed_current,
+        )
+        .unwrap();
+    let mut malformed_current_runs = canonical_runs.clone();
+    *malformed_current_runs
+        .iter_mut()
+        .find(|run| run.family() == 2)
+        .unwrap() = malformed_current_run;
+    let malformed_current_root = coordinator
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope: scope(),
+                revision: state_revision,
+                certificate_digest: state_certificate_digest,
+                reducer_profile: GraphState::REDUCER_PROFILE,
+                logical_state_digest: GraphState::logical_state_digest(&snapshot).unwrap(),
+                index_profile: GRAPH_STATE_PROFILE_V1,
+            },
+            &malformed_current_runs,
+        )
+        .unwrap();
+
+    // Likewise, a fully authenticated outgoing run with the right shape but the wrong neighbor
+    // must fail the comparison against the canonical indexes rebuilt from validated records.
+    let mut outgoing_key = Vec::with_capacity(32);
+    outgoing_key.extend_from_slice(left.record().as_bytes());
+    outgoing_key.extend_from_slice(relationship.record().as_bytes());
+    let malformed_outgoing_run = coordinator
+        .publish_index_run(
+            &mut filesystem,
+            state_revision,
+            GRAPH_STATE_PROFILE_V1,
+            4,
+            [IndexEntry {
+                key: outgoing_key,
+                value: foreign_id.record().as_bytes().to_vec(),
+            }],
+        )
+        .unwrap();
+    let mut malformed_derived_runs = canonical_runs;
+    *malformed_derived_runs
+        .iter_mut()
+        .find(|run| run.family() == 4)
+        .unwrap() = malformed_outgoing_run;
+    let malformed_derived_root = coordinator
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope: scope(),
+                revision: state_revision,
+                certificate_digest: state_certificate_digest,
+                reducer_profile: GraphState::REDUCER_PROFILE,
+                logical_state_digest: GraphState::logical_state_digest(&snapshot).unwrap(),
+                index_profile: GRAPH_STATE_PROFILE_V1,
+            },
+            &malformed_derived_runs,
+        )
+        .unwrap();
+    let semantic_candidates =
+        load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    let malformed_current_candidate = semantic_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == malformed_current_root.generation)
+        .unwrap();
+    assert_eq!(
+        reconstruct_graph_state_candidate(
+            &coordinator,
+            &mut filesystem,
+            malformed_current_candidate,
+            reconstruction_limits,
+        ),
+        Err(GraphDiskError::IndexCorrupt)
+    );
+    let malformed_derived_candidate = semantic_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == malformed_derived_root.generation)
+        .unwrap();
+    assert!(matches!(
+        reconstruct_graph_state_candidate(
+            &coordinator,
+            &mut filesystem,
+            malformed_derived_candidate,
+            reconstruction_limits,
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::Storage(
+                uste_storage::journal::StorageError::IntegrityFailure
+            )
+        ))
+    ));
+    // The root carrier intentionally retains two alternating manifests. Restore a current valid
+    // candidate after the two negative generations so later restart/history checks exercise it.
+    state_publication =
+        publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
     let mut state_cache = PageCache::new(INDEX_PAGE_BYTES * 2).unwrap();
     let state_scrub = scrub_graph_state_root(
         &coordinator,
@@ -242,9 +443,7 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         &mut state_cache,
     )
     .unwrap();
-    assert_eq!(state_scrub.runs, 7);
-    let (state_revision, state_certificate_digest) =
-        coordinator.checkpoint_anchor().unwrap().unwrap();
+    assert_eq!(state_scrub.runs, 8);
     let wrong_state_run = coordinator
         .publish_index_run(
             &mut filesystem,
@@ -257,7 +456,7 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
             }],
         )
         .unwrap();
-    coordinator
+    let wrong_metadata_root = coordinator
         .publish_index_root(
             &mut filesystem,
             IndexRootInput {
@@ -271,6 +470,25 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
             &[wrong_state_run],
         )
         .unwrap();
+    let candidates = load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.generation() == state_publication.generation)
+    );
+    let wrong_candidate = candidates
+        .iter()
+        .find(|candidate| candidate.generation() == wrong_metadata_root.generation)
+        .unwrap();
+    assert!(
+        reconstruct_graph_state_candidate(
+            &coordinator,
+            &mut filesystem,
+            wrong_candidate,
+            reconstruction_limits,
+        )
+        .is_err()
+    );
     let state_roots = load_graph_state_roots(&coordinator, &mut filesystem, &snapshot).unwrap();
     assert_eq!(state_roots.len(), 1);
     assert_eq!(state_roots[0].generation(), state_publication.generation);
@@ -378,6 +596,20 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
     let restarted_state_roots =
         load_graph_state_roots(&coordinator, &mut filesystem, &restarted).unwrap();
     assert_eq!(restarted_state_roots.len(), 1);
+    let restarted_candidates =
+        load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    let restarted_candidate = restarted_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == state_publication.generation)
+        .unwrap();
+    let (reconstructed, _) = reconstruct_graph_state_candidate(
+        &coordinator,
+        &mut filesystem,
+        restarted_candidate,
+        reconstruction_limits,
+    )
+    .unwrap();
+    assert_eq!(reconstructed.snapshot(), restarted);
     cache.clear();
     assert_eq!(
         disk_record(
@@ -407,6 +639,20 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         ),
     );
     let newer = coordinator.read_view().unwrap().state().clone();
+    let historical_candidates =
+        load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    let historical_candidate = historical_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == state_publication.generation)
+        .unwrap();
+    let (historical, _) = reconstruct_graph_state_candidate(
+        &coordinator,
+        &mut filesystem,
+        historical_candidate,
+        reconstruction_limits,
+    )
+    .unwrap();
+    assert_eq!(historical.snapshot(), snapshot);
     assert!(
         load_current_graph_index_roots(&coordinator, &mut filesystem, &newer)
             .unwrap()

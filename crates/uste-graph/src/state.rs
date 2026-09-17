@@ -840,16 +840,6 @@ fn decode_graph_checkpoint(
         }
         history.insert(id, versions);
     }
-    if records.len() != history.len()
-        || !records
-            .keys()
-            .zip(history.keys())
-            .all(|(left, right)| left == right)
-    {
-        return Err(CheckpointStateError::Invalid);
-    }
-    validate_historical_reference_closure(&history)?;
-
     let policy = decode_result_policy(cursor.read_frame()?).map_err(checkpoint_codec_error)?;
     if policy.as_ref().is_some_and(|value| value.scope() != scope) {
         return Err(CheckpointStateError::Invalid);
@@ -875,25 +865,212 @@ fn decode_graph_checkpoint(
         previous_version = Some(decoded.version());
         policy_history.insert(policy_revision, decoded);
     }
-    if policy_history.values().next_back() != policy.as_ref() || !cursor.is_empty() {
+    if !cursor.is_empty() {
         return Err(CheckpointStateError::Invalid);
     }
 
-    validate_state(scope, &records).map_err(|_| CheckpointStateError::Invalid)?;
-    let mut snapshot = GraphSnapshot {
-        scope,
-        revision: Some(revision),
-        records,
-        history,
-        outgoing: BTreeMap::new(),
-        incoming: BTreeMap::new(),
-        provenance: BTreeMap::new(),
-        reverse: BTreeMap::new(),
-        policy,
-        policy_history,
-    };
-    rebuild_indexes(&mut snapshot);
-    Ok(GraphState { snapshot })
+    GraphState::from_persisted_parts(scope, revision, records, history, policy, policy_history)
+}
+
+impl GraphState {
+    /// Validate complete persisted reducer families before constructing a privately staged state.
+    /// Callers remain responsible for authenticating their transport and enforcing its budgets.
+    pub(crate) fn from_persisted_parts(
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        records: BTreeMap<RecordRef, Record>,
+        history: BTreeMap<RecordRef, Vec<Record>>,
+        policy: Option<NamespacePolicy>,
+        policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
+    ) -> Result<Self, CheckpointStateError> {
+        Self::from_persisted_parts_inner(
+            scope,
+            revision,
+            records,
+            history,
+            policy,
+            policy_history,
+            None,
+        )
+    }
+
+    pub(crate) fn from_persisted_parts_with_derived_counts(
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        records: BTreeMap<RecordRef, Record>,
+        history: BTreeMap<RecordRef, Vec<Record>>,
+        policy: Option<NamespacePolicy>,
+        policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
+        expected_derived_counts: [u64; 4],
+    ) -> Result<Self, CheckpointStateError> {
+        Self::from_persisted_parts_inner(
+            scope,
+            revision,
+            records,
+            history,
+            policy,
+            policy_history,
+            Some(expected_derived_counts),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_persisted_parts_inner(
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        records: BTreeMap<RecordRef, Record>,
+        history: BTreeMap<RecordRef, Vec<Record>>,
+        policy: Option<NamespacePolicy>,
+        policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
+        expected_derived_counts: Option<[u64; 4]>,
+    ) -> Result<Self, CheckpointStateError> {
+        if records.len() != history.len()
+            || !records
+                .keys()
+                .zip(history.keys())
+                .all(|(left, right)| left == right)
+        {
+            return Err(CheckpointStateError::Invalid);
+        }
+        if records
+            .iter()
+            .any(|(id, record)| record.id() != *id || record.modified_revision() > revision)
+        {
+            return Err(CheckpointStateError::Invalid);
+        }
+        for (id, versions) in &history {
+            if versions.is_empty() {
+                return Err(CheckpointStateError::Invalid);
+            }
+            for (index, record) in versions.iter().enumerate() {
+                let expected_version = u64::try_from(index)
+                    .ok()
+                    .and_then(|value| value.checked_add(1))
+                    .ok_or(CheckpointStateError::ResourceLimit)?;
+                if record.id() != *id
+                    || record.version().get() != expected_version
+                    || record.modified_revision() > revision
+                    || index > 0
+                        && versions[index - 1].modified_revision() >= record.modified_revision()
+                {
+                    return Err(CheckpointStateError::Invalid);
+                }
+            }
+            validate_record_history(scope, versions)?;
+            if records.get(id) != versions.last() {
+                return Err(CheckpointStateError::Invalid);
+            }
+        }
+        validate_historical_reference_closure(&history)?;
+
+        if policy.as_ref().is_some_and(|value| value.scope() != scope) {
+            return Err(CheckpointStateError::Invalid);
+        }
+        let mut previous_version = None;
+        for (policy_revision, historical) in &policy_history {
+            if *policy_revision > revision
+                || historical.scope() != scope
+                || previous_version.is_some_and(|value| value >= historical.version())
+            {
+                return Err(CheckpointStateError::Invalid);
+            }
+            previous_version = Some(historical.version());
+        }
+        if policy_history.values().next_back() != policy.as_ref() {
+            return Err(CheckpointStateError::Invalid);
+        }
+
+        validate_state(scope, &records).map_err(|_| CheckpointStateError::Invalid)?;
+        if let Some(expected) = expected_derived_counts {
+            validate_derived_entry_counts(&records, expected)?;
+        }
+        let mut snapshot = GraphSnapshot {
+            scope,
+            revision: Some(revision),
+            records,
+            history,
+            outgoing: BTreeMap::new(),
+            incoming: BTreeMap::new(),
+            provenance: BTreeMap::new(),
+            reverse: BTreeMap::new(),
+            policy,
+            policy_history,
+        };
+        rebuild_indexes(&mut snapshot);
+        Ok(GraphState { snapshot })
+    }
+}
+
+fn validate_derived_entry_counts(
+    records: &BTreeMap<RecordRef, Record>,
+    expected: [u64; 4],
+) -> Result<(), CheckpointStateError> {
+    let [
+        expected_outgoing,
+        expected_incoming,
+        expected_provenance,
+        expected_reverse,
+    ] = expected;
+    let mut outgoing = 0_u64;
+    let mut incoming = 0_u64;
+    let mut provenance = 0_u64;
+    let mut reverse = 0_u64;
+    for record in records.values() {
+        match record {
+            Record::Relationship(relationship) => {
+                if relationship.status == AssertionStatus::Accepted {
+                    outgoing = outgoing
+                        .checked_add(1)
+                        .ok_or(CheckpointStateError::ResourceLimit)?;
+                    incoming = incoming
+                        .checked_add(1)
+                        .ok_or(CheckpointStateError::ResourceLimit)?;
+                }
+                provenance = provenance
+                    .checked_add(
+                        u64::try_from(relationship.evidence.len())
+                            .map_err(|_| CheckpointStateError::ResourceLimit)?,
+                    )
+                    .ok_or(CheckpointStateError::ResourceLimit)?;
+            }
+            Record::Assertion(assertion) => {
+                provenance = provenance
+                    .checked_add(
+                        u64::try_from(assertion.evidence.len())
+                            .map_err(|_| CheckpointStateError::ResourceLimit)?,
+                    )
+                    .ok_or(CheckpointStateError::ResourceLimit)?;
+            }
+            Record::Entity(_) | Record::Evidence(_) => {}
+        }
+        if outgoing > expected_outgoing
+            || incoming > expected_incoming
+            || provenance > expected_provenance
+        {
+            return Err(CheckpointStateError::Invalid);
+        }
+
+        let mut owner_targets = BTreeSet::new();
+        let mut overflow = false;
+        visit_record_references(record, &mut |target, _| {
+            if owner_targets.contains(&target) {
+                return;
+            }
+            if reverse == expected_reverse {
+                overflow = true;
+                return;
+            }
+            owner_targets.insert(target);
+            reverse += 1;
+        });
+        if overflow {
+            return Err(CheckpointStateError::Invalid);
+        }
+    }
+    if [outgoing, incoming, provenance, reverse] != expected {
+        return Err(CheckpointStateError::Invalid);
+    }
+    Ok(())
 }
 
 fn validate_record_history(

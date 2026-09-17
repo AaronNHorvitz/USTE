@@ -176,6 +176,12 @@ exact certificate, reducer profile and logical digest, but is admitted only by c
 live in-memory snapshot and cannot seed recovery. Journal authority and `graph-current-v1` remain
 unchanged.
 
+Decision 0030 separates an authenticated root candidate from a live-snapshot-admitted root. A
+privileged single-handle full-run stream reconstructs private primary state, applies the shared
+semantic validator, rebuilds and compares derived families, and releases the candidate only after
+terminal run and logical-state digests pass. It remains outside consumer APIs and cannot create a
+coordinator recovery seed without separately authenticated retry/outcome/blob-owner metadata.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

@@ -23,6 +23,7 @@ cargo test -p uste-graph --all-targets --locked --offline
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 ```
 
-This evidence does not claim bounded recovery or a disk-backed live reducer. Admission currently
-recomputes the complete expected projection from a full in-memory snapshot, and no state reader is
-exposed. The journal remains the only authority.
+This Decision 0029 evidence does not itself claim bounded recovery or a disk-backed live reducer.
+Its live-snapshot admission still recomputes the complete expected projection. Decision 0030 adds a
+separate candidate reader/reconstructor with its own evidence, but ordinary reconstructed state
+remains full-memory and the journal remains the only authority.

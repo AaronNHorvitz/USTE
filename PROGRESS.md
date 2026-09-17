@@ -3,12 +3,12 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `cd47e48` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
-deterministic benchmark-fixture foundations, bounded graph deltas and reverse dependencies. The
-current Decision 0029 increment adds the distinct complete certificate-anchored `graph-state-v1`
-derived root. T-20 remains open pending root-based larger-than-memory reducer recovery and
-qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
-independent external security certification.
+through `6dc502f` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
+complete certificate-anchored `graph-state-v1` root. The current Decision 0030 increment adds
+bounded full-run reading and semantic graph-state reconstruction. T-20 remains open pending a
+disk-backed larger-than-memory reducer path and qualifying BM-01/BM-06 results. Review was performed
+by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -223,6 +223,22 @@ unverified external distribution prerequisite.
   cannot construct reducer state or change journal authority. A canonical fixture pins every
   nonempty family key/value/count and seven run digests; focused agent re-review found no remaining
   high- or medium-severity issue.
+- Added Decision 0030 and a privileged, certificate-rechecked full-run visitor outside consumer
+  APIs. It uses one stable handle, bypasses shared cache, enforces caller page/entry/logical-byte bounds,
+  authenticates every page, retains at most one assembled entry and verifies exact length,
+  ordering, entry count and terminal logical digest. Partial visitor output is explicitly provisional.
+- Added a distinct anchored graph-state candidate and bounded reconstruction path. It validates
+  metadata/family shape before allocation, decodes current/history/policy into private maps through
+  the checkpoint semantic constructor, rebuilds and stream-compares derived families, and checks
+  all descriptors plus the state digest before returning. The all-eight-family fixture proves exact
+  equivalence, restart, stale historical reconstruction, wrong-root and caller-budget rejection;
+  authenticated descriptor-consistent current/history and adjacency mismatches also fail closed.
+- Reconstruction removes a monolithic checkpoint byte buffer but still reads already-scrubbed runs
+  again and materializes full ordinary `GraphState`. Caller load limits govern only this second
+  pass; discovery's first scrub is bounded by absolute carrier maxima. The root omits retry/
+  transaction/blob-owner metadata, so no coordinator seed, larger-than-memory recovery or
+  benchmark pass is claimed. Focused final agent review found no remaining high- or medium-severity
+  issue; this is not independent external security certification.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -294,12 +310,12 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 245 workspace tests including 74 uste-storage, 13
-# uste-crypto, 36 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 246 workspace tests including 74 uste-storage, 13
+# uste-crypto, 37 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 10 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 36 passed; 0 failed
+# 37 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -367,10 +383,10 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with bounded full-run state reads, scratch merge, root-based graph reconstruction,
-ingest deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
-BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's remaining VT gaps and
-BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
+Continue T-20 with authenticated coordinator-metadata pairing, disk-backed base/overlay state,
+scratch merge, ingest deltas and larger-than-memory reducer recovery, then connect the pinned
+fixture to exact BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's
+remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

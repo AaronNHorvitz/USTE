@@ -29,6 +29,7 @@ pub const MAX_INDEX_CACHE_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_INDEX_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_INDEX_SCAN_RESULTS: usize = 1_000_000;
 pub const MAX_INDEX_RESULT_BYTES: usize = 64 * 1024 * 1024;
+pub const MAX_INDEX_RUN_LOGICAL_BYTES: u64 = MAX_INDEX_PAGES_PER_RUN * INDEX_PAGE_BYTES as u64;
 
 const PAGE_HEADER_BYTES: usize = 80;
 const FRAGMENT_HEADER_BYTES: usize = 16;
@@ -36,7 +37,7 @@ const PAGE_MAGIC: &[u8; 4] = b"UIPG";
 const ROOT_MAGIC: &[u8; 4] = b"UIRT";
 const MAJOR: u8 = 1;
 const MINOR: u8 = 0;
-const ENCODED_PAGE_BYTES: u64 = 20_545;
+pub(crate) const ENCODED_PAGE_BYTES: u64 = 20_545;
 const SMALL_ENVELOPE_BYTES: usize = 4_161;
 const ROOT_BYTES: usize = 2_048;
 const ROOT_HEADER_BYTES: usize = 192;
@@ -225,6 +226,64 @@ pub struct IndexScan {
     pub entries: Vec<IndexScanEntry>,
     pub stats: IndexReadStats,
 }
+
+/// Explicit work bounds for a privileged, complete immutable-run read.
+///
+/// Unlike a consumer prefix scan, this permits more than one million entries and 64 MiB of
+/// logical data, but never more than the immutable format's absolute run bounds.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexRunReadLimits {
+    maximum_pages: u64,
+    maximum_entries: u64,
+    maximum_logical_bytes: u64,
+}
+
+impl IndexRunReadLimits {
+    pub const fn new(
+        maximum_pages: u64,
+        maximum_entries: u64,
+        maximum_logical_bytes: u64,
+    ) -> Result<Self, StorageError> {
+        if maximum_pages == 0
+            || maximum_pages > MAX_INDEX_PAGES_PER_RUN
+            || maximum_entries == 0
+            || maximum_entries > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_logical_bytes == 0
+            || maximum_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Self {
+            maximum_pages,
+            maximum_entries,
+            maximum_logical_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn maximum_pages(self) -> u64 {
+        self.maximum_pages
+    }
+
+    #[must_use]
+    pub const fn maximum_entries(self) -> u64 {
+        self.maximum_entries
+    }
+
+    #[must_use]
+    pub const fn maximum_logical_bytes(self) -> u64 {
+        self.maximum_logical_bytes
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IndexRunReadReport {
+    pub entries: u64,
+    pub logical_bytes: u64,
+    pub stats: IndexReadStats,
+}
+
+pub type IndexRunVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError> + 'a;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IndexScrubReport {
@@ -731,6 +790,193 @@ where
         report.cache_hits = report.cache_hits.saturating_add(stats.cache_hits);
     }
     Ok(report)
+}
+
+/// Visit one complete immutable run in canonical key order while re-authenticating every page
+/// and recomputing the terminal logical digest.
+///
+/// The visitor observes entries before the terminal digest can be known. It must therefore stage
+/// any externally visible result and publish it only after this function returns `Ok`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn visit_run<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    limits: IndexRunReadLimits,
+    visitor: &mut IndexRunVisitor<'_>,
+) -> Result<IndexRunReadReport, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    if root.scope.database() != context.database {
+        return Err(StorageError::InvalidState);
+    }
+    let run = root.run(family)?;
+    if run.page_count > limits.maximum_pages || run.entry_count > limits.maximum_entries {
+        return Err(StorageError::ResourceLimit);
+    }
+
+    // A recovery/maintenance stream attests one stable durable object, not a mixture of path
+    // reopenings or cached plaintext. Retain one handle for the exact-length check and every page.
+    let file = filesystem
+        .open_existing(context.directory, &run_name(run.object_id)?)
+        .map_err(|error| {
+            if error.kind() == AdapterErrorKind::NotFound {
+                StorageError::IntegrityFailure
+            } else {
+                error.into()
+            }
+        })?;
+    let expected_len = run
+        .page_count
+        .checked_mul(ENCODED_PAGE_BYTES)
+        .ok_or(StorageError::ResourceLimit)?;
+    if filesystem.metadata(&file)?.len != expected_len {
+        return Err(StorageError::IntegrityFailure);
+    }
+
+    let mut digest = Sha256::new();
+    digest.update(b"USTE-INDEX-RUN-V1\0");
+    digest.update(root.scope.namespace().as_bytes());
+    digest.update(root.revision.get().to_be_bytes());
+    digest.update(root.index_profile);
+    digest.update([run.family]);
+    let mut stats = IndexReadStats::default();
+    let mut previous_key: Option<Vec<u8>> = None;
+    let mut current_key = Vec::new();
+    let mut current_value = Vec::new();
+    let mut current_total = None;
+    let mut entries = 0_u64;
+    let mut logical_bytes = 0_u64;
+    for page_index in 0..run.page_count {
+        let offset = page_index
+            .checked_mul(ENCODED_PAGE_BYTES)
+            .ok_or(StorageError::ResourceLimit)?;
+        let mut encoded = vec![0_u8; ENCODED_PAGE_BYTES as usize];
+        read_exact_at(filesystem, &file, offset, &mut encoded).map_err(|error| {
+            if error.kind() == AdapterErrorKind::UnexpectedEof {
+                StorageError::IntegrityFailure
+            } else {
+                error.into()
+            }
+        })?;
+        let envelope = EncryptedEnvelope::decode(&encoded).map_err(index_crypto_error)?;
+        let plaintext = vault
+            .decrypt(
+                index_context(
+                    context,
+                    root.scope.namespace(),
+                    run.object_id,
+                    page_index
+                        .checked_add(1)
+                        .ok_or(StorageError::ResourceLimit)?,
+                    FrameClass::Small4KiB,
+                    ObjectRole::IndexPage,
+                ),
+                &envelope,
+            )
+            .map_err(index_crypto_error)?;
+        if plaintext.as_slice().len() != INDEX_PAGE_BYTES {
+            return Err(StorageError::IntegrityFailure);
+        }
+        stats.pages_read = stats.pages_read.saturating_add(1);
+        let parsed = ParsedPage::new(plaintext.as_slice(), root, run, page_index)?;
+        for fragment in parsed.fragments() {
+            let fragment = fragment?;
+            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+            if current_total.is_none() {
+                if fragment.offset != 0
+                    || previous_key
+                        .as_ref()
+                        .is_some_and(|previous| previous.as_slice() >= fragment.key)
+                {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                // Reject the complete logical entry before reserving its declared value length.
+                // The first authenticated fragment carries the canonical key and total length;
+                // later fragments must repeat both exactly.
+                let entry_bytes = u64::try_from(
+                    fragment
+                        .key
+                        .len()
+                        .checked_add(fragment.total_len)
+                        .ok_or(StorageError::ResourceLimit)?,
+                )
+                .map_err(|_| StorageError::ResourceLimit)?;
+                let projected_bytes = logical_bytes
+                    .checked_add(entry_bytes)
+                    .ok_or(StorageError::ResourceLimit)?;
+                if projected_bytes > limits.maximum_logical_bytes {
+                    return Err(StorageError::ResourceLimit);
+                }
+                current_key.extend_from_slice(fragment.key);
+                current_total = Some(fragment.total_len);
+                current_value
+                    .try_reserve_exact(fragment.total_len)
+                    .map_err(|_| StorageError::ResourceLimit)?;
+            }
+            if current_key.as_slice() != fragment.key
+                || current_total != Some(fragment.total_len)
+                || current_value.len() != fragment.offset
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            current_value.extend_from_slice(fragment.value);
+            if current_value.len() == fragment.total_len {
+                entries = entries.checked_add(1).ok_or(StorageError::ResourceLimit)?;
+                if entries > run.entry_count {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                if entries > limits.maximum_entries {
+                    return Err(StorageError::ResourceLimit);
+                }
+                let entry_bytes = u64::try_from(
+                    current_key
+                        .len()
+                        .checked_add(current_value.len())
+                        .ok_or(StorageError::ResourceLimit)?,
+                )
+                .map_err(|_| StorageError::ResourceLimit)?;
+                logical_bytes = logical_bytes
+                    .checked_add(entry_bytes)
+                    .ok_or(StorageError::ResourceLimit)?;
+                debug_assert!(logical_bytes <= limits.maximum_logical_bytes);
+                digest.update(
+                    u32::try_from(current_key.len())
+                        .map_err(|_| StorageError::ResourceLimit)?
+                        .to_be_bytes(),
+                );
+                digest.update(
+                    u64::try_from(current_value.len())
+                        .map_err(|_| StorageError::ResourceLimit)?
+                        .to_be_bytes(),
+                );
+                digest.update(&current_key);
+                digest.update(&current_value);
+                visitor(&current_key, &current_value)?;
+                previous_key = Some(core::mem::take(&mut current_key));
+                current_value.clear();
+                current_total = None;
+            }
+        }
+    }
+    if current_total.is_some()
+        || entries != run.entry_count
+        || <[u8; 32]>::from(digest.finalize()) != run.logical_digest
+        || filesystem.metadata(&file)?.len != expected_len
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
+    stats.result_bytes = logical_bytes;
+    Ok(IndexRunReadReport {
+        entries,
+        logical_bytes,
+        stats,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

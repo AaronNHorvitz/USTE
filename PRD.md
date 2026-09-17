@@ -131,6 +131,11 @@ root with complete current/history, adjacency, provenance, reverse and policy fa
 requires the exact live snapshot and fully scrubbed encrypted pages; it neither seeds recovery nor
 becomes commit authority. Full-memory publication/admission and bounded recovery remain open.
 
+Decision 0030 adds an explicitly bounded, certificate-rechecked full-run visitor and semantic
+reconstruction of all `graph-state-v1` families without a monolithic checkpoint byte buffer. The
+ordinary reconstructed reducer still retains full state in memory and lacks coordinator retry/blob
+metadata, so it is an intermediate candidate rather than larger-than-memory recovery or authority.
+
 ## Release gates
 
 | Gate | Required outcome |

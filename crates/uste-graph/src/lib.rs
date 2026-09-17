@@ -30,6 +30,7 @@ pub use state::{
     MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS,
 };
 pub use state_disk::{
-    DerivedGraphStateRoot, GRAPH_STATE_PROFILE_V1, load_graph_state_roots,
-    publish_graph_state_root, scrub_graph_state_root,
+    DerivedGraphStateRoot, GRAPH_STATE_PROFILE_V1, GraphStateLoadLimits, GraphStateLoadReport,
+    GraphStateRootCandidate, load_graph_state_root_candidates, load_graph_state_roots,
+    publish_graph_state_root, reconstruct_graph_state_candidate, scrub_graph_state_root,
 };

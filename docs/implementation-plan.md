@@ -74,6 +74,11 @@ scrubbed certificate-bound roots from the current snapshot. This is format/root 
 disk-backed reducer: construction and semantic admission still traverse full in-memory state and no
 root recovery reader exists yet.
 
+Decision 0030 supplies that bounded root reader and semantic reconstruction candidate. It removes
+the contiguous checkpoint payload from this path but still constructs a complete in-memory
+`GraphState`, reads candidates twice, and lacks coordinator metadata/seed integration. T-20 next
+needs disk-backed base/overlay state, scratch merge and authenticated coordinator pairing.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

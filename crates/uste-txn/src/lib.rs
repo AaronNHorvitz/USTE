@@ -23,8 +23,8 @@ use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
     CheckpointStreamCandidate, CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot,
     EMPTY_BLOB_INVENTORY_DIGEST, IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor,
-    IndexScan, IndexScrubReport, OwnershipFileSystem, PageCache, RecoveredCheckpoint,
-    RecoveredIndexRoot,
+    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScrubReport,
+    OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -858,6 +858,27 @@ where
                 maximum_result_bytes,
                 cache,
             )
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted recovery/maintenance stream over one complete immutable run. Callers must keep
+    /// visitor effects private until the terminal count and digest checks return success.
+    pub fn visit_index_run(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .visit_index_run(filesystem, root, family, limits, visitor)
             .map_err(TransactionError::Storage)
     }
 

@@ -32,8 +32,9 @@ pub use checkpoint::{
 };
 pub use index::{
     DEFAULT_INDEX_CACHE_BYTES, DurableIndexRoot, INDEX_PAGE_BYTES, IndexEntry, IndexReadStats,
-    IndexRootInput, IndexRunDescriptor, IndexScan, IndexScanEntry, IndexScrubReport,
-    MAX_INDEX_CACHE_BYTES, MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_KEY_BYTES, MAX_INDEX_PAGES_PER_RUN,
-    MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUNS, MAX_INDEX_SCAN_RESULTS, MAX_INDEX_VALUE_BYTES,
+    IndexRootInput, IndexRunDescriptor, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor,
+    IndexScan, IndexScanEntry, IndexScrubReport, MAX_INDEX_CACHE_BYTES, MAX_INDEX_ENTRIES_PER_RUN,
+    MAX_INDEX_KEY_BYTES, MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RESULT_BYTES,
+    MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_RUNS, MAX_INDEX_SCAN_RESULTS, MAX_INDEX_VALUE_BYTES,
     PageCache, RecoveredIndexRoot,
 };

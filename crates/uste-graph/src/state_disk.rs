@@ -3,20 +3,24 @@
 //! This profile remains optional and read-only. The authenticated journal is the only commit
 //! authority, and this module does not construct reducer state during recovery.
 
+use std::collections::BTreeMap;
+
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_storage::{
-    DurableIndexRoot, IndexEntry, IndexRootInput, IndexRunDescriptor, IndexScrubReport,
-    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
+    DurableIndexRoot, IndexEntry, IndexRootInput, IndexRunDescriptor, IndexRunReadLimits,
+    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_ENTRIES_PER_RUN,
+    MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES, OwnershipFileSystem, PageCache,
+    RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
-use uste_txn::{CheckpointState, CommitCoordinator, TransactionError};
-use uste_types::{CommitRevision, RecordRef};
+use uste_txn::{CheckpointState, CheckpointStateError, CommitCoordinator, TransactionError};
+use uste_types::{CommitRevision, RecordId, RecordRef};
 
-use crate::codec::encode_result_policy;
+use crate::codec::{decode_result_policy, encode_result_policy};
 use crate::{
-    GraphCodecError, GraphDiskError, GraphSnapshot, GraphState, Record, encode_stored_record,
-    state::ReverseReference,
+    GraphCodecError, GraphDiskError, GraphSnapshot, GraphState, Record, decode_stored_record,
+    encode_stored_record, state::ReverseReference,
 };
 
 pub const GRAPH_STATE_PROFILE_V1: [u8; 32] = [
@@ -36,6 +40,88 @@ const FAMILY_COUNT: u8 = 8;
 
 pub struct DerivedGraphStateRoot {
     root: RecoveredIndexRoot,
+}
+
+/// Authenticated, journal-anchored root that has not yet been semantically reconstructed.
+///
+/// This is intentionally distinct from `DerivedGraphStateRoot`, whose bytes have already been
+/// compared with a live reducer snapshot.
+pub struct GraphStateRootCandidate {
+    root: RecoveredIndexRoot,
+}
+
+impl core::fmt::Debug for GraphStateRootCandidate {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphStateRootCandidate")
+            .field("revision", &self.root.revision())
+            .field("generation", &self.root.generation())
+            .finish_non_exhaustive()
+    }
+}
+
+impl GraphStateRootCandidate {
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.root.revision()
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.root.generation()
+    }
+}
+
+/// Caller-selected aggregate reconstruction bounds. These are intentionally independent of the
+/// legacy monolithic checkpoint caps; the accepted state-root format permits larger runs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GraphStateLoadLimits {
+    maximum_records: u64,
+    maximum_versions: u64,
+    maximum_policy_history: u64,
+    maximum_total_entries: u64,
+    maximum_total_pages: u64,
+    maximum_logical_bytes: u64,
+}
+
+impl GraphStateLoadLimits {
+    pub const fn new(
+        maximum_records: u64,
+        maximum_versions: u64,
+        maximum_policy_history: u64,
+        maximum_total_entries: u64,
+        maximum_total_pages: u64,
+        maximum_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        if maximum_records > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_versions > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_policy_history > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_total_entries == 0
+            || maximum_total_entries > MAX_INDEX_ENTRIES_PER_RUN * FAMILY_COUNT as u64
+            || maximum_total_pages == 0
+            || maximum_total_pages > MAX_INDEX_PAGES_PER_RUN * FAMILY_COUNT as u64
+            || maximum_logical_bytes == 0
+            || maximum_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES * FAMILY_COUNT as u64
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(Self {
+            maximum_records,
+            maximum_versions,
+            maximum_policy_history,
+            maximum_total_entries,
+            maximum_total_pages,
+            maximum_logical_bytes,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphStateLoadReport {
+    pub runs: u64,
+    pub entries: u64,
+    pub logical_bytes: u64,
+    pub pages_read: u64,
 }
 
 impl core::fmt::Debug for DerivedGraphStateRoot {
@@ -157,6 +243,226 @@ where
     Ok(admitted)
 }
 
+/// Discover authenticated roots on the journal certificate chain without comparing them to the
+/// already-live reducer. Returned handles remain candidates until full semantic reconstruction.
+pub fn load_graph_state_root_candidates<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+) -> Result<Vec<GraphStateRootCandidate>, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    Ok(coordinator
+        .load_index_roots(filesystem, GRAPH_STATE_PROFILE_V1)?
+        .into_iter()
+        .filter(|root| root.reducer_profile() == &GraphState::REDUCER_PROFILE)
+        .map(|root| GraphStateRootCandidate { root })
+        .collect())
+}
+
+/// Reconstruct a privately staged graph state from a candidate and return it only after every run,
+/// persisted invariant, derived family and logical digest has been verified.
+///
+/// This removes a monolithic encoded-checkpoint buffer but the returned `GraphState` still owns its
+/// complete histories and indexes in memory; it is not the larger-than-memory T-20 endpoint.
+pub fn reconstruct_graph_state_candidate<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphStateLoadLimits,
+) -> Result<(GraphState, GraphStateLoadReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if candidate.root.reducer_profile() != &GraphState::REDUCER_PROFILE
+        || candidate.root.index_profile() != &GRAPH_STATE_PROFILE_V1
+        || candidate.root.scope() != coordinator.scope()
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let metadata_run = candidate
+        .root
+        .runs()
+        .find(|run| run.family() == FAMILY_METADATA)
+        .ok_or(GraphDiskError::IndexCorrupt)?;
+    if metadata_run.entry_count() != 1 {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    let mut budget = LoadBudget::new(limits);
+    let mut metadata = None;
+    visit_candidate_family(
+        coordinator,
+        filesystem,
+        candidate,
+        FAMILY_METADATA,
+        1,
+        &mut budget,
+        &mut |key, value| {
+            if metadata.is_some() || key != b"graph-state-v1" {
+                return Err(StorageError::IntegrityFailure);
+            }
+            metadata = Some(parse_metadata(value, candidate.revision())?);
+            Ok(())
+        },
+    )?;
+    let metadata = metadata.ok_or(GraphDiskError::IndexCorrupt)?;
+    let family_counts = metadata.family_counts()?;
+    validate_candidate_shape(candidate, metadata, &family_counts, limits)?;
+
+    let scope = candidate.root.scope();
+    let revision = candidate.revision();
+    let mut records = BTreeMap::new();
+    if family_counts[usize::from(FAMILY_CURRENT_RECORD - 1)] != 0 {
+        visit_candidate_family(
+            coordinator,
+            filesystem,
+            candidate,
+            FAMILY_CURRENT_RECORD,
+            metadata.current,
+            &mut budget,
+            &mut |key, value| {
+                let id = record_key(scope, key)?;
+                let record = decode_stored_record(value).map_err(codec_storage_error)?;
+                if record.id() != id
+                    || record.modified_revision() > revision
+                    || records.insert(id, record).is_some()
+                {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                Ok(())
+            },
+        )?;
+    }
+
+    let mut history: BTreeMap<RecordRef, Vec<Record>> = BTreeMap::new();
+    if family_counts[usize::from(FAMILY_RECORD_HISTORY - 1)] != 0 {
+        visit_candidate_family(
+            coordinator,
+            filesystem,
+            candidate,
+            FAMILY_RECORD_HISTORY,
+            metadata.history,
+            &mut budget,
+            &mut |key, value| {
+                if key.len() != 24 {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                let id = record_key(scope, &key[..16])?;
+                let key_revision = read_u64_be(&key[16..])?;
+                let record = decode_stored_record(value).map_err(codec_storage_error)?;
+                if record.id() != id || record.modified_revision().get() != key_revision {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                history.entry(id).or_default().push(record);
+                Ok(())
+            },
+        )?;
+    }
+
+    let mut policy = None;
+    let mut policy_history = BTreeMap::new();
+    let policy_entries = family_counts[usize::from(FAMILY_POLICY - 1)];
+    if policy_entries != 0 {
+        visit_candidate_family(
+            coordinator,
+            filesystem,
+            candidate,
+            FAMILY_POLICY,
+            policy_entries,
+            &mut budget,
+            &mut |key, value| {
+                let decoded = decode_result_policy(value).map_err(codec_storage_error)?;
+                match key {
+                    [0] => {
+                        let decoded = decoded.ok_or(StorageError::IntegrityFailure)?;
+                        if metadata.current_policy != 1 || policy.replace(decoded).is_some() {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                    }
+                    [1, revision_bytes @ ..] if revision_bytes.len() == 8 => {
+                        let policy_revision = CommitRevision::new(read_u64_be(revision_bytes)?)
+                            .map_err(|_| StorageError::IntegrityFailure)?;
+                        let decoded = decoded.ok_or(StorageError::IntegrityFailure)?;
+                        if policy_history.insert(policy_revision, decoded).is_some() {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                    }
+                    _ => return Err(StorageError::IntegrityFailure),
+                }
+                Ok(())
+            },
+        )?;
+    }
+
+    let state = GraphState::from_persisted_parts_with_derived_counts(
+        scope,
+        revision,
+        records,
+        history,
+        policy,
+        policy_history,
+        [
+            metadata.outgoing,
+            metadata.incoming,
+            metadata.provenance,
+            metadata.reverse,
+        ],
+    )
+    .map_err(checkpoint_state_disk_error)?;
+    let snapshot = state.current_snapshot();
+
+    for family in [
+        FAMILY_OUTGOING,
+        FAMILY_INCOMING,
+        FAMILY_PROVENANCE,
+        FAMILY_REVERSE,
+    ] {
+        let expected_count = family_counts[usize::from(family - 1)];
+        let mut expected = family_entries(snapshot, revision, family)?;
+        if expected_count == 0 {
+            if expected.next().is_some() {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            continue;
+        }
+        visit_candidate_family(
+            coordinator,
+            filesystem,
+            candidate,
+            family,
+            expected_count,
+            &mut budget,
+            &mut |key, value| {
+                let expected = expected.next().ok_or(StorageError::IntegrityFailure)??;
+                if expected.key != key || expected.value != value {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                Ok(())
+            },
+        )?;
+        if expected.next().is_some() {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+    }
+
+    let logical_digest =
+        GraphState::logical_state_digest(snapshot).map_err(checkpoint_state_disk_error)?;
+    let expected = expected_runs(snapshot, revision)?;
+    if logical_digest != *candidate.root.logical_state_digest()
+        || !runs_match(candidate.root.runs(), &expected)
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    Ok((state, budget.report))
+}
+
 pub fn scrub_graph_state_root<F, W, E, I>(
     coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
     filesystem: &mut F,
@@ -171,6 +477,241 @@ where
 {
     validate_current_root(coordinator, root)?;
     Ok(coordinator.scrub_index_root(filesystem, &root.root, cache)?)
+}
+
+#[derive(Clone, Copy)]
+struct GraphStateMetadata {
+    current: u64,
+    history: u64,
+    outgoing: u64,
+    incoming: u64,
+    provenance: u64,
+    reverse: u64,
+    policy_history: u64,
+    current_policy: u64,
+}
+
+impl GraphStateMetadata {
+    fn family_counts(self) -> Result<[u64; 8], GraphDiskError> {
+        let policy = self
+            .policy_history
+            .checked_add(self.current_policy)
+            .ok_or(GraphDiskError::IndexCorrupt)?;
+        Ok([
+            1,
+            self.current,
+            self.history,
+            self.outgoing,
+            self.incoming,
+            self.provenance,
+            self.reverse,
+            policy,
+        ])
+    }
+}
+
+struct LoadBudget {
+    maximum_pages: u64,
+    maximum_logical_bytes: u64,
+    report: GraphStateLoadReport,
+}
+
+impl LoadBudget {
+    const fn new(limits: GraphStateLoadLimits) -> Self {
+        Self {
+            maximum_pages: limits.maximum_total_pages,
+            maximum_logical_bytes: limits.maximum_logical_bytes,
+            report: GraphStateLoadReport {
+                runs: 0,
+                entries: 0,
+                logical_bytes: 0,
+                pages_read: 0,
+            },
+        }
+    }
+
+    fn remaining_logical_bytes(&self) -> Result<u64, GraphDiskError> {
+        self.maximum_logical_bytes
+            .checked_sub(self.report.logical_bytes)
+            .filter(|remaining| *remaining != 0)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))
+    }
+
+    fn remaining_pages(&self) -> Result<u64, GraphDiskError> {
+        self.maximum_pages
+            .checked_sub(self.report.pages_read)
+            .filter(|remaining| *remaining != 0)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))
+    }
+
+    fn add(&mut self, run: &IndexRunReadReport) -> Result<(), GraphDiskError> {
+        self.report.runs = self
+            .report
+            .runs
+            .checked_add(1)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.report.entries = self
+            .report
+            .entries
+            .checked_add(run.entries)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.report.logical_bytes = self
+            .report
+            .logical_bytes
+            .checked_add(run.logical_bytes)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.report.pages_read = self
+            .report
+            .pages_read
+            .checked_add(run.stats.pages_read)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        if self.report.logical_bytes > self.maximum_logical_bytes {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        if self.report.pages_read > self.maximum_pages {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_candidate_family<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    family: u8,
+    expected_entries: u64,
+    budget: &mut LoadBudget,
+    visitor: &mut IndexRunVisitor<'_>,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let remaining = budget.remaining_logical_bytes()?;
+    let remaining_pages = budget.remaining_pages()?;
+    let limits = IndexRunReadLimits::new(
+        remaining_pages.min(MAX_INDEX_PAGES_PER_RUN),
+        expected_entries,
+        remaining.min(MAX_INDEX_RUN_LOGICAL_BYTES),
+    )?;
+    let report =
+        coordinator.visit_index_run(filesystem, &candidate.root, family, limits, visitor)?;
+    if report.entries != expected_entries {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    budget.add(&report)
+}
+
+fn parse_metadata(
+    value: &[u8],
+    expected_revision: CommitRevision,
+) -> Result<GraphStateMetadata, StorageError> {
+    if value.len() != 80
+        || &value[..4] != b"UGSM"
+        || value[4] != 1
+        || value[5] != 0
+        || value[6..8] != [0, 0]
+        || read_u64_be(&value[8..16])? != expected_revision.get()
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let mut counts = [0_u64; 8];
+    for (index, count) in counts.iter_mut().enumerate() {
+        let start = 16 + index * 8;
+        *count = read_u64_be(&value[start..start + 8])?;
+    }
+    Ok(GraphStateMetadata {
+        current: counts[0],
+        history: counts[1],
+        outgoing: counts[2],
+        incoming: counts[3],
+        provenance: counts[4],
+        reverse: counts[5],
+        policy_history: counts[6],
+        current_policy: counts[7],
+    })
+}
+
+fn validate_candidate_shape(
+    candidate: &GraphStateRootCandidate,
+    metadata: GraphStateMetadata,
+    family_counts: &[u64; 8],
+    limits: GraphStateLoadLimits,
+) -> Result<(), GraphDiskError> {
+    if metadata.current_policy > 1
+        || (metadata.policy_history != 0 && metadata.current_policy != 1)
+        || family_counts
+            .iter()
+            .any(|count| *count > MAX_INDEX_ENTRIES_PER_RUN)
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let total = family_counts.iter().try_fold(0_u64, |total, count| {
+        total
+            .checked_add(*count)
+            .ok_or(GraphDiskError::IndexCorrupt)
+    })?;
+    let total_pages = candidate.root.runs().try_fold(0_u64, |total, run| {
+        total
+            .checked_add(run.page_count())
+            .ok_or(GraphDiskError::IndexCorrupt)
+    })?;
+    let expected = family_counts
+        .iter()
+        .enumerate()
+        .filter(|(_, count)| **count != 0)
+        .map(|(index, count)| (u8::try_from(index + 1).unwrap(), *count));
+    if !candidate
+        .root
+        .runs()
+        .map(|run| (run.family(), run.entry_count()))
+        .eq(expected)
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    if metadata.current > limits.maximum_records
+        || metadata.history > limits.maximum_versions
+        || metadata.policy_history > limits.maximum_policy_history
+        || total > limits.maximum_total_entries
+        || total_pages > limits.maximum_total_pages
+    {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    usize::try_from(metadata.current)
+        .and_then(|_| usize::try_from(metadata.history))
+        .and_then(|_| usize::try_from(metadata.policy_history))
+        .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    Ok(())
+}
+
+fn record_key(scope: uste_types::NamespaceRef, key: &[u8]) -> Result<RecordRef, StorageError> {
+    let bytes: [u8; 16] = key.try_into().map_err(|_| StorageError::IntegrityFailure)?;
+    Ok(RecordRef::new(
+        scope.database(),
+        scope.namespace(),
+        RecordId::from_bytes(bytes),
+    ))
+}
+
+fn read_u64_be(bytes: &[u8]) -> Result<u64, StorageError> {
+    Ok(u64::from_be_bytes(
+        bytes
+            .try_into()
+            .map_err(|_| StorageError::IntegrityFailure)?,
+    ))
+}
+
+fn checkpoint_state_disk_error(error: CheckpointStateError) -> GraphDiskError {
+    match error {
+        CheckpointStateError::ResourceLimit => GraphDiskError::Storage(StorageError::ResourceLimit),
+        CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
+            GraphDiskError::IndexCorrupt
+        }
+    }
 }
 
 fn validate_current_root<F, W, E, I>(
@@ -272,7 +813,7 @@ fn family_entries<'a>(
     revision: CommitRevision,
     family: u8,
 ) -> Result<EntryIterator<'a>, GraphDiskError> {
-    let records: &'a std::collections::BTreeMap<RecordRef, Record> = &snapshot.records;
+    let records: &'a BTreeMap<RecordRef, Record> = &snapshot.records;
     let entries: EntryIterator<'a> = match family {
         FAMILY_METADATA => Box::new(core::iter::once(Ok(IndexEntry {
             key: b"graph-state-v1".to_vec(),
@@ -423,7 +964,7 @@ fn reverse_value(reference: ReverseReference) -> Vec<u8> {
 }
 
 fn relationship_neighbor(
-    records: &std::collections::BTreeMap<RecordRef, Record>,
+    records: &BTreeMap<RecordRef, Record>,
     entity: RecordRef,
     relationship: RecordRef,
 ) -> Result<RecordRef, StorageError> {
@@ -736,6 +1277,34 @@ mod tests {
                 "27273b10d66f68ad64d24bf5baa321a444c76dca20c14ae07d6b6e62eac85d59",
             ]
         );
+    }
+
+    #[test]
+    fn derived_counts_reject_understatement_before_global_index_rebuild() {
+        let (snapshot, _) = canonical_fixture();
+        assert_eq!(
+            GraphState::from_persisted_parts_with_derived_counts(
+                snapshot.scope(),
+                snapshot.revision().unwrap(),
+                snapshot.records.clone(),
+                snapshot.history.clone(),
+                snapshot.policy.clone(),
+                snapshot.policy_history.clone(),
+                [0, 1, 1, 3],
+            ),
+            Err(CheckpointStateError::Invalid)
+        );
+        let rebuilt = GraphState::from_persisted_parts_with_derived_counts(
+            snapshot.scope(),
+            snapshot.revision().unwrap(),
+            snapshot.records.clone(),
+            snapshot.history.clone(),
+            snapshot.policy.clone(),
+            snapshot.policy_history.clone(),
+            [1, 1, 1, 3],
+        )
+        .unwrap();
+        assert_eq!(rebuilt.current_snapshot(), &snapshot);
     }
 
     #[test]

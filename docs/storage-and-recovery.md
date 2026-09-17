@@ -178,8 +178,16 @@ materialization assumptions; frozen `graph-current-v1` is not mutated. BM-06 rem
 Decision 0029 adds a separate `graph-state-v1` optional root containing metadata, current records,
 record history, adjacency, provenance, reverse references and policy history. Publication and load
 independently reproduce every run digest from the exact live snapshot and bind the root to the
-current journal certificate. It is not a recovery seed or second authority; bounded full-run reads,
-scratch merge and root-based reducer reconstruction remain future T-20 work.
+current journal certificate. It is not a recovery seed or second authority; it initially left
+bounded full-run reads, scratch merge and root-based reducer reconstruction to later T-20 work.
+
+Decision 0030 adds a privileged full-run visitor with explicit page/entry/logical-byte budgets, one stable
+file handle, one-entry assembly, exact length and terminal count/digest checks. Graph-state
+candidates use it to reconstruct and semantically verify all families without collecting a run or
+building a monolithic checkpoint byte buffer. Candidate discovery currently scrubs first under
+absolute carrier maxima; caller `GraphStateLoadLimits` apply only to the subsequent reconstruction
+pass. Ordinary `GraphState` remains full-memory, and coordinator metadata is not present in the
+root.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

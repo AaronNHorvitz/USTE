@@ -78,6 +78,8 @@ pub struct MemoryFileSystem {
     file_limit: usize,
     files: BTreeMap<u64, MemoryFileState>,
     directories: BTreeMap<u64, MemoryDirectoryState>,
+    #[cfg(test)]
+    open_existing_calls: u64,
 }
 
 impl Default for MemoryFileSystem {
@@ -97,6 +99,8 @@ impl MemoryFileSystem {
             file_limit,
             files: BTreeMap::new(),
             directories,
+            #[cfg(test)]
+            open_existing_calls: 0,
         }
     }
 
@@ -162,6 +166,16 @@ impl MemoryFileSystem {
         self.files
             .get_mut(&handle.node)
             .ok_or_else(|| AdapterErrorKind::NotFound.into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_reset_open_existing_calls(&mut self) {
+        self.open_existing_calls = 0;
+    }
+
+    #[cfg(test)]
+    pub(crate) const fn test_open_existing_calls(&self) -> u64 {
+        self.open_existing_calls
     }
 
     #[cfg(test)]
@@ -351,6 +365,10 @@ impl FileSystem for MemoryFileSystem {
         directory: &Self::Directory,
         name: &EntryName,
     ) -> Result<Self::File, AdapterError> {
+        #[cfg(test)]
+        {
+            self.open_existing_calls = self.open_existing_calls.saturating_add(1);
+        }
         match self.directory(directory)?.volatile.get(name) {
             Some(Node::File(node)) => Ok(MemoryFile {
                 node: *node,
