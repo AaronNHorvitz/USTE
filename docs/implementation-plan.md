@@ -95,6 +95,13 @@ snapshot access. Decision 0038 lets that proof-backed result enter the authorita
 only after reducer verification binds exact request bytes, target revision and current base. Live
 publication, postcommit validation and recovery remain full-memory.
 
+Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
+coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
+only to a currently `ManageSchema`-authorized operator with an issuer-bound root capability. The
+telemetry is cardinality-sensitive. Clearing establishes only an empty USTE userspace cache;
+qualifying reports must separately describe process and host storage-cache conditions. It is
+instrumentation, not BM-01 evidence.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

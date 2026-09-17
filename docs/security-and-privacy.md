@@ -64,6 +64,11 @@ uncommitted and foreign objects share the same content-free error; this is not a
 claim. Graph policy is durable and must exactly match the trusted local adapter at open; initial
 installation is restricted to privileged raw bootstrap and absence fails closed.
 
+Decision 0039 treats index cache/I/O diagnostics as privileged, cardinality-sensitive operator
+telemetry. Report and cache-clear operations require a fresh `ManageSchema` decision, an opaque
+root bound to the issuing authorized coordinator and a certain transaction outcome; revoked,
+foreign-instance and outcome-uncertain calls fail before observing or changing the cache.
+
 Decision 0023 composes import authorization across namespace `Import`/`Commit`, the job, immutable
 source and mapping Evidence, graph operations and every spatial external reference. Job projection
 requires `ReadBlob` plus current `ReadRecord` access to both embedded Evidence records before it

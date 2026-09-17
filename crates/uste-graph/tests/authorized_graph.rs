@@ -3,9 +3,9 @@ use uste_crypto::{
 };
 use uste_graph::{
     AdjacencyDirection, AssertionAction, DurablePolicyMutation, Expected, GraphDiskError,
-    GraphDiskReadContext, GraphError, GraphReadOutput, GraphReadRequest, GraphState,
-    GraphTransaction, NewAssertion, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation,
-    RecordVersion, ValidTime, encode_transaction,
+    GraphError, GraphReadOutput, GraphReadRequest, GraphState, GraphTransaction, NewAssertion,
+    NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, RecordVersion, ValidTime,
+    encode_transaction,
 };
 use uste_policy::{
     Action, AuthenticationError, NamespaceGrant, NamespacePolicy, PermissionSet, PolicyKernel,
@@ -13,7 +13,12 @@ use uste_policy::{
 };
 use uste_replay::{capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
-    ClockObservation, EntryName, fault::ScriptedClock, journal::DurableKeyEnvelope,
+    ClockObservation, EntryName,
+    fault::{
+        FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation as FaultOperation,
+        ScriptedClock,
+    },
+    journal::DurableKeyEnvelope,
     memory::MemoryFileSystem,
 };
 use uste_txn::{
@@ -165,12 +170,21 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         Action::ExpandGraph,
         Action::Commit,
     ];
-    let initial_policy = policy(
+    let mut initial_policy = policy(
         1,
         &[right, correction, hidden_missing],
         ADMIN_ACTIONS,
         &bob_read_actions,
     );
+    initial_policy
+        .grant(
+            PrincipalDigest::from_bytes([5; 32]),
+            NamespaceGrant::new(
+                PermissionSet::from_actions([Action::ManageSchema]),
+                limits(),
+            ),
+        )
+        .unwrap();
     let install = encode_transaction(&GraphTransaction::with_policy_mutation(
         scope(),
         Vec::new(),
@@ -179,7 +193,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         },
     ))
     .unwrap();
-    let mut filesystem = MemoryFileSystem::default();
+    let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let mut raw = CommitCoordinator::create(
         &mut filesystem,
         scope(),
@@ -207,6 +221,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
     let policy_kernel = kernel(initial_policy);
     let admin = policy_kernel.authenticate(&mut AuthAdapter, &3).unwrap();
     let bob = policy_kernel.authenticate(&mut AuthAdapter, &4).unwrap();
+    let operator = policy_kernel.authenticate(&mut AuthAdapter, &5).unwrap();
     let mut coordinator = AuthorizedCoordinator::new(raw, policy_kernel).unwrap();
     assert_eq!(
         coordinator.replace_namespace_policy(
@@ -366,18 +381,80 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         panic!("adjacent")
     };
     assert_eq!(admin_neighbors.len(), 1);
+    let empty_cache = coordinator.index_report(&admin, &disk_root).unwrap();
+    assert_eq!(empty_cache.accounted_bytes, 0);
+    assert_eq!(empty_cache.completed_authorized_reads, 0);
+    assert_eq!(empty_cache.completed_index_operations, 0);
+    assert_eq!(empty_cache.pages_read, 0);
+    assert_eq!(empty_cache.fragments_visited, 0);
+    assert_eq!(empty_cache.result_bytes, 0);
+    assert_eq!(
+        coordinator.index_report(&bob, &disk_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    );
+    assert_eq!(
+        coordinator.clear_index_cache(&bob, &disk_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    );
+    assert_eq!(
+        coordinator.index_report(&operator, &disk_root).unwrap(),
+        empty_cache
+    );
     assert_eq!(
         coordinator
-            .read_indexed(
-                &mut filesystem,
-                &admin,
-                &admin_view,
-                GraphDiskReadContext::new(&disk_root),
-                &request,
-            )
+            .read_indexed(&mut filesystem, &admin, &admin_view, &disk_root, &request,)
             .unwrap(),
         GraphReadOutput::Adjacent(admin_neighbors.clone())
     );
+    let cold_cache = coordinator.index_report(&admin, &disk_root).unwrap();
+    assert!(cold_cache.accounted_bytes > 0);
+    assert!(cold_cache.misses > empty_cache.misses);
+    assert_eq!(cold_cache.completed_authorized_reads, 1);
+    assert_eq!(cold_cache.completed_index_operations, 3);
+    assert!(cold_cache.pages_read > 0);
+    assert!(cold_cache.fragments_visited > 0);
+    assert!(cold_cache.result_bytes > 0);
+    assert_eq!(
+        coordinator
+            .read_indexed(&mut filesystem, &admin, &admin_view, &disk_root, &request,)
+            .unwrap(),
+        GraphReadOutput::Adjacent(admin_neighbors.clone())
+    );
+    let warm_cache = coordinator.index_report(&admin, &disk_root).unwrap();
+    assert!(warm_cache.hits > cold_cache.hits);
+    assert_eq!(warm_cache.completed_authorized_reads, 2);
+    assert_eq!(warm_cache.completed_index_operations, 6);
+    assert_eq!(warm_cache.pages_read, cold_cache.pages_read);
+    assert!(warm_cache.fragments_visited > cold_cache.fragments_visited);
+    assert!(warm_cache.result_bytes > cold_cache.result_bytes);
+    coordinator.clear_index_cache(&admin, &disk_root).unwrap();
+    let cleared_cache = coordinator.index_report(&admin, &disk_root).unwrap();
+    assert_eq!(cleared_cache.accounted_bytes, 0);
+    assert_eq!(cleared_cache.hits, warm_cache.hits);
+    assert_eq!(cleared_cache.misses, warm_cache.misses);
+    assert_eq!(cleared_cache.completed_authorized_reads, 2);
+    assert_eq!(cleared_cache.completed_index_operations, 6);
+    assert_eq!(cleared_cache.pages_read, warm_cache.pages_read);
+    assert_eq!(
+        cleared_cache.fragments_visited,
+        warm_cache.fragments_visited
+    );
+    assert_eq!(cleared_cache.result_bytes, warm_cache.result_bytes);
+    assert_eq!(
+        coordinator
+            .read_indexed(&mut filesystem, &admin, &admin_view, &disk_root, &request,)
+            .unwrap(),
+        GraphReadOutput::Adjacent(admin_neighbors.clone())
+    );
+    let recold_cache = coordinator.index_report(&admin, &disk_root).unwrap();
+    assert!(recold_cache.misses > cleared_cache.misses);
+    assert_eq!(recold_cache.completed_authorized_reads, 3);
+    assert_eq!(recold_cache.completed_index_operations, 9);
+    assert!(recold_cache.pages_read > cleared_cache.pages_read);
     let GraphReadOutput::Adjacent(bob_neighbors) =
         coordinator.read(&bob, &bob_view, &request).unwrap()
     else {
@@ -386,13 +463,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
     assert!(bob_neighbors.is_empty());
     assert_eq!(
         coordinator
-            .read_indexed(
-                &mut filesystem,
-                &bob,
-                &bob_view,
-                GraphDiskReadContext::new(&disk_root),
-                &request,
-            )
+            .read_indexed(&mut filesystem, &bob, &bob_view, &disk_root, &request,)
             .unwrap(),
         GraphReadOutput::Adjacent(bob_neighbors)
     );
@@ -402,13 +473,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         assert_eq!(reference, GraphReadOutput::Record(None));
         assert_eq!(
             coordinator
-                .read_indexed(
-                    &mut filesystem,
-                    &bob,
-                    &bob_view,
-                    GraphDiskReadContext::new(&disk_root),
-                    &request,
-                )
+                .read_indexed(&mut filesystem, &bob, &bob_view, &disk_root, &request,)
                 .unwrap(),
             reference
         );
@@ -438,7 +503,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
                 &mut filesystem,
                 &bob,
                 &bob_view,
-                GraphDiskReadContext::new(&disk_root),
+                &disk_root,
                 &supported_request,
             )
             .unwrap(),
@@ -458,7 +523,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
             &mut filesystem,
             &bob,
             &bob_view,
-            GraphDiskReadContext::new(&disk_root),
+            &disk_root,
             &zero_limit_request,
         ),
         Ok(GraphReadOutput::Adjacent(Vec::new()))
@@ -475,7 +540,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
             &mut filesystem,
             &admin,
             &admin_view,
-            GraphDiskReadContext::new(&disk_root),
+            &disk_root,
             &zero_limit_request,
         ),
         Err(AuthorizedReadError::Domain(GraphDiskError::Graph(
@@ -490,7 +555,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
             &mut filesystem,
             &admin,
             &admin_view,
-            GraphDiskReadContext::new(&disk_root),
+            &disk_root,
             &GraphReadRequest::RecordAt {
                 id: left,
                 revision: uste_types::CommitRevision::new(1).unwrap(),
@@ -582,7 +647,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
                 &mut filesystem,
                 &bob,
                 &bob_view,
-                GraphDiskReadContext::new(&disk_root),
+                &disk_root,
                 &denied_request,
             ),
             Err(AuthorizedReadError::Authorization(
@@ -619,13 +684,19 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         Err(AuthorizedError::StalePolicy)
     );
     assert_eq!(
-        coordinator.read_indexed(
-            &mut filesystem,
-            &bob,
-            &bob_view,
-            GraphDiskReadContext::new(&disk_root),
-            &request,
-        ),
+        coordinator.index_report(&operator, &disk_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    );
+    assert_eq!(
+        coordinator.clear_index_cache(&operator, &disk_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    );
+    assert_eq!(
+        coordinator.read_indexed(&mut filesystem, &bob, &bob_view, &disk_root, &request,),
         Err(AuthorizedReadError::Authorization(
             AuthorizedError::StalePolicy
         ))
@@ -692,7 +763,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
     let reopened_kernel = kernel(final_policy);
     let admin = reopened_kernel.authenticate(&mut AuthAdapter, &3).unwrap();
     let bob = reopened_kernel.authenticate(&mut AuthAdapter, &4).unwrap();
-    let (reopened, report) = open_authorized(
+    let (mut reopened, report) = open_authorized(
         &mut filesystem,
         &EntryName::new("authorized-graph").unwrap(),
         scope(),
@@ -704,6 +775,12 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         reopened_kernel,
     )
     .unwrap();
+    assert_eq!(
+        reopened.index_report(&admin, &disk_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    );
     assert_eq!(report.frontier.unwrap().get(), 5);
     let mut restarted_roots = reopened
         .load_current_index_roots(&mut filesystem, &admin)
@@ -727,7 +804,7 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
                 &mut filesystem,
                 &admin,
                 &view,
-                GraphDiskReadContext::new(&restarted_root),
+                &restarted_root,
                 &restarted_request,
             )
             .unwrap(),
@@ -737,6 +814,54 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         reopened.read_view(&bob),
         Err(AuthorizedError::Unauthorized)
     ));
+
+    filesystem
+        .arm(
+            FaultPlan::new([FaultPoint {
+                operation: FaultOperation::SyncData,
+                occurrence: 2,
+                action: FaultAction::CrashAfter,
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+    let uncertain_create = encode_transaction(&GraphTransaction::new(
+        scope(),
+        vec![Operation::Create {
+            expected: Expected::Absent,
+            record: NewRecord::Entity(NewEntity {
+                id: record(8),
+                entity_type: text("uncertain"),
+                schema_version: 1,
+                properties: Value::Null,
+            }),
+        }],
+    ))
+    .unwrap();
+    assert_eq!(
+        reopened.commit(
+            &mut filesystem,
+            &admin,
+            authorized_request(11, &uncertain_create),
+            &mut clock(6),
+            &NeverCancel,
+        ),
+        Err(AuthorizedError::Transaction(
+            uste_txn::TransactionError::OutcomeUnknown
+        ))
+    );
+    assert_eq!(
+        reopened.index_report(&admin, &restarted_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Transaction(uste_txn::TransactionError::OutcomeUnknown)
+        ))
+    );
+    assert_eq!(
+        reopened.clear_index_cache(&admin, &restarted_root),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Transaction(uste_txn::TransactionError::OutcomeUnknown)
+        ))
+    );
 }
 
 #[test]

@@ -66,7 +66,38 @@ impl CurrentGraphIndexRoot {
 /// to callers. The raw root remains available only through the privileged storage APIs above.
 pub struct AuthorizedGraphIndex {
     root: CurrentGraphIndexRoot,
-    cache: Mutex<PageCache>,
+    runtime: Mutex<GraphIndexRuntime>,
+}
+
+struct GraphIndexRuntime {
+    cache: PageCache,
+    completed_authorized_reads: u64,
+    completed_index_operations: u64,
+    read_stats: IndexReadStats,
+}
+
+impl GraphIndexRuntime {
+    fn account_index_operation(&mut self, stats: &IndexReadStats) {
+        self.completed_index_operations = self.completed_index_operations.saturating_add(1);
+        add_stats(&mut self.read_stats, stats);
+    }
+}
+
+/// Privileged decrypted page-cache and storage-read accounting for benchmark and operator
+/// diagnostics. Candidate-dependent fields can reveal cardinality; all counters are cumulative
+/// for the lifetime of this admitted root handle.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GraphIndexCacheReport {
+    pub budget_bytes: usize,
+    pub accounted_bytes: usize,
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+    pub completed_authorized_reads: u64,
+    pub completed_index_operations: u64,
+    pub pages_read: u64,
+    pub fragments_visited: u64,
+    pub result_bytes: u64,
 }
 
 impl core::fmt::Debug for AuthorizedGraphIndex {
@@ -90,29 +121,47 @@ impl AuthorizedGraphIndex {
         self.root.generation()
     }
 
+    fn cache_report(&self) -> Result<GraphIndexCacheReport, GraphDiskError> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+        Ok(GraphIndexCacheReport {
+            budget_bytes: runtime.cache.budget(),
+            accounted_bytes: runtime.cache.accounted_bytes(),
+            hits: runtime.cache.hits(),
+            misses: runtime.cache.misses(),
+            evictions: runtime.cache.evictions(),
+            completed_authorized_reads: runtime.completed_authorized_reads,
+            completed_index_operations: runtime.completed_index_operations,
+            pages_read: runtime.read_stats.pages_read,
+            fragments_visited: runtime.read_stats.fragments_visited,
+            result_bytes: runtime.read_stats.result_bytes,
+        })
+    }
+
+    /// Zeroize and discard decrypted cached pages while retaining cumulative counters.
+    ///
+    /// This controls only USTE's explicit cache. It does not claim to evict kernel/device caches.
+    fn clear_decrypted_page_cache(&self) -> Result<(), GraphDiskError> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+        runtime.cache.clear();
+        Ok(())
+    }
+
     fn new(root: CurrentGraphIndexRoot) -> Self {
         Self {
             root,
-            cache: Mutex::new(PageCache::default()),
+            runtime: Mutex::new(GraphIndexRuntime {
+                cache: PageCache::default(),
+                completed_authorized_reads: 0,
+                completed_index_operations: 0,
+                read_stats: IndexReadStats::default(),
+            }),
         }
-    }
-}
-
-/// Borrowed opaque resources for one authorization-preserving current-graph disk read.
-pub struct GraphDiskReadContext<'a> {
-    index: &'a AuthorizedGraphIndex,
-}
-
-impl core::fmt::Debug for GraphDiskReadContext<'_> {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("GraphDiskReadContext([REDACTED])")
-    }
-}
-
-impl<'a> GraphDiskReadContext<'a> {
-    #[must_use]
-    pub const fn new(index: &'a AuthorizedGraphIndex) -> Self {
-        Self { index }
     }
 }
 
@@ -561,7 +610,7 @@ where
     I: EntropySource,
 {
     type IndexRoot = AuthorizedGraphIndex;
-    type IndexContext<'a> = GraphDiskReadContext<'a>;
+    type IndexReport = GraphIndexCacheReport;
     type IndexError = GraphDiskError;
 
     fn publish_current_index(
@@ -586,24 +635,33 @@ where
             .map(|roots| roots.into_iter().map(AuthorizedGraphIndex::new).collect())
     }
 
+    fn index_report(root: &Self::IndexRoot) -> Result<Self::IndexReport, Self::IndexError> {
+        root.cache_report()
+    }
+
+    fn clear_index_cache(root: &Self::IndexRoot) -> Result<(), Self::IndexError> {
+        root.clear_decrypted_page_cache()
+    }
+
     fn read_index_authorized(
         snapshot: &Self::Snapshot,
         coordinator: &CommitCoordinator<Self, F, W, E, I>,
         filesystem: &mut F,
-        context: Self::IndexContext<'_>,
+        index: &Self::IndexRoot,
         request: &Self::ReadRequest,
         authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
     ) -> Result<Self::ReadOutput, Self::IndexError> {
-        validate_indexed_view(snapshot, context.index)?;
-        let root = &context.index.root;
-        let mut cache = context
-            .index
-            .cache
+        validate_indexed_view(snapshot, index)?;
+        let root = &index.root;
+        let mut runtime = index
+            .runtime
             .lock()
             .map_err(|_| GraphDiskError::IndexCorrupt)?;
-        match request {
+        let output = match request {
             GraphReadRequest::Record { id } => {
-                let (record, _) = disk_record(coordinator, filesystem, root, *id, &mut cache)?;
+                let (record, stats) =
+                    disk_record(coordinator, filesystem, root, *id, &mut runtime.cache)?;
+                runtime.account_index_operation(&stats);
                 Ok(GraphReadOutput::Record(visible_record(
                     record.as_ref(),
                     authorize_candidate,
@@ -618,15 +676,16 @@ where
                 if *maximum > MAX_TRAVERSAL_RESULTS {
                     return Err(GraphError::ResourceLimit.into());
                 }
-                let (candidate_ids, _) = disk_adjacent_ids(
+                let (candidate_ids, stats) = disk_adjacent_ids(
                     coordinator,
                     filesystem,
                     root,
                     *entity,
                     *direction,
                     MAX_TRAVERSAL_VISITS,
-                    &mut cache,
+                    &mut runtime.cache,
                 )?;
+                runtime.account_index_operation(&stats);
                 let mut visible = Vec::new();
                 for (relationship_id, neighbor_id) in candidate_ids {
                     let relationship_target = Target::Record(relationship_id);
@@ -635,8 +694,14 @@ where
                     {
                         continue;
                     }
-                    let (relationship, _) =
-                        disk_record(coordinator, filesystem, root, relationship_id, &mut cache)?;
+                    let (relationship, stats) = disk_record(
+                        coordinator,
+                        filesystem,
+                        root,
+                        relationship_id,
+                        &mut runtime.cache,
+                    )?;
+                    runtime.account_index_operation(&stats);
                     let Some(Record::Relationship(relationship)) = relationship else {
                         return Err(GraphDiskError::IndexCorrupt);
                     };
@@ -664,8 +729,14 @@ where
                     {
                         continue;
                     }
-                    let (neighbor, _) =
-                        disk_record(coordinator, filesystem, root, neighbor_id, &mut cache)?;
+                    let (neighbor, stats) = disk_record(
+                        coordinator,
+                        filesystem,
+                        root,
+                        neighbor_id,
+                        &mut runtime.cache,
+                    )?;
+                    runtime.account_index_operation(&stats);
                     let Some(Record::Entity(entity)) = neighbor else {
                         return Err(GraphDiskError::IndexCorrupt);
                     };
@@ -693,20 +764,23 @@ where
                 if *maximum > MAX_TRAVERSAL_RESULTS {
                     return Err(GraphError::ResourceLimit.into());
                 }
-                let (candidate_ids, _) = disk_supported_ids(
+                let (candidate_ids, stats) = disk_supported_ids(
                     coordinator,
                     filesystem,
                     root,
                     *evidence,
                     MAX_TRAVERSAL_VISITS,
-                    &mut cache,
+                    &mut runtime.cache,
                 )?;
+                runtime.account_index_operation(&stats);
                 let mut visible = Vec::new();
                 for id in candidate_ids {
                     if !authorize_candidate(Action::ReadRecord, Target::Record(id)) {
                         continue;
                     }
-                    let (record, _) = disk_record(coordinator, filesystem, root, id, &mut cache)?;
+                    let (record, stats) =
+                        disk_record(coordinator, filesystem, root, id, &mut runtime.cache)?;
+                    runtime.account_index_operation(&stats);
                     let Some(record) = record else {
                         return Err(GraphDiskError::IndexCorrupt);
                     };
@@ -724,7 +798,12 @@ where
                 }
                 Ok(GraphReadOutput::Supported(visible))
             }
+        };
+        if output.is_ok() {
+            runtime.completed_authorized_reads =
+                runtime.completed_authorized_reads.saturating_add(1);
         }
+        output
     }
 }
 

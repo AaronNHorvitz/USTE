@@ -14,6 +14,11 @@ Status: implementation increment verified locally; T-20 remains open.
 - Exact run binding to database/namespace, revision, profile, key epoch and writer incarnation.
 - A fixed-byte-budget decrypted page cache keyed by the full authenticated identity. Diagnostics
   expose counters only; scrub clears cached plaintext and verifies exact durable file lengths.
+  Authorized handles can also zeroize their pages without resetting cumulative counters and report
+  successful authorized reads, completed raw operations, authenticated pages, fragments and
+  logical result bytes without disclosing keys or plaintext. Because these counters reveal
+  candidate-dependent work, current `ManageSchema` authorization and an issuer-instance-bound
+  opaque root capability guard both report and clear operations.
 - `graph-current-v1` current-record, outgoing/incoming adjacency and provenance families, with exact
   live-coordinator snapshot admission, independent expected family/count/digest comparison, restart
   recovery and per-read stale-frontier rejection.
@@ -37,9 +42,17 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 237 workspace tests and 10 isolated t20-bench tests passed; format, clippy, rustdoc,
+# 262 workspace tests and 10 isolated t20-bench tests passed; format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
+
+The authorized graph regression proves a newly admitted handle starts empty, a cold one-hop read
+performs three raw operations and reads authenticated pages, a repeated read produces cache hits
+without another page read, clearing returns accounted bytes to zero while preserving every counter,
+and the next read misses and reads pages again. Unauthorized and policy-revoked principals cannot
+report or clear, and a root issued by a prior coordinator instance is rejected. This is explicit
+USTE-cache control only; an outcome-uncertain coordinator also rejects both operations before
+consulting possibly stale policy. No kernel/device cache eviction or BM-01 timing claim follows.
 
 The storage regressions cover large fragmented values, exact/prefix reads, cache eviction and
 cross-database identity, cached-plaintext bypass, same-length corruption, trailing bytes, root
@@ -114,5 +127,11 @@ independent adjacency-array BFS oracle. Its exact digests are recorded in
 `acceptance/r1/bm01-materialization-v1.tsv` and checked in the normal repository script. It neither
 opens USTE nor measures it and explicitly emits `engine_benchmark: false`; BM-01 remains unrun.
 
-The full `bash scripts/check.sh` gate passed after this extension: 237 workspace tests, all docs,
+The exact production-backed run was not launched during the Decision 0039 increment because the
+reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
+65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
+The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition blocks only a qualifying
+measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
+
+The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all docs,
 strict clippy/rustdoc, the storage publication model, and 10 isolated T-20 fixture tests passed.

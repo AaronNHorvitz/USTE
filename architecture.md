@@ -232,6 +232,14 @@ revision and current base before the ordinary journal append/publish sequence. N
 reducer currently opts into external preparation, and live publication/replay still use the
 complete graph state.
 
+Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
+root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
+candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-
+authorized operator using a root capability bound to that coordinator instance can report or clear
+it. Clearing zeroizes pages without resetting counters; it does not evict kernel, filesystem or
+device caches. Production benchmark reports must distinguish those cache layers and derive work
+from counter deltas.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

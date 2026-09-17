@@ -173,6 +173,14 @@ authoritative coordinator can commit it without repeating complete-state prepara
 independent postcommit validation and recovery still use the complete live reducer;
 larger-than-memory recovery and qualification remain open.
 
+Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
+reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
+does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are
+cardinality-sensitive and therefore require current `ManageSchema` authority plus an opaque root
+bound to the issuing coordinator. It does not claim control of kernel/device caches. This enables
+honest BM-01 measurement through the authorization boundary but supplies no performance result;
+the exact qualifying run and full-memory boundaries remain open.
+
 ## Release gates
 
 | Gate | Required outcome |

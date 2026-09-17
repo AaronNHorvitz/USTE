@@ -79,7 +79,7 @@ where
     I: EntropySource,
 {
     type IndexRoot;
-    type IndexContext<'a>;
+    type IndexReport;
     type IndexError;
 
     fn publish_current_index(
@@ -92,14 +92,33 @@ where
         filesystem: &mut F,
     ) -> Result<Vec<Self::IndexRoot>, Self::IndexError>;
 
+    fn index_report(root: &Self::IndexRoot) -> Result<Self::IndexReport, Self::IndexError>;
+
+    fn clear_index_cache(root: &Self::IndexRoot) -> Result<(), Self::IndexError>;
+
     fn read_index_authorized(
         snapshot: &Self::Snapshot,
         coordinator: &CommitCoordinator<Self, F, W, E, I>,
         filesystem: &mut F,
-        context: Self::IndexContext<'_>,
+        root: &Self::IndexRoot,
         request: &Self::ReadRequest,
         authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
     ) -> Result<Self::ReadOutput, Self::IndexError>;
+}
+
+/// Opaque derived-index capability bound to the authorized coordinator that issued it.
+pub struct AuthorizedIndexRoot<R> {
+    inner: R,
+    instance: Arc<()>,
+}
+
+impl<R: core::fmt::Debug> core::fmt::Debug for AuthorizedIndexRoot<R> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_tuple("AuthorizedIndexRoot")
+            .field(&self.inner)
+            .finish()
+    }
 }
 
 /// Content-free failures returned by the mandatory authorization facade.
@@ -474,13 +493,18 @@ where
         &mut self,
         filesystem: &mut F,
         principal: &AuthenticatedPrincipal,
-    ) -> Result<S::IndexRoot, AuthorizedReadError<S::IndexError>>
+    ) -> Result<AuthorizedIndexRoot<S::IndexRoot>, AuthorizedReadError<S::IndexError>>
     where
         S: AuthorizedIndexedReadState<F, W, E, I>,
     {
         self.authorize(principal, Action::ManageSchema)
             .map_err(AuthorizedReadError::Authorization)?;
-        S::publish_current_index(&mut self.inner, filesystem).map_err(AuthorizedReadError::Domain)
+        let inner = S::publish_current_index(&mut self.inner, filesystem)
+            .map_err(AuthorizedReadError::Domain)?;
+        Ok(AuthorizedIndexRoot {
+            inner,
+            instance: Arc::clone(&self.instance),
+        })
     }
 
     /// Policy-authorized discovery of current derived roots. Authorization is resolved before
@@ -489,13 +513,73 @@ where
         &self,
         filesystem: &mut F,
         principal: &AuthenticatedPrincipal,
-    ) -> Result<Vec<S::IndexRoot>, AuthorizedReadError<S::IndexError>>
+    ) -> Result<Vec<AuthorizedIndexRoot<S::IndexRoot>>, AuthorizedReadError<S::IndexError>>
     where
         S: AuthorizedIndexedReadState<F, W, E, I>,
     {
         self.authorize(principal, Action::ManageSchema)
             .map_err(AuthorizedReadError::Authorization)?;
-        S::load_current_index_roots(&self.inner, filesystem).map_err(AuthorizedReadError::Domain)
+        S::load_current_index_roots(&self.inner, filesystem)
+            .map(|roots| {
+                roots
+                    .into_iter()
+                    .map(|inner| AuthorizedIndexRoot {
+                        inner,
+                        instance: Arc::clone(&self.instance),
+                    })
+                    .collect()
+            })
+            .map_err(AuthorizedReadError::Domain)
+    }
+
+    /// Return privileged, cardinality-sensitive index diagnostics after current maintenance
+    /// authorization and issuer-instance validation.
+    pub fn index_report(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        root: &AuthorizedIndexRoot<S::IndexRoot>,
+    ) -> Result<S::IndexReport, AuthorizedReadError<S::IndexError>>
+    where
+        S: AuthorizedIndexedReadState<F, W, E, I>,
+    {
+        if self.inner.is_uncertain() {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Transaction(TransactionError::OutcomeUnknown),
+            ));
+        }
+        if !Arc::ptr_eq(&self.instance, &root.instance) {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized,
+            ));
+        }
+        self.authorize(principal, Action::ManageSchema)
+            .map_err(AuthorizedReadError::Authorization)?;
+        S::index_report(&root.inner).map_err(AuthorizedReadError::Domain)
+    }
+
+    /// Clear the derived index's userspace cache after current maintenance authorization and
+    /// issuer-instance validation.
+    pub fn clear_index_cache(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        root: &AuthorizedIndexRoot<S::IndexRoot>,
+    ) -> Result<(), AuthorizedReadError<S::IndexError>>
+    where
+        S: AuthorizedIndexedReadState<F, W, E, I>,
+    {
+        if self.inner.is_uncertain() {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Transaction(TransactionError::OutcomeUnknown),
+            ));
+        }
+        if !Arc::ptr_eq(&self.instance, &root.instance) {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized,
+            ));
+        }
+        self.authorize(principal, Action::ManageSchema)
+            .map_err(AuthorizedReadError::Authorization)?;
+        S::clear_index_cache(&root.inner).map_err(AuthorizedReadError::Domain)
     }
 
     /// Execute an optimized reducer-owned projection under the same lease and per-candidate
@@ -505,7 +589,7 @@ where
         filesystem: &mut F,
         principal: &AuthenticatedPrincipal,
         view: &AuthorizedReadView<S::Snapshot>,
-        context: S::IndexContext<'_>,
+        root: &AuthorizedIndexRoot<S::IndexRoot>,
         request: &R,
     ) -> Result<S::ReadOutput, AuthorizedReadError<S::IndexError>>
     where
@@ -517,6 +601,11 @@ where
             ));
         }
         if !Arc::ptr_eq(&self.instance, &view.instance) {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized,
+            ));
+        }
+        if !Arc::ptr_eq(&self.instance, &root.instance) {
             return Err(AuthorizedReadError::Authorization(
                 AuthorizedError::Unauthorized,
             ));
@@ -547,7 +636,7 @@ where
             &view.inner.state,
             &self.inner,
             filesystem,
-            context,
+            &root.inner,
             request,
             &mut authorize_candidate,
         )

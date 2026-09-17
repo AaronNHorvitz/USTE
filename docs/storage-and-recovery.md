@@ -237,6 +237,12 @@ adds a reducer-verified external-preparation seam: graph checks exact request by
 policy version and touched before-values before the normal journal append/publish sequence. The
 live publication target, independent root validator and recovery remain full-memory.
 
+Decision 0039 adds cumulative authenticated page/fragment/result-byte accounting to authorized
+index reads and a zeroizing userspace-cache clear. Candidate-dependent counters reveal cardinality,
+so an issuer-instance-bound root plus current `ManageSchema` authorization gates both report and
+clear; outcome-uncertain coordinators reject them before possibly stale policy is used. Clearing
+does not evict kernel, filesystem, controller or device caches.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

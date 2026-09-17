@@ -92,6 +92,13 @@ The standalone generator emits `engine_benchmark: false`; fixture dimensions and
 not satisfy BM-01 until the production encrypted/authorized/durable engine runs the required cold
 and warm samples and reports latency, visits, result bytes, RSS and environment evidence.
 
+Decision 0039 exposes cumulative authenticated page/fragment/result-byte work and explicit
+decrypted-page-cache clearing on that production authorized path. These candidate-dependent
+counters are cardinality-sensitive and require current `ManageSchema` authority plus an
+issuer-instance-bound root. Benchmark samples use counter deltas and must label an empty USTE cache
+separately from process, kernel, filesystem, controller and device cache state. The clear operation
+alone is not evidence of a fully cold host.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

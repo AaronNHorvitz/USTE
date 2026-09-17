@@ -15,7 +15,7 @@ pub use codec::{
 };
 pub use disk::{
     AuthorizedGraphIndex, CurrentGraphIndexRoot, GRAPH_INDEX_PROFILE_V1, GraphDiskError,
-    GraphDiskReadContext, disk_adjacent_ids, disk_record, disk_supported_ids,
+    GraphIndexCacheReport, disk_adjacent_ids, disk_record, disk_supported_ids,
     load_current_graph_index_roots, publish_current_graph_index, scrub_current_graph_index,
 };
 pub use query::{GraphNeighbor, GraphReadOutput, GraphReadRequest};
