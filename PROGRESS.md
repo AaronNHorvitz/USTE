@@ -2,9 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `6b0b89d` (T-13 encrypted journal/recovery qualification before
-the final filesystem-profile delta). Review was performed by Codex agents and does not represent
-independent external security certification.
+Latest verified implementation: `3453d67` (completed T-13 encrypted journal/recovery and Btrfs/ext4
+filesystem qualification). Review was performed by Codex agents and does not represent independent
+external security certification.
 
 ## Completed this increment
 

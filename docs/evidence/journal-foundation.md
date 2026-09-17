@@ -15,6 +15,10 @@ exhaustive corruption offsets, error/short-progress matrices, committed-error cl
 test-only filesystem snapshots and Linux process-loss/lock scenarios and found no blocker or
 high-severity issue.
 
+Completed T-13 implementation: commit `3453d67caf6ce99f597e7f86aa989058d3507683` · tree
+`d034bbe8d29babccd75f411b9a0707ac889e622d`. This adds the real-process creation boundaries,
+parameterized Btrfs/ext4 trial harness and the evidence-backed T-13 task closure.
+
 ## Implemented
 
 - Decision 0015 format-1.0 encrypted manifest, certificate-log header, segment headers, exact opaque
