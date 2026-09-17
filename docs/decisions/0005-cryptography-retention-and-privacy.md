@@ -43,6 +43,20 @@ Rotation writes new epochs and rewrites reachable objects transactionally before
 old key. Key loss is unrecoverable without a valid recovery wrapper. Logs contain stable
 redacted error codes, never keys, plaintext, raw source digests or low-entropy equality tokens.
 
+~~~text
+OS CSPRNG -> database master key -> wrapped recovery/key-store envelope
+                                  -> HKDF(database, epoch, namespace, role, object)
+                                     -> per-object/segment AEAD key + fresh 192-bit nonce
+
+active epoch -> write/rewrite reachable objects -> verify new epoch -> retire old wrappers
+purge request -> revoke access/leases -> dependency plan -> deletion epoch/receipt
+              -> bounded pin expiry -> physical reclamation -> backup expiry/ledger enforcement
+~~~
+
+Rotation never retires an old wrapper before every retained reachable object is verified under
+the new epoch. Purge access revocation is immediate on commit; reclamation and backup expiry are
+separately reported stages.
+
 ## Retention epochs and purge
 
 Each namespace has an append-only policy version and database-wide deletion epoch. Default

@@ -25,34 +25,27 @@ appended spatial/physics tasks appear at their dependency gate rather than numer
 
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
 |---|---|---|---|---|
-| [ ] T-01 | Close D-06: records, schema/version compatibility, constrained transaction preconditions, retry lifetime, time codec/ranges and pinned normalization profile; FR-01/02/05/06/26 | None | Data/time/compatibility ADR and literal state-transition vectors | Reviewed semantics cover conflicts, UTC, ambiguity, leap limits, idempotency and unknown versions |
-| [ ] T-02 | Close D-01: journal/root/index design and platform failure model; FR-02/03/16 | T-01 | Storage ADR, publication state machine, crash matrix | Torn commit metadata cannot silently erase acknowledged history under the stated model |
-| [ ] T-03 | Close D-02/D-04: encryption, keys, retention epochs, deletion and backups; FR-09/10/11/12 | T-01, T-02 | Security/privacy ADRs and key/retention lifecycle diagrams | Exact crypto dependencies, nonce strategy, trust boundaries and purge/restore rules reviewed |
-| [ ] T-04 | Close D-05: parser/decoder/model matrix and sandbox feasibility; FR-17/19/20/21/22 | T-01, T-03 | Versioned adapter registry and dependency/license inventory | Every baseline family has exact candidate, limits, profile and acceptance fixtures; unresolved native dependency is explicit |
-| [ ] T-05 | Close D-03: target workloads, budgets and runner; NFR-02 | T-01, T-02, T-04, T-46, T-47 | Versioned synthetic fixture/benchmark manifests | Numeric limits include space, motion, physics and mixed load; hardware/corpus recorded; no unmeasured speed claim |
+| [x] T-01 | Close D-06: records, schema/version compatibility, constrained transaction preconditions, retry lifetime, time codec/ranges and pinned normalization profile; FR-01/02/05/06/26 | None | Data/time/compatibility ADR and literal state-transition vectors | Reviewed semantics cover conflicts, UTC, ambiguity, leap limits, idempotency and unknown versions |
+| [x] T-02 | Close D-01: journal/root/index design and platform failure model; FR-02/03/16 | T-01 | Storage ADR, publication state machine, crash matrix | Torn commit metadata cannot silently erase acknowledged history under the stated model |
+| [x] T-03 | Close D-02/D-04: encryption, keys, retention epochs, deletion and backups; FR-09/10/11/12 | T-01, T-02 | Security/privacy ADRs and key/retention lifecycle diagrams | Exact crypto dependencies, nonce strategy, trust boundaries and purge/restore rules reviewed |
+| [x] T-04 | Close D-05: parser/decoder/model matrix and sandbox feasibility; FR-17/19/20/21/22 | T-01, T-03 | Versioned adapter registry and dependency/license inventory | Every baseline family has exact candidate, limits, profile and acceptance fixtures; unresolved native dependency is explicit |
+| [x] T-05 | Close D-03: target workloads, budgets and runner; NFR-02 | T-01, T-02, T-04, T-46, T-47 | Versioned synthetic fixture/benchmark manifests | Numeric limits include space, motion, physics and mixed load; hardware/corpus recorded; no unmeasured speed claim |
 | [ ] T-06 | Close D-07: maintainership, provenance and disclosure readiness; NFR-05 | None | Contribution/release policy and verified private reporting instructions | Maintainer-controlled reporting route tested; no fabricated address/SLA |
-| [ ] T-46 | Close D-08: frames, geometry, units, spatial indexes, trajectory interpretation and navigation; FR-27/28/29/30/33 | T-01, T-03 | Spatial ADR, supported matrix, reference predicates and literal boundary vectors | Rust-only algorithmic dependency feasibility, tolerances, antimeridian/poles, transforms and path limits reviewed |
-| [ ] T-47 | Close D-09: kinematics/contact scope, arithmetic, replay, UTC mapping and Rust dependency feasibility; FR-31/32 | T-01, T-03, T-46 | Physics ADR, numerical profile, analytic/contact fixtures | Exact baseline implementable; deterministic ordering, overflow, collision limits and profile compatibility defined |
+| [x] T-46 | Close D-08: frames, geometry, units, spatial indexes, trajectory interpretation and navigation; FR-27/28/29/30/33 | T-01, T-03 | Spatial ADR, supported matrix, reference predicates and literal boundary vectors | Rust-only algorithmic dependency feasibility, tolerances, antimeridian/poles, transforms and path limits reviewed |
+| [x] T-47 | Close D-09: kinematics/contact scope, arithmetic, replay, UTC mapping and Rust dependency feasibility; FR-31/32 | T-01, T-03, T-46 | Physics ADR, numerical profile, analytic/contact fixtures | Exact baseline implementable; deterministic ordering, overflow, collision limits and profile compatibility defined |
 | [ ] T-07 | Review R0 contracts together | T-01, T-02, T-03, T-04, T-05, T-06, T-46, T-47 | R0 decision/evidence record | No conflicting authority/durability/deletion/parser/spatial/physics contracts; all D decisions resolved for initial profile |
 
 ### R0 implementation progress (2026-09-16)
 
-- T-01/T-02/T-03/T-46/T-47 have proposed closed v1 profiles in Decisions 0003–0005 and
-  0009–0010, literal vectors under `acceptance/r0`, and ten passing standalone Rust vector
-  tests. They remain unchecked until the aggregate review accepts the contracts.
-- T-04 has an exact adapter registry, resolved candidate lockfile/native-link/license snapshot,
-  clean advisory/license/source policy checks, and pinned logical/byte fixtures for every
-  family. Direct unsafe boundaries and namespace/no-egress feasibility are evidenced; T-04
-  remains unchecked until reachable transitive validation and complete supervisor controls
-  exist.
-- T-05 has a named measured runner, hard limits, all BM-01…13 rows and a deterministic
-  bounded-memory generator kernel. It remains unchecked until workload-specific materializers,
-  measurements and review exist.
+- T-01–T-05 and T-46–T-47 are closed at their R0 decision/evidence scope. This does not mark
+  their later implementation requirements complete: unsafe review continues, T-23 owns the
+  production worker supervisor, and benchmark targets are explicitly unmeasured.
 - T-06/D-07 is blocked on repository-owner enablement and a harmless end-to-end test of GitHub
   private vulnerability reporting. The local GitHub CLI credential is invalid; no repository
   security setting was changed. Decision 0008 records the selected policy and exact unblock.
-- T-07 and every dependent R1 task remain open. Pre-gate code is limited to design experiments
-  and must not be described as a production disk format or alpha release.
+- The cross-decision review found and corrected BM-04's blob-size/cap mismatch. T-07 and every
+  dependent R1 task remain open solely because T-06 is unresolved. Pre-gate code is limited to
+  design experiments and must not be described as a production disk format or alpha release.
 
 ## R1 — Correctness kernel
 

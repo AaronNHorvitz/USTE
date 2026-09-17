@@ -2,8 +2,9 @@
 
 Date: 2026-09-16
 
-R0 is **not complete**. Decisions D-01 through D-06, D-08 and D-09 have constrained v1
-profiles and literal acceptance vectors in Decisions 0003–0010. D-07 has a selected policy,
+R0 is **not complete**. T-01–T-05 and T-46–T-47 are closed at their decision/evidence scope;
+Decisions D-01 through D-06, D-08 and D-09 have constrained v1 profiles and literal acceptance
+vectors in Decisions 0003–0010. D-07 has a selected policy,
 but T-06 is blocked on repository-owner enablement and end-to-end testing of GitHub private
 vulnerability reporting; the local `gh` credential is invalid and this work is not authorized
 to change repository security settings. Consequently T-07 remains open and R1 implementation
@@ -31,8 +32,8 @@ tasks are not checked.
 ~~~text
 $ rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 $ /tmp/uste-r0-vectors --nocapture
-running 11 tests
-test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 12 tests
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
 $ /tmp/uste-storage-publication

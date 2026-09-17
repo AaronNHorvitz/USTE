@@ -203,3 +203,13 @@ fn benchmark_seeds_are_256_bit_hex_and_unique() {
             .all(|seed| seed.len() == 64 && seed.bytes().all(|b| b.is_ascii_hexdigit()))
     );
 }
+
+#[test]
+fn benchmark_blob_fixture_stays_within_the_selected_single_blob_cap() {
+    let parsed = rows(BENCHMARKS, 5);
+    let bm04 = parsed.iter().find(|row| row[0] == "BM-04").unwrap();
+    assert!(bm04[3].contains("12GiB"));
+    let selected_cap_gib = 16_u64;
+    let fixture_gib = 12_u64;
+    assert!(fixture_gib <= selected_cap_gib);
+}

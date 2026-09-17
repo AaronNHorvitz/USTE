@@ -67,7 +67,7 @@ larger than available cache/RAM is mandatory for R3 scalability claims.
 R0 freezes deterministic generators rather than committing huge corpora. Generator
 `synthetic-v1` uses BLAKE3 counter streams from the published 32-byte seed, stable IDs and no
 wall clock. Exact sizes are BM-01 100k/1m; BM-03 10m events; BM-04 100k 4 KiB blobs plus one
-20 GiB stream; BM-10 1m points (half uniform, half 100 clusters); BM-11 10m observations with
+12 GiB stream; BM-10 1m points (half uniform, half 100 clusters); BM-11 10m observations with
 5% late, 1% corrected, 1% duplicates; BM-12 100/1k/10k bodies; BM-13 the documented world
 with 100k moving objects and simultaneous 10k-row batches.
 
