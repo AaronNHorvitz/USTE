@@ -39,7 +39,8 @@ A fault matrix injects crash-before and crash-after at target create, write, exa
 and directory-sync boundaries. After restart every case exposes only the previously published base
 root; a complete target can remain only as an unreferenced optional run.
 
-This is scratch-merge transport evidence, not graph-state integration or T-20 closure. The current
-graph reducer, recovery candidate and ingest reducer still retain complete maps, candidate discovery
-still performs an absolute-max scrub before caller reconstruction limits, and no allocator/RSS or
-BM-01/BM-06 result is claimed.
+This is scratch-merge transport evidence, not T-20 closure. Decision 0033 separately adds graph
+terminal-family integration and independent cross-family validation. The current graph reducer,
+semantic comparison, recovery candidate and ingest reducer still retain complete maps, candidate
+discovery still performs an absolute-max scrub before caller reconstruction limits, and no
+allocator/RSS or BM-01/BM-06 result is claimed.

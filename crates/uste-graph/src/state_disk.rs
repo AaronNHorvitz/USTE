@@ -8,23 +8,26 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_storage::{
-    DurableIndexRoot, IndexEntry, IndexRootAnchor, IndexRootInput, IndexRunDescriptor,
-    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScrubReport,
-    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES,
-    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
+    DurableIndexRoot, IndexDelta, IndexEntry, IndexRootAnchor, IndexRootInput, IndexRunDescriptor,
+    IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits, IndexRunReadReport,
+    IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES, MAX_INDEX_ENTRIES_PER_RUN,
+    MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES, OwnershipFileSystem, PageCache,
+    RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
 use uste_txn::{
     AuthenticatedIndexRecovery, CheckpointState, CheckpointStateError, CommitCoordinator,
     CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
-    CoordinatorRecoverySeed, TransactionError, reconstruct_coordinator_metadata_seed_for_recovery,
+    CoordinatorRecoverySeed, TransactionError, TransactionOutcome,
+    reconstruct_coordinator_metadata_seed_for_recovery,
 };
 use uste_types::{CommitRevision, RecordId, RecordRef};
 
 use crate::codec::{decode_result_policy, encode_result_policy};
 use crate::{
-    GraphCodecError, GraphDiskError, GraphSnapshot, GraphState, Record, decode_stored_record,
-    encode_stored_record, state::ReverseReference,
+    GraphCodecError, GraphDiskError, GraphSnapshot, GraphState, GraphTransaction, Record,
+    decode_stored_record, encode_stored_record,
+    state::{PreparedGraph, ReverseReference, record_reverse_references},
 };
 
 pub const GRAPH_STATE_PROFILE_V1: [u8; 32] = [
@@ -130,6 +133,122 @@ pub struct GraphStateLoadReport {
     pub runs: u64,
     pub entries: u64,
     pub logical_bytes: u64,
+    pub pages_read: u64,
+}
+
+/// Aggregate bounds for retaining one transaction's exact graph-state family deltas.
+///
+/// The budget is debited while family maps are formed. The preceding graph transaction prepare
+/// and each record's temporary canonical reference coalescing remain governed by the graph
+/// operation/reference limits rather than these derived-cache limits.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GraphStateDeltaLimits {
+    maximum_deltas: u64,
+    maximum_logical_bytes: u64,
+}
+
+impl GraphStateDeltaLimits {
+    pub const fn new(
+        maximum_deltas: u64,
+        maximum_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        if maximum_deltas == 0
+            || maximum_deltas > MAX_INDEX_ENTRIES_PER_RUN * FAMILY_COUNT as u64
+            || maximum_logical_bytes == 0
+            || maximum_logical_bytes > MAX_INDEX_DELTA_LOGICAL_BYTES * FAMILY_COUNT as u64
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(Self {
+            maximum_deltas,
+            maximum_logical_bytes,
+        })
+    }
+}
+
+/// Opaque, bounded exact family changes prepared against one journal-certified graph revision.
+pub struct GraphStateRootDelta {
+    scope: uste_types::NamespaceRef,
+    base_anchor: IndexRootAnchor,
+    base_revision: CommitRevision,
+    revision: CommitRevision,
+    result_digest: [u8; 32],
+    families: [Vec<IndexDelta>; FAMILY_COUNT as usize],
+    deltas: u64,
+    logical_bytes: u64,
+}
+
+impl core::fmt::Debug for GraphStateRootDelta {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphStateRootDelta")
+            .field("scope", &"[REDACTED]")
+            .field("base_revision", &self.base_revision)
+            .field("revision", &self.revision)
+            .field(
+                "family_delta_counts",
+                &self.families.each_ref().map(Vec::len),
+            )
+            .field("deltas", &self.deltas)
+            .field("logical_bytes", &self.logical_bytes)
+            .finish()
+    }
+}
+
+impl GraphStateRootDelta {
+    #[must_use]
+    pub const fn base_revision(&self) -> CommitRevision {
+        self.base_revision
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn delta_count(&self) -> u64 {
+        self.deltas
+    }
+
+    #[must_use]
+    pub const fn logical_bytes(&self) -> u64 {
+        self.logical_bytes
+    }
+}
+
+/// Per-family storage merge budgets in graph-state family order 1 through 8.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GraphStateRootMergeLimits {
+    families: [IndexRunMergeLimits; FAMILY_COUNT as usize],
+}
+
+impl GraphStateRootMergeLimits {
+    #[must_use]
+    pub const fn new(families: [IndexRunMergeLimits; FAMILY_COUNT as usize]) -> Self {
+        Self { families }
+    }
+
+    #[must_use]
+    pub const fn uniform(limit: IndexRunMergeLimits) -> Self {
+        Self {
+            families: [limit; FAMILY_COUNT as usize],
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphStateRootMergeReport {
+    pub runs: u64,
+    pub base_entries: u64,
+    pub base_logical_bytes: u64,
+    pub deltas: u64,
+    pub delta_logical_bytes: u64,
+    pub insertions: u64,
+    pub replacements: u64,
+    pub deletions: u64,
+    pub output_entries: u64,
+    pub output_logical_bytes: u64,
     pub pages_read: u64,
 }
 
@@ -243,6 +362,463 @@ impl DerivedGraphStateRoot {
     pub const fn generation(&self) -> u64 {
         self.root.generation()
     }
+}
+
+/// Prepare exact, bounded family deltas before the corresponding graph transaction is committed.
+///
+/// The returned plan is opaque and bound to the exact admitted base root, target revision, scope,
+/// and reducer result digest. Preparing it performs no durable writes.
+pub fn prepare_graph_state_root_delta<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    base: &DerivedGraphStateRoot,
+    transaction: &GraphTransaction,
+    revision: CommitRevision,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphStateRootDelta, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    validate_current_root(coordinator, base)?;
+    let state = coordinator.reducer_state_for_checkpoint()?;
+    let snapshot = state.current_snapshot();
+    if snapshot.scope() != transaction.scope()
+        || snapshot.revision() != Some(base.root.revision())
+        || GraphState::logical_state_digest(snapshot)
+            .map_err(|_| GraphDiskError::RootStateMismatch)?
+            != *base.root.logical_state_digest()
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let prepared = state.prepare_transaction(transaction, revision)?;
+    build_graph_state_root_delta(snapshot, base.root.anchor(), prepared, limits)
+}
+
+/// Merge a previously prepared graph-state plan after its transaction has durably committed.
+///
+/// All merged runs remain invisible until their exact descriptors have been compared with the
+/// live reducer and a certificate-bound root is atomically published. An error never rolls back or
+/// weakens the already-authoritative journal commit. An in-process caller retaining the borrowed
+/// plan may retry; after process loss, rebuild the cache from recovered live state.
+pub fn publish_graph_state_root_delta<F, W, E, I>(
+    coordinator: &mut CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    base: &DerivedGraphStateRoot,
+    plan: &GraphStateRootDelta,
+    outcome: TransactionOutcome,
+    limits: GraphStateRootMergeLimits,
+) -> Result<(DurableIndexRoot, GraphStateRootMergeReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if base.root.anchor() != plan.base_anchor
+        || base.root.revision() != plan.base_revision
+        || outcome.revision != plan.revision
+        || outcome.result_digest != plan.result_digest
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+
+    let snapshot = coordinator
+        .reducer_state_for_checkpoint()?
+        .current_snapshot();
+    if snapshot.scope() != plan.scope || snapshot.revision() != Some(plan.revision) {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let (anchor_revision, certificate_digest) = coordinator
+        .checkpoint_anchor()?
+        .ok_or(GraphDiskError::RootStateMismatch)?;
+    if anchor_revision != plan.revision {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let logical_state_digest = GraphState::logical_state_digest(snapshot)
+        .map_err(|_| GraphDiskError::RootStateMismatch)?;
+    let expected = expected_runs(snapshot, plan.revision)?;
+
+    let mut report = GraphStateRootMergeReport::default();
+    let mut runs = Vec::with_capacity(expected.len());
+    for (index, deltas) in plan.families.iter().enumerate() {
+        let family = u8::try_from(index + 1).map_err(|_| GraphDiskError::IndexCorrupt)?;
+        let base_has_family = base.root.runs().any(|run| run.family() == family);
+        let merged = coordinator.merge_index_run(
+            filesystem,
+            plan.revision,
+            GRAPH_STATE_PROFILE_V1,
+            family,
+            base_has_family.then_some(&base.root),
+            limits.families[index],
+            deltas.iter().cloned().map(Ok),
+        )?;
+        let expected_run = expected.iter().find(|run| run.family == family).copied();
+        match (merged.run, expected_run) {
+            (Some(run), Some(expected_run)) if expected_run.matches(&run) => {
+                runs.push(run);
+                report.runs = checked_sum(report.runs, 1)?;
+            }
+            (None, None) => {}
+            _ => return Err(GraphDiskError::IndexCorrupt),
+        }
+        add_merge_report(&mut report, &merged.report)?;
+    }
+    if report.deltas != plan.deltas || report.delta_logical_bytes != plan.logical_bytes {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    let root = coordinator.publish_index_root(
+        filesystem,
+        IndexRootInput {
+            scope: plan.scope,
+            revision: plan.revision,
+            certificate_digest,
+            reducer_profile: GraphState::REDUCER_PROFILE,
+            logical_state_digest,
+            index_profile: GRAPH_STATE_PROFILE_V1,
+        },
+        &runs,
+    )?;
+    Ok((root, report))
+}
+
+type DeltaMap = BTreeMap<Vec<u8>, (Option<Vec<u8>>, Option<Vec<u8>>)>;
+type FamilyEntryMap = BTreeMap<Vec<u8>, Vec<u8>>;
+
+#[derive(Default)]
+struct DeltaBudget {
+    deltas: u64,
+    logical_bytes: u64,
+}
+
+fn build_graph_state_root_delta(
+    snapshot: &GraphSnapshot,
+    base_anchor: IndexRootAnchor,
+    prepared: PreparedGraph,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphStateRootDelta, GraphDiskError> {
+    if prepared.scope != snapshot.scope() || prepared.base_revision != snapshot.revision() {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let mandatory_deltas = count(prepared.changes.len())?
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if mandatory_deltas > limits.maximum_deltas {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+
+    let mut families: [DeltaMap; FAMILY_COUNT as usize] = core::array::from_fn(|_| BTreeMap::new());
+    let mut budget = DeltaBudget::default();
+    for change in &prepared.changes {
+        if change.after.id() != change.id
+            || change.after.modified_revision() != prepared.revision
+            || snapshot.records.get(&change.id) != change.before.as_ref()
+        {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+
+        insert_delta_side(
+            &mut families[usize::from(FAMILY_CURRENT_RECORD - 1)],
+            change.id.record().as_bytes().to_vec(),
+            change
+                .before
+                .as_ref()
+                .map(encode_stored_record)
+                .transpose()?,
+            Some(encode_stored_record(&change.after)?),
+            &mut budget,
+            limits,
+        )?;
+        insert_delta_side(
+            &mut families[usize::from(FAMILY_RECORD_HISTORY - 1)],
+            history_key(change.id, prepared.revision),
+            None,
+            Some(encode_stored_record(&change.after)?),
+            &mut budget,
+            limits,
+        )?;
+
+        let before = change
+            .before
+            .as_ref()
+            .map(record_secondary_entries)
+            .transpose()?
+            .unwrap_or_else(|| core::array::from_fn(|_| BTreeMap::new()));
+        let after = record_secondary_entries(&change.after)?;
+        for offset in 0..4 {
+            let family = usize::from(FAMILY_OUTGOING - 1) + offset;
+            for (key, value) in &before[offset] {
+                insert_delta_side(
+                    &mut families[family],
+                    key.clone(),
+                    Some(value.clone()),
+                    after[offset].get(key).cloned(),
+                    &mut budget,
+                    limits,
+                )?;
+            }
+            for (key, value) in &after[offset] {
+                if !before[offset].contains_key(key) {
+                    insert_delta_side(
+                        &mut families[family],
+                        key.clone(),
+                        None,
+                        Some(value.clone()),
+                        &mut budget,
+                        limits,
+                    )?;
+                }
+            }
+        }
+    }
+
+    if let Some(policy) = &prepared.policy_change {
+        let before = snapshot
+            .policy
+            .as_ref()
+            .map(|policy| encode_result_policy(Some(policy)))
+            .transpose()?;
+        let after = encode_result_policy(Some(policy))?;
+        let policy_family = &mut families[usize::from(FAMILY_POLICY - 1)];
+        insert_delta_side(
+            policy_family,
+            vec![0],
+            before,
+            Some(after.clone()),
+            &mut budget,
+            limits,
+        )?;
+        let mut history_key = Vec::with_capacity(9);
+        history_key.push(1);
+        history_key.extend_from_slice(&prepared.revision.get().to_be_bytes());
+        insert_delta_side(
+            policy_family,
+            history_key,
+            None,
+            Some(after),
+            &mut budget,
+            limits,
+        )?;
+    }
+
+    let base_counts = metadata_counts(snapshot)?;
+    let mut target_counts = base_counts;
+    for family in FAMILY_CURRENT_RECORD..=FAMILY_REVERSE {
+        for (before, after) in families[usize::from(family - 1)].values() {
+            apply_count_delta(
+                &mut target_counts[usize::from(family - FAMILY_CURRENT_RECORD)],
+                before.is_some(),
+                after.is_some(),
+            )?;
+        }
+    }
+    for (key, (before, after)) in &families[usize::from(FAMILY_POLICY - 1)] {
+        let count_index = match key.first() {
+            Some(0) => 7,
+            Some(1) => 6,
+            _ => return Err(GraphDiskError::IndexCorrupt),
+        };
+        apply_count_delta(
+            &mut target_counts[count_index],
+            before.is_some(),
+            after.is_some(),
+        )?;
+    }
+    insert_delta_side(
+        &mut families[usize::from(FAMILY_METADATA - 1)],
+        b"graph-state-v1".to_vec(),
+        Some(metadata_value_from_counts(
+            prepared
+                .base_revision
+                .ok_or(GraphDiskError::RootStateMismatch)?,
+            base_counts,
+        )),
+        Some(metadata_value_from_counts(prepared.revision, target_counts)),
+        &mut budget,
+        limits,
+    )?;
+
+    let mut encoded_families: [Vec<IndexDelta>; FAMILY_COUNT as usize] =
+        core::array::from_fn(|_| Vec::new());
+    let mut deltas = 0_u64;
+    let mut logical_bytes = 0_u64;
+    for (index, family) in families.into_iter().enumerate() {
+        let output = &mut encoded_families[index];
+        output
+            .try_reserve(family.len())
+            .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        for (key, (before, after)) in family {
+            if before == after {
+                continue;
+            }
+            let before_bytes = before.as_ref().map_or(Ok(0), |value| count(value.len()))?;
+            let after_bytes = after.as_ref().map_or(Ok(0), |value| count(value.len()))?;
+            let bytes = count(key.len())?
+                .checked_add(before_bytes)
+                .and_then(|value| value.checked_add(after_bytes))
+                .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+            deltas = checked_sum(deltas, 1)?;
+            logical_bytes = checked_sum(logical_bytes, bytes)?;
+            output.push(IndexDelta::new(key, before, after)?);
+        }
+    }
+    if deltas != budget.deltas || logical_bytes != budget.logical_bytes {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    Ok(GraphStateRootDelta {
+        scope: prepared.scope,
+        base_anchor,
+        base_revision: prepared
+            .base_revision
+            .ok_or(GraphDiskError::RootStateMismatch)?,
+        revision: prepared.revision,
+        result_digest: prepared.result_digest,
+        families: encoded_families,
+        deltas,
+        logical_bytes,
+    })
+}
+
+fn insert_delta_side(
+    family: &mut DeltaMap,
+    key: Vec<u8>,
+    before: Option<Vec<u8>>,
+    after: Option<Vec<u8>>,
+    budget: &mut DeltaBudget,
+    limits: GraphStateDeltaLimits,
+) -> Result<(), GraphDiskError> {
+    if before == after {
+        return Ok(());
+    }
+    if family.contains_key(&key) {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    charge_delta_budget(budget, &key, before.as_deref(), after.as_deref(), limits)?;
+    family.insert(key, (before, after));
+    Ok(())
+}
+
+fn charge_delta_budget(
+    budget: &mut DeltaBudget,
+    key: &[u8],
+    before: Option<&[u8]>,
+    after: Option<&[u8]>,
+    limits: GraphStateDeltaLimits,
+) -> Result<(), GraphDiskError> {
+    let new_bytes = delta_logical_bytes(key, before, after)?.ok_or(GraphDiskError::IndexCorrupt)?;
+    let deltas = budget
+        .deltas
+        .checked_add(1)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let logical_bytes = budget
+        .logical_bytes
+        .checked_add(new_bytes)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if deltas > limits.maximum_deltas || logical_bytes > limits.maximum_logical_bytes {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    budget.deltas = deltas;
+    budget.logical_bytes = logical_bytes;
+    Ok(())
+}
+
+fn delta_logical_bytes(
+    key: &[u8],
+    before: Option<&[u8]>,
+    after: Option<&[u8]>,
+) -> Result<Option<u64>, GraphDiskError> {
+    if before == after {
+        return Ok(None);
+    }
+    let before_bytes = before.map_or(Ok(0), |value| count(value.len()))?;
+    let after_bytes = after.map_or(Ok(0), |value| count(value.len()))?;
+    let bytes = count(key.len())?
+        .checked_add(before_bytes)
+        .and_then(|value| value.checked_add(after_bytes))
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    Ok(Some(bytes))
+}
+
+fn record_secondary_entries(record: &Record) -> Result<[FamilyEntryMap; 4], GraphDiskError> {
+    let mut families = core::array::from_fn(|_| BTreeMap::new());
+    match record {
+        Record::Relationship(relationship) => {
+            if relationship.status == crate::AssertionStatus::Accepted {
+                families[0].insert(
+                    pair_key(relationship.from, relationship.id),
+                    relationship.to.record().as_bytes().to_vec(),
+                );
+                families[1].insert(
+                    pair_key(relationship.to, relationship.id),
+                    relationship.from.record().as_bytes().to_vec(),
+                );
+            }
+            for evidence in &relationship.evidence {
+                if families[2]
+                    .insert(pair_key(*evidence, relationship.id), Vec::new())
+                    .is_some()
+                {
+                    return Err(GraphDiskError::IndexCorrupt);
+                }
+            }
+        }
+        Record::Assertion(assertion) => {
+            for evidence in &assertion.evidence {
+                if families[2]
+                    .insert(pair_key(*evidence, assertion.id), Vec::new())
+                    .is_some()
+                {
+                    return Err(GraphDiskError::IndexCorrupt);
+                }
+            }
+        }
+        Record::Entity(_) | Record::Evidence(_) => {}
+    }
+    for (target, reference) in record_reverse_references(record) {
+        if families[3]
+            .insert(pair_key(target, record.id()), reverse_value(reference))
+            .is_some()
+        {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+    }
+    Ok(families)
+}
+
+fn apply_count_delta(count: &mut u64, before: bool, after: bool) -> Result<(), GraphDiskError> {
+    *count = match (before, after) {
+        (false, true) => count.checked_add(1),
+        (true, false) => count.checked_sub(1),
+        _ => Some(*count),
+    }
+    .ok_or(GraphDiskError::IndexCorrupt)?;
+    Ok(())
+}
+
+fn add_merge_report(
+    total: &mut GraphStateRootMergeReport,
+    next: &IndexRunMergeReport,
+) -> Result<(), GraphDiskError> {
+    total.base_entries = checked_sum(total.base_entries, next.base.entries)?;
+    total.base_logical_bytes = checked_sum(total.base_logical_bytes, next.base.logical_bytes)?;
+    total.deltas = checked_sum(total.deltas, next.deltas)?;
+    total.delta_logical_bytes = checked_sum(total.delta_logical_bytes, next.delta_logical_bytes)?;
+    total.insertions = checked_sum(total.insertions, next.insertions)?;
+    total.replacements = checked_sum(total.replacements, next.replacements)?;
+    total.deletions = checked_sum(total.deletions, next.deletions)?;
+    total.output_entries = checked_sum(total.output_entries, next.output_entries)?;
+    total.output_logical_bytes =
+        checked_sum(total.output_logical_bytes, next.output_logical_bytes)?;
+    total.pages_read = checked_sum(total.pages_read, next.base.stats.pages_read)?;
+    Ok(())
+}
+
+fn checked_sum(left: u64, right: u64) -> Result<u64, GraphDiskError> {
+    left.checked_add(right).ok_or(GraphDiskError::IndexCorrupt)
 }
 
 pub fn publish_graph_state_root<F, W, E, I>(
@@ -1091,7 +1667,14 @@ fn metadata_value(
     snapshot: &GraphSnapshot,
     revision: CommitRevision,
 ) -> Result<Vec<u8>, GraphDiskError> {
-    let counts = [
+    Ok(metadata_value_from_counts(
+        revision,
+        metadata_counts(snapshot)?,
+    ))
+}
+
+fn metadata_counts(snapshot: &GraphSnapshot) -> Result<[u64; 8], GraphDiskError> {
+    Ok([
         count(snapshot.records.len())?,
         total(snapshot.history.values().map(Vec::len))?,
         total(snapshot.outgoing.values().map(|values| values.len()))?,
@@ -1100,7 +1683,10 @@ fn metadata_value(
         total(snapshot.reverse.values().map(|values| values.len()))?,
         count(snapshot.policy_history.len())?,
         u64::from(snapshot.policy.is_some()),
-    ];
+    ])
+}
+
+fn metadata_value_from_counts(revision: CommitRevision, counts: [u64; 8]) -> Vec<u8> {
     let mut value = Vec::with_capacity(80);
     value.extend_from_slice(b"UGSM");
     value.extend_from_slice(&[1, 0, 0, 0]);
@@ -1109,7 +1695,7 @@ fn metadata_value(
         value.extend_from_slice(&count.to_be_bytes());
     }
     debug_assert_eq!(value.len(), 80);
-    Ok(value)
+    value
 }
 
 fn count(value: usize) -> Result<u64, GraphDiskError> {

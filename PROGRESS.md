@@ -3,14 +3,15 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `a181d17` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `7b92b8f` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
-The current Decision 0032 increment adds authenticated bounded base/delta scratch merge. T-20
-remains open pending graph-family integration, a disk-backed larger-than-memory reducer path and
-qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
-independent external security certification.
+Decision 0032 adds authenticated bounded base/delta scratch merge. The current Decision 0033
+increment connects one bounded graph transaction to an independently validated terminal
+`graph-state-v1` root. T-20 remains open pending a disk-backed larger-than-memory reducer path,
+streaming semantic validation, ingest deltas and qualifying BM-01/BM-06 results. Review was
+performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -259,7 +260,25 @@ unverified external distribution prerequisite.
   Multi-page insert/replace/delete, all-tombstone output, no-base construction, wrong-before/order
   rejection, corruption discovered after provisional output and ten target create/write/size/sync
   crash boundaries pass. Frozen `index-v1` still has one terminal run per family, and the primitive
-  neither validates graph semantics nor publishes a root.
+  itself neither validates graph semantics nor publishes a root.
+- Added Decision 0033 and an opaque no-I/O graph delta plan bound to the exact admitted base anchor,
+  scope, base/target revision and prepared result digest. It converts current/history, accepted
+  adjacency, provenance, canonical reverse-role and current/history policy changes into sorted,
+  coalesced exact deltas under aggregate count/byte limits.
+- Postcommit publication requires the matching durable outcome, merge-rewrites all eight families,
+  independently recomputes the expected terminal descriptors and full logical digest from the
+  actual current reducer, and publishes only the complete matching family set. Cache failure cannot
+  undo or weaken the journal transaction; partial scratch runs remain invisible.
+- The revision-three-to-four disk fixture combines entity reference replacement, accepted-edge
+  retraction, source-backed assertion creation and policy replacement. It rejects an undersized
+  preflight, incremental count and logical-byte plan budgets plus a wrong outcome, then proves a
+  postcommit merge-budget failure leaves the committed state intact and no target root visible
+  across storage restart. The test harness retains the non-durable plan for an in-process retry;
+  actual process loss requires a full-root rebuild. The retry exercises insert/replace/delete plus
+  empty adjacency output, proves delta and full roots both reconstruct to the exact live state, and
+  reopens both after restart. The
+  independent validator remains a full in-memory scan, so no larger-than-memory or benchmark claim
+  is made.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -331,8 +350,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 252 workspace tests including 77 uste-storage, 13
-# uste-crypto, 38 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 253 workspace tests including 77 uste-storage, 13
+# uste-crypto, 39 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
@@ -382,9 +401,10 @@ remaining mixed workload have not passed.
   stream. Ordinary graph prepare/publish is now change-bounded, but checkpoint decoding, explicit
   snapshots and composite ingest writes remain full-state boundaries. Reverse dependencies add an
   in-memory structure with no accepted aggregate/per-target fanout cap.
-  The bounded scratch merge can rewrite one terminal family without collecting its base, but graph
-  family-delta encoding, cross-family validation and live overlay lifecycle are not connected yet.
-  BM-01/BM-06 have not run. Graph policy is durable; the trusted adapter must supply its exact
+  The bounded scratch merge and graph terminal planner can rewrite and cross-check all eight
+  families for one revision without collecting base runs, but the live base/overlay lifecycle and
+  semantic validator remain fully memory-resident. BM-01/BM-06 have not run. Graph policy is
+  durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
   compiler, both confined to development tooling.
@@ -406,9 +426,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by converting bounded graph changes into terminal family merges, then add the live
-disk-backed base/overlay state, streaming semantic validation, ingest deltas and larger-than-memory
-reducer recovery. Connect the pinned fixture to exact BM-01 and define/run BM-06's 10-million-event
+Continue T-20 with the live disk-backed base/overlay state, streaming semantic validation, ingest
+deltas and larger-than-memory reducer recovery. Connect the pinned fixture to exact BM-01 and
+define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered

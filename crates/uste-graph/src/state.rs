@@ -492,19 +492,19 @@ fn graph_result_digest<'a>(
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct PreparedGraph {
-    scope: NamespaceRef,
-    base_revision: Option<CommitRevision>,
-    revision: CommitRevision,
-    changes: Vec<RecordChange>,
-    policy_change: Option<NamespacePolicy>,
-    result_digest: [u8; 32],
+    pub(crate) scope: NamespaceRef,
+    pub(crate) base_revision: Option<CommitRevision>,
+    pub(crate) revision: CommitRevision,
+    pub(crate) changes: Vec<RecordChange>,
+    pub(crate) policy_change: Option<NamespacePolicy>,
+    pub(crate) result_digest: [u8; 32],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct RecordChange {
-    id: RecordRef,
-    before: Option<Record>,
-    after: Record,
+pub(crate) struct RecordChange {
+    pub(crate) id: RecordRef,
+    pub(crate) before: Option<Record>,
+    pub(crate) after: Record,
 }
 
 impl TransactionState for GraphState {
@@ -2579,7 +2579,7 @@ pub(crate) const REVERSE_ROLE_RELATIONSHIP_PROPERTY: u16 = 1 << 5;
 pub(crate) const REVERSE_ROLE_EVIDENCE: u16 = 1 << 6;
 pub(crate) const REVERSE_ROLE_CORRECTION_OF: u16 = 1 << 7;
 
-fn record_reverse_references(record: &Record) -> BTreeMap<RecordRef, ReverseReference> {
+pub(crate) fn record_reverse_references(record: &Record) -> BTreeMap<RecordRef, ReverseReference> {
     let mut references = BTreeMap::new();
     visit_record_references(record, &mut |target, roles| {
         references

@@ -3,22 +3,24 @@ use uste_crypto::{
 };
 use uste_graph::{
     AdjacencyDirection, AssertionAction, DurablePolicyMutation, Expected, GRAPH_STATE_PROFILE_V1,
-    GraphDiskError, GraphState, GraphStateLoadLimits, GraphTransaction, NewEntity, NewEvidence,
-    NewRecord, NewRelationship, Operation, Record, ValidTime, disk_adjacent_ids, disk_record,
+    GraphDiskError, GraphState, GraphStateDeltaLimits, GraphStateLoadLimits,
+    GraphStateRootMergeLimits, GraphTransaction, NewAssertion, NewEntity, NewEvidence, NewRecord,
+    NewRelationship, Operation, Record, ValidTime, disk_adjacent_ids, disk_record,
     disk_supported_ids, encode_stored_record, encode_transaction, load_current_graph_index_roots,
     load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
-    load_graph_state_roots, publish_current_graph_index, publish_graph_state_root,
-    reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate, scrub_current_graph_index,
-    scrub_graph_state_root,
+    load_graph_state_roots, prepare_graph_state_root_delta, publish_current_graph_index,
+    publish_graph_state_root, publish_graph_state_root_delta, reconstruct_graph_recovery_seed,
+    reconstruct_graph_state_candidate, scrub_current_graph_index, scrub_graph_state_root,
 };
 use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
 use uste_storage::{
-    ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexRootInput, PageCache,
-    fault::ScriptedClock, journal::DurableKeyEnvelope, memory::MemoryFileSystem,
+    ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexRootInput, IndexRunMergeLimits,
+    IndexRunReadLimits, PageCache, fault::ScriptedClock, journal::DurableKeyEnvelope,
+    memory::MemoryFileSystem,
 };
 use uste_txn::{
     AuthenticatedIndexRecovery, CheckpointState, CommitCoordinator, CoordinatorMetadataLoadLimits,
-    NeverCancel, RetentionDays, TransactionRequest,
+    NeverCancel, RetentionDays, TransactionOutcome, TransactionRequest,
     load_coordinator_metadata_candidates_for_recovery, publish_coordinator_metadata_root,
 };
 use uste_types::{
@@ -63,7 +65,7 @@ fn commit(
     filesystem: &mut MemoryFileSystem,
     revision: u8,
     transaction: GraphTransaction,
-) {
+) -> TransactionOutcome {
     let encoded = encode_transaction(&transaction).unwrap();
     coordinator
         .commit(
@@ -78,7 +80,7 @@ fn commit(
             &mut clock(u64::from(revision)),
             &NeverCancel,
         )
-        .unwrap();
+        .unwrap()
 }
 
 #[test]
@@ -689,6 +691,365 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         snapshot.record(relationship),
         Some(Record::Relationship(_))
     ));
+}
+
+#[test]
+fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
+    let left = record(0x31);
+    let right = record(0x32);
+    let evidence = record(0x33);
+    let relationship = record(0x34);
+    let assertion = record(0x35);
+    let mut filesystem = MemoryFileSystem::new(32 * 1024 * 1024);
+    let name = EntryName::new("graph-state-delta").unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        create_vault(scope().database(), 40_000),
+        CounterEntropy(41_000),
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        1,
+        GraphTransaction::with_policy_mutation(
+            scope(),
+            vec![
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Entity(NewEntity {
+                        id: left,
+                        entity_type: text("node"),
+                        schema_version: 1,
+                        properties: Value::Null,
+                    }),
+                },
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Entity(NewEntity {
+                        id: right,
+                        entity_type: text("node"),
+                        schema_version: 1,
+                        properties: Value::Null,
+                    }),
+                },
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Evidence(NewEvidence {
+                        id: evidence,
+                        digest: [0x36; 32],
+                        locator: text("fixture://delta"),
+                    }),
+                },
+            ],
+            DurablePolicyMutation::Install {
+                policy: NamespacePolicy::new(
+                    scope(),
+                    PolicyVersion::new(1).unwrap(),
+                    QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
+                ),
+            },
+        ),
+    );
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        2,
+        GraphTransaction::new(
+            scope(),
+            vec![Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Relationship(NewRelationship {
+                    id: relationship,
+                    from: left,
+                    to: right,
+                    relationship_type: text("edge"),
+                    properties: Value::Null,
+                    evidence: vec![evidence],
+                    valid_time: ValidTime::Unknown,
+                }),
+            }],
+        ),
+    );
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        3,
+        GraphTransaction::new(
+            scope(),
+            vec![Operation::ActOnRelationship {
+                target: relationship,
+                expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+                action: AssertionAction::Accept,
+                correction: None,
+                correction_expected: None,
+            }],
+        ),
+    );
+
+    let base_snapshot = coordinator.read_view().unwrap().state().clone();
+    publish_graph_state_root(&mut coordinator, &mut filesystem, &base_snapshot).unwrap();
+    let base_roots = load_graph_state_roots(&coordinator, &mut filesystem, &base_snapshot).unwrap();
+    assert_eq!(base_roots.len(), 1);
+    let base = &base_roots[0];
+    let target_revision = CommitRevision::new(4).unwrap();
+    let transaction = GraphTransaction::with_policy_mutation(
+        scope(),
+        vec![
+            Operation::ReplaceEntity {
+                target: left,
+                expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+                properties: Value::RecordRef(right),
+            },
+            Operation::ActOnRelationship {
+                target: relationship,
+                expected: Expected::Version(uste_graph::RecordVersion::new(2).unwrap()),
+                action: AssertionAction::Retract,
+                correction: None,
+                correction_expected: None,
+            },
+            Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Assertion(NewAssertion {
+                    id: assertion,
+                    subject: left,
+                    predicate: text("tracks"),
+                    object: Value::RecordRef(right),
+                    evidence: vec![evidence],
+                    valid_time: ValidTime::Unknown,
+                }),
+            },
+        ],
+        DurablePolicyMutation::Replace {
+            expected: PolicyVersion::new(1).unwrap(),
+            policy: NamespacePolicy::new(
+                scope(),
+                PolicyVersion::new(2).unwrap(),
+                QuotaLimits::new(200, 2 * 1024 * 1024, 2 * 1024 * 1024, 16, 2048).unwrap(),
+            ),
+        },
+    );
+    assert!(matches!(
+        prepare_graph_state_root_delta(
+            &coordinator,
+            base,
+            &transaction,
+            target_revision,
+            GraphStateDeltaLimits::new(1, 1024 * 1024).unwrap(),
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let plan = prepare_graph_state_root_delta(
+        &coordinator,
+        base,
+        &transaction,
+        target_revision,
+        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plan.delta_count(), 19);
+    assert!(plan.logical_bytes() > 0);
+    assert!(matches!(
+        prepare_graph_state_root_delta(
+            &coordinator,
+            base,
+            &transaction,
+            target_revision,
+            GraphStateDeltaLimits::new(18, 1024 * 1024).unwrap(),
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    assert!(matches!(
+        prepare_graph_state_root_delta(
+            &coordinator,
+            base,
+            &transaction,
+            target_revision,
+            GraphStateDeltaLimits::new(100, plan.logical_bytes() - 1).unwrap(),
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let exact_plan = prepare_graph_state_root_delta(
+        &coordinator,
+        base,
+        &transaction,
+        target_revision,
+        GraphStateDeltaLimits::new(plan.delta_count(), plan.logical_bytes()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(exact_plan.delta_count(), plan.delta_count());
+    assert_eq!(exact_plan.logical_bytes(), plan.logical_bytes());
+
+    let outcome = commit(&mut coordinator, &mut filesystem, 4, transaction);
+    let base_read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(base_read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    let merge_limits = GraphStateRootMergeLimits::uniform(merge);
+    let mut wrong_outcome = outcome;
+    wrong_outcome.result_digest[0] ^= 1;
+    assert!(matches!(
+        publish_graph_state_root_delta(
+            &mut coordinator,
+            &mut filesystem,
+            base,
+            &exact_plan,
+            wrong_outcome,
+            merge_limits,
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
+
+    let undersized_merge =
+        IndexRunMergeLimits::new(base_read, 1, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    assert!(matches!(
+        publish_graph_state_root_delta(
+            &mut coordinator,
+            &mut filesystem,
+            base,
+            &plan,
+            outcome,
+            GraphStateRootMergeLimits::uniform(undersized_merge),
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::Storage(uste_storage::journal::StorageError::ResourceLimit)
+        ))
+    ));
+    let committed_target = coordinator.read_view().unwrap().state().clone();
+    assert_eq!(committed_target.revision(), Some(target_revision));
+    assert!(
+        load_graph_state_roots(&coordinator, &mut filesystem, &committed_target)
+            .unwrap()
+            .is_empty()
+    );
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (reopened_after_failed_merge, recovery) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(42_000),
+        CounterEntropy(43_000),
+        &mut TestKeyAdapter,
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    assert_eq!(recovery.frontier, Some(target_revision));
+    assert_eq!(
+        reopened_after_failed_merge.read_view().unwrap().state(),
+        &committed_target
+    );
+    assert!(
+        load_graph_state_roots(
+            &reopened_after_failed_merge,
+            &mut filesystem,
+            &committed_target,
+        )
+        .unwrap()
+        .is_empty()
+    );
+    coordinator = reopened_after_failed_merge;
+
+    let (delta_publication, report) = publish_graph_state_root_delta(
+        &mut coordinator,
+        &mut filesystem,
+        base,
+        &plan,
+        outcome,
+        merge_limits,
+    )
+    .unwrap();
+    assert_eq!(delta_publication.revision, target_revision);
+    assert_eq!(report.runs, 6);
+    assert!(report.base_entries > 0);
+    assert!(report.replacements > 0);
+    assert!(report.insertions > 0);
+    assert!(report.deletions > 0);
+    assert!(report.pages_read >= 8);
+
+    let stale_base_transaction = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: right,
+            expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+            properties: Value::Bool(true),
+        }],
+    );
+    assert!(matches!(
+        prepare_graph_state_root_delta(
+            &coordinator,
+            base,
+            &stale_base_transaction,
+            CommitRevision::new(5).unwrap(),
+            GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
+
+    let target = coordinator.read_view().unwrap().state().clone();
+    let delta_roots = load_graph_state_roots(&coordinator, &mut filesystem, &target).unwrap();
+    assert_eq!(delta_roots.len(), 1);
+    assert_eq!(delta_roots[0].generation(), delta_publication.generation);
+    let full_publication =
+        publish_graph_state_root(&mut coordinator, &mut filesystem, &target).unwrap();
+    let equivalent_roots = load_graph_state_roots(&coordinator, &mut filesystem, &target).unwrap();
+    assert_eq!(equivalent_roots.len(), 2);
+    assert!(
+        equivalent_roots
+            .iter()
+            .any(|root| root.generation() == delta_publication.generation)
+    );
+    assert!(
+        equivalent_roots
+            .iter()
+            .any(|root| root.generation() == full_publication.generation)
+    );
+
+    let candidates = load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    let delta_candidate = candidates
+        .iter()
+        .find(|candidate| candidate.generation() == delta_publication.generation)
+        .unwrap();
+    let (reconstructed, reconstruction) = reconstruct_graph_state_candidate(
+        &coordinator,
+        &mut filesystem,
+        delta_candidate,
+        GraphStateLoadLimits::new(20, 40, 10, 200, 200, 2 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reconstructed.snapshot(), target);
+    assert_eq!(reconstruction.runs, 6);
+
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (reopened, recovery) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(44_000),
+        CounterEntropy(45_000),
+        &mut TestKeyAdapter,
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    assert_eq!(recovery.frontier, Some(target_revision));
+    assert_eq!(reopened.read_view().unwrap().state(), &target);
+    assert_eq!(
+        load_graph_state_roots(&reopened, &mut filesystem, &target)
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[test]

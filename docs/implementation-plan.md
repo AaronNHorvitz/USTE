@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.10 · 2026-09-17 · R1 implementation through T-49 complete; T-19 acceptance open
+Design draft 1.11 · 2026-09-17 · R1 implementation through T-49 complete; T-19 acceptance open
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -79,9 +79,11 @@ the contiguous checkpoint payload from this path but still constructs a complete
 `GraphState` and reads candidates twice. Decision 0031 pairs it with a versioned coordinator
 metadata root through a temporary authenticated recovery owner; seeded open rechecks the prefix and
 replays the suffix. Decision 0032 adds the bounded authenticated storage-level base/delta scratch
-merge without changing `index-v1`; it does not yet connect graph-family deltas or replace the
-in-memory reducer. T-20 next needs graph terminal-root delta construction, a live disk-backed
-base/overlay state, streaming semantic validation and ingest deltas.
+merge without changing `index-v1`. Decision 0033 connects exact bounded graph changes to all eight
+terminal families through an opaque base/outcome-bound plan, independently compares the merged
+descriptors with the postcommit graph and publishes one complete root. It still scans and retains
+the full in-memory reducer. T-20 next needs a live disk-backed base/overlay state, streaming semantic
+validation, ingest deltas and qualifying scale evidence.
 
 ## Architectural decomposition
 

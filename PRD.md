@@ -144,8 +144,11 @@ result remains full-memory recovery and does not close T-20 or qualify BM-01/BM-
 Decision 0032 adds a bounded authenticated merge from one optional `index-v1` base plus exact
 ordered before/after deltas into one unpublished encrypted terminal run. It validates absent/
 present preconditions, tombstones, source integrity and independent source/delta/output budgets
-without changing the frozen format or journal authority. Graph-family integration, a live
-disk-backed reducer and qualifying BM-01/BM-06 measurements remain open.
+without changing the frozen format or journal authority. Decision 0033 adds the graph-owned
+two-phase bridge: an opaque precommit plan binds exact family deltas to an admitted base and result
+digest, and postcommit maintenance merges all eight families, compares them with the actual live
+reducer and publishes only a complete matching root. The independent comparison and reducer remain
+full-memory; a live disk-backed reducer and qualifying BM-01/BM-06 measurements remain open.
 
 ## Release gates
 

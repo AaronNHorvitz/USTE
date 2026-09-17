@@ -204,6 +204,14 @@ output work. Empty output creates no run. Errors can leave only unreferenced scr
 validator and exact root publication are still required before visibility. `index-v1` remains a
 single-run-per-family terminal format rather than a persistent overlay manifest.
 
+Decision 0033 implements that validator for `graph-state-v1`. A no-I/O precommit plan encodes exact
+metadata/current/history/adjacency/provenance/reverse/policy changes and binds them to an admitted
+base anchor and transaction result digest. Postcommit publication requires the exact outcome,
+merge-rewrites all eight families, independently projects the actual current graph, and publishes
+only when family presence, counts and logical digests match. A failure leaves the journal commit
+intact and at most unreferenced encrypted runs. The projection pass and live reducer remain
+full-memory pending the persistent base/overlay design.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

@@ -196,6 +196,14 @@ validator and exact root publication remain mandatory. Frozen roots still allow 
 so a newer terminal root must rewrite every nonempty family; persistent multi-run overlays require
 a new versioned profile.
 
+Decision 0033 supplies that graph domain layer for one-revision terminal updates. Before commit it
+materializes an opaque bounded eight-family plan against an admitted exact base root. After the
+ordinary journal commit, the exact outcome is required; every family is merge-rewritten, empty
+families are omitted, and the result is compared with descriptors and the full logical digest
+independently recomputed from the actual current graph before root publication. Cache failure never
+changes journal authority. This still scans a fully memory-resident reducer and is not the
+disk-backed base/overlay or larger-than-memory endpoint.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

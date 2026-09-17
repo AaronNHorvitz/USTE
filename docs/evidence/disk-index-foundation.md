@@ -89,6 +89,12 @@ Decision 0028 then adds the incrementally maintained target/owner reverse map an
 full-record scan. The map remains in memory and is not yet part of a durable state profile; see
 [`reverse-dependency-index.md`](reverse-dependency-index.md).
 
+Decisions 0032 and 0033 add an authenticated bounded base/delta run merge and the graph-owned
+terminal-root bridge. One precommit plan now maps exact graph changes to every `graph-state-v1`
+family and postcommit publication independently checks the complete result before visibility; see
+[`graph-state-root-deltas.md`](graph-state-root-deltas.md). The live reducer and semantic comparison
+remain full-memory, so this is not T-20 closure.
+
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
 stops after the first delivered entry in the regression.
