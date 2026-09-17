@@ -2,7 +2,7 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `be114f5` (T-09 canonical type kernel). Review was performed by
+Latest reviewed implementation: `9953624` (T-10 independent state-machine oracle). Review was performed by
 Codex agents and does not represent independent external security certification.
 
 ## Completed this increment
@@ -21,6 +21,16 @@ Codex agents and does not represent independent external security certification.
   supply-chain scripts. Excluded experiment workspaces retain their independent pinned locks.
 - Completed T-09 with Decision 0012, bounded generic values, typed/scoped identities, UTC
   instants, nonzero monotonic commit revisions and a strict canonical format-1.0 codec.
+- Completed T-10 with an independent `uste-testkit` oracle using ordered maps, clone-and-publish
+  transactions, retained revision snapshots and scans rather than future production reducers.
+- Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
+  lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
+  bounded reject/cascade/retract deletion and typed atomic failures.
+- Executed every literal assertion transition plus the complete valid/invalid action matrix; added
+  deterministic bounded entity and evidence-backed graph histories with an independently asserted
+  claim/correction projection.
+- Enforced the `limits-v1` 10,000-operation and conservative 100,000-reference request caps before
+  state cloning. The operation wire-size cap remains with the later admission/codec boundary.
 - Added independent literal R1 goldens for all assigned value tags and numeric/time/reference
   endpoints; malformed length/integer/version/tag/order/UTF-8/depth inputs fail closed.
 - Added a fixed 262,144-node aggregate budget and fallible decode allocation after review found
@@ -77,7 +87,7 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; uste-types 7 unit + 12 integration tests;
+# workspace format/clippy/test/doc pass; 33 workspace tests including 14 uste-testkit tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles: zero advisory/license/source errors; documented miniz_oxide warnings only
@@ -102,13 +112,15 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The canonical type/codec kernel is implemented, but there is still no database executable,
-  transaction coordinator, durable storage, encryption or production qualification. The fuzz
-  runner requires nightly Rust plus a C++ compiler, both confined to development tooling.
+- The canonical type/codec kernel and test-only logical oracle are implemented, but there is still
+  no database executable, production transaction coordinator, durable storage, encryption or
+  production qualification. The oracle intentionally retains full snapshots and scans records;
+  it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
+  Rust plus a C++ compiler, both confined to development tooling.
 
 ## Next dependency-permitted work
 
-Implement T-10's independent in-memory reference model. T-11's encryption/key boundary and
-T-12's deterministic I/O fault harness are also unblocked by T-09 and can proceed as independent
-work packages. T-62 remains independent and must not be represented as complete without
-owner-administered evidence.
+Implement T-11's encryption/key boundary and T-12's deterministic I/O fault harness, both
+unblocked by T-09 and suitable as independent work packages. Their completion plus T-10 unblocks
+T-13 journal/publication/recovery. T-62 remains independent and must not be represented as complete
+without owner-administered evidence.
