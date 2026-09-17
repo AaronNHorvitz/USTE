@@ -278,6 +278,7 @@ pub struct BlobUpload {
     aborted: bool,
     requires_resume: bool,
     finalized: Option<BlobReference>,
+    durable_resume_evidence: bool,
     lease: Option<UploadLease>,
     owner_epoch: KeyEpoch,
     owner_writer: WriterIncarnationId,
@@ -359,6 +360,7 @@ impl BlobUpload {
             aborted: false,
             requires_resume: false,
             finalized: None,
+            durable_resume_evidence: false,
             lease: Some(lease),
             owner_epoch,
             owner_writer,
@@ -378,6 +380,12 @@ impl BlobUpload {
     #[must_use]
     pub const fn durable_bytes(&self) -> u64 {
         self.durable_bytes
+    }
+
+    /// Whether resume authenticated a durable chunk or terminal marker for this token.
+    #[must_use]
+    pub const fn has_durable_resume_evidence(&self) -> bool {
+        self.durable_resume_evidence
     }
 
     fn release_lease(&mut self) {
@@ -438,6 +446,7 @@ where
             upload.durable_bytes = reference.byte_len;
             upload.sealed = true;
             upload.finalized = Some(reference);
+            upload.durable_resume_evidence = true;
             upload.release_lease();
             return Err(StorageError::InvalidState);
         }
@@ -503,6 +512,7 @@ where
             upload.durable_bytes = reference.byte_len;
             upload.sealed = true;
             upload.finalized = Some(reference);
+            upload.durable_resume_evidence = true;
             upload.release_lease();
             return Ok(reference);
         }
@@ -607,6 +617,7 @@ where
             upload.durable_bytes = reference.byte_len;
             upload.sealed = true;
             upload.finalized = Some(reference);
+            upload.durable_resume_evidence = true;
             upload.release_lease();
             return Ok(upload);
         }
@@ -682,6 +693,7 @@ where
             break;
         }
     }
+    upload.durable_resume_evidence = upload.durable_chunks != 0;
     Ok(upload)
 }
 

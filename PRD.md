@@ -49,6 +49,11 @@ under FR-15/27/28/31/33/34. Game rendering and broader physics remain future con
 SHALL means a release obligation, not an implemented feature. Each row names its first
 required release and its detailed contract.
 
+Decision 0018 and T-16 implement the default-deny namespace/record policy primitive and the
+authorized transaction/blob facade for FR-09. Concrete graph/history/search/export/branch paths
+remain obligations of their feature tasks and must repeat authorization-before-expansion tests;
+the foundation is not a claim that those unimplemented paths already exist.
+
 | ID | Obligation | Gate | Contract |
 |---|---|---|---|
 | FR-01 | Stable namespace-scoped identities and validated typed entities, assertions, relationships, evidence, and artifacts | R1 | [Data](docs/data-model.md) |

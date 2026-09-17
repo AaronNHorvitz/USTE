@@ -1,7 +1,7 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-13/T-14 journal and transactions plus the locally qualified T-15
-blob foundation are implemented
+Draft contract · 2026-09-17 · T-13–T-16 journal, transaction, blob and policy foundations are
+locally qualified
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 
@@ -67,6 +67,21 @@ recovery must not resample clocks or reinterpret source dates. See [time and ord
 Readers see a pinned committed revision, not staging. Current authorization is checked
 separately; revocation can invalidate an otherwise valid reader handle. Failed validation
 publishes no partial revision. Bounded queues apply backpressure instead of dropping writes.
+
+Decision 0018's authorized facade now performs that separate current-policy check. Consumer commit
+requests omit the principal; the facade derives it from a trusted authenticated principal before
+calling the raw coordinator. Raw coordinator/storage methods remain privileged recovery and adapter
+capabilities. Versioned leases gate every access to a pinned revision and every subsequent upload
+operation. The recovered transaction index retains its owner, and the recovered unique-blob set
+retains first-commit ownership for per-principal quota reconstruction.
+
+Staged and committed blob quotas count exact logical plaintext octets. A failed write reconciles
+the handle's observed accepted-byte delta; finalize does not release staging; accepted abort does;
+successful commit moves each unique reference to committed accounting once. T-17 must persist the
+current policy records supplied by the trusted local adapter in this foundation. Format 1.0 cannot
+enumerate every abandoned upload reservation, so a reopened authorized coordinator denies new
+starts while permitting evidenced-token resume/abort; T-35 must replace this conservative rule
+with complete reconciliation.
 
 ## Commit metadata and corruption
 

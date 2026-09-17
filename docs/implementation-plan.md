@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.6 · 2026-09-17 · R0 design ready; T-08–T-12 foundation implemented
+Design draft 1.7 · 2026-09-17 · R0 design ready; T-08–T-16 foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -69,6 +69,13 @@ blob bytes and inventory are durable and verified before their transaction certi
 Its T-15 qualification injects every modeled publication failure class, rejects authenticated
 malformed/replayed objects, caps live upload buffers per database and measures a 12 GiB encrypted
 restart/round-trip at bounded RSS.
+Decision 0018 adds the storage-independent `uste-policy` kernel and `uste-txn` authorized facade.
+Trusted authentication supplies the principal; consumer commit requests cannot spoof it. Every
+implemented revision-view/outcome/blob/commit path authorizes before existence access, version
+changes invalidate active handles, and exact committed-byte ownership rebuilds across restart.
+Because uncommitted reservations are not enumerable yet, reopened coordinators deny new upload
+starts while allowing evidenced-token reconciliation; T-35 owns removing that limitation. T-17
+adds durable policy records and record requirements before graph reducer state is inspected.
 
 ## R0 design deliverables
 

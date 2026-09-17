@@ -5,13 +5,22 @@
 
 #![forbid(unsafe_code)]
 
+mod authorized;
+
+pub use authorized::{
+    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedReadView,
+    AuthorizedTransactionRequest, AuthorizedTransactionState, MAX_STAGED_UPLOAD_RESERVATIONS,
+    QuotaUsage, open_authorized,
+};
+
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 use uste_crypto::{EntropySource, KeyAdapter};
+pub use uste_policy::PrincipalDigest;
 use uste_storage::{
-    BlobInventory, BlobReference, BlobUpload, BlobUploadToken, Clock, EMPTY_BLOB_INVENTORY_DIGEST,
-    OwnershipFileSystem,
+    BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, Clock,
+    EMPTY_BLOB_INVENTORY_DIGEST, OwnershipFileSystem,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -30,22 +39,6 @@ const MAX_RETENTION_DAYS: u16 = 365;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024 - GROUP_HEADER_BYTES;
 /// Accepted `limits-v1` cap for retained idempotency outcomes in one namespace.
 pub const MAX_OUTCOMES_PER_NAMESPACE: usize = 10_000_000;
-
-/// Stable digest of an authenticated principal identity, supplied by the trusted policy adapter.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct PrincipalDigest([u8; 32]);
-
-impl PrincipalDigest {
-    #[must_use]
-    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-
-    #[must_use]
-    pub const fn as_bytes(self) -> [u8; 32] {
-        self.0
-    }
-}
 
 /// Retry-outcome retention fixed by Decision 0003.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -189,7 +182,9 @@ where
     journal: JournalStore<F, W, E, I>,
     state: S,
     outcomes: BTreeMap<RetryKey, TransactionOutcome>,
-    transactions: BTreeMap<TransactionId, TransactionOutcome>,
+    transactions: BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    committed_blob_owners: BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    recovered: bool,
     uncertain: bool,
 }
 
@@ -227,6 +222,8 @@ where
             state: initial_state,
             outcomes: BTreeMap::new(),
             transactions: BTreeMap::new(),
+            committed_blob_owners: BTreeMap::new(),
+            recovered: false,
             uncertain: false,
         })
     }
@@ -248,6 +245,7 @@ where
         let mut state = initial_state;
         let mut outcomes = BTreeMap::new();
         let mut transactions = BTreeMap::new();
+        let mut committed_blob_owners = BTreeMap::new();
         let (journal, report) = JournalStore::open(
             filesystem,
             final_name,
@@ -255,7 +253,16 @@ where
             vault_entropy,
             identity_entropy,
             key_adapter,
-            |group| replay_group(scope, &mut state, &mut outcomes, &mut transactions, group),
+            |group| {
+                replay_group(
+                    scope,
+                    &mut state,
+                    &mut outcomes,
+                    &mut transactions,
+                    &mut committed_blob_owners,
+                    group,
+                )
+            },
         )
         .map_err(map_open_error)?;
         Ok((
@@ -266,6 +273,8 @@ where
                 state,
                 outcomes,
                 transactions,
+                committed_blob_owners,
+                recovered: true,
                 uncertain: false,
             },
             report,
@@ -280,6 +289,39 @@ where
             revision: self.journal.frontier(),
             state: self.state.snapshot(),
         })
+    }
+
+    /// Namespace governed by this coordinator.
+    #[must_use]
+    pub const fn scope(&self) -> NamespaceRef {
+        self.scope
+    }
+
+    /// Whether this coordinator opened an existing durable database.
+    #[must_use]
+    pub const fn was_recovered(&self) -> bool {
+        self.recovered
+    }
+
+    /// Recovered first-commit ownership for every unique committed blob.
+    ///
+    /// This is a trusted-adapter surface used to rebuild durable principal quota accounting. It
+    /// must not be exposed directly to untrusted callers because it reveals blob existence.
+    pub fn committed_blob_owners(
+        &self,
+    ) -> impl Iterator<Item = (BlobReference, PrincipalDigest)> + '_ {
+        self.committed_blob_owners
+            .values()
+            .map(|(reference, principal)| (*reference, *principal))
+    }
+
+    /// Return the first committing principal for an exact committed reference.
+    #[must_use]
+    pub fn committed_blob_owner(&self, reference: BlobReference) -> Option<PrincipalDigest> {
+        self.committed_blob_owners
+            .get(&(reference.scope(), reference.id()))
+            .filter(|(committed, _)| *committed == reference)
+            .map(|(_, principal)| *principal)
     }
 
     pub fn start_blob_upload(
@@ -412,7 +454,36 @@ where
             .observe()
             .map_err(|_| TransactionError::RetryableUnavailable)?
             .wall_utc;
-        let outcome = self.transactions.get(&transaction_id).copied();
+        let outcome = self
+            .transactions
+            .get(&transaction_id)
+            .map(|(_, outcome)| *outcome);
+        match outcome {
+            Some(outcome) if now >= outcome.expires_at => Err(TransactionError::IdempotencyExpired),
+            other => Ok(other),
+        }
+    }
+
+    /// Look up an outcome only when the transaction belongs to the authenticated principal.
+    /// A different principal and an unknown transaction are deliberately indistinguishable.
+    pub fn transaction_outcome_for(
+        &self,
+        principal: PrincipalDigest,
+        transaction_id: TransactionId,
+        clock: &mut impl Clock,
+    ) -> Result<Option<TransactionOutcome>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        let now = clock
+            .observe()
+            .map_err(|_| TransactionError::RetryableUnavailable)?
+            .wall_utc;
+        let outcome = self
+            .transactions
+            .get(&transaction_id)
+            .filter(|(owner, _)| *owner == principal)
+            .map(|(_, outcome)| *outcome);
         match outcome {
             Some(outcome) if now >= outcome.expires_at => Err(TransactionError::IdempotencyExpired),
             other => Ok(other),
@@ -519,7 +590,15 @@ where
         }
         self.state.publish(prepared);
         self.outcomes.insert(retry_key, outcome);
-        self.transactions.insert(request.transaction_id, outcome);
+        self.transactions
+            .insert(request.transaction_id, (request.principal, outcome));
+        if let Some(inventory) = request.blob_inventory {
+            for reference in inventory.references() {
+                self.committed_blob_owners
+                    .entry((reference.scope(), reference.id()))
+                    .or_insert((*reference, request.principal));
+            }
+        }
         Ok(outcome)
     }
 }
@@ -528,7 +607,8 @@ fn replay_group<S: TransactionState>(
     scope: NamespaceRef,
     state: &mut S,
     outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
-    transactions: &mut BTreeMap<TransactionId, TransactionOutcome>,
+    transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    committed_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
     group: RecoveredGroup<'_>,
 ) -> Result<(), StorageError> {
     if sha256(group.encoded_group) != group.logical_event_digest {
@@ -554,12 +634,22 @@ fn replay_group<S: TransactionState>(
             .insert(decoded.retry_key, decoded.outcome)
             .is_some()
         || transactions
-            .insert(decoded.outcome.transaction_id, decoded.outcome)
+            .insert(
+                decoded.outcome.transaction_id,
+                (decoded.retry_key.principal, decoded.outcome),
+            )
             .is_some()
     {
         return Err(StorageError::IntegrityFailure);
     }
     state.publish(prepared);
+    if let Some(inventory) = decoded.blob_inventory {
+        for reference in inventory.references() {
+            committed_blob_owners
+                .entry((reference.scope(), reference.id()))
+                .or_insert((*reference, decoded.retry_key.principal));
+        }
+    }
     Ok(())
 }
 
@@ -654,7 +744,7 @@ fn decode_group<'a>(
     {
         return Err(TransactionError::IntegrityFailure);
     }
-    let principal = PrincipalDigest(read_array(bytes, 24)?);
+    let principal = PrincipalDigest::from_bytes(read_array(bytes, 24)?);
     let idempotency_key = IdempotencyKey::from_bytes(read_array(bytes, 56)?);
     let transaction_id = TransactionId::from_bytes(read_array(bytes, 72)?);
     Ok(DecodedGroup {

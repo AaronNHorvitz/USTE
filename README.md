@@ -13,10 +13,11 @@ to persist game-world items, track real-world objects, or link items to imported
 observations. These are uses of the same storage, graph, space, time and physics capabilities.
 An item can link to a price record without USTE fetching that price from an external provider.
 
-**Status: R0 design ready; T-08–T-13 workspace-through-encrypted-journal work is complete.** There
-is no database executable,
-transaction coordinator, supported parser, benchmark result, security certification, or production
-release yet. The features below are requirements unless explicitly identified as implemented.
+**Status: R0 design ready; T-08–T-16 workspace, encrypted journal/transactions/blobs and local
+authorization foundation are complete.** There is no database executable, graph engine, supported
+parser, security certification, or production release yet. One T-15 component benchmark is recorded
+and misses its throughput target. The features below are requirements unless explicitly identified
+as implemented.
 
 ## Product direction
 

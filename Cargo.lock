@@ -310,6 +310,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uste-policy"
+version = "0.1.0"
+dependencies = [
+ "uste-types",
+]
+
+[[package]]
 name = "uste-storage"
 version = "0.1.0"
 dependencies = [
@@ -333,6 +340,7 @@ version = "0.1.0"
 dependencies = [
  "sha2",
  "uste-crypto",
+ "uste-policy",
  "uste-storage",
  "uste-types",
 ]

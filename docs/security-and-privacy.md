@@ -52,6 +52,16 @@ within a documented bound. Worker results arriving after revocation are rejected
 Promotions, schema changes, imports, retention holds, key changes, and executable capabilities
 have distinct permissions. Stored procedures are inert unless separately authorized elsewhere.
 
+Decision 0018 implements the first local policy boundary. `uste-policy` is default deny and has no
+storage or network capability; a trusted authentication adapter binds a principal to the exact
+kernel instance before the consumer receives the facade. `uste-txn::AuthorizedCoordinator` does
+not accept an authenticator and checks current action/scope before outcome indexes or blob storage.
+Generic views expose only a revision; T-17 record projections must authorize targets before state.
+Policy-versioned leases make an open view or upload stale on its next call after any replacement. Denied existing,
+uncommitted and foreign objects share the same content-free error; this is not a constant-time
+claim. Until T-17 persists native policy records, a trusted local adapter must supply current policy
+at open and absence fails closed.
+
 An embedded API protects against untrusted inputs, not an already compromised host process.
 Use process separation when the consumer itself must not hold unrestricted database handles.
 

@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.4 · 2026-09-17 · R0 design ready; canonical type kernel implemented
+Database design draft 1.5 · 2026-09-17 · R0 design ready; T-08–T-16 foundation implemented
 
 ## Component boundaries
 
@@ -36,8 +36,9 @@ See [application use cases](docs/application-use-cases.md).
 
 ## Proposed Rust workspace
 
-`uste-types` now exists as the first workspace crate. The remaining rows are planned component
-boundaries, not claims of implemented directories or a fixed public API.
+The workspace now implements `uste-types`, `uste-policy`, `uste-crypto`, `uste-storage`,
+`uste-txn` and the independent `uste-testkit`; later rows remain planned component boundaries,
+not claims of implemented directories or a fixed public API.
 
 | Crate | Responsibility |
 |---|---|
@@ -116,6 +117,15 @@ grow outside recorded limits. A database-scoped process-local lease also caps li
 at 32 under the exclusive owner; canonical staging publication uses synchronized temporary files,
 no-replace rename and authenticated progress witnesses. Paired terminal witnesses preserve final/
 abort intent after one missing copy, and accepted abort intent is durable before cleanup begins.
+
+Decision 0018 puts the storage-independent default-deny kernel in `uste-policy` and the mandatory
+consumer facade in `uste-txn`. The facade derives the journaled principal from a trusted
+authentication adapter, authorizes before state/index/filesystem access, revalidates versioned
+revision-view/upload leases, conceals foreign outcomes and accounts exact staged/committed plaintext bytes.
+Raw coordinator and storage handles are privileged internal capabilities. The trusted local adapter
+supplies current policy at open until T-17 adds durable native policy records; absent policy denies.
+Recovered unique committed usage is rebuilt, while new uploads fail closed after reopen until T-35
+can enumerate every uncommitted reservation; known evidenced tokens remain recoverable.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.
