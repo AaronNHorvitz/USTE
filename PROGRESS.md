@@ -2,6 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
+Latest reviewed implementation: `be114f5` (T-09 canonical type kernel). Review was performed by
+Codex agents and does not represent independent external security certification.
+
 ## Completed this increment
 
 - Recorded owner-authorized Decision 0011, separating local development governance (T-06)

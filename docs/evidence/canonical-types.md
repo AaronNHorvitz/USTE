@@ -2,6 +2,12 @@
 
 Date: 2026-09-17 · Product toolchain: Rust/Cargo 1.95.0 · Target: x86_64-unknown-linux-gnu
 
+Reviewed implementation: commit `be114f5` · tree
+`3632a690409f414688dbbf5dc597a95fb58d029a`. Two read-only Codex agent audits examined the
+wire profile, boundaries, allocation behavior, tests, fuzz harness and evidence; their initial
+findings were corrected before this commit and their final audits reported no blocker. This is
+automated implementation review, not independent human review or security certification.
+
 This record closes T-09's bounded type, identity and canonical serialization scope. It does not
 claim transaction, storage, encryption, parser, database-executable or release readiness.
 [Decision 0012](../decisions/0012-canonical-wire-profile.md) owns the accepted bytes and limits.
