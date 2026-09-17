@@ -1,171 +1,110 @@
-# Universal Spatial-Temporal Engine
+# USTE — Universal Spatial-Temporal Engine
 
-The whole universe is a seed, a rulebook, and a clock. The Universal Spatial-Temporal Engine is the kernel that turns them into worlds: a deterministic, multiscale, event-sourced simulation engine in Rust that computes only what matters at this moment and stores only what deviates.
+A local-first, Rust-native spatial-temporal graph and content database with a deterministic
+simulation kernel for agent systems and queryable world models.
 
-The engine represents an enormous simulated space with compact rules, and computes only what matters at the present moment. It is not a database and not a rendering engine. It is the kernel underneath both: the part that decides what exists, what changes, and how any past state can be reconstructed exactly.
+USTE is being designed to store connected knowledge, arbitrary file bytes, source evidence,
+and durable event history, including objects with geographic/local positions and movement.
+Agents would use a bounded API to retrieve actual items and authorized content, navigate
+relationships and locations, trace answers to sources, and explore hypothetical motion.
 
-```
-Universe = seed + rules + simulation time + sparse deviations
-```
+**Status: design draft; implementation has not started.** There is no database executable,
+supported parser, benchmark result, security certification, or production release yet.
+The features below are requirements, not existing capabilities.
 
-Nothing that can be regenerated needs to be **stored** — regenerable state is canonical by *derivation*, not by storage. Given a hierarchical address and a seed, the engine reproduces a body's stable properties on demand, identically, every time. The truth on disk is a small immutable **world manifest** (format version, numerical profile, seed, rules) plus the deviation log — modifications, exceptional events; checkpoints merely *cache* regenerable state to bound recovery time, and can always be discarded and rebuilt.
+## Product direction
 
----
+The product is an original Rust database engine, not a wrapper around ArangoDB, TimescaleDB,
+SQLite, or RocksDB. Property graphs, time partitioning, and incremental summaries are
+conceptual influences; persistence, transactions, graph indexes, and replay are our own
+implementation responsibility. Reviewed supporting libraries remain permitted.
 
-## Status
+The former simulation-first design is preserved in [design history](docs/history/simulation/README.md).
+[Decision 0001](docs/decisions/0001-product-direction.md) explains what changed.
+[Decision 0002](docs/decisions/0002-spatial-world-model.md) adds required spatial lookup,
+movement history, bounded navigation and a constrained physics baseline. Celestial mechanics
+and rendering do not gate the database release; spatial indexing is now required by R3.
 
-**Design complete; implementation has not started.** Earlier revisions of this repository described a GPU-accelerated graph database built on TensorFlow, TimescaleDB, and ArangoDB. That framing has been retired: it described a storage layer, not an engine, and it put databases on the simulation's critical path. The old design documents have been removed so they cannot be mistaken for the build plan; they remain in git history. The design below, together with [architecture.md](./architecture.md) (normative contracts) and [PRD.md](./PRD.md) (numbered requirements, milestones, and exit criteria), replaces them.
+## Planned capabilities
 
----
+- Persistent entities, typed relationships, assertions, evidence, and artifacts.
+- Valid-time and recorded-time history, corrections, contradictions, and provenance.
+- UTC-normalized instants with original timezone provenance and explicit ambiguous-date handling.
+- Atomic durable transactions, verified snapshots, crash recovery, backup, and migration.
+- Storage of arbitrary file formats within declared size, quota, and admission policies.
+- Immutable content versions, isolated extraction, searchable chunks, and source citations.
+- Explicit format support: storing a file does not imply the ability to parse or understand it.
+- Authenticated encryption, scoped authorization, deletion, and bounded resource use.
+- Deterministic historical replay and isolated hypothetical branches.
+- A Rust API, operational CLI, and optional authenticated local service.
+- Geographic/local frames, movement observations, spatial history and explicit uncertainty.
+- Bounded supplied-graph navigation and joint content/graph/location/time retrieval.
+- Rust kinematic and constrained 2D contact simulation, separated from observed facts.
+- Previewable, resumable CSV/JSON batch import through normal transaction validation.
 
-## Lineage
+## Unstructured content
 
-The core idea is not new. It is the founding trick of a specific generation of software, and modern hardware makes it dramatically more capable rather than less relevant.
+Original bytes and derived interpretations are different records. A PDF, image, audio clip,
+spreadsheet, source archive, or unknown binary may be retained without executing it.
+Supported workers can derive text, tables, metadata, OCR, or transcripts; each result records
+its source version, parser/model identity, limitations, and exact available locators.
+Unsupported, encrypted, malformed, or partially parsed files return visible status.
+Neither document instructions nor extracted code receive execution authority.
 
-**Elite (1984)** fit eight galaxies of 256 star systems each — names, positions, economies, prices — into a machine with 32 KB of RAM. The galaxy was never stored. It was a pure function of a seed, regenerated identically on every visit. Systems existed because the arithmetic said so.
+See [content ingestion and parsing](docs/content-ingestion-and-parsing.md) for the planned
+format matrix, security boundary, and release gates.
 
-**Starflight (1986)** carried that idea to hundreds of explorable planets with fractal terrain, streamed from floppy disks, on hardware that could not possibly have held them.
+## Initial scope
 
-**Gravitar (1982)** and **Thrust (1986)** did something different and equally instructive: they made real physics the substance of play. Gravity wells, orbital insertion, momentum, tethered mass — none of it decorative. On hardware measured in kilobytes, physics was cheaper than content, so physics *became* the content.
+One machine, one database-owning process, multiple clients, an ordered commit coordinator,
+and concurrent coherent readers. No mandatory network, GPU, hosted model, telemetry, or
+external database. The initial platform is Linux, with Fedora Kinoite as a target test
+environment; exact supported kernel/filesystem combinations must be recorded before release.
 
-The shared insight, stated plainly: **determinism is compression.** Store the cause, not the effect. A world that can be recomputed exactly does not need to be remembered.
+No production security or speed claim follows merely from choosing Rust. Dependencies,
+unsafe code, platform interfaces, file parsers, recovery, and permissions require evidence.
+No universal file-understanding, government approval, or historical-replay-after-erasure
+guarantee is made.
 
-### Why now is different
+## Documentation
 
-The BBC Micro ran at roughly one million instructions per second with 32 KB of memory. A current desktop CPU executes on the order of a hundred billion instructions per second, and its L3 cache alone exceeds that machine's entire memory by a factor of a thousand.
+| Document | Owns |
+|---|---|
+| [PRD](PRD.md) | Requirements and release gates |
+| [Architecture](architecture.md) | Component boundaries and cross-component invariants |
+| [Data model](docs/data-model.md) | Records, lifecycle, time, and constraints |
+| [Time and ordering](docs/time-and-ordering.md) | UTC normalization, source timestamps, uncertainty, clock domains, and knowledge cutoffs |
+| [Spatial world model](docs/spatial-world-model.md) | Frames, objects, movement, geographic queries and navigation |
+| [Physics and motion](docs/physics-and-motion.md) | Kinematics, constrained contacts, numerical profiles and branch durability |
+| [Ingestion and unified retrieval](docs/ingestion-and-unified-retrieval.md) | ETL batches and combined object/content/graph/space/time queries |
+| [Implementation plan](docs/implementation-plan.md) | Incremental delivery, dependencies, integration readiness and scope boundaries |
+| [Storage and recovery](docs/storage-and-recovery.md) | Transactions, disk artifacts, recovery, and compaction |
+| [Security and privacy](docs/security-and-privacy.md) | Threats, authorization, encryption, and deletion |
+| [Content ingestion and parsing](docs/content-ingestion-and-parsing.md) | Files, workers, extraction, and citations |
+| [Replay and simulation](docs/replay-and-simulation.md) | Replay, branches, models, and determinism |
+| [API and integration](docs/api-and-integration.md) | Consumer contract, adapters, and error semantics |
+| [Verification and benchmarks](docs/verification-and-benchmarks.md) | Test suites, workloads, and required evidence |
+| [Task list](TASKS.md) | Sequenced implementation work and completion evidence |
+| [Security policy](SECURITY.md) | Reporting readiness and supported versions |
+| [Contributing](CONTRIBUTING.md) | Development, review, and provenance rules |
 
-The same philosophy, given roughly a million-fold increase in budget, does not merely produce a bigger version of Elite. It allows the budget to be spent on *fidelity where the observer is standing* rather than on scope — real numerical integration in the active region, real terrain under an avatar, real ephemeris-grade celestial mechanics — while everything beyond remains implied by the same compact arithmetic that served in 1984.
+The domain specification owns the detailed contract. The PRD owns scope; decisions record
+changes. A contradiction blocks the affected work until resolved, rather than allowing an
+implementer to choose the most convenient interpretation.
 
-### Why Rust
+## Delivery
 
-The discipline those programs required — cache-conscious data layout, no wasted byte, predictable timing — has a modern name: data-oriented design. Rust is the language where that discipline is idiomatic rather than heroic.
+1. R0: close foundational decisions and make acceptance vectors executable.
+2. R1: correctness kernel with durable encrypted graph/content storage.
+3. R2: developer alpha with spatial/temporal/content retrieval, ETL, navigation and kinematics.
+4. R3: hardened beta with rich formats, disk spatial history, constrained contacts and lifecycle hardening.
+5. R4: production candidate with independent review and measured operating limits.
 
-- **Controllable memory layout.** Contiguous arrays, `#[repr(C)]` where layout matters, and structure-of-arrays as a deliberate design choice. Rust does not produce cache-friendly layout automatically — no language does — but it makes the layout you design the layout you get.
-- **No garbage collector.** Not a throughput argument — a *determinism* argument. A fixed-timestep simulation cannot tolerate unpredictable pauses in its loop.
-- **Data-race freedom at compile time.** This guarantees the absence of a class of nondeterminism bugs; it does not guarantee deterministic scheduling or reduction order. Those are supplied by policy (below), and Rust's ownership model is what makes the policy enforceable rather than aspirational.
-- **Control over arithmetic.** No fast-math by default, explicit SIMD, no silent reassociation — which matters enormously when bit-reproducibility is a project requirement rather than a nicety.
-- **Zero-cost abstraction.** Layered, readable structure that compiles down to the tight loops the 1980s wrote by hand.
-
----
-
-## Architecture
-
-Deeper contracts — sleep/wake reconciliation, numerical profiles, durability semantics, implementation order — live in [architecture.md](./architecture.md). This section is the shape of the system.
-
-### The invariant
-
-The engine guarantees exactly one thing, and every test is written against it:
-
-```
-state(t) = f(world_format_version, numerical_profile, seed, rules, ordered_event_log)
-```
-
-Bit-reproducible under a fixed *numerical profile* — a named, versioned bundle of integrator choices, floating-point mode, and math-library versions. Per-binary determinism is the baseline profile; cross-platform bit-equality is a separate, stricter profile that must be purchased deliberately (fixed-point or strict-arithmetic discipline in the authoritative layer), not assumed.
-
-### Layered simulation
-
-Fidelity is a function of relevance, not of distance alone. Five layers, each cheaper than the one above it. Costs shown are **budgets, not measurements** — they become claims only when Criterion benchmarks back them.
-
-| Layer | Role | Budget |
-|---|---|---|
-| **Procedural** | Generates galaxies, systems, and bodies deterministically from hierarchical address and seed | On-demand; cached; near-free |
-| **Analytical** | Dormant bodies advance by closed-form propagation (Keplerian orbits; iterative Kepler solves and transcendentals included) | Sub-microsecond per body, evaluated lazily |
-| **Active** | Nearby bodies use numerical integration and interact physically | Milliseconds for thousands of bodies |
-| **Contact** | Collisions, vehicles, terrain, immediate phenomena — higher frequency | Bounded by bubble radius, not world size |
-| **Historical** | Append-only event log recording every committed deviation from the generated baseline | Off the frame path entirely |
-
-Objects sleep when they cannot affect anything. On revisit, the engine either advances them analytically or processes only the events that mattered while they were dormant. **The apparent universe is enormous; the actively simulated universe stays small.** That is the entire reason this is achievable on one machine.
-
-### Observer independence: fidelity is presentation, deviations require causation
-
-Switching a system between analytical and numerical physics must not, by itself, change the universe — otherwise two observers visiting different systems would fork physical history merely by looking.
-
-The engine resolves this with two rules:
-
-1. **Every body's canonical force model is assigned at generation** — a pure function of `(seed, rules, address)`, never of activation or observation. Baselines come in tiers (pure conic; precessing conic with secular rates; deterministic ephemeris table generated with the system), so the *dominant* physics is canonical rather than an artifact of who is watching. Every force is classified canonical or presentational; there is no third category.
-2. **The active layer integrates deviations *relative to* that canonical baseline** (Encke's method, rather than absolute integration). Awake behavior is baseline-plus-deviation; the deviation holds only sub-threshold residuals and genuine interactions. If no interaction exceeds the rules-defined significance threshold, the deviation is discarded on sleep and the canonical trajectory was never perturbed — observation leaves no fingerprints. Only a committed interaction forks a body's canonical trajectory, by exactly the recorded delta. **Interactions commit state changes; model changes occur only as committed segment boundaries** — a body's model history is itself a pure function of `(seed, rules, address, event_log)`.
-
-Three corollaries complete the rule. **Canonical events are detected from canonical state** — presentational residuals are invisible to event predicates, so richer active physics can never reveal-and-commit an interaction the canonical model does not predict. **Natural encounters implied by the seed are baseline history, not events** — regenerated on demand like everything procedural, never logged; the log records exactly what the seed cannot imply, which is what keeps it sparse at universe scale by definition. And **causal waking is observer-independent and scoped to the deviation frontier**: only committed deviations can produce futures the seed does not imply, so the kernel's encounter detection watches deviated bodies and their neighborhoods — ungenerated, untouched space is never scanned — and wakes them whether or not anyone is watching. Observers participate through *presence* — a committed canonical fact — never through observation itself.
-
-Replay reproduces committed deviations; observation alone produces none. The force classification, tiered canonical models with piecewise model segments, the sleep/wake reconciliation contract, and the event lifecycle (pending → accepted → durable, with external permanence requiring durability) are specified in [architecture.md](./architecture.md).
-
-### Determinism policy
-
-Reproducibility is the project's central claim, so the known hazards are policy, not afterthought:
-
-- **No randomized iteration order.** Rust's `HashMap` randomizes iteration per process. Ordered or seeded-hash containers only, anywhere state is iterated.
-- **Order-independent parallelism.** Parallel stages must be pure maps with deterministic merges, or deterministically scheduled. Reduction order is not permitted to vary between runs or thread counts.
-- **Numerical profiles, not vibes.** Every build declares its profile; the invariant is scoped to it.
-- **Integer time.** Simulation time is integer ticks. Never accumulated floating-point seconds.
-- **Hierarchical seed derivation.** PRNG streams are keyed by address path, so any node in the hierarchy regenerates independently without touching its siblings.
-- **Symplectic integrators** in the orbital layer, where long-horizon energy drift is the quantity being controlled.
-
-### Multi-rate time
-
-The contact region, the active region, and the analytical layer advance at different frequencies, and the procedural layer is timeless. Coordinating those clocks reproducibly is a first-class subsystem: an integer master clock, nested fixed timesteps, and a total ordering of events across regions.
-
-### Coordinate frames
-
-Human-scale precision and astronomical-scale extent cannot coexist in one flat coordinate system; single-precision error at astronomical distance is catastrophic. The engine uses nested reference frames with 64-bit positions.
-
-**Authoritative state lives in stable, frame-local coordinates and never moves for anyone's convenience.** Floating-origin recentering is strictly a rendering-side projection, applied per client — with multiple observers, each render context recenters independently and none of it touches simulation state. Rounding must never depend on viewpoint.
-
-### CPU versus GPU
-
-The authoritative simulation is **CPU-resident**. This is a design conclusion, not a limitation:
-
-- Dynamics are small-N sequential ODE integration — a CPU-shaped workload. Where the CPU/GPU crossover sits depends on force complexity and hardware, and is a benchmark question, not a slogan.
-- Event scheduling, sparse graphs, branching, and shifting workloads are CPU-shaped problems.
-- Reproducibility is materially easier to guarantee on CPU.
-- Compact layout, SIMD, and cache-conscious design do more here than raw arithmetic throughput.
-
-The GPU is retained for what it is actually built for: **rendering**, particles, atmospheres, fields, and — when batch sizes justify it — large sets of independent orbital evaluations and other embarrassingly parallel numerics.
-
-### Persistence
-
-Storage is four artifacts: an immutable **world manifest** carrying the invariant's non-log inputs; an append-only **event log**; periodic **snapshots**; and a small dual-slot **durable-frontier record** naming the acknowledged byte offset. **World creation is durable-or-absent** — the world is built in a temporary directory, fsynced, and atomically renamed into place before creation reports success, so existence at the final name *means* creation completed and every legal world has a valid frontier from birth. In steady state, the log and snapshots are written **asynchronously, off the critical path**. Manifest and log are truth about the world; snapshots are cache; the frontier is truth about *durability* — it says nothing about the world, only how much of the log is acknowledged, and recovery semantics are undefined without it. Durability is contractual, not incidental — group-framed, checksummed, schema-versioned records; an independently persisted durable frontier; atomic checkpoint publication; an explicit flush policy defining the maximum crash-loss window; recovery by replaying the log suffix over the last durable checkpoint, with corruption of acknowledged history a hard error rather than a silent truncation. Details in [architecture.md](./architecture.md). Databases are a later concern, appropriate for historical analysis and exploration tooling rather than for participating in a simulation frame.
-
----
-
-## Milestones
-
-**Milestone 0 — the replay kernel.** Before any galaxy exists: hierarchical addresses and seed derivation, integer time and canonical event ordering, deterministic serialization, state hashing, a two-body analytical propagator, one numerical integrator with the full sleep/wake reconciliation contract, and property tests across replays, thread counts, and transition schedules. The exit test:
-
-> Simulate a trivial world through a long interval with mixed sleep/wake transitions and at least one committed deviation. Hash the state. Replay cold from `(world_format, numerical_profile, seed, rules, event_log)`. The hashes must be bit-identical — across runs, and across thread counts.
-
-A tiny world that survives replay perfectly proves more of the engine's thesis than a billion generated stars. **This milestone precedes the universe generator on purpose.**
-
-**Milestone 1 — the galaxy demonstration.**
-
-1. Generate a stable galaxy from a single seed.
-2. Select a generated star system.
-3. Numerically simulate its primary/planet/satellite system.
-4. Move seamlessly between procedural, analytical, and active fidelity levels.
-5. Leave the system and return; regenerated properties must be identical, and unvisited systems must be provably untouched.
-6. Persist one committed modification without storing the untouched remainder.
-7. Benchmark per PRD Appendix A (BENCH-A/B/C/C2/M): throughput, memory footprint, and numerical drift against the analytical baseline.
-
----
-
-**Milestone V — the demo viewer** *(incremental: V1 after M0, V2 after M1)*: `uste-view`, a read-only 3D consumer. **V1, the quick MVP:** the TV-REPLAY world rendered from canonical elements (≤ 1 px screen-space error), a fly camera, and a minimal HUD — body labels, a time control with tick readout, and a selection panel showing a body's elements and deviation status. **V2:** the TV-GEN system view, continuous zoom across six orders of magnitude on the render-side floating origin, and dual-trajectory rendering — a deviated body shows its canonical baseline and actual path as two distinct curves, making the kernel's central design decision visible on screen. The viewer consumes the public read API (FR-11) only and can never gate the kernel.
-
-## What this is not
-
-- **Not a database.** Storage is a consequence of the design, not the substance of it.
-- **Not a game engine.** Rendering consumes the kernel's state; it does not define it.
-- **Not a physics library.** Existing integrators and rigid-body engines are dependencies, not the contribution. The contribution is the multiscale, deterministic, event-sourced structure that coordinates them.
-
----
+There are no setup or run commands yet. See [TASKS.md](TASKS.md); all implementation work
+is currently open.
 
 ## License
 
-Licensed under either of
-
-- Apache License, Version 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](./LICENSE-MIT))
-
-at your option.
-
-### Contribution
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions. Contributions must carry a Developer Certificate of Origin sign-off (`git commit -s`).
+Dual [MIT](LICENSE-MIT) / [Apache-2.0](LICENSE-APACHE), at your option.
+Third-party components retain their own terms and require review. No upstream database
+source is incorporated by this design change.
