@@ -8,9 +8,10 @@
 mod authorized;
 
 pub use authorized::{
-    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedReadView,
-    AuthorizedTransactionRequest, AuthorizedTransactionState, MAX_STAGED_UPLOAD_RESERVATIONS,
-    QuotaUsage, open_authorized,
+    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedReadError,
+    AuthorizedReadState, AuthorizedReadView, AuthorizedTransactionRequest,
+    AuthorizedTransactionState, DurablePolicyChange, MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage,
+    open_authorized,
 };
 
 use std::collections::BTreeMap;
@@ -289,6 +290,15 @@ where
             revision: self.journal.frontier(),
             state: self.state.snapshot(),
         })
+    }
+
+    /// Whether a commit may have become durable without a known outcome.
+    ///
+    /// Trusted authorization facades use this content-free health signal to invalidate views
+    /// without first cloning or exposing reducer state.
+    #[must_use]
+    pub const fn is_uncertain(&self) -> bool {
+        self.uncertain
     }
 
     /// Namespace governed by this coordinator.

@@ -13,9 +13,10 @@ use uste_storage::{
     memory::MemoryFileSystem,
 };
 use uste_txn::{
-    ApplyError, AuthorizedCoordinator, AuthorizedError, AuthorizedTransactionRequest,
-    AuthorizedTransactionState, CommitCoordinator, MAX_STAGED_UPLOAD_RESERVATIONS, NeverCancel,
-    RetentionDays, TransactionState, open_authorized,
+    ApplyError, AuthorizedCoordinator, AuthorizedError, AuthorizedReadError, AuthorizedReadState,
+    AuthorizedTransactionRequest, AuthorizedTransactionState, CommitCoordinator,
+    MAX_STAGED_UPLOAD_RESERVATIONS, NeverCancel, RetentionDays, TransactionError, TransactionState,
+    open_authorized,
 };
 use uste_types::{
     CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, RecordId, RecordRef,
@@ -67,6 +68,26 @@ impl AuthorizedTransactionState for CounterState {
         _blob_inventory: Option<&BlobInventory>,
     ) -> Result<AuthorizationRequirements, ApplyError> {
         Ok(AuthorizationRequirements::default())
+    }
+}
+
+impl AuthorizedReadState for CounterState {
+    type ReadRequest = ();
+    type ReadOutput = i64;
+    type ReadError = core::convert::Infallible;
+
+    fn read_authorization_requirements(
+        _request: &Self::ReadRequest,
+    ) -> Result<AuthorizationRequirements, ApplyError> {
+        Ok(AuthorizationRequirements::default())
+    }
+
+    fn read_authorized(
+        snapshot: &Self::Snapshot,
+        _request: &Self::ReadRequest,
+        _authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
+    ) -> Result<Self::ReadOutput, Self::ReadError> {
+        Ok(snapshot.0)
     }
 }
 
@@ -192,6 +213,59 @@ const ALL_DATA_ACTIONS: &[Action] = &[
     Action::InspectQuota,
     Action::ManagePolicy,
 ];
+
+#[test]
+fn outcome_unknown_invalidates_existing_authorized_views() {
+    let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+    let raw = CommitCoordinator::create(
+        &mut filesystem,
+        scope(14),
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("uncertain-authorized-view").unwrap(),
+        create_vault(scope(14).database(), 17),
+        CounterEntropy(170),
+        CounterState::default(),
+    )
+    .unwrap();
+    let kernel = policy(scope(14), 1, &[(3, ALL_DATA_ACTIONS)], 1024);
+    let alice = authenticated(&kernel, 3);
+    let mut coordinator = AuthorizedCoordinator::new(raw, kernel).unwrap();
+    let view = coordinator.read_view(&alice).unwrap();
+    filesystem
+        .arm(
+            FaultPlan::new([FaultPoint {
+                operation: Operation::SyncData,
+                occurrence: 2,
+                action: FaultAction::CrashAfter,
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+    let bytes = mutation(0, 1);
+    assert_eq!(
+        coordinator.commit(
+            &mut filesystem,
+            &alice,
+            AuthorizedTransactionRequest {
+                idempotency_key: IdempotencyKey::from_bytes([1; 16]),
+                transaction_id: TransactionId::from_bytes([2; 16]),
+                canonical_request: &bytes,
+                blob_inventory: None,
+            },
+            &mut clock(0),
+            &NeverCancel,
+        ),
+        Err(AuthorizedError::Transaction(
+            TransactionError::OutcomeUnknown
+        ))
+    );
+    let uncertain = AuthorizedError::Transaction(TransactionError::OutcomeUnknown);
+    assert_eq!(coordinator.read_view_revision(&view), Err(uncertain));
+    assert_eq!(
+        coordinator.read(&alice, &view, &()),
+        Err(AuthorizedReadError::Authorization(uncertain))
+    );
+}
 
 #[test]
 fn default_deny_and_principal_derived_outcomes_conceal_existence() {

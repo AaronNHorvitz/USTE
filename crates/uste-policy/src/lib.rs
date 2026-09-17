@@ -86,6 +86,9 @@ pub enum Action {
     ExecuteProcedure,
 }
 
+const ACTION_COUNT: u32 = Action::ExecuteProcedure as u32 + 1;
+const VALID_PERMISSION_BITS: u64 = (1_u64 << ACTION_COUNT) - 1;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PermissionSet(u64);
 
@@ -107,6 +110,19 @@ impl PermissionSet {
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
+    }
+
+    #[must_use]
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    pub const fn from_bits(bits: u64) -> Result<Self, PolicyError> {
+        if bits & !VALID_PERMISSION_BITS == 0 {
+            Ok(Self(bits))
+        } else {
+            Err(PolicyError::InvalidPolicy)
+        }
     }
 }
 
@@ -266,6 +282,12 @@ impl NamespaceGrant {
     pub const fn quotas(&self) -> QuotaLimits {
         self.quotas
     }
+
+    pub fn record_rules(&self) -> impl ExactSizeIterator<Item = (RecordId, PermissionSet)> + '_ {
+        self.record_rules
+            .iter()
+            .map(|(record, rule)| (*record, rule.deny))
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -324,6 +346,17 @@ impl NamespacePolicy {
     #[must_use]
     pub const fn version(&self) -> PolicyVersion {
         self.version
+    }
+
+    #[must_use]
+    pub const fn quotas(&self) -> QuotaLimits {
+        self.quotas
+    }
+
+    pub fn grants(&self) -> impl ExactSizeIterator<Item = (PrincipalDigest, &NamespaceGrant)> + '_ {
+        self.grants
+            .iter()
+            .map(|(principal, grant)| (*principal, grant))
     }
 }
 
@@ -579,6 +612,11 @@ impl PolicyKernel {
             .get(&scope)
             .map(|policy| policy.quotas)
             .ok_or(PolicyError::Unauthorized)
+    }
+
+    #[must_use]
+    pub fn namespace_policy(&self, scope: NamespaceRef) -> Option<&NamespacePolicy> {
+        self.policies.get(&scope)
     }
 
     pub fn replace_namespace_policy(

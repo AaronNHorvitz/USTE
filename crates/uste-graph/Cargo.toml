@@ -1,0 +1,23 @@
+[package]
+name = "uste-graph"
+description = "Transactional evidence-backed graph records and indexes for USTE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+sha2 = { version = "=0.11.0", default-features = false }
+uste-policy = { path = "../uste-policy", version = "=0.1.0" }
+uste-storage = { path = "../uste-storage", version = "=0.1.0" }
+uste-txn = { path = "../uste-txn", version = "=0.1.0" }
+uste-types = { path = "../uste-types", version = "=0.1.0" }
+
+[dev-dependencies]
+uste-crypto = { path = "../uste-crypto", version = "=0.1.0" }
+uste-testkit = { path = "../uste-testkit", version = "=0.1.0" }
+
+[lints]
+workspace = true

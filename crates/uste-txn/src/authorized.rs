@@ -26,10 +26,46 @@ pub const MAX_STAGED_UPLOAD_RESERVATIONS: usize = 32;
 
 /// Reducers admitted to the consumer facade must declare bounded targets without reading state.
 pub trait AuthorizedTransactionState: TransactionState {
+    /// Whether this reducer requires a durable policy in every authorized snapshot.
+    const REQUIRES_DURABLE_POLICY: bool = false;
+
     fn authorization_requirements(
         canonical_request: &[u8],
         blob_inventory: Option<&BlobInventory>,
     ) -> Result<AuthorizationRequirements, ApplyError>;
+
+    fn durable_namespace_policy(_snapshot: &Self::Snapshot) -> Option<NamespacePolicy> {
+        None
+    }
+
+    fn durable_policy_change(
+        _canonical_request: &[u8],
+    ) -> Result<Option<DurablePolicyChange>, ApplyError> {
+        Ok(None)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DurablePolicyChange {
+    pub expected: PolicyVersion,
+    pub next: NamespacePolicy,
+}
+
+/// Reducer-owned authorized projection. Callers can supply data, but never receive a raw snapshot.
+pub trait AuthorizedReadState: AuthorizedTransactionState {
+    type ReadRequest;
+    type ReadOutput;
+    type ReadError;
+
+    fn read_authorization_requirements(
+        request: &Self::ReadRequest,
+    ) -> Result<AuthorizationRequirements, ApplyError>;
+
+    fn read_authorized(
+        snapshot: &Self::Snapshot,
+        request: &Self::ReadRequest,
+        authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
+    ) -> Result<Self::ReadOutput, Self::ReadError>;
 }
 
 /// Content-free failures returned by the mandatory authorization facade.
@@ -41,6 +77,12 @@ pub enum AuthorizedError {
     InvalidPolicy,
     IntegrityFailure,
     Transaction(TransactionError),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AuthorizedReadError<E> {
+    Authorization(AuthorizedError),
+    Domain(E),
 }
 
 impl From<PolicyError> for AuthorizedError {
@@ -263,6 +305,14 @@ where
         inner: CommitCoordinator<S, F, W, E, I>,
         policy: PolicyKernel,
     ) -> Result<Self, AuthorizedError> {
+        let snapshot = inner.read_view()?.state;
+        match S::durable_namespace_policy(&snapshot) {
+            Some(durable) if policy.namespace_policy(durable.scope()) != Some(&durable) => {
+                return Err(AuthorizedError::InvalidPolicy);
+            }
+            None if S::REQUIRES_DURABLE_POLICY => return Err(AuthorizedError::InvalidPolicy),
+            _ => {}
+        }
         let ledger = QuotaLedger::from_coordinator(&inner)?;
         let allow_new_uploads = !inner.was_recovered();
         Ok(Self {
@@ -282,6 +332,15 @@ where
     ) -> Result<(), AuthorizedError> {
         if next.scope() != self.scope() {
             return Err(AuthorizedError::Unauthorized);
+        }
+        self.policy.authorize(
+            authority,
+            Action::ManagePolicy,
+            Target::Namespace(self.scope()),
+        )?;
+        let snapshot = self.inner.read_view()?.state;
+        if S::REQUIRES_DURABLE_POLICY || S::durable_namespace_policy(&snapshot).is_some() {
+            return Err(AuthorizedError::InvalidPolicy);
         }
         self.policy
             .replace_namespace_policy(authority, expected, next)
@@ -318,11 +377,61 @@ where
         &self,
         view: &AuthorizedReadView<S::Snapshot>,
     ) -> Result<Option<uste_types::CommitRevision>, AuthorizedError> {
+        if self.inner.is_uncertain() {
+            return Err(AuthorizedError::Transaction(
+                TransactionError::OutcomeUnknown,
+            ));
+        }
         if !Arc::ptr_eq(&self.instance, &view.instance) {
             return Err(AuthorizedError::Unauthorized);
         }
         self.policy.revalidate(&view.lease)?;
         Ok(view.inner.revision())
+    }
+
+    pub fn read<R>(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        view: &AuthorizedReadView<S::Snapshot>,
+        request: &R,
+    ) -> Result<S::ReadOutput, AuthorizedReadError<S::ReadError>>
+    where
+        S: AuthorizedReadState<ReadRequest = R>,
+    {
+        if self.inner.is_uncertain() {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Transaction(TransactionError::OutcomeUnknown),
+            ));
+        }
+        if !Arc::ptr_eq(&self.instance, &view.instance) {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized,
+            ));
+        }
+        self.policy
+            .revalidate(&view.lease)
+            .map_err(AuthorizedError::from)
+            .map_err(AuthorizedReadError::Authorization)?;
+        let requirements = S::read_authorization_requirements(request)
+            .map_err(map_requirement_error)
+            .map_err(AuthorizedReadError::Authorization)?;
+        for requirement in requirements.iter() {
+            if requirement.target.scope() != self.scope() {
+                return Err(AuthorizedReadError::Authorization(
+                    AuthorizedError::Unauthorized,
+                ));
+            }
+            self.policy
+                .authorize(principal, requirement.action, requirement.target)
+                .map_err(AuthorizedError::from)
+                .map_err(AuthorizedReadError::Authorization)?;
+        }
+        let mut authorize_candidate = |action: Action, target: Target| {
+            target.scope() == self.scope()
+                && self.policy.authorize(principal, action, target).is_ok()
+        };
+        S::read_authorized(&view.inner.state, request, &mut authorize_candidate)
+            .map_err(AuthorizedReadError::Domain)
     }
 
     pub fn start_blob_upload(
@@ -599,6 +708,8 @@ where
                 .authorize(principal, requirement.action, requirement.target)?;
         }
         self.check_inventory(principal, request.blob_inventory)?;
+        let changes_policy =
+            S::durable_policy_change(request.canonical_request).map_err(map_requirement_error)?;
         let result = self.inner.commit(
             filesystem,
             TransactionRequest {
@@ -615,7 +726,36 @@ where
         if let Some(inventory) = request.blob_inventory {
             self.commit_inventory(principal.digest(), inventory)?;
         }
+        if changes_policy.is_some() {
+            self.synchronize_durable_policy(principal)?;
+        }
         Ok(outcome)
+    }
+
+    fn synchronize_durable_policy(
+        &mut self,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<(), AuthorizedError> {
+        let snapshot = self.inner.read_view()?.state;
+        let Some(durable) = S::durable_namespace_policy(&snapshot) else {
+            return if S::REQUIRES_DURABLE_POLICY {
+                Err(AuthorizedError::IntegrityFailure)
+            } else {
+                Ok(())
+            };
+        };
+        let Some(current) = self.policy.namespace_policy(durable.scope()) else {
+            return Err(AuthorizedError::InvalidPolicy);
+        };
+        if current == &durable {
+            return Ok(());
+        }
+        if durable.version() <= current.version() {
+            return Err(AuthorizedError::IntegrityFailure);
+        }
+        self.policy
+            .replace_namespace_policy(principal, current.version(), durable)
+            .map_err(Into::into)
     }
 
     fn authorize(
