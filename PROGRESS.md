@@ -15,9 +15,10 @@ preparation. Decision 0036 adds complete bounded history/reverse proof buckets s
 operation and precondition variant can use that phase. Decision 0037 carries authenticated
 metadata/counts into a proof-derived terminal-root plan. Decision 0038 binds
 that proof result into the authoritative coordinator commit without repeating full-state
-preparation. Decision 0039 adds explicit authorized cache/I/O measurement. The current Decision
-0040 increment connects a capped, nonqualifying production-engine equivalence driver to the pinned
-fixture and oracle. Neither is a benchmark result. T-20 remains open pending a disk-backed live publication target,
+preparation. Decision 0039 adds explicit authorized cache/I/O measurement. Decision 0040 connects a
+capped, nonqualifying production-engine equivalence driver to the pinned fixture and oracle.
+Decision 0041 streams exact-profile construction through bounded transactions and pins its
+212-revision plan. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -362,6 +363,11 @@ unverified external distribution prerequisite.
   aggregate digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
   The command is capped at 1,000 entities, emits `engine_benchmark:false`, and is not timing/RSS,
   Linux-filesystem, portable-recovery or BM-01 qualification evidence.
+- Added Decision 0041 and bounded fixture construction to maximum-10,000-operation transactions.
+  The exact qualifying profile has 212 durable revisions: one policy, 11 shared-Evidence/entity,
+  100 relationship-create and 100 relationship-accept revisions. The accepted TSV and generated
+  manifest pin this plan while continuing to emit `engine_benchmark:false`; it is not a completed
+  qualifying run.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -436,8 +442,8 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (99 links, 96 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 11 isolated T-20 fixture/engine-equivalence tests pass
+# docs=ok (100 links, 97 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 12 isolated T-20 fixture/engine-equivalence tests pass
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
@@ -523,9 +529,10 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by replacing the complete live graph publication target with a disk-backed
-base/overlay state, then remove the full-memory recovery boundary. Connect the pinned fixture to
-exact BM-01 and
+Continue T-20 by adding the Linux/Btrfs and portable-recovery qualifying runner around the now
+bounded exact-profile materializer, while replacing the complete live graph publication target
+with a disk-backed base/overlay state and removing the full-memory recovery boundary. Run exact
+BM-01 and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

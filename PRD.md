@@ -186,6 +186,11 @@ development scale. After durable transactions, index publication and simulated r
 measured query shapes must agree exactly. Its memory adapter, test key wrapper and absent timing/RSS
 make it semantic groundwork only; it always reports `engine_benchmark:false`.
 
+Decision 0041 makes that materializer stream maximum-10,000-operation transactions and pins the
+exact qualifying plan at 212 durable revisions, including its shared Evidence record. The command
+cap and nonqualifying label remain; bounded operation construction is not Linux/RSS/latency or
+larger-than-memory evidence.
+
 ## Release gates
 
 | Gate | Required outcome |

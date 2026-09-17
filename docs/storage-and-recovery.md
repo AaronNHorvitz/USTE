@@ -247,6 +247,10 @@ Decision 0040 exercises this path after memory-adapter restart and journal repla
 persisted encrypted graph root and runs oracle-checked authorized queries. That establishes bounded
 semantic recovery equivalence, not Linux durability, portable recovery cost or BM-01 scale.
 
+Decision 0041 bounds benchmark materialization to the graph transaction maximum and pins the exact
+qualifying plan at 212 durable revisions. It does not change the memory-backed live-state or
+recovery boundary and therefore supplies no larger-than-memory or platform-durability evidence.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

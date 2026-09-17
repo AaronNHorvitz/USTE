@@ -12,7 +12,9 @@ pub mod oracle;
 pub mod query;
 pub mod synthetic;
 
-pub use engine::{DevelopmentVerification, verify_development_profile};
+pub use engine::{
+    DevelopmentVerification, materialization_revision_count, verify_development_profile,
+};
 pub use manifest::Bm01Manifest;
 pub use materialization::{
     ACCEPTED_SEED, Bm01Profile, Edge, EntityId, Materializer, RelationshipId, Topology,

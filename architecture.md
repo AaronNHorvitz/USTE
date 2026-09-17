@@ -246,6 +246,11 @@ adjacency-array oracle remains the expected result. Multi-hop development querie
 authorized one-hop reads after restart; the capped memory/test-key environment is not performance
 or platform evidence.
 
+Decision 0041 replaces profile-sized operation collection with sequential transactions of at most
+10,000 operations. The qualifying fixture therefore has a pinned 212-revision durable plan: one
+policy, 11 evidence/entity, 100 relationship-create and 100 relationship-accept revisions. This
+bounds construction batches but not the current live reducer or recovery footprint.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

@@ -2,7 +2,10 @@
 
 use std::fmt::Write;
 
-use crate::{Bm01Profile, Materializer, QuerySet, measured_queries, query_digest, warmup_queries};
+use crate::{
+    Bm01Profile, Materializer, QuerySet, materialization_revision_count, measured_queries,
+    query_digest, warmup_queries,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Bm01Manifest {
@@ -81,8 +84,19 @@ impl Bm01Manifest {
             "  \"materialization_profile\": \"bm01-materialization-v1\","
         )
         .unwrap();
+        writeln!(
+            &mut json,
+            "  \"engine_mapping_profile\": \"bm01-uste-graph-v1\","
+        )
+        .unwrap();
         writeln!(&mut json, "  \"qualification\": \"{qualification}\",").unwrap();
         writeln!(&mut json, "  \"engine_benchmark\": false,").unwrap();
+        writeln!(
+            &mut json,
+            "  \"durable_revisions\": {},",
+            materialization_revision_count(self.profile)
+        )
+        .unwrap();
         writeln!(&mut json, "  \"seed\": \"{}\",", hex(&crate::ACCEPTED_SEED)).unwrap();
         writeln!(&mut json, "  \"counts\": {{").unwrap();
         writeln!(&mut json, "    \"entities\": {},", self.profile.entities()).unwrap();
@@ -211,11 +225,13 @@ mod tests {
             hex(manifest.warmup_query_digest()),
             "f350fba4568e146bdd0f61542a1b3c4579fa5f4dee53ccad65b738b1a75bf226"
         );
-        assert_eq!(ACCEPTANCE.lines().count(), 19);
+        assert_eq!(ACCEPTANCE.lines().count(), 21);
         for expected in [
             "profile\tseed\tbm01-materialization-v1\t8f41d0a52b40f13f4a77bc3beae2026a8bc42ad48d12ce53d92e29f612111001",
             "profile\tentities\tqualifying\t100000",
             "profile\trelationships\tqualifying\t1000000",
+            "profile\tengine_mapping\tqualifying\tbm01-uste-graph-v1",
+            "profile\tdurable_revisions\tmaximum-10000-operations\t212",
             "topology\tuniform_relationships\tqualifying\t800000",
             "topology\tdistributed_hub_relationships\tqualifying\t100000",
             "topology\tring_cycle_relationships\tqualifying\t100000",

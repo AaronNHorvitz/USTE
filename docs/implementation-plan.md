@@ -108,6 +108,11 @@ independent oracle for all measured query shapes. The remaining qualifying drive
 memory/test-key environment with Linux/Btrfs and portable recovery, batch the exact 100k/1m profile,
 separate oracle generation, and collect the accepted repeated latency/RSS/environment evidence.
 
+Decision 0041 completes the exact-profile transaction batching portion: construction streams at
+most 10,000 operations at a time and the shared Evidence record makes the qualifying plan exactly
+212 durable revisions. Linux/Btrfs execution, portable recovery, independent oracle generation and
+the accepted repeated measurements remain before BM-01 can pass.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

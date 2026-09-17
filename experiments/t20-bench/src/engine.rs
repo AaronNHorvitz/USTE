@@ -8,8 +8,8 @@ use uste_crypto::{
 use uste_graph::{
     AdjacencyDirection, AssertionAction, AssertionStatus, AuthorizedGraphIndex, Expected,
     GraphIndexCacheReport, GraphReadOutput, GraphReadRequest, GraphSnapshot, GraphState,
-    GraphTransaction, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, RecordVersion,
-    ValidTime, encode_transaction,
+    GraphTransaction, MAX_TRANSACTION_OPERATIONS, NewEntity, NewEvidence, NewRecord,
+    NewRelationship, Operation, RecordVersion, ValidTime, encode_transaction,
 };
 use uste_policy::{
     Action, AuthenticatedPrincipal, AuthenticationError, NamespaceGrant, NamespacePolicy,
@@ -110,12 +110,13 @@ pub fn verify_development_profile(profile: Bm01Profile) -> Result<DevelopmentVer
         .map_err(debug)?;
     let mut coordinator = AuthorizedCoordinator::new(raw, policy_kernel).map_err(debug)?;
     let materializer = Materializer::new(profile);
+    let mut sequence = 2_u64;
 
-    commit_operations(
+    commit_operation_batches(
         &mut coordinator,
         &mut filesystem,
         &principal,
-        2,
+        &mut sequence,
         core::iter::once(Ok(Operation::Create {
             expected: Expected::Absent,
             record: NewRecord::Evidence(NewEvidence {
@@ -134,52 +135,49 @@ pub fn verify_development_profile(profile: Bm01Profile) -> Result<DevelopmentVer
                     properties: Value::Null,
                 }),
             })
-        }))
-        .collect::<Result<Vec<_>, String>>()?,
+        })),
     )
     .map_err(|error| format!("entity materialization: {error}"))?;
-    commit_operations(
+    commit_operation_batches(
         &mut coordinator,
         &mut filesystem,
         &principal,
-        3,
-        (0..profile.relationships())
-            .map(|ordinal| {
-                let edge = materializer.edge(ordinal);
-                Ok(Operation::Create {
-                    expected: Expected::Absent,
-                    record: NewRecord::Relationship(NewRelationship {
-                        id: relationship_ref(scope, materializer, ordinal),
-                        from: entity_ref(scope, materializer, edge.source),
-                        to: entity_ref(scope, materializer, edge.destination),
-                        relationship_type: text(match edge.topology {
-                            crate::Topology::Uniform => "bm01-uniform-v1",
-                            crate::Topology::DistributedHub => "bm01-hub-v1",
-                            crate::Topology::RingCycle => "bm01-ring-v1",
-                        })?,
-                        properties: Value::Null,
-                        evidence: vec![evidence_ref(scope)],
-                        valid_time: ValidTime::Unknown,
-                    }),
-                })
+        &mut sequence,
+        (0..profile.relationships()).map(|ordinal| {
+            let edge = materializer.edge(ordinal);
+            Ok(Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Relationship(NewRelationship {
+                    id: relationship_ref(scope, materializer, ordinal),
+                    from: entity_ref(scope, materializer, edge.source),
+                    to: entity_ref(scope, materializer, edge.destination),
+                    relationship_type: text(match edge.topology {
+                        crate::Topology::Uniform => "bm01-uniform-v1",
+                        crate::Topology::DistributedHub => "bm01-hub-v1",
+                        crate::Topology::RingCycle => "bm01-ring-v1",
+                    })?,
+                    properties: Value::Null,
+                    evidence: vec![evidence_ref(scope)],
+                    valid_time: ValidTime::Unknown,
+                }),
             })
-            .collect::<Result<Vec<_>, String>>()?,
+        }),
     )
     .map_err(|error| format!("relationship materialization: {error}"))?;
-    commit_operations(
+    commit_operation_batches(
         &mut coordinator,
         &mut filesystem,
         &principal,
-        4,
-        (0..profile.relationships())
-            .map(|ordinal| Operation::ActOnRelationship {
+        &mut sequence,
+        (0..profile.relationships()).map(|ordinal| {
+            Ok(Operation::ActOnRelationship {
                 target: relationship_ref(scope, materializer, ordinal),
                 expected: Expected::Version(RecordVersion::FIRST),
                 action: AssertionAction::Accept,
                 correction: None,
                 correction_expected: None,
             })
-            .collect(),
+        }),
     )
     .map_err(|error| format!("relationship acceptance: {error}"))?;
 
@@ -377,6 +375,46 @@ fn commit_operations(
     Ok(())
 }
 
+fn commit_operation_batches<I>(
+    coordinator: &mut EngineCoordinator,
+    filesystem: &mut MemoryFileSystem,
+    principal: &AuthenticatedPrincipal,
+    sequence: &mut u64,
+    operations: I,
+) -> Result<(), String>
+where
+    I: IntoIterator<Item = Result<Operation, String>>,
+{
+    let mut batch = Vec::with_capacity(MAX_TRANSACTION_OPERATIONS);
+    for operation in operations {
+        batch.push(operation?);
+        if batch.len() == MAX_TRANSACTION_OPERATIONS {
+            let full =
+                core::mem::replace(&mut batch, Vec::with_capacity(MAX_TRANSACTION_OPERATIONS));
+            commit_operations(coordinator, filesystem, principal, *sequence, full)?;
+            *sequence = sequence
+                .checked_add(1)
+                .ok_or("transaction sequence overflow")?;
+        }
+    }
+    if !batch.is_empty() {
+        commit_operations(coordinator, filesystem, principal, *sequence, batch)?;
+        *sequence = sequence
+            .checked_add(1)
+            .ok_or("transaction sequence overflow")?;
+    }
+    Ok(())
+}
+
+/// Exact policy-plus-record revision count for the fixed maximum-size batching protocol.
+#[must_use]
+pub fn materialization_revision_count(profile: Bm01Profile) -> u64 {
+    let batch = u64::try_from(MAX_TRANSACTION_OPERATIONS).expect("fixed transaction cap");
+    1 + (profile.entities() + 1).div_ceil(batch)
+        + profile.relationships().div_ceil(batch)
+        + profile.relationships().div_ceil(batch)
+}
+
 fn benchmark_policy(scope: NamespaceRef) -> Result<NamespacePolicy, String> {
     let quotas = QuotaLimits::new(16 * 1024 * 1024, 0, 0, 0, 1024 * 1024).map_err(debug)?;
     let mut policy = NamespacePolicy::new(scope, PolicyVersion::new(1).map_err(debug)?, quotas);
@@ -549,7 +587,7 @@ impl EntropySource for CounterEntropy {
 
 #[cfg(test)]
 mod tests {
-    use super::verify_development_profile;
+    use super::{materialization_revision_count, verify_development_profile};
     use crate::Bm01Profile;
 
     #[test]
@@ -569,5 +607,13 @@ mod tests {
         );
         assert!(report.cache_report.completed_authorized_reads > 0);
         assert!(report.cache_report.pages_read > 0);
+    }
+
+    #[test]
+    fn qualifying_materialization_has_a_pinned_bounded_batch_plan() {
+        assert_eq!(
+            materialization_revision_count(Bm01Profile::qualifying()),
+            212
+        );
     }
 }

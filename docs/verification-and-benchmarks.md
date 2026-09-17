@@ -104,6 +104,10 @@ explicitly capped development scale. Its restart-backed 20/200 golden checks all
 shapes, but the memory fault-model adapter, test key wrapper, absent timings/RSS and client-composed
 multi-hop path make it semantic groundwork only. It always reports `engine_benchmark:false`.
 
+Decision 0041 streams the exact fixture mapping in maximum-10,000-operation transactions and pins
+the qualifying plan at 212 durable revisions. This removes profile-sized operation collection but
+does not turn the capped development verifier into BM-01 timing or memory evidence.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

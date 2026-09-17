@@ -129,7 +129,10 @@ has a production-backed development verifier capped at 1,000 entities. Its 20/20
 materializes and accepts records through the authorized durable coordinator, restarts/replays,
 loads the encrypted index and matches all 384 measured query shapes against the independent oracle.
 It explicitly emits `engine_benchmark: false`, uses the memory fault model and test key wrapper,
-and records no timing/RSS; BM-01 remains unrun.
+and records no timing/RSS; BM-01 remains unrun. Decision 0041 replaces profile-sized operation
+collection with maximum-10,000-operation streaming transactions. The accepted profile has exactly
+212 durable revisions: one policy, 11 evidence/entity, 100 relationship-create and 100 acceptance
+revisions. The accepted TSV and generated manifest pin that plan without presenting it as a run.
 
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
@@ -137,5 +140,6 @@ reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo`
 The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition blocks only a qualifying
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
-The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all docs,
-strict clippy/rustdoc, the storage publication model, and 11 isolated T-20 fixture/engine tests passed.
+The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
+docs, strict clippy/rustdoc, the storage publication model, and 12 isolated T-20 fixture/engine
+tests passed.

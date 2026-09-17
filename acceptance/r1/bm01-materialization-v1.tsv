@@ -2,6 +2,8 @@ case	field	input	expected
 profile	seed	bm01-materialization-v1	8f41d0a52b40f13f4a77bc3beae2026a8bc42ad48d12ce53d92e29f612111001
 profile	entities	qualifying	100000
 profile	relationships	qualifying	1000000
+profile	engine_mapping	qualifying	bm01-uste-graph-v1
+profile	durable_revisions	maximum-10000-operations	212
 topology	uniform_relationships	qualifying	800000
 topology	distributed_hub_relationships	qualifying	100000
 topology	ring_cycle_relationships	qualifying	100000
