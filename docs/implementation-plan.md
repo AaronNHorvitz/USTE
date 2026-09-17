@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.5 · 2026-09-17 · R0 design ready; T-08–T-11 foundation implemented
+Design draft 1.6 · 2026-09-17 · R0 design ready; T-08–T-12 foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -53,6 +53,11 @@ Hot object lookup, temporal history, blob reads and graph traversal need distinc
 trusted key-adapter contracts. Storage supplies durably published writer incarnation/object IDs and
 never resets an exhausted nonce session in place. Rotation, restore and writable-clone admission
 remain lifecycle operations rather than crypto-library side effects.
+
+`uste-storage` begins with Decision 0014's host-capability traits and deterministic fault adapter.
+The memory durability model keeps file bytes and directory names independently synchronized and
+invalidates handles on restart. T-13 adds the reviewed Linux implementation and journal; T-12's
+test-only host SIGKILL scenario is not a durability or supported-filesystem claim.
 
 ## R0 design deliverables
 

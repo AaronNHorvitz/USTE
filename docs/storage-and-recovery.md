@@ -1,6 +1,6 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-16 · Not implemented
+Draft contract · 2026-09-17 · T-12 I/O/fault boundary implemented; journal/recovery not implemented
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 
@@ -32,6 +32,10 @@ required files and directory entries, atomically publishes it, then flushes its 
 before acknowledging success. Failures must not resemble a valid created database.
 An exclusive owner lock prevents competing writers. Stale-lock handling must not permit
 two owners. Network filesystems are unsupported initially.
+
+Decision 0014 implements the handle-relative interface and deterministic volatile/durable fault
+model. It intentionally omits a production host filesystem implementation until T-13 can provide
+reviewed no-follow, no-replace and ownership semantics rather than ambient path operations.
 
 ## Transaction lifecycle
 

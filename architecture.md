@@ -110,6 +110,11 @@ Avoid two independent sources of commit truth. The journal owns commits; project
 worker queues derive from it. A checkpoint is a cache until explicitly promoted to a new
 recovery baseline during retention/compaction.
 
+Decision 0014 makes filesystem, clock and randomness explicit capabilities. Storage paths are
+single validated names relative to opaque directory handles; positional I/O exposes short progress,
+and file/directory flushes and no-replace rename remain separate observable operations. The T-12
+memory/fault adapter is a correctness harness, not the supported Linux implementation.
+
 ## Security scope
 
 Core storage/query code is safe Rust by default. Standard-library/platform boundaries,

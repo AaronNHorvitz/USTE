@@ -275,6 +275,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "uste-storage"
+version = "0.1.0"
+dependencies = [
+ "uste-types",
+]
+
+[[package]]
 name = "uste-testkit"
 version = "0.1.0"
 dependencies = [
