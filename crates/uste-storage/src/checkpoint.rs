@@ -142,7 +142,67 @@ impl RecoveredCheckpoint {
     }
 }
 
-#[derive(Clone, Copy)]
+/// Opaque, fully authenticated checkpoint candidate whose payload can be read incrementally.
+/// The journal must revalidate its exact manifest and certificate anchor before streaming bytes.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct CheckpointStreamCandidate {
+    slot: Slot,
+    manifest: Manifest,
+}
+
+impl core::fmt::Debug for CheckpointStreamCandidate {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("CheckpointStreamCandidate")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.manifest.revision)
+            .field("generation", &self.manifest.generation)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("reducer_profile", &"[REDACTED]")
+            .field("logical_state_digest", &"[REDACTED]")
+            .field("payload_len", &self.manifest.payload_len)
+            .finish()
+    }
+}
+
+impl CheckpointStreamCandidate {
+    #[must_use]
+    pub const fn scope(self) -> NamespaceRef {
+        self.manifest.scope
+    }
+
+    #[must_use]
+    pub const fn revision(self) -> CommitRevision {
+        self.manifest.revision
+    }
+
+    #[must_use]
+    pub const fn generation(self) -> u64 {
+        self.manifest.generation
+    }
+
+    #[must_use]
+    pub const fn certificate_digest(&self) -> &[u8; 32] {
+        &self.manifest.certificate_digest
+    }
+
+    #[must_use]
+    pub const fn reducer_profile(&self) -> &[u8; 32] {
+        &self.manifest.reducer_profile
+    }
+
+    #[must_use]
+    pub const fn logical_state_digest(&self) -> &[u8; 32] {
+        &self.manifest.logical_state_digest
+    }
+
+    #[must_use]
+    pub const fn payload_len(self) -> u64 {
+        self.manifest.payload_len
+    }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
 struct Manifest {
     scope: NamespaceRef,
     revision: CommitRevision,
@@ -218,20 +278,20 @@ where
     {
         return Err(StorageError::InvalidState);
     }
-    let candidates = load_candidates(filesystem, &context, vault, input.scope)?;
+    let candidates = discover_candidates(filesystem, &context, vault, input.scope)?;
     let generation = candidates
         .iter()
-        .map(|(_, checkpoint)| checkpoint.generation)
+        .map(|candidate| candidate.generation())
         .max()
         .unwrap_or(0)
         .checked_add(1)
         .ok_or(StorageError::ResourceLimit)?;
     let slot = match candidates.as_slice() {
         [] => Slot::A,
-        [(used, _)] => used.other(),
-        [(newest, _), (older, _)] => {
+        [used] => used.slot.other(),
+        [newest, older] => {
             let _ = newest;
-            *older
+            older.slot
         }
         _ => return Err(StorageError::IntegrityFailure),
     };
@@ -386,19 +446,71 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    load_candidates(filesystem, &context, vault, scope)
-        .unwrap_or_default()
+    let mut candidates = [Slot::A, Slot::B]
         .into_iter()
-        .map(|(_, checkpoint)| checkpoint)
-        .collect()
+        .filter_map(|slot| {
+            let manifest = read_manifest(filesystem, &context, vault, scope, slot)
+                .ok()
+                .flatten()?;
+            collect_manifest(filesystem, &context, vault, slot, manifest).ok()
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.generation));
+    if candidates.len() == 2
+        && candidates[0].generation == candidates[1].generation
+        && candidates[0] != candidates[1]
+    {
+        return Vec::new();
+    }
+    candidates
 }
 
-fn load_candidates<F, W, E>(
+pub(crate) fn discover<F, W, E>(
+    filesystem: &mut F,
+    context: CheckpointContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    scope: NamespaceRef,
+) -> Vec<CheckpointStreamCandidate>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    discover_candidates(filesystem, &context, vault, scope).unwrap_or_default()
+}
+
+pub(crate) fn stream<F, W, E>(
+    filesystem: &mut F,
+    context: CheckpointContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    candidate: CheckpointStreamCandidate,
+    sink: &mut dyn FnMut(&[u8]) -> Result<(), StorageError>,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let current = read_manifest(
+        filesystem,
+        &context,
+        vault,
+        candidate.scope(),
+        candidate.slot,
+    )?
+    .ok_or(StorageError::InvalidState)?;
+    if current != candidate.manifest {
+        return Err(StorageError::InvalidState);
+    }
+    visit_payload(filesystem, &context, vault, candidate.slot, current, sink)
+}
+
+fn discover_candidates<F, W, E>(
     filesystem: &mut F,
     context: &CheckpointContext<'_, F::Directory>,
     vault: &KeyVault<W, E>,
     scope: NamespaceRef,
-) -> Result<Vec<(Slot, RecoveredCheckpoint)>, StorageError>
+) -> Result<Vec<CheckpointStreamCandidate>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -407,28 +519,49 @@ where
     let mut candidates = [Slot::A, Slot::B]
         .into_iter()
         .filter_map(|slot| {
-            load_slot(filesystem, context, vault, scope, slot)
+            discover_slot(filesystem, context, vault, scope, slot)
                 .ok()
                 .flatten()
         })
         .collect::<Vec<_>>();
-    candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.1.generation));
+    candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.generation()));
     if candidates.len() == 2
-        && candidates[0].1.generation == candidates[1].1.generation
-        && candidates[0].1 != candidates[1].1
+        && candidates[0].generation() == candidates[1].generation()
+        && !candidates[0]
+            .manifest
+            .same_logical_checkpoint(candidates[1].manifest)
     {
         return Err(StorageError::IntegrityFailure);
     }
     Ok(candidates)
 }
 
-fn load_slot<F, W, E>(
+fn discover_slot<F, W, E>(
     filesystem: &mut F,
     context: &CheckpointContext<'_, F::Directory>,
     vault: &KeyVault<W, E>,
     expected_scope: NamespaceRef,
     slot: Slot,
-) -> Result<Option<(Slot, RecoveredCheckpoint)>, StorageError>
+) -> Result<Option<CheckpointStreamCandidate>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let Some(manifest) = read_manifest(filesystem, context, vault, expected_scope, slot)? else {
+        return Ok(None);
+    };
+    visit_payload(filesystem, context, vault, slot, manifest, &mut |_| Ok(()))?;
+    Ok(Some(CheckpointStreamCandidate { slot, manifest }))
+}
+
+fn read_manifest<F, W, E>(
+    filesystem: &mut F,
+    context: &CheckpointContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    expected_scope: NamespaceRef,
+    slot: Slot,
+) -> Result<Option<Manifest>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -466,11 +599,59 @@ where
     if manifest.scope != expected_scope || manifest.object_id != object_id {
         return Err(StorageError::IntegrityFailure);
     }
-    let (payload_len, chunk_count) = validate_manifest_shape(manifest)?;
+    validate_manifest_shape(manifest)?;
+    Ok(Some(manifest))
+}
+
+fn collect_manifest<F, W, E>(
+    filesystem: &mut F,
+    context: &CheckpointContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    slot: Slot,
+    manifest: Manifest,
+) -> Result<RecoveredCheckpoint, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let payload_len =
+        usize::try_from(manifest.payload_len).map_err(|_| StorageError::ResourceLimit)?;
     let mut payload = Vec::new();
     payload
         .try_reserve_exact(payload_len)
         .map_err(|_| StorageError::ResourceLimit)?;
+    visit_payload(filesystem, context, vault, slot, manifest, &mut |bytes| {
+        payload.extend_from_slice(bytes);
+        Ok(())
+    })?;
+    Ok(RecoveredCheckpoint {
+        scope: manifest.scope,
+        revision: manifest.revision,
+        generation: manifest.generation,
+        certificate_digest: manifest.certificate_digest,
+        reducer_profile: manifest.reducer_profile,
+        logical_state_digest: manifest.logical_state_digest,
+        payload,
+    })
+}
+
+fn visit_payload<F, W, E>(
+    filesystem: &mut F,
+    context: &CheckpointContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    slot: Slot,
+    manifest: Manifest,
+    sink: &mut dyn FnMut(&[u8]) -> Result<(), StorageError>,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let (payload_len, chunk_count) = validate_manifest_shape(manifest)?;
+    let mut actual_len = 0_usize;
+    let mut payload_digest = Sha256::new();
     for index in 0..chunk_count {
         let chunk_file = filesystem.open_existing(context.directory, &chunk_name(slot, index)?)?;
         let length = filesystem.metadata(&chunk_file)?.len;
@@ -490,8 +671,8 @@ where
             .decrypt(
                 checkpoint_context(
                     context,
-                    expected_scope.namespace(),
-                    object_id,
+                    manifest.scope.namespace(),
+                    manifest.object_id,
                     sequence,
                     FrameClass::Blob64KiB,
                 ),
@@ -506,24 +687,17 @@ where
         if chunk.as_slice().len() != expected {
             return Err(StorageError::IntegrityFailure);
         }
-        payload.extend_from_slice(chunk.as_slice());
+        actual_len = actual_len
+            .checked_add(chunk.as_slice().len())
+            .ok_or(StorageError::ResourceLimit)?;
+        payload_digest.update(chunk.as_slice());
+        sink(chunk.as_slice())?;
     }
-    let actual_payload_digest: [u8; 32] = Sha256::digest(&payload).into();
-    if payload.len() != payload_len || actual_payload_digest != manifest.payload_digest {
+    let actual_payload_digest: [u8; 32] = payload_digest.finalize().into();
+    if actual_len != payload_len || actual_payload_digest != manifest.payload_digest {
         return Err(StorageError::IntegrityFailure);
     }
-    Ok(Some((
-        slot,
-        RecoveredCheckpoint {
-            scope: manifest.scope,
-            revision: manifest.revision,
-            generation: manifest.generation,
-            certificate_digest: manifest.certificate_digest,
-            reducer_profile: manifest.reducer_profile,
-            logical_state_digest: manifest.logical_state_digest,
-            payload,
-        },
-    )))
+    Ok(())
 }
 
 fn validate_manifest_shape(manifest: Manifest) -> Result<(usize, usize), StorageError> {
@@ -543,6 +717,18 @@ fn validate_manifest_shape(manifest: Manifest) -> Result<(usize, usize), Storage
 }
 
 impl Manifest {
+    fn same_logical_checkpoint(self, other: Self) -> bool {
+        self.scope == other.scope
+            && self.revision == other.revision
+            && self.generation == other.generation
+            && self.certificate_digest == other.certificate_digest
+            && self.reducer_profile == other.reducer_profile
+            && self.logical_state_digest == other.logical_state_digest
+            && self.payload_digest == other.payload_digest
+            && self.payload_len == other.payload_len
+            && self.chunk_count == other.chunk_count
+    }
+
     fn encode(self) -> [u8; MANIFEST_BYTES] {
         let mut bytes = [0_u8; MANIFEST_BYTES];
         bytes[..4].copy_from_slice(MAGIC);
@@ -799,6 +985,14 @@ mod tests {
             validate_manifest_shape(valid),
             Ok((CHECKPOINT_CHUNK_BYTES + 1, 2))
         );
+        assert!(valid.same_logical_checkpoint(Manifest {
+            object_id: [0x99; 16],
+            ..valid
+        }));
+        assert!(!valid.same_logical_checkpoint(Manifest {
+            payload_digest: [0x98; 32],
+            ..valid
+        }));
 
         for (payload_len, chunk_count) in [
             (0, 1),

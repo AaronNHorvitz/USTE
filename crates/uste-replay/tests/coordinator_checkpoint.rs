@@ -9,7 +9,7 @@ use uste_storage::{
 use uste_txn::{
     ApplyError, CheckpointState, CheckpointStateError, CommitCoordinator, NeverCancel,
     PrincipalDigest, RetentionDays, TransactionRequest, TransactionState,
-    load_verified_checkpoint_candidates,
+    load_verified_checkpoint_candidates, stream_verified_checkpoint_candidate,
 };
 use uste_types::{
     CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, TransactionId,
@@ -463,6 +463,26 @@ fn encrypted_checkpoint_restores_coordinator_and_replays_only_reducer_suffix() {
         .unwrap();
     drop(coordinator);
     filesystem.restart().unwrap();
+
+    let mut streamed = Vec::new();
+    let (stream_candidate, stream_report) =
+        stream_verified_checkpoint_candidate::<_, TestEnvelope, _, _, _>(
+            &mut filesystem,
+            &name,
+            scope,
+            0,
+            CounterEntropy::new(250),
+            CounterEntropy::new(260),
+            &mut TestKeyAdapter,
+            &mut |bytes| {
+                streamed.extend_from_slice(bytes);
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(stream_report.frontier.unwrap().get(), 2);
+    assert_eq!(stream_candidate.unwrap().revision().get(), 2);
+    assert_eq!(streamed, malformed_payload);
 
     let (candidates, verified) = load_verified_checkpoint_candidates::<_, TestEnvelope, _, _, _>(
         &mut filesystem,

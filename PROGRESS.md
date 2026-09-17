@@ -3,11 +3,11 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Pushed commits
-through `776a2cf` add T-20's encrypted disk-index and authorized-read foundation. The current
-Decision 0026 increment adds bounded checkpoint publication and deterministic benchmark-fixture
-groundwork; T-20 remains open pending streaming larger-than-memory state/recovery and qualifying
-BM-01/BM-06 results. Review was performed by Codex agents and does not represent independent
-external security certification.
+through `acde6bb` add T-20's encrypted disk-index, authorized-read, bounded checkpoint-publication
+and deterministic benchmark-fixture foundations. The current Decision 0026 extension adds bounded
+checkpoint recovery transport; T-20 remains open pending streaming larger-than-memory reducer state
+and qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
+independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -193,6 +193,10 @@ unverified external distribution prerequisite.
   terminal-manifest visibility only after exact production. Explicit producer failure, short and long
   streams leave the earlier candidate usable. Index prefix scans now also expose a bounded visitor
   path instead of requiring result collection.
+- Added bounded checkpoint recovery transport: discovery authenticates/rehashes candidates without
+  retaining complete plaintext, filters opaque metadata against the verified certificate chain and
+  revalidates a selected chunk stream under the live owner/key context. Partial sink output is never
+  publishable unless the terminal digest succeeds; current reducer decoders remain full-state.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -307,10 +311,10 @@ remaining mixed workload have not passed.
   implemented, but there is no database executable or production qualification. Privileged raw
   disk APIs remain separate from the new authorization-preserving current-graph consumer path.
   Checkpoint discovery and seeded open each authenticate the journal, and publication can now stream
-  with a one-new-payload-chunk buffer, while candidate selection/recovery still materializes bounded
-  payloads and reducer writes retain/clone full graph history in memory; BM-01/BM-06 have not run.
-  Graph policy
-  is durable; the trusted adapter must supply its exact current copy at authorized open. The oracle
+  with a one-new-payload-chunk buffer, and checkpoint transport can recover through a bounded chunk
+  stream. Reducer decoding and writes still materialize/clone full graph history in memory;
+  BM-01/BM-06 have not run. Graph policy is durable; the trusted adapter must supply its exact
+  current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
   compiler, both confined to development tooling.
 - T-45 normalizes timestamps and preserves their provenance but does not add temporal indexes,

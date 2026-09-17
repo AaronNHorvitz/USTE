@@ -23,8 +23,8 @@ use crate::{
         read_range, resume_upload, verify_reference, write_upload,
     },
     checkpoint::{
-        self, CheckpointContext, CheckpointInput, CheckpointStreamInput, DurableCheckpoint,
-        RecoveredCheckpoint,
+        self, CheckpointContext, CheckpointInput, CheckpointStreamCandidate, CheckpointStreamInput,
+        DurableCheckpoint, RecoveredCheckpoint,
     },
     index::{
         self, DurableIndexRoot, IndexContext, IndexEntry, IndexReadStats, IndexRootInput,
@@ -1009,6 +1009,62 @@ where
                 == Some(checkpoint.certificate_digest())
         })
         .collect()
+    }
+
+    /// Discover up to two fully authenticated checkpoint candidates without retaining their
+    /// complete plaintext payloads. Candidates are newest first and remain optional caches.
+    #[must_use]
+    pub fn checkpoint_stream_candidates(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+    ) -> Vec<CheckpointStreamCandidate> {
+        checkpoint::discover(
+            filesystem,
+            CheckpointContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            scope,
+        )
+        .into_iter()
+        .filter(|candidate| {
+            self.certificate_anchors.get(&candidate.revision())
+                == Some(candidate.certificate_digest())
+        })
+        .collect()
+    }
+
+    /// Revalidate an opaque candidate and emit independently authenticated plaintext chunks. A
+    /// caller may observe chunks before the final whole-payload digest check and must publish no
+    /// decoded state unless this method returns `Ok(())`.
+    pub fn stream_checkpoint_candidate(
+        &self,
+        filesystem: &mut F,
+        candidate: CheckpointStreamCandidate,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), StorageError>,
+    ) -> Result<(), StorageError> {
+        if candidate.scope().database() != self.database
+            || self.certificate_anchors.get(&candidate.revision())
+                != Some(candidate.certificate_digest())
+        {
+            return Err(StorageError::InvalidState);
+        }
+        checkpoint::stream(
+            filesystem,
+            CheckpointContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            candidate,
+            sink,
+        )
     }
 
     /// Write one immutable encrypted sorted run. It is not visible until an exact anchored root
@@ -2396,10 +2452,102 @@ mod tests {
         assert_eq!(loaded[0].payload(), second_payload);
         assert_eq!(loaded[1].payload(), first_payload);
 
+        let stream_candidates = store.checkpoint_stream_candidates(&mut filesystem, scope);
+        assert_eq!(stream_candidates.len(), 2);
+        let newest_stream = stream_candidates[0];
+        assert_eq!(newest_stream.revision(), second_commit.revision);
+        assert_eq!(newest_stream.generation(), 2);
+        assert_eq!(newest_stream.payload_len(), second_payload.len() as u64);
+        assert!(format!("{newest_stream:?}").contains("[REDACTED]"));
+        let mut streamed = Vec::new();
+        let mut stream_chunks = 0_usize;
+        store
+            .stream_checkpoint_candidate(&mut filesystem, newest_stream, &mut |bytes| {
+                stream_chunks += 1;
+                streamed.extend_from_slice(bytes);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(stream_chunks, 2);
+        assert_eq!(streamed, second_payload);
+        let mut stopped = 0_usize;
+        assert_eq!(
+            store.stream_checkpoint_candidate(&mut filesystem, newest_stream, &mut |_| {
+                stopped += 1;
+                Err(StorageError::InvalidState)
+            },),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(stopped, 1);
+
+        let mut replaced_manifest_filesystem = filesystem.clone();
+        store
+            .publish_checkpoint(
+                &mut replaced_manifest_filesystem,
+                CheckpointInput {
+                    scope,
+                    revision: second_commit.revision,
+                    certificate_digest: second_commit.certificate_digest,
+                    reducer_profile: [0xc4; 32],
+                    logical_state_digest: [0xc9; 32],
+                    payload: b"valid replacement in slot A",
+                },
+            )
+            .unwrap();
+        store
+            .publish_checkpoint(
+                &mut replaced_manifest_filesystem,
+                CheckpointInput {
+                    scope,
+                    revision: second_commit.revision,
+                    certificate_digest: second_commit.certificate_digest,
+                    reducer_profile: [0xc4; 32],
+                    logical_state_digest: [0xca; 32],
+                    payload: b"valid replacement in slot B",
+                },
+            )
+            .unwrap();
+        let mut replaced_callbacks = 0_usize;
+        assert_eq!(
+            store.stream_checkpoint_candidate(
+                &mut replaced_manifest_filesystem,
+                newest_stream,
+                &mut |_| {
+                    replaced_callbacks += 1;
+                    Ok(())
+                },
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(replaced_callbacks, 0);
+
+        let mut corrupt_late_chunk_filesystem = filesystem.clone();
+        corrupt_late_chunk_filesystem
+            .test_mutate_file(&store.database_directory, &entry("CHECKPOINT-B-001"), 32)
+            .unwrap();
+        let mut corrupt_callbacks = 0_usize;
+        assert!(
+            store
+                .stream_checkpoint_candidate(
+                    &mut corrupt_late_chunk_filesystem,
+                    newest_stream,
+                    &mut |_| {
+                        corrupt_callbacks += 1;
+                        Ok(())
+                    },
+                )
+                .is_err()
+        );
+        assert_eq!(corrupt_callbacks, 1);
+
         let saved_anchor = store
             .certificate_anchors
             .remove(&second_commit.revision)
             .unwrap();
+        assert_eq!(
+            store.stream_checkpoint_candidate(&mut filesystem, newest_stream, &mut |_| Ok(()),),
+            Err(StorageError::InvalidState)
+        );
         let future_rejected = store.load_checkpoints(&mut filesystem, scope);
         assert_eq!(future_rejected.len(), 1);
         assert_eq!(future_rejected[0].generation(), 1);

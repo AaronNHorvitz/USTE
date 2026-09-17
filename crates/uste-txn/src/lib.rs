@@ -21,9 +21,10 @@ use uste_crypto::{EntropySource, KeyAdapter};
 pub use uste_policy::PrincipalDigest;
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
-    CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot, EMPTY_BLOB_INVENTORY_DIGEST,
-    IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor, IndexScan, IndexScrubReport,
-    OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
+    CheckpointStreamCandidate, CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot,
+    EMPTY_BLOB_INVENTORY_DIGEST, IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor,
+    IndexScan, IndexScrubReport, OwnershipFileSystem, PageCache, RecoveredCheckpoint,
+    RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -74,6 +75,53 @@ where
     .map_err(map_open_error)?;
     let candidates = journal.load_checkpoints(filesystem, scope);
     Ok((candidates, report))
+}
+
+/// Authenticate the complete journal, select an anchored checkpoint by newest-first rank and
+/// stream its payload without retaining it in a complete plaintext buffer. The sink may receive
+/// chunks before the final whole-payload digest check; decoded state must not be published unless
+/// this function returns `Ok(Some(..))`.
+#[allow(clippy::too_many_arguments)]
+pub fn stream_verified_checkpoint_candidate<F, W, E, I, A>(
+    filesystem: &mut F,
+    final_name: &uste_storage::EntryName,
+    scope: NamespaceRef,
+    rank: usize,
+    vault_entropy: E,
+    identity_entropy: I,
+    key_adapter: &mut A,
+    sink: &mut dyn FnMut(&[u8]) -> Result<(), StorageError>,
+) -> Result<(Option<CheckpointStreamCandidate>, RecoveryReport), TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+    A: KeyAdapter<Envelope = W>,
+{
+    if rank >= 2 {
+        return Err(TransactionError::InvalidRequest);
+    }
+    let (journal, report) = JournalStore::open(
+        filesystem,
+        final_name,
+        scope.database(),
+        vault_entropy,
+        identity_entropy,
+        key_adapter,
+        |_group| Ok(()),
+    )
+    .map_err(map_open_error)?;
+    let candidate = journal
+        .checkpoint_stream_candidates(filesystem, scope)
+        .get(rank)
+        .copied();
+    if let Some(candidate) = candidate {
+        journal
+            .stream_checkpoint_candidate(filesystem, candidate, sink)
+            .map_err(TransactionError::Storage)?;
+    }
+    Ok((candidate, report))
 }
 
 /// Retry-outcome retention fixed by Decision 0003.

@@ -159,12 +159,17 @@ runs under one revision.
 
 Decision 0026 removes avoidable snapshot clones from replay metadata checks, lets graph checkpoints
 flow through a fallible bounded encoder, and publishes their declared-length bytes while retaining
-only one 1 MiB plaintext chunk of the new payload. A terminal manifest appears only after exact byte production;
-producer failure or a short/long stream leaves no visible cache candidate. Prefix-index consumers
-can likewise visit entries without collecting the full bounded result. These are transport and API
-foundations: candidate selection/recovery still materializes bounded payloads, and graph/ingest prepare still
-clone and rebuild complete in-memory candidates. New versioned state profiles, not a mutation of
-frozen `graph-current-v1`, must remove those full-RAM assumptions before BM-06 can qualify.
+only one 1 MiB plaintext chunk of the new payload. A terminal manifest appears only after exact
+byte production; producer failure or a short/long stream leaves no visible cache candidate.
+Prefix-index consumers can likewise visit entries without collecting the full bounded result.
+
+The follow-on streaming recovery transport authenticates candidate manifests and rehashes their
+encrypted chunks without a complete plaintext allocation. Opaque candidates are filtered against
+the authenticated certificate chain; selected bytes are revalidated and emitted while the journal
+owner/key context remains live. Consumers must discard partial decoded state if the final digest or
+sink fails. The legacy collecting API remains available. Current reducer decoders and write
+preparation still materialize/clone complete logical state; new versioned state profiles, not a
+mutation of frozen `graph-current-v1`, must remove those assumptions before BM-06 can qualify.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

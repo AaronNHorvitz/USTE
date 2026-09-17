@@ -158,12 +158,18 @@ recovery and BM-01/BM-06 remain open T-20 work. T-35 still owns authoritative ba
 compaction and orphan reclamation.
 
 Decision 0026 adds borrow-aware reducer checkpoint access, incremental graph checkpoint encoding,
-declared-length one-new-payload-chunk checkpoint publication and visitor-based index scans without changing
-format-1.0 or `graph-current-v1`. The collecting APIs remain compatibility surfaces. Recovery still
-materializes the authenticated checkpoint and write preparation still clones/rebuilds complete
-graph/ingest state. The scalable design therefore uses new versioned state profiles backed by
+declared-length one-new-payload-chunk checkpoint publication and visitor-based index scans without
+changing format-1.0 or `graph-current-v1`. The collecting APIs remain compatibility surfaces.
+Reducer decoding and write preparation still materialize/clone complete graph/ingest state. The
+scalable design therefore uses new versioned state profiles backed by
 encrypted scratch runs, bounded overlays/tombstones and affected-closure validation; it does not
 silently reinterpret the frozen current-graph projection as authoritative mutable state.
+
+Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
+bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
+chunks before its terminal digest result, so consumers publish only after success. This removes the
+transport-level full-payload requirement; reducer decoding and live state remain the full-memory
+boundary.
 
 Decision 0021 adds the capability-free `uste-time` normalization kernel. `uste-types` retains the
 canonical instant pair without a timezone dependency. Strict explicit-offset and numeric-unit input

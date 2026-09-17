@@ -70,8 +70,14 @@ does not clone complete snapshots, and a regression reducer whose `snapshot()` p
 replay and capture use that path. Graph checkpoint encoding emits canonical format-1.0 bytes to a
 fallible sink; the old collecting API returns identical bytes. Storage publication retains one
 1 MiB plaintext chunk of the new payload, hashes incrementally and withholds the terminal manifest on explicit
-producer error or declared-length mismatch. Candidate selection/recovery still materializes existing
-payloads and therefore does not yet provide BM-06's larger-than-memory property.
+producer error or declared-length mismatch.
+
+Candidate discovery now verifies manifests and complete chunk digests with bounded plaintext and
+returns opaque certificate-anchored metadata. Selected recovery revalidates the exact manifest and
+emits authenticated chunks under the live owner/key context; sink failure stops immediately, and
+callers must not publish partial decoded state before the final digest succeeds. The compatibility
+collector remains byte-identical. Reducer decoders still require complete logical state and
+therefore do not yet provide BM-06's larger-than-memory property.
 
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure

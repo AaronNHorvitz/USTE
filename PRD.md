@@ -110,8 +110,12 @@ authoritative baselines remain T-35/R3.
 
 Decision 0026 advances that foundation with borrow-aware replay state, bounded streaming checkpoint
 publication, visitor-based index reads and a pinned deterministic BM-01 materialization/query
-oracle. The fixture is not performance evidence. Full-payload recovery, clone-based reducer writes
-and both qualifying benchmarks remain open, so no release-gate status changes.
+oracle. The fixture is not performance evidence. Full-state reducer recovery, clone-based reducer
+writes and both qualifying benchmarks remain open, so no release-gate status changes.
+
+The checkpoint transport now discovers authenticated opaque candidates and streams a selected
+candidate under its live journal/key context without retaining the complete plaintext payload.
+Reducer decoders still require complete state, so this narrows but does not close the recovery gap.
 
 ## Release gates
 

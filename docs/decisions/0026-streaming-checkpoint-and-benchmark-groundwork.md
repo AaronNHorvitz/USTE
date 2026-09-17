@@ -22,9 +22,15 @@ Checkpoint publication accepts a declared-length fallible producer, retains at m
 plaintext chunk of the new payload, hashes it incrementally, encrypts and synchronizes each chunk,
 and publishes the terminal manifest only after the producer emits exactly the declared length.
 Producer failure, under-production and over-production cannot make a cache candidate visible. The
-existing 256 MiB format cap and exact format-1.0 bytes remain unchanged. Candidate selection and
-recovery still collect authenticated existing chunks into `Vec`s; this publication change is not
-larger-than-memory recovery.
+existing 256 MiB format cap and exact format-1.0 bytes remain unchanged.
+
+Candidate discovery subsequently authenticates manifests and incrementally rehashes every chunk
+without retaining a complete plaintext payload. It returns only opaque candidates anchored to the
+authenticated journal. A selected candidate is revalidated and emitted chunk by chunk while the
+owner lock and key context remain live; callers may observe chunks before the final whole-payload
+digest check and must publish no decoded state unless streaming returns success. The collecting API
+remains compatible and materializes its result. Current reducer decoders still require complete
+slices, so this transport does not yet constitute larger-than-memory state recovery.
 
 Index prefix scans gain a visitor surface with the same global candidate and returned-byte limits.
 The original collecting scan is a compatibility wrapper over it. Visitor failure stops the scan
@@ -48,8 +54,8 @@ performed by this component.
 ## Required next state profile
 
 The current graph and ingest reducers still clone complete candidates during prepare, validate and
-rebuild full in-memory indexes, and the recovery checkpoint decoder still materializes the full
-payload. `graph-current-v1` is a frozen derived projection and will not be repurposed as mutable
+rebuild full in-memory indexes, and reducer checkpoint decoders still materialize the full logical
+state. `graph-current-v1` is a frozen derived projection and will not be repurposed as mutable
 state. The scalable path therefore requires new versioned graph/ingest state profiles with:
 
 - encrypted scratch runs and certificate-bound roots for current records, histories, adjacency,
