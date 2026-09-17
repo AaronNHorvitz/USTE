@@ -3,6 +3,8 @@
 Date: 2026-09-17 · scope: local policy/transaction/blob qualification, not production security
 certification
 
+Implementation commit: `d53dd2a`
+
 ## Implemented boundary
 
 - `uste-policy` has no storage, crypto, filesystem, clock or network dependency. It provides

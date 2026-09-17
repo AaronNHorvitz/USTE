@@ -2,9 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest verified and pushed implementation: `62637a9` (completed local T-15 encrypted blob-store
-qualification over the T-13/T-14 journal and transaction foundation). Review was performed by Codex agents and
-does not represent independent external security certification.
+Latest verified implementation: `d53dd2a` (completed local T-16 authorization and quota
+foundation over the T-13–T-15 journal/transaction/blob foundation). Review was performed by Codex
+agents and does not represent independent external security certification.
 
 ## Completed this increment
 
@@ -73,6 +73,23 @@ does not represent independent external security certification.
   1.06653x disk bytes and reproduced SHA-256
   `7eb969346fd20004fd1bb01f0ba1a8b356aea4c684ba22b1f8fde7c0014589c4`. Ingest was 95.923 MiB/s,
   below BM-04's 250 MiB/s target, so BM-04 remains unpassed despite T-15 correctness/RSS closure.
+- Completed T-16 with Decision 0018 and a storage-independent, safe-Rust `uste-policy` kernel:
+  trusted-adapter authentication mints opaque issuing-kernel-bound principals; absent policy denies;
+  action permissions are independent; record rules narrow namespace grants; and policy revisions
+  invalidate leases. The consumer transaction request has no caller-controlled principal field.
+- Added the mandatory authorized transaction facade. It checks namespace and reducer-declared
+  record requirements before state/index/storage access, rejects cross-namespace reducer targets,
+  binds views/uploads to their issuing coordinator and exposes no generic reducer snapshot.
+  Transaction-ID outcomes are owner-filtered, and denied unknown/existing paths use content-free
+  failures. A review-found same-scope fabricated resume-token capability was closed by requiring
+  authenticated durable journal evidence for every token absent from the in-memory ledger.
+- Enforced checked exact-plaintext quotas for request bytes, staging, committed unique blobs, live
+  handles and range reads. Failed writes reconcile accepted bytes; finalize retains the reservation;
+  abort releases it; commit moves it once. Recovery reconstructs first-publication ownership and
+  committed charges. Zero-byte reservations are capped at 32 and inventory lookup has a blob index.
+- Format 1.0 cannot enumerate abandoned uncommitted reservations, so a recovered authorized
+  coordinator conservatively rejects new upload starts. Evidenced known uploads, including a
+  zero-byte final marker, remain resumable for reconciliation/abort; T-35 owns complete enumeration.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -137,8 +154,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 122 workspace tests including 64 uste-storage, 13
-# uste-crypto and 12 uste-txn tests;
+# workspace format/clippy/test/doc pass; 138 workspace tests including 64 uste-storage, 13
+# uste-crypto, 4 uste-policy and 24 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -166,8 +183,10 @@ remaining mixed workload have not passed.
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
 - The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
-  durable journal, transaction coordinator and blob foundation are implemented, but there is still no
-  database executable, authorization or production qualification. The
+  durable journal, transaction/blob coordinator and authorization foundation are implemented, but
+  there is still no graph engine, database executable or production qualification. Current native
+  policy records and concrete graph authorization paths remain T-17; policy is supplied by a
+  trusted local adapter at open. The
   oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
@@ -178,7 +197,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Begin dependency-permitted T-16 principal/namespace authorization and actual-byte quota policy over
-the completed storage/transaction/blob foundation. T-62 remains independent and must not be
-represented as complete without owner-administered evidence. BM-04 performance optimization remains
-later acceptance work and is not silently treated as passed.
+Begin dependency-permitted T-17 graph records, evidence-backed adjacency and durable native policy
+records over the authorized transaction foundation. Repeat VT-05/VT-06 through the real graph
+reducer, including corrections, deletion, conflicts, restart and authorization-before-expansion.
+T-62 remains independent and must not be represented as complete without owner-administered
+evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
+as passed.
