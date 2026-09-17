@@ -327,6 +327,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "uste-txn"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "uste-crypto",
+ "uste-storage",
+ "uste-types",
+]
+
+[[package]]
 name = "uste-types"
 version = "0.1.0"
 

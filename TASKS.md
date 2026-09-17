@@ -63,7 +63,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-11 | Encryption/key-adapter boundary; FR-10 | T-09 | [Reviewed crypto envelopes and key interfaces](docs/evidence/crypto-boundary.md) | T-11 slice of VT-07 covers wrong context/key, tampering, nonce lifecycle, lock/unlock and redaction; rotation/clone/restore remain later tasks |
 | [x] T-12 | Filesystem/clock/random adapters and fault harness; FR-03, NFR-03 | T-09 | [Narrow I/O interfaces and deterministic failure injection](docs/evidence/io-fault-harness.md) | Reproducible short-write/read, file/directory-sync, rename, disk-full and SIGKILL/reopen scenarios; production Linux adapter remains T-13 |
 | [x] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | [uste-storage journal/recovery evidence](docs/evidence/journal-foundation.md) | VT-03/04 pass every initial publication boundary and hard-corruption case |
-| [ ] T-14 | Commit coordinator, readers, conflict checks, idempotency; FR-02 | T-13 | uste-txn and durable outcome lookup | VT-02 includes lost response, competing mutations, cancellation and restart |
+| [ ] T-14 | Commit coordinator, readers, conflict checks, idempotency; FR-02 | T-13 | [uste-txn coordinator foundation](docs/evidence/transaction-coordinator-foundation.md) and durable outcome lookup | VT-02 includes lost response, competing mutations, cancellation and restart |
 | [ ] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | Staging/finalization/resume/cleanup and inventory | VT-08 plus blob-specific VT-03: exact unknown-binary round-trip, bounded RSS, no committed dangling object |
 | [ ] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | uste-policy and trusted adapter checks | VT-06 proves no cross-scope graph/blob/existence leakage; quotas enforced on actual bytes |
 | [ ] T-17 | Graph records, evidence and transactional adjacency; FR-01/04/06 | T-10, T-14, T-16 | uste-graph basic records and traversal | VT-05 agrees with reference through create/correct/delete/conflict and restart |
@@ -80,6 +80,12 @@ byte-exhaustive corruption, real portable-key wiring, injected error/short-progr
 Btrfs SIGKILL after group/certificate sync pass. Live cross-process exclusion and lock release on
 death also pass. Real-process creation outcomes pass on Btrfs and the separately verified ext4
 mount; T-13's local acceptance scope is complete without claiming power-cut behavior.
+
+T-14 progress: Decision 0016, the domain-neutral prepare/publish reducer boundary,
+encrypted `UTXN` publication, coherent owned-snapshot readers, durable retry/transaction outcome indexes,
+expiry and uncertain-handle quarantine are implemented. Focused lost-response, conflict,
+cancellation, retry and restart cases pass; the task remains open for the complete fault,
+concurrency, format-golden and malformed-recovery matrix.
 
 ## R2 — Developer alpha
 

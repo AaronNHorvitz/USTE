@@ -61,6 +61,10 @@ exclusive ownership, encrypted opaque groups, fixed commit certificates and stre
 recovery. Btrfs and ext4 process-loss evidence does not establish controller-cache or power-loss
 behavior.
 
+Decision 0016 layers `uste-txn` over that journal. Domain reducers consume bounded canonical bytes,
+produce an owned prepared change and result digest without mutating live state; the coordinator
+durably binds request, principal-scoped idempotency and transaction outcomes before publication.
+
 ## R0 design deliverables
 
 - D-01/02/04: crash matrix, crypto/key strategy, ownership, deletion epochs and backup rules.

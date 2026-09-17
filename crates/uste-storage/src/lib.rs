@@ -1,8 +1,7 @@
 //! Handle-relative storage capabilities, encrypted journal/recovery and deterministic fault models.
 //!
-//! The T-13 foundation includes the x86_64 Linux adapter and format-1.0 commit-certificate
-//! journal. Qualification remains in progress; the in-memory adapter and fault scripts are
-//! verification tools rather than host durability claims.
+//! T-13 includes the qualified x86_64 Linux adapter and format-1.0 commit-certificate journal. The
+//! in-memory adapter and fault scripts remain verification tools rather than host durability claims.
 
 #![forbid(unsafe_code)]
 

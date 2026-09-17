@@ -100,6 +100,12 @@ validation checks read sets/predicates or rejects unsupported isolation patterns
 claim serializability for arbitrary transactions until phantom/conflict tests demonstrate it.
 The first supported transaction API uses constrained operations with explicit preconditions.
 
+Decision 0016 implements the initial `uste-txn` correctness profile: a domain reducer produces an
+owned prepared change without mutating live state, the coordinator publishes an encrypted `UTXN`
+group, and only a synced certificate applies it. Pinned readers own reducer-produced snapshots. Ambiguous journal
+results quarantine the coordinator until recovery; durable retry and transaction indexes rebuild
+from the same groups rather than becoming a second commit authority.
+
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.
 The exact binary layout and index algorithm are gated by D-01; no other database engine is

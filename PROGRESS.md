@@ -52,6 +52,10 @@ external security certification.
   frontier recovery after certificate-sync failure, incomplete-tail repair and hard failure for
   complete certificate/group corruption. A Btrfs child was SIGKILLed after certificate sync and
   the production adapter reopened the exact committed group.
+- Began T-14 with Decision 0016 and `uste-txn`: owned prepare/publish changes, encrypted canonical
+  transaction groups, coherent pinned readers, namespace/principal retry scope, durable outcome
+  reconstruction, expiry and uncertain-handle quarantine. Focused conflict/cancellation/restart and
+  lost-response retry tests pass; the task remains open for its full matrix.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -116,7 +120,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 81 workspace tests including 36 uste-storage tests;
+# workspace format/clippy/test/doc pass; 83 workspace tests including 36 uste-storage and 2
+# uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -142,9 +147,9 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The canonical type/codec kernel, test-only logical oracle, envelope/key boundary and initial
-  encrypted durable journal path are implemented, but there is still no database executable,
-  production transaction coordinator, authorization or production qualification. The
+- The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
+  durable journal and initial transaction coordinator are implemented, but there is still no
+  database executable, authorization or production qualification. The
   oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
@@ -155,6 +160,6 @@ policy checks; no benchmark measurement exists yet.
 
 ## Next dependency-permitted work
 
-Implement T-14's commit coordinator, retained readers, conflict checks, cancellation semantics and
-durable idempotency/outcome lookup. T-62 remains independent and must not be represented as complete
-without owner-administered evidence.
+Continue T-14 with its complete fault/concurrency/cancellation, format-golden and malformed-recovery
+matrix. T-62 remains independent and must not be represented as complete without owner-administered
+evidence.
