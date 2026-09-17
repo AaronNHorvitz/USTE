@@ -2,8 +2,8 @@
 
 Date: 2026-09-17
 
-Status: accepted as the T-20 foundation. T-20 remains open until its authorized query path,
-BM-01 and streaming larger-than-memory BM-06 acceptance work passes.
+Status: accepted as the T-20 foundation. T-20 remains open until BM-01 and streaming
+larger-than-memory BM-06 acceptance work passes.
 
 This decision fixes the first native Rust disk-index representation without promoting it to a
 second commit authority. It extends Decisions 0004, 0013, 0019 and 0020. T-35 continues to own
@@ -89,7 +89,7 @@ context; decoded descriptors inherit those authenticated root/context bindings.
 ## Limits, cache and graph families
 
 The profile admits at most 16 runs per root, 16,777,216 pages and 1,000,000,000 entries per run,
-4 KiB keys and 16 MiB values. Prefix scans admit at most 100,000 results and 64 MiB of returned key
+4 KiB keys and 16 MiB values. Prefix scans admit at most 1,000,000 candidates and 64 MiB of returned key
 plus value bytes. The decrypted LRU-style page cache defaults to 64 MiB, rejects budgets above
 256 MiB, uses fixed 16 KiB boxed pages with conservative per-entry accounting and keys entries by
 the complete database/namespace/epoch/writer/revision/profile/generation/run/page identity. Cache
@@ -103,15 +103,23 @@ revision and logical digest before index I/O. It then requires the exact current
 reducer/logical/index profiles, a full storage scrub, the exact family set, counts and independently
 recomputed family digests. Every read rechecks the live journal frontier, so a previously admitted
 handle becomes stale after a commit.
-These functions are privileged maintenance/raw projection surfaces; consumer reads still require an
-authorization-preserving facade.
+The raw functions remain privileged maintenance/projection surfaces. Facade publication and root
+discovery require the namespace `ManageSchema` action before reducer or filesystem access. They
+return a policy-admitted handle whose bounded page cache is opaque, preventing consumers from using
+cache counters as a hidden-candidate side channel. Consumer reads use the reducer-owned
+`AuthorizedIndexedReadState` path: it validates the issuing view and current policy, authorizes
+top-level targets before index I/O, filters each discovered candidate and embedded reference,
+preserves reference result limits, shares one million-candidate/64 MiB scan budgets across both
+adjacency directions, and rejects current-index use for historical reads. Handle admission binds
+the full logical digest once; reads then check view revision in constant time and raw operations
+revalidate the live journal certificate.
 
 ## Deliberate limits and remaining acceptance
 
 The graph reducer and canonical checkpoint still retain and clone full state in memory. This index
 therefore proves immutable encrypted runs, bounded page caching, restart recovery and current graph
 projection equivalence; it does not prove that a 10-million-event recovery fits outside RAM. T-20
-must add streaming checkpoint/state construction, the authorized disk-query facade, the BM-01
-100k/1m one-hop and four-hop workload, and BM-06 10-million-event checkpoint recovery before its
+must add streaming checkpoint/state construction, the BM-01 100k/1m one-hop and four-hop workload,
+and BM-06 10-million-event checkpoint recovery before its
 checkbox can close. Temporal/property/lexical/spatial families belong to T-21/T-25/T-37/T-59.
 Authoritative baseline switching, compaction and garbage collection remain T-35.

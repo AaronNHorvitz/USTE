@@ -10,5 +10,5 @@ key_max	bytes	index-v1	4096
 value_max	bytes	index-v1	16777216
 cache_default	bytes	index-v1	67108864
 cache_max	bytes	index-v1	268435456
-scan_results_max	count	index-v1	100000
+scan_results_max	count	index-v1	1000000
 scan_result_bytes_max	bytes	index-v1	67108864

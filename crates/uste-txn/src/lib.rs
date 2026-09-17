@@ -8,8 +8,8 @@
 mod authorized;
 
 pub use authorized::{
-    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedReadError,
-    AuthorizedReadState, AuthorizedReadView, AuthorizedTransactionRequest,
+    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedIndexedReadState,
+    AuthorizedReadError, AuthorizedReadState, AuthorizedReadView, AuthorizedTransactionRequest,
     AuthorizedTransactionState, DurablePolicyChange, MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage,
     open_authorized,
 };

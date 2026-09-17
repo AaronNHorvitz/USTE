@@ -150,9 +150,12 @@ and 256 MiB in-memory cache cap are correctness choices, not T-20/BM-06 performa
 Decision 0025 adds the native Rust `index-v1` foundation: immutable encrypted 16 KiB logical pages,
 certificate-anchored two-slot cache roots, complete-context bounded decrypted caching and a
 semantically validated current-record/adjacency/provenance graph projection. The journal remains the
-only commit authority. The current graph projection is a privileged maintenance/raw surface;
-authorization-preserving disk queries, streaming larger-than-memory recovery and BM-01/BM-06 remain
-open T-20 work. T-35 still owns authoritative baseline switching, compaction and orphan reclamation.
+only commit authority. Raw projection methods stay privileged, while consumer indexed reads reuse
+the mandatory policy facade and reducer-owned per-candidate filtering. Index maintenance requires
+`ManageSchema`; policy-admitted roots keep their bounded cache opaque, use constant-time view/root
+binding after admission and share global mixed-direction scan budgets. Streaming larger-than-memory
+recovery and BM-01/BM-06 remain open T-20 work. T-35 still owns authoritative baseline switching,
+compaction and orphan reclamation.
 
 Decision 0021 adds the capability-free `uste-time` normalization kernel. `uste-types` retains the
 canonical instant pair without a timezone dependency. Strict explicit-offset and numeric-unit input

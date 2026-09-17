@@ -13,9 +13,9 @@ pub use codec::{
     encode_transaction,
 };
 pub use disk::{
-    CurrentGraphIndexRoot, GRAPH_INDEX_PROFILE_V1, GraphDiskError, disk_adjacent_ids, disk_record,
-    disk_supported_ids, load_current_graph_index_roots, publish_current_graph_index,
-    scrub_current_graph_index,
+    AuthorizedGraphIndex, CurrentGraphIndexRoot, GRAPH_INDEX_PROFILE_V1, GraphDiskError,
+    GraphDiskReadContext, disk_adjacent_ids, disk_record, disk_supported_ids,
+    load_current_graph_index_roots, publish_current_graph_index, scrub_current_graph_index,
 };
 pub use query::{GraphNeighbor, GraphReadOutput, GraphReadRequest};
 pub use record::{
@@ -26,5 +26,5 @@ pub use record::{
 };
 pub use state::{
     AdjacencyDirection, GraphError, GraphSnapshot, GraphState, MAX_TRANSACTION_OPERATIONS,
-    MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS,
+    MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS,
 };

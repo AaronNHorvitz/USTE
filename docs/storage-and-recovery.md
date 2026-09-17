@@ -147,9 +147,12 @@ database, namespace, epoch, writer, revision, profile, generation, run and page;
 keys and plaintext, and scrub bypasses cached bytes. Exact layout, scan and object limits are pinned
 in Decision 0025 and `acceptance/r1/index-v1.tsv`.
 
-These roots are rebuildable certificate-anchored caches, not committed baselines. The current graph
-surface is privileged maintenance/raw access and does not replace consumer authorization. Property/
-type and valid/recorded-time lookup remain T-21/T-25 work; streaming larger-than-memory checkpoint
+These roots are rebuildable certificate-anchored caches, not committed baselines. Privileged raw
+access remains separate; current-graph consumer reads reuse the mandatory policy lease plus
+top-level, candidate and embedded-reference checks through a reducer-owned indexed-read trait.
+Facade publication and discovery require `ManageSchema`; admitted handles keep cache state opaque,
+and mixed-direction scans share the fixed candidate and returned-byte budgets. Property/type and
+valid/recorded-time lookup remain T-21/T-25 work; streaming larger-than-memory checkpoint
 construction and the BM-01/BM-06 results remain required before T-20 closes. Time-partitioned
 history alone is not an adequate graph adjacency index. Queries merge only compatible committed
 runs under one revision.

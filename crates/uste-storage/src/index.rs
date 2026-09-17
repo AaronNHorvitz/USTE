@@ -27,7 +27,7 @@ pub const MAX_INDEX_PAGES_PER_RUN: u64 = 16 * 1024 * 1024;
 pub const MAX_INDEX_ENTRIES_PER_RUN: u64 = 1_000_000_000;
 pub const MAX_INDEX_CACHE_BYTES: usize = 256 * 1024 * 1024;
 pub const DEFAULT_INDEX_CACHE_BYTES: usize = 64 * 1024 * 1024;
-pub const MAX_INDEX_SCAN_RESULTS: usize = 100_000;
+pub const MAX_INDEX_SCAN_RESULTS: usize = 1_000_000;
 pub const MAX_INDEX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 
 const PAGE_HEADER_BYTES: usize = 80;

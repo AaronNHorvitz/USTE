@@ -2,10 +2,10 @@ use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_graph::{
-    AdjacencyDirection, AssertionAction, DurablePolicyMutation, Expected, GraphError,
-    GraphReadOutput, GraphReadRequest, GraphState, GraphTransaction, NewAssertion, NewEntity,
-    NewEvidence, NewRecord, NewRelationship, Operation, RecordVersion, ValidTime,
-    encode_transaction,
+    AdjacencyDirection, AssertionAction, DurablePolicyMutation, Expected, GraphDiskError,
+    GraphDiskReadContext, GraphError, GraphReadOutput, GraphReadRequest, GraphState,
+    GraphTransaction, NewAssertion, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation,
+    RecordVersion, ValidTime, encode_transaction,
 };
 use uste_policy::{
     Action, AuthenticationError, NamespaceGrant, NamespacePolicy, PermissionSet, PolicyKernel,
@@ -32,6 +32,7 @@ const ADMIN_ACTIONS: &[Action] = &[
     Action::ExpandGraph,
     Action::Commit,
     Action::ManagePolicy,
+    Action::ManageSchema,
 ];
 
 fn scope() -> NamespaceRef {
@@ -330,6 +331,28 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         )
         .unwrap();
 
+    assert!(matches!(
+        coordinator.publish_current_index(&mut filesystem, &bob),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    ));
+    assert!(matches!(
+        coordinator.load_current_index_roots(&mut filesystem, &bob),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    ));
+    let disk_root = coordinator
+        .publish_current_index(&mut filesystem, &admin)
+        .unwrap();
+    assert_eq!(
+        coordinator
+            .load_current_index_roots(&mut filesystem, &admin)
+            .unwrap()
+            .len(),
+        1
+    );
     let admin_view = coordinator.read_view(&admin).unwrap();
     let bob_view = coordinator.read_view(&bob).unwrap();
     let request = GraphReadRequest::Adjacent {
@@ -343,18 +366,51 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         panic!("adjacent")
     };
     assert_eq!(admin_neighbors.len(), 1);
+    assert_eq!(
+        coordinator
+            .read_indexed(
+                &mut filesystem,
+                &admin,
+                &admin_view,
+                GraphDiskReadContext::new(&disk_root),
+                &request,
+            )
+            .unwrap(),
+        GraphReadOutput::Adjacent(admin_neighbors.clone())
+    );
     let GraphReadOutput::Adjacent(bob_neighbors) =
         coordinator.read(&bob, &bob_view, &request).unwrap()
     else {
         panic!("adjacent")
     };
     assert!(bob_neighbors.is_empty());
+    assert_eq!(
+        coordinator
+            .read_indexed(
+                &mut filesystem,
+                &bob,
+                &bob_view,
+                GraphDiskReadContext::new(&disk_root),
+                &request,
+            )
+            .unwrap(),
+        GraphReadOutput::Adjacent(bob_neighbors)
+    );
     for id in [left, relationship] {
+        let request = GraphReadRequest::Record { id };
+        let reference = coordinator.read(&bob, &bob_view, &request).unwrap();
+        assert_eq!(reference, GraphReadOutput::Record(None));
         assert_eq!(
             coordinator
-                .read(&bob, &bob_view, &GraphReadRequest::Record { id })
+                .read_indexed(
+                    &mut filesystem,
+                    &bob,
+                    &bob_view,
+                    GraphDiskReadContext::new(&disk_root),
+                    &request,
+                )
                 .unwrap(),
-            GraphReadOutput::Record(None)
+            reference
         );
     }
     let GraphReadOutput::Supported(supported) = coordinator
@@ -372,6 +428,22 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
     };
     assert_eq!(supported.len(), 1);
     assert_eq!(supported[0].id(), assertion);
+    let supported_request = GraphReadRequest::SupportedBy {
+        evidence,
+        maximum: 10,
+    };
+    assert_eq!(
+        coordinator
+            .read_indexed(
+                &mut filesystem,
+                &bob,
+                &bob_view,
+                GraphDiskReadContext::new(&disk_root),
+                &supported_request,
+            )
+            .unwrap(),
+        GraphReadOutput::Supported(supported)
+    );
     let zero_limit_request = GraphReadRequest::Adjacent {
         entity: left,
         direction: AdjacencyDirection::Outgoing,
@@ -382,11 +454,51 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         Ok(GraphReadOutput::Adjacent(Vec::new()))
     );
     assert_eq!(
+        coordinator.read_indexed(
+            &mut filesystem,
+            &bob,
+            &bob_view,
+            GraphDiskReadContext::new(&disk_root),
+            &zero_limit_request,
+        ),
+        Ok(GraphReadOutput::Adjacent(Vec::new()))
+    );
+    assert_eq!(
         coordinator.read(&admin, &admin_view, &zero_limit_request),
         Err(AuthorizedReadError::Domain(GraphError::ResultLimit {
             actual: 1,
             maximum: 0,
         }))
+    );
+    assert_eq!(
+        coordinator.read_indexed(
+            &mut filesystem,
+            &admin,
+            &admin_view,
+            GraphDiskReadContext::new(&disk_root),
+            &zero_limit_request,
+        ),
+        Err(AuthorizedReadError::Domain(GraphDiskError::Graph(
+            GraphError::ResultLimit {
+                actual: 1,
+                maximum: 0,
+            }
+        )))
+    );
+    assert_eq!(
+        coordinator.read_indexed(
+            &mut filesystem,
+            &admin,
+            &admin_view,
+            GraphDiskReadContext::new(&disk_root),
+            &GraphReadRequest::RecordAt {
+                id: left,
+                revision: uste_types::CommitRevision::new(1).unwrap(),
+            },
+        ),
+        Err(AuthorizedReadError::Domain(
+            GraphDiskError::UnsupportedRequest
+        ))
     );
     let denied_claim = encode_transaction(&GraphTransaction::new(
         scope(),
@@ -458,8 +570,21 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         3
     );
     for denied in [right, hidden_missing] {
+        let denied_request = GraphReadRequest::Record { id: denied };
         assert_eq!(
-            coordinator.read(&bob, &bob_view, &GraphReadRequest::Record { id: denied },),
+            coordinator.read(&bob, &bob_view, &denied_request),
+            Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized
+            ))
+        );
+        assert_eq!(
+            coordinator.read_indexed(
+                &mut filesystem,
+                &bob,
+                &bob_view,
+                GraphDiskReadContext::new(&disk_root),
+                &denied_request,
+            ),
             Err(AuthorizedReadError::Authorization(
                 AuthorizedError::Unauthorized
             ))
@@ -493,6 +618,18 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         coordinator.read_view_revision(&bob_view),
         Err(AuthorizedError::StalePolicy)
     );
+    assert_eq!(
+        coordinator.read_indexed(
+            &mut filesystem,
+            &bob,
+            &bob_view,
+            GraphDiskReadContext::new(&disk_root),
+            &request,
+        ),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::StalePolicy
+        ))
+    );
 
     let final_policy = policy(3, &[right, correction, hidden_missing], ADMIN_ACTIONS, &[]);
     let replace_again = encode_transaction(&GraphTransaction::with_policy_mutation(
@@ -525,6 +662,9 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
             .unwrap(),
         second_outcome
     );
+    coordinator
+        .publish_current_index(&mut filesystem, &admin)
+        .unwrap();
     drop(coordinator);
     filesystem.restart().unwrap();
 
@@ -565,22 +705,34 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
     )
     .unwrap();
     assert_eq!(report.frontier.unwrap().get(), 5);
+    let mut restarted_roots = reopened
+        .load_current_index_roots(&mut filesystem, &admin)
+        .unwrap();
+    assert_eq!(restarted_roots.len(), 1);
+    let restarted_root = restarted_roots.remove(0);
     let view = reopened.read_view(&admin).unwrap();
-    let GraphReadOutput::Adjacent(neighbors) = reopened
-        .read(
-            &admin,
-            &view,
-            &GraphReadRequest::Adjacent {
-                entity: left,
-                direction: AdjacencyDirection::Outgoing,
-                maximum: 10,
-            },
-        )
-        .unwrap()
-    else {
+    let restarted_request = GraphReadRequest::Adjacent {
+        entity: left,
+        direction: AdjacencyDirection::Outgoing,
+        maximum: 10,
+    };
+    let reference = reopened.read(&admin, &view, &restarted_request).unwrap();
+    let GraphReadOutput::Adjacent(neighbors) = &reference else {
         panic!("adjacent")
     };
     assert_eq!(neighbors.len(), 1);
+    assert_eq!(
+        reopened
+            .read_indexed(
+                &mut filesystem,
+                &admin,
+                &view,
+                GraphDiskReadContext::new(&restarted_root),
+                &restarted_request,
+            )
+            .unwrap(),
+        reference
+    );
     assert!(matches!(
         reopened.read_view(&bob),
         Err(AuthorizedError::Unauthorized)

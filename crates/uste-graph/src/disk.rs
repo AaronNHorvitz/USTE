@@ -3,21 +3,24 @@
 //! These functions are trusted maintenance/raw projection surfaces. Consumer reads still require
 //! the authorization facade; possessing a `JournalStore` is already a privileged capability.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, sync::Mutex};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
+use uste_policy::{Action, Target};
 use uste_storage::{
     DurableIndexRoot, IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor,
     IndexScrubReport, OwnershipFileSystem, PageCache, RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
-use uste_txn::{CheckpointState, CommitCoordinator, TransactionError};
+use uste_txn::{AuthorizedIndexedReadState, CheckpointState, CommitCoordinator, TransactionError};
 use uste_types::{RecordId, RecordRef};
 
 use crate::{
-    AdjacencyDirection, GraphCodecError, GraphSnapshot, GraphState, Record, decode_stored_record,
-    encode_stored_record,
+    AdjacencyDirection, GraphCodecError, GraphError, GraphNeighbor, GraphReadOutput,
+    GraphReadRequest, GraphSnapshot, GraphState, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS,
+    Record, decode_stored_record, encode_stored_record,
+    query::{record_references_are_authorized, visible_record},
 };
 
 pub const GRAPH_INDEX_PROFILE_V1: [u8; 32] = [
@@ -59,7 +62,61 @@ impl CurrentGraphIndexRoot {
     }
 }
 
-#[derive(Debug)]
+/// Policy-admitted graph index handle with an internal cache whose access pattern is not exposed
+/// to callers. The raw root remains available only through the privileged storage APIs above.
+pub struct AuthorizedGraphIndex {
+    root: CurrentGraphIndexRoot,
+    cache: Mutex<PageCache>,
+}
+
+impl core::fmt::Debug for AuthorizedGraphIndex {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AuthorizedGraphIndex")
+            .field("revision", &self.root.revision())
+            .field("generation", &self.root.generation())
+            .finish_non_exhaustive()
+    }
+}
+
+impl AuthorizedGraphIndex {
+    #[must_use]
+    pub const fn revision(&self) -> uste_types::CommitRevision {
+        self.root.revision()
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.root.generation()
+    }
+
+    fn new(root: CurrentGraphIndexRoot) -> Self {
+        Self {
+            root,
+            cache: Mutex::new(PageCache::default()),
+        }
+    }
+}
+
+/// Borrowed opaque resources for one authorization-preserving current-graph disk read.
+pub struct GraphDiskReadContext<'a> {
+    index: &'a AuthorizedGraphIndex,
+}
+
+impl core::fmt::Debug for GraphDiskReadContext<'_> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("GraphDiskReadContext([REDACTED])")
+    }
+}
+
+impl<'a> GraphDiskReadContext<'a> {
+    #[must_use]
+    pub const fn new(index: &'a AuthorizedGraphIndex) -> Self {
+        Self { index }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum GraphDiskError {
     Storage(StorageError),
     Transaction(TransactionError),
@@ -67,6 +124,8 @@ pub enum GraphDiskError {
     SnapshotHasNoRevision,
     RootStateMismatch,
     IndexCorrupt,
+    UnsupportedRequest,
+    Graph(GraphError),
 }
 
 impl core::fmt::Display for GraphDiskError {
@@ -92,6 +151,12 @@ impl From<TransactionError> for GraphDiskError {
 impl From<GraphCodecError> for GraphDiskError {
     fn from(error: GraphCodecError) -> Self {
         Self::Codec(error)
+    }
+}
+
+impl From<GraphError> for GraphDiskError {
+    fn from(error: GraphError) -> Self {
+        Self::Graph(error)
     }
 }
 
@@ -337,6 +402,8 @@ where
     }
     let mut combined = BTreeSet::new();
     let mut total = IndexReadStats::default();
+    let mut budget =
+        AggregateScanBudget::new(MAX_TRAVERSAL_VISITS, uste_storage::MAX_INDEX_RESULT_BYTES);
     for family in match direction {
         AdjacencyDirection::Outgoing => &[FAMILY_OUTGOING][..],
         AdjacencyDirection::Incoming => &[FAMILY_INCOMING][..],
@@ -345,15 +412,17 @@ where
         if root.root.runs().all(|run| run.family() != *family) {
             continue;
         }
+        let (remaining_visits, remaining_result_bytes) = budget.remaining();
         let scan = coordinator.index_scan_prefix(
             filesystem,
             &root.root,
             *family,
             entity.record().as_bytes(),
-            maximum,
-            uste_storage::MAX_INDEX_RESULT_BYTES,
+            remaining_visits,
+            remaining_result_bytes,
             cache,
         )?;
+        budget.account(scan.entries.len(), scan.stats.result_bytes)?;
         add_stats(&mut total, &scan.stats);
         for entry in scan.entries {
             if entry.key.len() != 32
@@ -364,10 +433,10 @@ where
             }
             let relationship = record_ref(&root.root, &entry.key[16..])?;
             let neighbor = record_ref(&root.root, &entry.value)?;
-            combined.insert((relationship, neighbor));
-            if combined.len() > maximum {
+            if !combined.contains(&(relationship, neighbor)) && combined.len() == maximum {
                 return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
             }
+            combined.insert((relationship, neighbor));
         }
     }
     Ok((combined.into_iter().collect(), total))
@@ -479,6 +548,194 @@ where
             != GraphState::logical_state_digest(current)
                 .map_err(|_| GraphDiskError::RootStateMismatch)?
     {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    Ok(())
+}
+
+impl<F, W, E, I> AuthorizedIndexedReadState<F, W, E, I> for GraphState
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    type IndexRoot = AuthorizedGraphIndex;
+    type IndexContext<'a> = GraphDiskReadContext<'a>;
+    type IndexError = GraphDiskError;
+
+    fn publish_current_index(
+        coordinator: &mut CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+    ) -> Result<Self::IndexRoot, Self::IndexError> {
+        let snapshot = coordinator.reducer_state_for_checkpoint()?.snapshot();
+        let published = publish_current_graph_index(coordinator, filesystem, &snapshot)?;
+        load_current_graph_index_roots(coordinator, filesystem, &snapshot)?
+            .into_iter()
+            .find(|root| root.generation() == published.generation)
+            .map(AuthorizedGraphIndex::new)
+            .ok_or(GraphDiskError::IndexCorrupt)
+    }
+
+    fn load_current_index_roots(
+        coordinator: &CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+    ) -> Result<Vec<Self::IndexRoot>, Self::IndexError> {
+        let snapshot = coordinator.reducer_state_for_checkpoint()?.snapshot();
+        load_current_graph_index_roots(coordinator, filesystem, &snapshot)
+            .map(|roots| roots.into_iter().map(AuthorizedGraphIndex::new).collect())
+    }
+
+    fn read_index_authorized(
+        snapshot: &Self::Snapshot,
+        coordinator: &CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+        context: Self::IndexContext<'_>,
+        request: &Self::ReadRequest,
+        authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
+    ) -> Result<Self::ReadOutput, Self::IndexError> {
+        validate_indexed_view(snapshot, context.index)?;
+        let root = &context.index.root;
+        let mut cache = context
+            .index
+            .cache
+            .lock()
+            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+        match request {
+            GraphReadRequest::Record { id } => {
+                let (record, _) = disk_record(coordinator, filesystem, root, *id, &mut cache)?;
+                Ok(GraphReadOutput::Record(visible_record(
+                    record.as_ref(),
+                    authorize_candidate,
+                )))
+            }
+            GraphReadRequest::RecordAt { .. } => Err(GraphDiskError::UnsupportedRequest),
+            GraphReadRequest::Adjacent {
+                entity,
+                direction,
+                maximum,
+            } => {
+                if *maximum > MAX_TRAVERSAL_RESULTS {
+                    return Err(GraphError::ResourceLimit.into());
+                }
+                let (candidate_ids, _) = disk_adjacent_ids(
+                    coordinator,
+                    filesystem,
+                    root,
+                    *entity,
+                    *direction,
+                    MAX_TRAVERSAL_VISITS,
+                    &mut cache,
+                )?;
+                let mut visible = Vec::new();
+                for (relationship_id, neighbor_id) in candidate_ids {
+                    let relationship_target = Target::Record(relationship_id);
+                    if !authorize_candidate(Action::ReadRecord, relationship_target)
+                        || !authorize_candidate(Action::ExpandGraph, relationship_target)
+                    {
+                        continue;
+                    }
+                    let (relationship, _) =
+                        disk_record(coordinator, filesystem, root, relationship_id, &mut cache)?;
+                    let Some(Record::Relationship(relationship)) = relationship else {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    };
+                    let expected_neighbor = if relationship.from == *entity {
+                        relationship.to
+                    } else if relationship.to == *entity {
+                        relationship.from
+                    } else {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    };
+                    if expected_neighbor != neighbor_id
+                        || !record_references_are_authorized(
+                            &Record::Relationship(relationship.clone()),
+                            authorize_candidate,
+                        )
+                    {
+                        if expected_neighbor != neighbor_id {
+                            return Err(GraphDiskError::IndexCorrupt);
+                        }
+                        continue;
+                    }
+                    let neighbor_target = Target::Record(neighbor_id);
+                    if !authorize_candidate(Action::ReadRecord, neighbor_target)
+                        || !authorize_candidate(Action::ExpandGraph, neighbor_target)
+                    {
+                        continue;
+                    }
+                    let (neighbor, _) =
+                        disk_record(coordinator, filesystem, root, neighbor_id, &mut cache)?;
+                    let Some(Record::Entity(entity)) = neighbor else {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    };
+                    if !record_references_are_authorized(
+                        &Record::Entity(entity.clone()),
+                        authorize_candidate,
+                    ) {
+                        continue;
+                    }
+                    if visible.len() == *maximum {
+                        return Err(GraphError::ResultLimit {
+                            actual: visible.len().saturating_add(1),
+                            maximum: *maximum,
+                        }
+                        .into());
+                    }
+                    visible.push(GraphNeighbor {
+                        relationship,
+                        entity,
+                    });
+                }
+                Ok(GraphReadOutput::Adjacent(visible))
+            }
+            GraphReadRequest::SupportedBy { evidence, maximum } => {
+                if *maximum > MAX_TRAVERSAL_RESULTS {
+                    return Err(GraphError::ResourceLimit.into());
+                }
+                let (candidate_ids, _) = disk_supported_ids(
+                    coordinator,
+                    filesystem,
+                    root,
+                    *evidence,
+                    MAX_TRAVERSAL_VISITS,
+                    &mut cache,
+                )?;
+                let mut visible = Vec::new();
+                for id in candidate_ids {
+                    if !authorize_candidate(Action::ReadRecord, Target::Record(id)) {
+                        continue;
+                    }
+                    let (record, _) = disk_record(coordinator, filesystem, root, id, &mut cache)?;
+                    let Some(record) = record else {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    };
+                    if !record_references_are_authorized(&record, authorize_candidate) {
+                        continue;
+                    }
+                    if visible.len() == *maximum {
+                        return Err(GraphError::ResultLimit {
+                            actual: visible.len().saturating_add(1),
+                            maximum: *maximum,
+                        }
+                        .into());
+                    }
+                    visible.push(record);
+                }
+                Ok(GraphReadOutput::Supported(visible))
+            }
+        }
+    }
+}
+
+fn validate_indexed_view(
+    snapshot: &GraphSnapshot,
+    index: &AuthorizedGraphIndex,
+) -> Result<(), GraphDiskError> {
+    // `AuthorizedGraphIndex` construction is private and only follows admission of the root
+    // against the current snapshot. The authorization facade already binds the view to this
+    // coordinator instance, while every raw disk operation rechecks the live journal frontier.
+    if snapshot.revision() != Some(index.revision()) {
         return Err(GraphDiskError::RootStateMismatch);
     }
     Ok(())
@@ -658,6 +915,38 @@ fn codec_storage_error(error: GraphCodecError) -> StorageError {
     }
 }
 
+struct AggregateScanBudget {
+    remaining_entries: usize,
+    remaining_bytes: usize,
+}
+
+impl AggregateScanBudget {
+    const fn new(maximum_entries: usize, maximum_bytes: usize) -> Self {
+        Self {
+            remaining_entries: maximum_entries,
+            remaining_bytes: maximum_bytes,
+        }
+    }
+
+    const fn remaining(&self) -> (usize, usize) {
+        (self.remaining_entries, self.remaining_bytes)
+    }
+
+    fn account(&mut self, entries: usize, bytes: u64) -> Result<(), GraphDiskError> {
+        let bytes = usize::try_from(bytes)
+            .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.remaining_entries = self
+            .remaining_entries
+            .checked_sub(entries)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.remaining_bytes = self
+            .remaining_bytes
+            .checked_sub(bytes)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        Ok(())
+    }
+}
+
 fn add_stats(total: &mut IndexReadStats, next: &IndexReadStats) {
     total.pages_read = total.pages_read.saturating_add(next.pages_read);
     total.cache_hits = total.cache_hits.saturating_add(next.cache_hits);
@@ -665,4 +954,29 @@ fn add_stats(total: &mut IndexReadStats, next: &IndexReadStats) {
         .fragments_visited
         .saturating_add(next.fragments_visited);
     total.result_bytes = total.result_bytes.saturating_add(next.result_bytes);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AggregateScanBudget, GraphDiskError};
+    use uste_storage::journal::StorageError;
+
+    #[test]
+    fn mixed_direction_scans_share_entry_and_byte_budgets() {
+        let mut budget = AggregateScanBudget::new(3, 12);
+        budget.account(2, 7).unwrap();
+        assert_eq!(budget.remaining(), (1, 5));
+        budget.account(1, 5).unwrap();
+        assert_eq!(budget.remaining(), (0, 0));
+        assert_eq!(
+            budget.account(1, 0),
+            Err(GraphDiskError::Storage(StorageError::ResourceLimit))
+        );
+
+        let mut byte_budget = AggregateScanBudget::new(3, 12);
+        assert_eq!(
+            byte_budget.account(1, 13),
+            Err(GraphDiskError::Storage(StorageError::ResourceLimit))
+        );
+    }
 }

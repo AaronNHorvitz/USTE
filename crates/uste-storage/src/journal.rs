@@ -2467,6 +2467,30 @@ mod tests {
                 value: b"tail".to_vec(),
             }]
         );
+        assert_eq!(
+            store.index_scan_prefix(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"g",
+                index::MAX_INDEX_SCAN_RESULTS + 1,
+                index::MAX_INDEX_RESULT_BYTES,
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.index_scan_prefix(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"g",
+                index::MAX_INDEX_SCAN_RESULTS,
+                index::MAX_INDEX_RESULT_BYTES + 1,
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
         let scrubbed = store
             .scrub_index_root(&mut filesystem, &roots[0], &mut cache)
             .unwrap();

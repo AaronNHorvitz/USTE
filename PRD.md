@@ -103,8 +103,8 @@ does not yet implement mapping execution, rejected-row handling, CSV/JSON toolin
 consumer preview surface or the item/price fixture; those remain T-54/R2.
 
 Decision 0025 implements an initial FR-16/T-20 foundation of encrypted immutable sorted runs,
-certificate-anchored rebuildable roots, a bounded decrypted-page cache and semantically checked
-current graph projections. It does not close T-20 or satisfy the R2 gate: consumer authorization,
+certificate-anchored rebuildable roots, a bounded decrypted-page cache and semantically checked,
+authorization-preserving current graph projections. It does not close T-20 or satisfy the R2 gate:
 streaming larger-than-memory recovery and BM-01/BM-06 evidence remain required, while compaction and
 authoritative baselines remain T-35/R3.
 

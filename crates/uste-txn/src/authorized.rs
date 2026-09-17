@@ -68,6 +68,40 @@ pub trait AuthorizedReadState: AuthorizedTransactionState {
     ) -> Result<Self::ReadOutput, Self::ReadError>;
 }
 
+/// Reducer-owned optimized index projection used through the same mandatory authorization facade.
+/// Implementations receive the raw coordinator only after top-level request authorization succeeds;
+/// candidate authorization remains controlled by the reducer implementation rather than callers.
+pub trait AuthorizedIndexedReadState<F, W, E, I>: AuthorizedReadState + Sized
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    type IndexRoot;
+    type IndexContext<'a>;
+    type IndexError;
+
+    fn publish_current_index(
+        coordinator: &mut CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+    ) -> Result<Self::IndexRoot, Self::IndexError>;
+
+    fn load_current_index_roots(
+        coordinator: &CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+    ) -> Result<Vec<Self::IndexRoot>, Self::IndexError>;
+
+    fn read_index_authorized(
+        snapshot: &Self::Snapshot,
+        coordinator: &CommitCoordinator<Self, F, W, E, I>,
+        filesystem: &mut F,
+        context: Self::IndexContext<'_>,
+        request: &Self::ReadRequest,
+        authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
+    ) -> Result<Self::ReadOutput, Self::IndexError>;
+}
+
 /// Content-free failures returned by the mandatory authorization facade.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AuthorizedError {
@@ -432,6 +466,92 @@ where
         };
         S::read_authorized(&view.inner.state, request, &mut authorize_candidate)
             .map_err(AuthorizedReadError::Domain)
+    }
+
+    /// Policy-authorized maintenance entry point for the reducer's current derived-index
+    /// profile. Authorization is resolved before reducer code or storage I/O can run.
+    pub fn publish_current_index(
+        &mut self,
+        filesystem: &mut F,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<S::IndexRoot, AuthorizedReadError<S::IndexError>>
+    where
+        S: AuthorizedIndexedReadState<F, W, E, I>,
+    {
+        self.authorize(principal, Action::ManageSchema)
+            .map_err(AuthorizedReadError::Authorization)?;
+        S::publish_current_index(&mut self.inner, filesystem).map_err(AuthorizedReadError::Domain)
+    }
+
+    /// Policy-authorized discovery of current derived roots. Authorization is resolved before
+    /// reducer code or storage I/O can run.
+    pub fn load_current_index_roots(
+        &self,
+        filesystem: &mut F,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<Vec<S::IndexRoot>, AuthorizedReadError<S::IndexError>>
+    where
+        S: AuthorizedIndexedReadState<F, W, E, I>,
+    {
+        self.authorize(principal, Action::ManageSchema)
+            .map_err(AuthorizedReadError::Authorization)?;
+        S::load_current_index_roots(&self.inner, filesystem).map_err(AuthorizedReadError::Domain)
+    }
+
+    /// Execute an optimized reducer-owned projection under the same lease and per-candidate
+    /// authorization rules as the reference in-memory projection.
+    pub fn read_indexed<R>(
+        &self,
+        filesystem: &mut F,
+        principal: &AuthenticatedPrincipal,
+        view: &AuthorizedReadView<S::Snapshot>,
+        context: S::IndexContext<'_>,
+        request: &R,
+    ) -> Result<S::ReadOutput, AuthorizedReadError<S::IndexError>>
+    where
+        S: AuthorizedIndexedReadState<F, W, E, I, ReadRequest = R>,
+    {
+        if self.inner.is_uncertain() {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Transaction(TransactionError::OutcomeUnknown),
+            ));
+        }
+        if !Arc::ptr_eq(&self.instance, &view.instance) {
+            return Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized,
+            ));
+        }
+        self.policy
+            .revalidate(&view.lease)
+            .map_err(AuthorizedError::from)
+            .map_err(AuthorizedReadError::Authorization)?;
+        let requirements = S::read_authorization_requirements(request)
+            .map_err(map_requirement_error)
+            .map_err(AuthorizedReadError::Authorization)?;
+        for requirement in requirements.iter() {
+            if requirement.target.scope() != self.scope() {
+                return Err(AuthorizedReadError::Authorization(
+                    AuthorizedError::Unauthorized,
+                ));
+            }
+            self.policy
+                .authorize(principal, requirement.action, requirement.target)
+                .map_err(AuthorizedError::from)
+                .map_err(AuthorizedReadError::Authorization)?;
+        }
+        let mut authorize_candidate = |action: Action, target: Target| {
+            target.scope() == self.scope()
+                && self.policy.authorize(principal, action, target).is_ok()
+        };
+        S::read_index_authorized(
+            &view.inner.state,
+            &self.inner,
+            filesystem,
+            context,
+            request,
+            &mut authorize_candidate,
+        )
+        .map_err(AuthorizedReadError::Domain)
     }
 
     pub fn start_blob_upload(

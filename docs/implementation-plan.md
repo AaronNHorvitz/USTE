@@ -51,9 +51,10 @@ T-19 remains open and still requires all applicable R1 VT/BM results, including 
 failed BM-04 target. T-29 directly depends on T-19, so the reorder cannot bypass R1 acceptance.
 
 Decision 0025 fixes T-20's initial encrypted immutable-run/root and bounded-page-cache profile plus
-a current graph projection. This is an implementation foundation, not task closure: an authorized
-disk-query facade, streaming larger-than-memory checkpoint/state construction and qualifying
-BM-01/BM-06 runs are still mandatory. T-35 retains compaction, authoritative baselines and garbage
+a current graph projection. Consumer current-graph reads now traverse that projection through the
+mandatory authorization facade. This is still not task closure: streaming larger-than-memory
+checkpoint/state construction and qualifying BM-01/BM-06 runs are mandatory. T-35 retains
+compaction, authoritative baselines and garbage
 collection, so an optional derived root never becomes a second commit authority.
 
 ## Architectural decomposition

@@ -171,7 +171,7 @@ impl AuthorizedReadState for GraphState {
     }
 }
 
-fn visible_record(
+pub(crate) fn visible_record(
     record: Option<&Record>,
     authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
 ) -> Option<Box<Record>> {
@@ -181,7 +181,7 @@ fn visible_record(
         .map(Box::new)
 }
 
-fn record_references_are_authorized(
+pub(crate) fn record_references_are_authorized(
     record: &Record,
     authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
 ) -> bool {

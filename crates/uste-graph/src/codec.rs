@@ -1108,7 +1108,7 @@ fn take_principal(value: Value) -> Result<[u8; 32], GraphCodecError> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub enum GraphCodecError {
     Decode(DecodeError),
     Encode(EncodeError),

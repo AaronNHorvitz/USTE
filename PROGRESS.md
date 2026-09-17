@@ -2,10 +2,10 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). T-20 now has a
-locally verified encrypted disk-index foundation in the current increment, but remains open pending
-its authorized query path, streaming larger-than-memory recovery and BM-01/BM-06 results. Review was
-performed by Codex agents and does not represent independent external security certification.
+Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). The pushed
+`44b6e2f` increment adds T-20's encrypted disk-index foundation; T-20 remains open pending streaming
+larger-than-memory recovery and BM-01/BM-06 results. Review was performed by Codex agents and does
+not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -177,6 +177,13 @@ unverified external distribution prerequisite.
   run corruption, operational read faults, all root-publication crash boundaries, encrypted restart,
   self-consistent wrong projections and raw graph reference equivalence pass. This is explicitly
   not T-20 closure or BM evidence; see `docs/evidence/disk-index-foundation.md`.
+- Added reducer-owned indexed reads to the mandatory authorization facade. Top-level targets are
+  authorized before index I/O; adjacency/provenance candidates and every embedded reference are
+  filtered without exposing hidden counts; stale policies/views fail before disk access; current
+  roots reject historical requests. Facade maintenance requires `ManageSchema`, handles keep cache
+  counters opaque, mixed-direction scans share global candidate/byte limits, and admitted view
+  binding is constant-time. Authorized in-memory/disk results agree before and after an encrypted
+  restart.
 - Corrected review findings for normalizer-construction bypass, cap-before-copy behavior, malformed
   date-only inputs and open semantic reason combinations. Final review found no remaining high- or
   medium-severity T-45 finding; dependency unsafe remains explicitly inventoried.
@@ -244,8 +251,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 234 workspace tests including 74 uste-storage, 13
-# uste-crypto, 27 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 235 workspace tests including 74 uste-storage, 13
+# uste-crypto, 28 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 8 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 cargo test -p uste-spatial --all-targets --locked
@@ -284,8 +291,8 @@ remaining mixed workload have not passed.
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
 - The canonical kernel through T-49 plus T-20's encrypted current-graph disk projection is
-  implemented, but there is no database executable or production qualification. The new disk APIs
-  are privileged maintenance/raw surfaces, not an authorization-preserving consumer path.
+  implemented, but there is no database executable or production qualification. Privileged raw
+  disk APIs remain separate from the new authorization-preserving current-graph consumer path.
   Checkpoint discovery and seeded open each authenticate the journal, while the 256 MiB checkpoint
   and reducer still retain/clone full graph history in memory; BM-01/BM-06 have not run. Graph policy
   is durable; the trusted adapter must supply its exact current copy at authorized open. The oracle
@@ -309,8 +316,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with the authorization-preserving disk-query facade, streaming larger-than-memory
-checkpoint/state path and exact BM-01/BM-06 harnesses. Then return to T-19's remaining VT gaps and
+Continue T-20 with the streaming larger-than-memory checkpoint/state path and exact BM-01/BM-06
+harnesses. Then return to T-19's remaining VT gaps and
 BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

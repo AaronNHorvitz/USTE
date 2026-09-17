@@ -20,8 +20,9 @@ Status: implementation increment verified locally; T-20 remains open.
 - Literal page/root SHA-256 vectors in `acceptance/r1/index-v1.tsv` and an assigned/pinned opaque
   index-name derivation under crypto role `0D`.
 
-The journal remains the sole commit authority. The disk APIs in this increment are privileged raw
-maintenance/projection surfaces and cannot advance recovery or create a commit.
+The journal remains the sole commit authority. Privileged raw disk APIs cannot advance recovery or
+create a commit. Consumer current-graph reads now go through `AuthorizedIndexedReadState`, which
+reuses the mandatory lease/top-level/candidate/reference policy checks before returning disk data.
 
 ## Verification
 
@@ -30,11 +31,13 @@ cargo test -p uste-storage index --locked
 # 4 passed; 0 failed
 cargo test -p uste-graph --test disk_index --locked
 # 1 passed; 0 failed
+cargo test -p uste-graph --test authorized_graph --locked
+# 3 passed; 0 failed
 cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 234 workspace tests passed; format, clippy, rustdoc, docs/task graph, R0 vectors,
+# 235 workspace tests passed; format, clippy, rustdoc, docs/task graph, R0 vectors,
 # storage publication model and isolated dependency/fixture builds passed
 ~~~
 
@@ -42,13 +45,13 @@ The storage regressions cover large fragmented values, exact/prefix reads, cache
 cross-database identity, cached-plaintext bypass, same-length corruption, trailing bytes, root
 corruption fallback, transient root/run read errors, and crash before/after every root publication
 operation. Graph coverage includes records, both adjacency directions, provenance, encrypted
-restart, stale handles, a self-consistent but logically wrong root, and a same-scope/same-revision
-foreign snapshot.
+restart, stale handles and policies, denied maintenance and read requests, hidden candidates,
+shared mixed-direction scan limits, reference-result equivalence, a self-consistent but logically
+wrong root, and a same-scope/same-revision foreign snapshot. Authorized handles retain an opaque
+bounded cache, and per-read view binding is constant-time after full admission.
 
 ## Remaining T-20 acceptance
 
-- Add an authorization-preserving consumer disk-query path and repeat graph disclosure fixtures
-  through it; the raw API is not consumer integration.
 - Replace the 256 MiB materialized graph/coordinator checkpoint and full-state clone path with a
   streaming larger-than-memory recovery design.
 - Implement and run BM-01 at its exact 100k/1m one-hop and four-hop sizes with normal encryption and
