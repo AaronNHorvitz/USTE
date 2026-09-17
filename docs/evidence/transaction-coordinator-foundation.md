@@ -9,6 +9,13 @@ The reported high-severity API/isolation findings were corrected before this com
 review found no remaining blocker or high-severity issue. This is automated implementation review,
 not independent transaction or security assessment.
 
+Completed T-14 implementation: commit `834c5fdb984af9636d74d872675d48b5a9ba7082` · tree
+`ec570a5213cbdc37eb5765297a460f4811788e6e`. A read-only delta review checked the literal format,
+malformed recovery, 12-case publication fault matrix, both cancellation polls and 32-caller Linux
+conflict test and found no blocker or high-severity code defect. It identified and this commit
+corrected an evidence overclaim: these results complete T-14's VT-02 slice, while phantom-sensitive
+graph predicate integration remains explicitly assigned to T-17.
+
 ## Implemented
 
 - New safe-Rust `uste-txn` crate with a domain-neutral deterministic reducer boundary.
