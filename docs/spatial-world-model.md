@@ -8,7 +8,8 @@ namespace authorization, current permissions, retention and bounded-query rules.
 
 Decision 0022 implements the R1 exact-unit schemas, canonical records, immutable reference
 histories, observation correction rules and qualification reducer. Transform bindings are opaque
-until T-50; authorized external graph/source closure is composed by T-49. Movement queries,
+until T-50; Decision 0023/T-49 now composes authorized external graph/source closure in the
+capability-free import reducer. Movement queries,
 predicates, navigation and scalable indexes remain at their assigned later tasks.
 
 ## Records and identity

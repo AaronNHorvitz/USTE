@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.9 · 2026-09-17 · R0 design ready; T-08–T-18/T-45 foundation implemented
+Design draft 1.10 · 2026-09-17 · R1 implementation through T-49 complete; T-19 acceptance open
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -36,6 +36,11 @@ secrets. Decision 0011 separately governs the external executable-distribution g
 T-48's accepted R1 catalog is a bounded in-memory correctness implementation, not the native disk
 index or BM-10 capacity result. T-49 owns authorized atomic graph/import reference closure; T-50
 turns T-48's opaque transform bindings into validated transform records and algorithms.
+
+Decision 0023 implements T-49 as one capability-free composite reducer over graph and spatial
+state. It binds finalized source/mapping blobs, composes authorization, rejects dangling external
+references and retains a private restartable job ledger. This is the typed R1 transaction contract;
+T-54 still owns CSV/JSON parsing, mapping execution, rejected-row reports and operator tooling.
 
 Task IDs are stable, not execution order. New tasks inserted in earlier gates must complete
 before those gates close. No green documentation check marks an implementation row complete.

@@ -1,6 +1,6 @@
 # Ingestion and unified retrieval
 
-Draft contract · 2026-09-16 · Not implemented
+Draft contract · 2026-09-17 · T-49 typed transaction foundation implemented; R2 tooling open
 
 Owns FR-33/34 and composes graph, spatial, temporal and content requirements. A query API
 does not imply an external network call. The first interface is structured typed operations;
@@ -13,6 +13,11 @@ Rust callers submit transactions directly to the owning engine. Approved local c
 authenticated IPC/CLI operations. A separate ETL can read CSV/JSON, another database, sensor
 output or an external service; the core does not fetch these sources automatically.
 The importer receives only explicitly granted source and destination capabilities.
+
+Decision 0023 implements the capability-free typed transaction layer: exact finalized source and
+mapping bindings, atomic graph/spatial batches, composed authorization, preview, durable retry and
+restartable checkpoints. It does not read or parse a local file. The CSV/JSON and operator steps
+below remain T-54.
 
 Item-to-asset relationships and price observations are ordinary caller-supplied data under
 [application use cases](application-use-cases.md). The local batch importer does not become

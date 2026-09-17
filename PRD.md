@@ -97,6 +97,11 @@ authorization-before-expansion tests.
 | NFR-04 | Offline core, explicit network permissions, no required telemetry, and bounded parsing/query resource use | R1 onward | [Security](docs/security-and-privacy.md) |
 | NFR-05 | Reviewable licenses/provenance, reproducible release process, documented vulnerability-reporting policy, verified reporting before executable distribution, and honest support claims | R0 governance; distribution and R4 verification | [Contributing](CONTRIBUTING.md) |
 
+Decision 0023 implements FR-34's R1 typed transaction slice: exact finalized source/mapping
+bindings, authorized atomic graph/spatial batches, durable retry and logical job checkpoints. It
+does not yet implement mapping execution, rejected-row handling, CSV/JSON tooling, an authorized
+consumer preview surface or the item/price fixture; those remain T-54/R2.
+
 ## Release gates
 
 | Gate | Required outcome |

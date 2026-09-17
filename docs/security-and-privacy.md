@@ -64,6 +64,13 @@ uncommitted and foreign objects share the same content-free error; this is not a
 claim. Graph policy is durable and must exactly match the trusted local adapter at open; initial
 installation is restricted to privileged raw bootstrap and absence fails closed.
 
+Decision 0023 composes import authorization across namespace `Import`/`Commit`, the job, immutable
+source and mapping Evidence, graph operations and every spatial external reference. Job projection
+requires `ReadBlob` plus current `ReadRecord` access to both embedded Evidence records before it
+returns a checkpoint containing blob handles or digests; a hidden/revoked binding conceals the
+whole job projection. Import mutation cannot change policy or delete entities, and graph-only
+mutation revalidates retained job and spatial closure before publication.
+
 An embedded API protects against untrusted inputs, not an already compromised host process.
 Use process separation when the consumer itself must not hold unrestricted database handles.
 

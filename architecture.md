@@ -49,14 +49,14 @@ API.
 | uste-storage | Journal, commit metadata, blob segments, checkpoints, I/O adapters |
 | uste-txn | Commit sequencing, optimistic validation, idempotency, reader revisions |
 | uste-graph | Native graph records, adjacency/property/temporal indexes, traversal |
-| uste-spatial | Typed geometry and versioned-frame history; later transform evaluation, predicates and native indexes |
+| uste-spatial | Implemented R1 typed geometry and versioned-frame history; later transform evaluation, predicates and native indexes |
 | uste-motion | Observations, trajectories, state-at-time, uncertainty and correction dependencies |
 | uste-content | Artifact lifecycle, parser protocol, derivation and citation validation |
 | uste-query | Typed plans, budgets, ranking, explain output, lexical retrieval |
 | uste-replay | Deterministic reducers, logical hashing, recovery replay |
 | uste-sim | Branches, model identity, virtual clock, pure simulation scheduling |
 | uste-physics | Pure bounded kinematics/contact models under pinned numerical profiles |
-| uste-ingest | Mapping/preview/batch/resume orchestration through normal transaction authority |
+| uste-ingest | Implemented R1 typed atomic batch/job ledger; later mapping/CLI orchestration through normal transaction authority |
 | uste-api | Consumer API and generic integration adapter contracts |
 | uste-cli / uste-service | Operations and authenticated local IPC |
 | uste-testkit | Independent reference model, adversarial fixtures, fault simulation |
@@ -154,6 +154,14 @@ canonical source envelope preserves the original token, interpretation, precisio
 accepted pair. Graph transactions journal that complete value, so replay restores the pair without
 parsing text or resolving a zone. Commit revision remains authoritative when wall observations are
 equal or move backward.
+
+Decision 0023 adds `uste-ingest` as the sole composite graph/spatial/import reducer. Finalized
+source and mapping blobs are immutable inputs, while one unpublished candidate owns graph changes,
+optional spatial changes and private job-ledger advancement. Authorization requirements cover the
+namespace, job, bindings, graph operations and every spatial external reference. Full retained
+spatial closure is rechecked after graph-only changes. Composite checkpoints are bounded verified
+caches; the encrypted journal and coordinator retry identity remain authoritative. CSV/JSON parsing
+and mapping execution stay outside this capability-free reducer until T-54.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.

@@ -13,9 +13,10 @@ to persist game-world items, track real-world objects, or link items to imported
 observations. These are uses of the same storage, graph, space, time and physics capabilities.
 An item can link to a price record without USTE fetching that price from an external provider.
 
-**Status: R0 design ready; T-08–T-18/T-45 workspace, encrypted journal/transactions/blobs,
-authorization, transactional evidence graph, deterministic replay/checkpoints and pinned time
-normalization are complete.** There is no database executable, disk-backed graph index, supported
+**Status: R0 design ready; the T-08–T-18/T-45/T-48/T-49 correctness foundation now includes the
+workspace, encrypted journal/transactions/blobs, authorization, evidence graph, replay/checkpoints,
+pinned time, spatial schemas and atomic typed import contracts.** There is no database executable,
+disk-backed graph index, supported
 content parser, security certification, or production release yet. One T-15 component benchmark is
 recorded and misses its throughput target. The features below are requirements unless explicitly
 identified as implemented.

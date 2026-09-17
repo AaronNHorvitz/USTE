@@ -1,7 +1,7 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-13–T-16 journal, transaction, blob and policy foundations are
-locally qualified
+Draft contract · 2026-09-17 · T-13–T-18/T-49 journal, transaction, blob, replay and typed-import
+foundations are locally qualified
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 
@@ -10,6 +10,11 @@ the same transaction protocol. Spatial/history indexes and route caches are deri
 not extra commit authorities. Multi-body results publish atomically. See
 [space](spatial-world-model.md), [physics](physics-and-motion.md) and
 [ingestion](ingestion-and-unified-retrieval.md) for dependencies and visibility rules.
+
+An import job checkpoint is logical reducer state (source/mapping binding, cursor, counts and
+status) journaled through ordinary transactions. It is distinct from Decision 0020's optional
+encrypted reducer-cache checkpoint used to accelerate replay. The cache may contain the logical
+job ledger, but never becomes an independent commit or retry authority.
 
 ## Physical artifacts
 

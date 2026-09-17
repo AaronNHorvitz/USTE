@@ -1,7 +1,7 @@
 # API and integration
 
-Draft contract · 2026-09-17 · T-16 transaction/blob, T-17 graph and T-45 time-library subsets
-callable; public database/API/CLI operations remain proposed
+Draft contract · 2026-09-17 · T-16 transaction/blob, T-17 graph, T-45 time and T-49 typed-import
+library subsets callable; public database/API/CLI operations remain proposed
 
 Owns FR-13, FR-14, FR-15, FR-25 and the consumer boundary.
 
@@ -20,6 +20,11 @@ must be presented back for current-policy and coordinator-instance revalidation.
 expose only the revision; T-17 supplies reducer-owned direct-record, historical, one-hop adjacency
 and evidence-provenance projections without exposing the raw snapshot. Direct raw transaction and
 storage handles are trusted internals, not an API for untrusted consumers.
+
+The T-49 library surface accepts finalized blob references and already-typed graph/spatial
+requests, exposes durable job lookup through reducer-owned authorization, and provides a trusted
+raw preview helper. It is not the proposed authenticated preview/CSV/JSON/CLI surface in the table
+below; T-54 must add that orchestration and verify per-row mapping effects.
 
 | Surface | Required operations |
 |---|---|
