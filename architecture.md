@@ -204,6 +204,15 @@ independently recomputed from the actual current graph before root publication. 
 changes journal authority. This still scans a fully memory-resident reducer and is not the
 disk-backed base/overlay or larger-than-memory endpoint.
 
+Decision 0034 makes ordinary composite preparation delta-owned as well. Graph closure validation
+uses a borrowed changed-record view; spatial validation uses a request-sized overlay with exact
+retry effect revisions; and the ingest ledger retains only one job mutation plus admitted row
+receipts. Graph, optional spatial and ledger bases are checked before the first publication step.
+A reconstructible private spatial content fingerprint prevents same-revision foreign-plan use
+without scanning the catalog; it is neither persistent authority nor a storage authentication
+format. Reducer maps, graph-only closure scans, snapshots and checkpoint decoding remain
+materialized pending the explicit-I/O disk-backed base/overlay design.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the
@@ -219,8 +228,9 @@ parsing text or resolving a zone. Commit revision remains authoritative when wal
 equal or move backward.
 
 Decision 0023 adds `uste-ingest` as the sole composite graph/spatial/import reducer. Finalized
-source and mapping blobs are immutable inputs, while one unpublished candidate owns graph changes,
-optional spatial changes and private job-ledger advancement. Authorization requirements cover the
+source and mapping blobs are immutable inputs. Decision 0034 represents its unpublished candidate
+as graph, optional spatial and private job-ledger deltas instead of a complete reducer copy.
+Authorization requirements cover the
 namespace, job, bindings, graph operations and every spatial external reference. Full retained
 spatial closure is rechecked after graph-only changes. Composite checkpoints are bounded verified
 caches; the encrypted journal and coordinator retry identity remain authoritative. CSV/JSON parsing

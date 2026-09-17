@@ -9,9 +9,11 @@ remain T-54.
 ## One authority and closed inputs
 
 `uste-ingest` is a capability-free reducer above `uste-graph` and `uste-spatial`. One
-`IngestState` owns their coherent snapshots plus a private import ledger; it prepares a cloned
-candidate and publishes only after graph, spatial, import and external-reference validation all
-pass. It cannot read files, clocks, environment, credentials or networks. Original bytes and a
+`IngestState` owns their coherent snapshots plus a private import ledger. The original T-49
+implementation prepared a cloned candidate; Decision 0034 replaces that internal path with
+preflighted graph, optional spatial and private-ledger deltas, published only after graph, spatial,
+import and external-reference validation all pass. It cannot read files, clocks, environment,
+credentials or networks. Original bytes and a
 mapping manifest arrive only as already-finalized `BlobReference` values under the existing
 journal owner. Neither their content nor retrieved instructions receive execution authority.
 
@@ -48,7 +50,7 @@ dangling spatial history. Any failure discards the complete candidate.
 
 ## Retry, preview and durable resume
 
-The trusted raw-reducer preview helper runs the exact prepare path on an unpublished clone and returns the base/proposed revision,
+The trusted raw-reducer preview helper runs the exact unpublished prepare path and returns the base/proposed revision,
 typed outcome and result digest. It is advisory: commit repeats authorization, source binding,
 checkpoint and closure checks against current state. It is not yet an authorized consumer/API
 preview surface.
@@ -74,8 +76,9 @@ cache. Logical state hashing includes genesis and all private ledger state.
 - 16 MiB canonical composite request and 256 MiB canonical composite checkpoint.
 - The R1 job ledger and component catalogs are in memory; these are correctness bounds, not an
   ingest-throughput or larger-than-RAM claim.
-- Structural maxima are not simultaneous capacity claims: the full-state clone and 256 MiB cache
-  checkpoint can bind far below the job/batch/row counters. No RSS, throughput, concurrency,
+- Structural maxima are not simultaneous capacity claims: the in-memory maps and 256 MiB cache
+  checkpoint can bind far below the job/batch/row counters. Decision 0034 bounds ordinary prepare
+  deltas but does not make the reducer larger-than-memory. No RSS, throughput, concurrency,
   real-process crash or power-loss qualification is claimed.
 - Batches are nonempty and fully accepted, cannot attach new row blobs, and expose only `Open` and
   `Completed`; there is no durable rejected/failed/cancelled job state in T-49.

@@ -284,11 +284,39 @@ fn preview_batch_and_checkpoint_are_atomic_and_resumable() {
     assert_eq!(preview.base_revision(), None);
     assert_eq!(preview.proposed_revision(), CommitRevision::FIRST);
     assert_eq!(state.snapshot().revision(), None);
-
-    let checkpoint = match publish(&mut state, &start, Some(&inventory), 1) {
+    let prepared = state
+        .prepare(&start_bytes, Some(&inventory), CommitRevision::FIRST)
+        .unwrap();
+    assert_eq!(prepared.graph_change_count(), 5);
+    assert_eq!(prepared.job_change_count(), 1);
+    assert_eq!(prepared.spatial_change_count(), 0);
+    assert_eq!(prepared.outcome(), preview.outcome());
+    assert_eq!(
+        IngestState::result_digest(&prepared),
+        preview.result_digest()
+    );
+    assert_eq!(
+        IngestState::result_digest(&prepared),
+        [
+            0xb0, 0xae, 0x75, 0xc6, 0xa6, 0xc4, 0xca, 0x30, 0xf3, 0x47, 0x7d, 0x45, 0xcc, 0x49,
+            0xfc, 0xd4, 0x8b, 0x69, 0x73, 0xd8, 0x03, 0x93, 0xce, 0xce, 0xf1, 0x9d, 0xa6, 0xaa,
+            0x80, 0xff, 0x14, 0xcd,
+        ]
+    );
+    let start_outcome = prepared.outcome().clone();
+    state.publish(prepared);
+    let checkpoint = match start_outcome {
         ImportBatchOutcome::JobStarted(value) => value,
         other => panic!("unexpected outcome: {other:?}"),
     };
+    assert_eq!(
+        checkpoint.chain_digest(),
+        [
+            0x37, 0x23, 0x49, 0x0e, 0xc6, 0x23, 0x5b, 0xf2, 0x3a, 0x56, 0x03, 0xd6, 0x7e, 0xf2,
+            0x69, 0x44, 0x24, 0x14, 0x59, 0x58, 0xed, 0x6d, 0x41, 0x11, 0xab, 0x81, 0xd2, 0x8b,
+            0xe0, 0xaf, 0xab, 0x38,
+        ]
+    );
     assert_eq!(checkpoint.next_batch(), 1);
 
     let delete_job = EngineTransaction::graph(
@@ -372,7 +400,41 @@ fn preview_batch_and_checkpoint_are_atomic_and_resumable() {
     let batch_preview = state.preview(&batch, None).unwrap();
     assert_eq!(batch_preview.proposed_revision().get(), 2);
     assert_eq!(state.snapshot().revision().unwrap().get(), 1);
-    let final_checkpoint = match publish(&mut state, &batch, None, 2) {
+    let batch_bytes = encode_transaction(&batch).unwrap();
+    let prepared = state
+        .prepare(&batch_bytes, None, CommitRevision::new(2).unwrap())
+        .unwrap();
+    let stale = state
+        .prepare(&batch_bytes, None, CommitRevision::new(2).unwrap())
+        .unwrap();
+    assert_eq!(prepared.graph_change_count(), 1);
+    assert_eq!(prepared.job_change_count(), 2);
+    assert_eq!(prepared.spatial_change_count(), 2);
+    assert!(prepared.has_spatial_change());
+    assert_eq!(prepared.outcome(), batch_preview.outcome());
+    assert_eq!(
+        IngestState::result_digest(&prepared),
+        batch_preview.result_digest()
+    );
+    assert_eq!(
+        IngestState::result_digest(&prepared),
+        [
+            0xa8, 0xf0, 0x46, 0x05, 0xf9, 0xf2, 0xe5, 0x06, 0x20, 0x0d, 0x78, 0x79, 0x9b, 0xc4,
+            0x2a, 0xca, 0x94, 0xf7, 0x51, 0x60, 0x46, 0xaa, 0x81, 0xcc, 0x45, 0x03, 0xfa, 0x03,
+            0x30, 0xe2, 0x7b, 0x3b,
+        ]
+    );
+    let batch_outcome = prepared.outcome().clone();
+    state.publish(prepared);
+    let published_digest = IngestState::logical_state_digest(&state.snapshot()).unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state.publish(stale))).is_err()
+    );
+    assert_eq!(
+        IngestState::logical_state_digest(&state.snapshot()).unwrap(),
+        published_digest
+    );
+    let final_checkpoint = match batch_outcome {
         ImportBatchOutcome::BatchCommitted {
             accepted,
             checkpoint,
@@ -383,6 +445,14 @@ fn preview_batch_and_checkpoint_are_atomic_and_resumable() {
         }
         other => panic!("unexpected outcome: {other:?}"),
     };
+    assert_eq!(
+        final_checkpoint.chain_digest(),
+        [
+            0xbc, 0x61, 0x92, 0xaf, 0x38, 0x33, 0x22, 0x32, 0x61, 0xdf, 0xf8, 0x16, 0x3f, 0xa7,
+            0x58, 0x71, 0x66, 0x49, 0x77, 0x3d, 0xa4, 0xd6, 0xfe, 0x6e, 0xc3, 0x85, 0xbe, 0x0a,
+            0xa5, 0x90, 0xf4, 0xea,
+        ]
+    );
     assert_eq!(final_checkpoint.accepted_rows(), 1);
     assert_eq!(final_checkpoint.next_batch(), 2);
     assert_eq!(state.snapshot().batch_count(), 1);
@@ -425,7 +495,6 @@ fn preview_batch_and_checkpoint_are_atomic_and_resumable() {
         &final_checkpoint
     );
 
-    let batch_bytes = encode_transaction(&batch).unwrap();
     for end in 0..batch_bytes.len() {
         assert!(
             decode_transaction(&batch_bytes[..end]).is_err(),

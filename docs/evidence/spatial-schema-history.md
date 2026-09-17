@@ -35,9 +35,10 @@ not independent security certification
 | Checkpoint | 256 MiB canonical bytes |
 | Golden matrix | 11 record variants plus transaction and checkpoint |
 
-The 64 MiB logical-byte cap bounds the clone-based R1 correctness catalog; it is not a measured
-RSS bound or the one-million-item BM-10 claim. T-59 owns native disk indexes and larger-than-RAM
-behavior.
+The 64 MiB logical-byte cap bounds the in-memory R1 correctness catalog; it is not a measured RSS
+bound or the one-million-item BM-10 claim. Decision 0034 later replaces full-catalog prepare clones
+with request-sized deltas, but current state remains materialized. T-59 owns native disk indexes
+and larger-than-RAM behavior.
 
 ## Focused verification
 

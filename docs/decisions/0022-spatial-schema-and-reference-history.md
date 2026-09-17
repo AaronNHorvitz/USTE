@@ -47,9 +47,11 @@ correction chains. Observed data remains distinct from the `unknown`, `estimated
 ## Durable reducer and limits
 
 Spatial transaction bytes are closed, canonical and scoped, with 10,000 records and 16 MiB as
-hard admission limits. Prepare clones one unpublished R1 catalog, validates and stages into it,
-then hashes the request-ordered canonical stored effects. Observation effects distinguish insert
-from idempotent retry and bind the original recorded revision. Publication remains atomic.
+hard admission limits. The original implementation prepared one unpublished R1 catalog clone.
+Decision 0034 replaces that path with a request-sized borrowed overlay and preflighted publication
+delta, then hashes the same request-ordered canonical stored effects. Observation effects
+distinguish insert from idempotent retry and bind the original recorded revision. Publication
+remains atomic.
 
 Canonical checkpoints retain every immutable record and its recorded revision, reject reordered,
 duplicate, future-revision, cross-scope, truncated and trailing input, and rebuild reference
@@ -57,7 +59,7 @@ invariants rather than trusting derived maps. Logical hashing streams the comple
 and works at genesis without pretending genesis is checkpointable. Checkpoint bytes are capped at
 256 MiB. The R1 in-memory catalog additionally caps canonical record data plus framing at 64 MiB
 and entries at 1,000,000; the byte cap normally binds first. These are hostile-input correctness
-bounds, not BM-10 capacity claims. The clone-and-map catalog is intentionally not the T-59
+bounds, not BM-10 capacity claims. The in-memory map catalog is intentionally not the T-59
 larger-than-RAM index.
 
 `SpatialState` is an internal qualification reducer implementing the generic transaction and

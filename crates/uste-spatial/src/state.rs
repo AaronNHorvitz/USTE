@@ -3,6 +3,7 @@ use uste_storage::BlobInventory;
 use uste_txn::{ApplyError, CheckpointState, CheckpointStateError, TransactionState};
 use uste_types::{CommitRevision, DatabaseId, NamespaceId, NamespaceRef};
 
+use crate::catalog::PreparedCatalogBatch;
 use crate::{
     MAX_SPATIAL_BATCH_RECORDS, MAX_SPATIAL_CATALOG_ENTRIES, ObservationOutcome, SpatialCatalog,
     SpatialError, SpatialRecord, codec::encode_record_ref, decode_record, encode_record,
@@ -148,12 +149,40 @@ impl SpatialState {
             },
         }
     }
+
+    /// Borrow the current immutable spatial snapshot without cloning the retained catalog.
+    #[must_use]
+    pub const fn current_snapshot(&self) -> &SpatialSnapshot {
+        &self.snapshot
+    }
+
+    /// Return whether an opaque prepared delta still targets this exact reducer base.
+    #[must_use]
+    pub fn can_publish(&self, prepared: &PreparedSpatial) -> bool {
+        prepared.scope == self.snapshot.scope
+            && prepared.base_revision == self.snapshot.revision
+            && prepared
+                .base_revision
+                .is_none_or(|base| prepared.revision > base)
+            && self.snapshot.catalog.can_publish(&prepared.catalog)
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PreparedSpatial {
-    snapshot: SpatialSnapshot,
+    scope: NamespaceRef,
+    base_revision: Option<CommitRevision>,
+    revision: CommitRevision,
+    catalog: PreparedCatalogBatch,
     result_digest: [u8; 32],
+}
+
+impl PreparedSpatial {
+    /// Number of catalog records retained for publication; retries retain no record copy.
+    #[must_use]
+    pub fn inserted_record_count(&self) -> usize {
+        self.catalog.inserted_count()
+    }
 }
 
 impl TransactionState for SpatialState {
@@ -178,22 +207,24 @@ impl TransactionState for SpatialState {
         {
             return Err(ApplyError::Conflict);
         }
-        let mut snapshot = self.snapshot.clone();
-        let outcomes = snapshot
+        let catalog = self
+            .snapshot
             .catalog
-            .apply_batch_prepared(revision, transaction.records())
+            .prepare_batch(revision, transaction.records())
             .map_err(map_apply_error)?;
-        snapshot.revision = Some(revision);
         let result_digest = digest_effects(
-            &snapshot,
             revision,
             canonical_request,
             transaction.records(),
-            &outcomes,
+            catalog.effect_revisions(),
+            catalog.outcomes(),
         )
         .map_err(map_apply_error)?;
         Ok(PreparedSpatial {
-            snapshot,
+            scope: self.snapshot.scope,
+            base_revision: self.snapshot.revision,
+            revision,
+            catalog,
             result_digest,
         })
     }
@@ -203,7 +234,12 @@ impl TransactionState for SpatialState {
     }
 
     fn publish(&mut self, prepared: Self::Prepared) {
-        self.snapshot = prepared.snapshot;
+        assert!(
+            self.can_publish(&prepared),
+            "prepared spatial delta must publish on its exact reducer base"
+        );
+        self.snapshot.catalog.publish_prepared(prepared.catalog);
+        self.snapshot.revision = Some(prepared.revision);
     }
 
     fn snapshot(&self) -> Self::Snapshot {
@@ -374,9 +410,10 @@ fn decode_checkpoint(
             let (_, record) = entries.next().ok_or(CheckpointStateError::Invalid)?;
             records.push(record);
         }
-        catalog
-            .apply_batch_prepared(recorded, &records)
+        let prepared = catalog
+            .prepare_batch(recorded, &records)
             .map_err(map_checkpoint_error)?;
+        catalog.publish_prepared(prepared);
     }
     if catalog.entry_count() != count {
         return Err(CheckpointStateError::Invalid);
@@ -423,10 +460,10 @@ fn digest_snapshot(snapshot: &SpatialSnapshot, domain: &[u8]) -> Result<[u8; 32]
 }
 
 fn digest_effects(
-    snapshot: &SpatialSnapshot,
     revision: CommitRevision,
     canonical_request: &[u8],
     records: &[SpatialRecord],
+    effect_revisions: &[CommitRevision],
     outcomes: &[ObservationOutcome],
 ) -> Result<[u8; 32], SpatialError> {
     let mut digest = Sha256::new();
@@ -443,12 +480,12 @@ fn digest_effects(
             .map_err(|_| SpatialError::ResourceLimit)?
             .to_be_bytes(),
     );
+    if effect_revisions.len() != records.len() {
+        return Err(SpatialError::InvalidEncoding);
+    }
     let mut outcomes = outcomes.iter();
-    for requested in records {
-        let (recorded_revision, stored) = snapshot
-            .catalog
-            .stored_effect(requested)
-            .ok_or(SpatialError::InvalidEncoding)?;
+    for (requested, recorded_revision) in records.iter().zip(effect_revisions) {
+        let stored = SpatialRecordRef::from(requested);
         let kind = match stored {
             SpatialRecordRef::World(_) => 0,
             SpatialRecordRef::Frame(_) => 1,

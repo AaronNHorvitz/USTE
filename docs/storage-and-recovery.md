@@ -212,6 +212,13 @@ only when family presence, counts and logical digests match. A failure leaves th
 intact and at most unreferenced encrypted runs. The projection pass and live reducer remain
 full-memory pending the persistent base/overlay design.
 
+Decision 0034 removes retained-state cloning from ordinary graph, spatial and composite ingest
+preparation. Spatial and ingest publication plans are request-sized and all component bases are
+checked before mutation; formats and journal authority do not change. This does not remove the
+full-memory live reducer, checkpoint decoder or complete semantic closure scans. A future
+disk-backed preparation view must expose explicit bounded storage I/O rather than hiding reads
+inside the current pure `TransactionState::prepare` contract.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

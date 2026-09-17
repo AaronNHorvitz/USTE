@@ -27,7 +27,8 @@ pub use record::{
 };
 pub use state::{
     AdjacencyDirection, GraphError, GraphSnapshot, GraphState, MAX_TRANSACTION_OPERATIONS,
-    MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS,
+    MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS, PreparedGraph,
+    PreparedGraphView,
 };
 pub use state_disk::{
     DerivedGraphStateRoot, GRAPH_STATE_PROFILE_V1, GraphRecoverySeedReport, GraphStateDeltaLimits,

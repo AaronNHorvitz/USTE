@@ -41,6 +41,29 @@ fn forward_world_root_and_exact_reference_history_are_stable() {
 }
 
 #[test]
+fn same_batch_sequential_versions_preserve_request_order_rules() {
+    let mut catalog = SpatialCatalog::new();
+    catalog.apply_batch(revision(1), &world_and_root()).unwrap();
+    let frame_v1 = SpatialRecord::Frame(child_frame(12, 1, reference(11, 1)));
+    let frame_v2 = SpatialRecord::Frame(child_frame(12, 2, reference(11, 1)));
+    catalog
+        .apply_batch(revision(2), &[frame_v1.clone(), frame_v2.clone()])
+        .unwrap();
+    assert_eq!(catalog.frame_history_len(record(12)), 2);
+
+    let mut reversed = SpatialCatalog::new();
+    reversed
+        .apply_batch(revision(1), &world_and_root())
+        .unwrap();
+    assert_eq!(
+        reversed.apply_batch(revision(2), &[frame_v2, frame_v1]),
+        Err(SpatialError::VersionConflict)
+    );
+    assert_eq!(reversed.frame_history_len(record(12)), 0);
+    assert_eq!(reversed.last_revision(), Some(revision(1)));
+}
+
+#[test]
 fn cycles_and_the_first_over_depth_chain_fail_atomically() {
     let mut catalog = SpatialCatalog::new();
     catalog.apply_batch(revision(1), &world_and_root()).unwrap();

@@ -1,12 +1,15 @@
 mod common;
 
-use common::{child_frame, geometry, observation, point, reference, revision, world_and_root};
+use common::{
+    child_frame, geometry, observation, point, record, reference, revision, world_and_root,
+};
 use uste_replay::{
     ReplayError, ReplayEvent, capture_reducer_checkpoint, cold_replay, verify_reducer_checkpoint,
 };
 use uste_spatial::{
-    SpatialError, SpatialRecord, SpatialState, SpatialTransaction, decode_transaction,
-    encode_transaction,
+    CoordinateSystem, FrameDefinition, PositionObservation, SpatialError, SpatialRecord,
+    SpatialState, SpatialTransaction, SpatialVersion, VersionedRecordRef, WorldDefinition,
+    decode_transaction, encode_transaction,
 };
 use uste_txn::{ApplyError, CheckpointState, TransactionState};
 use uste_types::{DatabaseId, NamespaceId, NamespaceRef};
@@ -213,9 +216,312 @@ fn result_digest_distinguishes_observation_insert_from_retry() {
     let retry_effect = retrying
         .prepare(&existing_bytes, None, revision(3))
         .unwrap();
+    assert_eq!(
+        SpatialState::result_digest(&inserting_effect),
+        [
+            0x84, 0x80, 0x0f, 0x28, 0xe5, 0x62, 0x6a, 0xa9, 0x70, 0x96, 0xbe, 0x21, 0x05, 0xd4,
+            0xfd, 0x09, 0x40, 0x78, 0x48, 0x8d, 0xd5, 0x7d, 0xc0, 0x4e, 0x15, 0x01, 0x7e, 0x07,
+            0x34, 0x2f, 0x44, 0x5c,
+        ]
+    );
+    assert_eq!(
+        SpatialState::result_digest(&retry_effect),
+        [
+            0x8b, 0x7b, 0x3e, 0x5a, 0x07, 0x8d, 0x9d, 0x4d, 0xe9, 0x55, 0xce, 0x74, 0x07, 0x56,
+            0x62, 0x01, 0xd0, 0x9f, 0x59, 0x70, 0xf4, 0x88, 0x8d, 0x6c, 0x81, 0x3c, 0x36, 0xd7,
+            0xb5, 0x2f, 0x56, 0x51,
+        ]
+    );
     assert_ne!(
         SpatialState::result_digest(&inserting_effect),
         SpatialState::result_digest(&retry_effect)
+    );
+}
+
+#[test]
+fn prepared_delta_is_request_bounded_and_stale_publish_is_atomic() {
+    let first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let mut state = SpatialState::new(scope());
+    let prepared = state
+        .prepare(&encode_transaction(&first).unwrap(), None, revision(1))
+        .unwrap();
+    assert_eq!(prepared.inserted_record_count(), 2);
+    state.publish(prepared);
+
+    let observed = SpatialRecord::Observation(Box::new(observation(50, 51, point(3, 4))));
+    let request = SpatialTransaction::new(scope(), vec![observed.clone(), observed]).unwrap();
+    let bytes = encode_transaction(&request).unwrap();
+    let winner = state.prepare(&bytes, None, revision(2)).unwrap();
+    let stale = state.prepare(&bytes, None, revision(2)).unwrap();
+    assert_eq!(winner.inserted_record_count(), 1);
+    assert_eq!(stale.inserted_record_count(), 1);
+    state.publish(winner);
+    assert!(!state.can_publish(&stale));
+    let before = SpatialState::logical_state_digest(&state.snapshot()).unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state.publish(stale))).is_err()
+    );
+    assert_eq!(
+        SpatialState::logical_state_digest(&state.snapshot()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn content_anchor_rejects_same_revision_foreign_catalog_before_mutation() {
+    let mut left = SpatialState::new(scope());
+    let left_first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let prepared = left
+        .prepare(&encode_transaction(&left_first).unwrap(), None, revision(1))
+        .unwrap();
+    left.publish(prepared);
+
+    let foreign_world = record(20);
+    let foreign_frame = record(21);
+    let foreign_reference = VersionedRecordRef::new(foreign_frame, SpatialVersion::FIRST);
+    let right_first = SpatialTransaction::new(
+        scope(),
+        vec![
+            SpatialRecord::World(
+                WorldDefinition::new(foreign_world, SpatialVersion::FIRST, foreign_reference)
+                    .unwrap(),
+            ),
+            SpatialRecord::Frame(
+                FrameDefinition::new(
+                    foreign_frame,
+                    SpatialVersion::FIRST,
+                    foreign_world,
+                    CoordinateSystem::LocalCartesian2,
+                    None,
+                )
+                .unwrap(),
+            ),
+        ],
+    )
+    .unwrap();
+    let mut right = SpatialState::new(scope());
+    let prepared = right
+        .prepare(
+            &encode_transaction(&right_first).unwrap(),
+            None,
+            revision(1),
+        )
+        .unwrap();
+    right.publish(prepared);
+
+    let next = SpatialTransaction::new(
+        scope(),
+        vec![SpatialRecord::Frame(child_frame(12, 1, reference(11, 1)))],
+    )
+    .unwrap();
+    let foreign_plan = left
+        .prepare(&encode_transaction(&next).unwrap(), None, revision(2))
+        .unwrap();
+    assert!(!right.can_publish(&foreign_plan));
+    let before = SpatialState::logical_state_digest(&right.snapshot()).unwrap();
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| right.publish(foreign_plan)))
+            .is_err()
+    );
+    assert_eq!(
+        SpatialState::logical_state_digest(&right.snapshot()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn one_record_prepare_retains_one_delta_over_large_catalog() {
+    let mut state = SpatialState::new(scope());
+    let first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let prepared = state
+        .prepare(&encode_transaction(&first).unwrap(), None, revision(1))
+        .unwrap();
+    state.publish(prepared);
+    let frames = (12_u8..112)
+        .map(|id| SpatialRecord::Frame(child_frame(id, 1, reference(11, 1))))
+        .collect();
+    let bulk = SpatialTransaction::new(scope(), frames).unwrap();
+    let prepared = state
+        .prepare(&encode_transaction(&bulk).unwrap(), None, revision(2))
+        .unwrap();
+    assert_eq!(prepared.inserted_record_count(), 100);
+    state.publish(prepared);
+
+    let one = SpatialTransaction::new(
+        scope(),
+        vec![SpatialRecord::Geometry(geometry(120, reference(11, 1)))],
+    )
+    .unwrap();
+    let prepared = state
+        .prepare(&encode_transaction(&one).unwrap(), None, revision(3))
+        .unwrap();
+    assert_eq!(prepared.inserted_record_count(), 1);
+}
+
+#[test]
+fn old_retry_keeps_its_revision_for_same_batch_correction_validation() {
+    let first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let mut state = SpatialState::new(scope());
+    let prepared = state
+        .prepare(&encode_transaction(&first).unwrap(), None, revision(1))
+        .unwrap();
+    state.publish(prepared);
+
+    let original = observation(50, 51, point(3, 4));
+    let insert = SpatialTransaction::new(
+        scope(),
+        vec![SpatialRecord::Observation(Box::new(original.clone()))],
+    )
+    .unwrap();
+    let prepared = state
+        .prepare(&encode_transaction(&insert).unwrap(), None, revision(2))
+        .unwrap();
+    state.publish(prepared);
+
+    let candidate = observation(52, 52, point(5, 6));
+    let correction = PositionObservation::new(
+        candidate.id(),
+        candidate.entity(),
+        candidate.world(),
+        candidate.frame(),
+        candidate.key().clone(),
+        candidate.evidence(),
+        candidate.source_time().clone(),
+        candidate.position(),
+        candidate.uncertainty(),
+        Some(original.id()),
+    )
+    .unwrap();
+    let retry_and_correct = SpatialTransaction::new(
+        scope(),
+        vec![
+            SpatialRecord::Observation(Box::new(original)),
+            SpatialRecord::Observation(Box::new(correction)),
+        ],
+    )
+    .unwrap();
+    let prepared = state
+        .prepare(
+            &encode_transaction(&retry_and_correct).unwrap(),
+            None,
+            revision(3),
+        )
+        .unwrap();
+    assert_eq!(prepared.inserted_record_count(), 1);
+    state.publish(prepared);
+    assert!(
+        state
+            .snapshot()
+            .catalog()
+            .observation_at(record(52), revision(3))
+            .is_ok()
+    );
+}
+
+#[test]
+fn correction_to_new_same_batch_observation_remains_invalid() {
+    let first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let mut state = SpatialState::new(scope());
+    let prepared = state
+        .prepare(&encode_transaction(&first).unwrap(), None, revision(1))
+        .unwrap();
+    state.publish(prepared);
+
+    let original = observation(50, 51, point(3, 4));
+    let candidate = observation(52, 52, point(5, 6));
+    let correction = PositionObservation::new(
+        candidate.id(),
+        candidate.entity(),
+        candidate.world(),
+        candidate.frame(),
+        candidate.key().clone(),
+        candidate.evidence(),
+        candidate.source_time().clone(),
+        candidate.position(),
+        candidate.uncertainty(),
+        Some(original.id()),
+    )
+    .unwrap();
+    let request = SpatialTransaction::new(
+        scope(),
+        vec![
+            SpatialRecord::Observation(Box::new(original)),
+            SpatialRecord::Observation(Box::new(correction)),
+        ],
+    )
+    .unwrap();
+    assert!(matches!(
+        state.prepare(&encode_transaction(&request).unwrap(), None, revision(2)),
+        Err(ApplyError::InvalidRequest)
+    ));
+    assert_eq!(state.snapshot().revision(), Some(revision(1)));
+}
+
+#[test]
+fn retry_only_revision_survives_checkpoint_rebuild_and_next_prepare() {
+    let first = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let mut state = SpatialState::new(scope());
+    let prepared = state
+        .prepare(&encode_transaction(&first).unwrap(), None, revision(1))
+        .unwrap();
+    state.publish(prepared);
+    let observed = SpatialTransaction::new(
+        scope(),
+        vec![SpatialRecord::Observation(Box::new(observation(
+            50,
+            51,
+            point(3, 4),
+        )))],
+    )
+    .unwrap();
+    let bytes = encode_transaction(&observed).unwrap();
+    let prepared = state.prepare(&bytes, None, revision(2)).unwrap();
+    state.publish(prepared);
+    let retry = state.prepare(&bytes, None, revision(3)).unwrap();
+    assert_eq!(retry.inserted_record_count(), 0);
+    state.publish(retry);
+    assert_eq!(
+        state.snapshot().catalog().last_revision(),
+        Some(revision(3))
+    );
+
+    let checkpoint = SpatialState::encode_checkpoint(&state.snapshot()).unwrap();
+    let mut restored = SpatialState::decode_checkpoint(scope(), revision(3), &checkpoint).unwrap();
+    assert_eq!(restored.snapshot().revision(), Some(revision(3)));
+    assert_eq!(
+        restored.snapshot().catalog().last_revision(),
+        Some(revision(2))
+    );
+    assert_eq!(
+        SpatialState::logical_state_digest(&restored.snapshot()).unwrap(),
+        SpatialState::logical_state_digest(&state.snapshot()).unwrap()
+    );
+    let next = SpatialTransaction::new(
+        scope(),
+        vec![SpatialRecord::Frame(child_frame(12, 1, reference(11, 1)))],
+    )
+    .unwrap();
+    let prepared = restored
+        .prepare(&encode_transaction(&next).unwrap(), None, revision(4))
+        .unwrap();
+    restored.publish(prepared);
+    assert_eq!(restored.snapshot().revision(), Some(revision(4)));
+}
+
+#[test]
+fn spatial_result_digest_profile_is_pinned() {
+    let request = SpatialTransaction::new(scope(), world_and_root().to_vec()).unwrap();
+    let state = SpatialState::new(scope());
+    let prepared = state
+        .prepare(&encode_transaction(&request).unwrap(), None, revision(1))
+        .unwrap();
+    assert_eq!(
+        SpatialState::result_digest(&prepared),
+        [
+            0xcc, 0x0d, 0x8c, 0x7e, 0xd6, 0x65, 0x28, 0xc9, 0x62, 0x07, 0x5c, 0x74, 0x64, 0x1f,
+            0x90, 0xd3, 0xd3, 0x17, 0x66, 0xd9, 0x49, 0x81, 0xfb, 0x49, 0xfc, 0x55, 0x0b, 0x7e,
+            0xbf, 0xd5, 0xa7, 0x53,
+        ]
     );
 }
 

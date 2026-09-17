@@ -44,7 +44,8 @@ boundaries remain covered by Decision 0032's merge tests.
 
 This evidence does not close T-20. Delta preparation is transaction-bounded, and storage merge has
 bounded buffers, but the current reducer and independent expected-descriptor pass retain and scan
-the full graph in memory. Root discovery/reconstruction, composite ingest and coordinator metadata
-also remain full-memory. The derived plan limit is debited during retained family-map construction,
+the full graph in memory. Decision 0034 subsequently makes composite ingest preparation
+request-bounded too, while root discovery/reconstruction, live reducer maps and coordinator
+metadata remain full-memory. The derived plan limit is debited during retained family-map construction,
 but graph prepare and one-record reference-role coalescing remain under the graph's existing
 operation/reference caps. No allocator/RSS proof or BM-01/BM-06 result is claimed.

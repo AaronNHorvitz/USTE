@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 use uste_policy::{
-    Action, AuthorizationRequirement, AuthorizationRequirements, NamespacePolicy, Target,
+    Action, AuthorizationRequirement, AuthorizationRequirements, NamespacePolicy, PolicyVersion,
+    Target,
 };
 use uste_storage::BlobInventory;
 use uste_txn::{
@@ -274,8 +275,42 @@ impl GraphState {
         self.snapshot.clone()
     }
 
-    pub(crate) const fn current_snapshot(&self) -> &GraphSnapshot {
+    /// Borrow the current immutable reducer snapshot without cloning its retained state.
+    #[must_use]
+    pub const fn current_snapshot(&self) -> &GraphSnapshot {
         &self.snapshot
+    }
+
+    /// Borrow the exact post-transaction record view for a plan prepared by this current state.
+    ///
+    /// The view overlays only changed records and allocates nothing. Callers must not mix a plan
+    /// with another same-scope/same-revision reducer instance; touched before-values are rechecked
+    /// defensively and the ordinary publish path retains the same exact-source contract.
+    pub fn prepared_view<'a>(
+        &'a self,
+        prepared: &'a PreparedGraph,
+    ) -> Result<PreparedGraphView<'a>, GraphError> {
+        if prepared.scope != self.snapshot.scope
+            || prepared.base_revision != self.snapshot.revision
+            || prepared.base_policy_version
+                != self.snapshot.policy.as_ref().map(NamespacePolicy::version)
+            || prepared
+                .changes
+                .iter()
+                .any(|change| self.snapshot.records.get(&change.id) != change.before.as_ref())
+        {
+            return Err(GraphError::PreparedStateMismatch);
+        }
+        Ok(PreparedGraphView {
+            base: &self.snapshot,
+            changes: &prepared.changes,
+        })
+    }
+
+    /// Return whether a prepared delta still targets this exact reducer base.
+    #[must_use]
+    pub fn can_publish(&self, prepared: &PreparedGraph) -> bool {
+        self.prepared_view(prepared).is_ok()
     }
 
     pub fn prepare_transaction(
@@ -367,6 +402,7 @@ impl GraphState {
         Ok(PreparedGraph {
             scope: self.scope(),
             base_revision: self.snapshot.revision,
+            base_policy_version: self.snapshot.policy.as_ref().map(NamespacePolicy::version),
             revision,
             changes,
             policy_change,
@@ -494,10 +530,46 @@ fn graph_result_digest<'a>(
 pub struct PreparedGraph {
     pub(crate) scope: NamespaceRef,
     pub(crate) base_revision: Option<CommitRevision>,
+    pub(crate) base_policy_version: Option<PolicyVersion>,
     pub(crate) revision: CommitRevision,
     pub(crate) changes: Vec<RecordChange>,
     pub(crate) policy_change: Option<NamespacePolicy>,
     pub(crate) result_digest: [u8; 32],
+}
+
+impl PreparedGraph {
+    #[must_use]
+    pub fn change_count(&self) -> usize {
+        self.changes.len()
+    }
+}
+
+/// Allocation-free current-record overlay for one exact prepared graph transaction.
+pub struct PreparedGraphView<'a> {
+    base: &'a GraphSnapshot,
+    changes: &'a [RecordChange],
+}
+
+impl fmt::Debug for PreparedGraphView<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PreparedGraphView")
+            .field("scope", &"[REDACTED]")
+            .field("base_revision", &self.base.revision)
+            .field("change_count", &self.changes.len())
+            .finish()
+    }
+}
+
+impl PreparedGraphView<'_> {
+    #[must_use]
+    pub fn record(&self, id: RecordRef) -> Option<&Record> {
+        self.changes
+            .binary_search_by_key(&id, |change| change.id)
+            .ok()
+            .map(|index| &self.changes[index].after)
+            .or_else(|| self.base.records.get(&id))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -534,9 +606,8 @@ impl TransactionState for GraphState {
     }
 
     fn publish(&mut self, prepared: Self::Prepared) {
-        assert_eq!(
-            (self.snapshot.scope, self.snapshot.revision),
-            (prepared.scope, prepared.base_revision),
+        assert!(
+            self.can_publish(&prepared),
             "prepared graph delta must publish on its exact base state"
         );
         for change in prepared.changes {
@@ -2859,6 +2930,7 @@ pub enum GraphError {
     },
     IndexCorrupt(RecordRef),
     DerivedIndexMismatch,
+    PreparedStateMismatch,
     ResourceLimit,
 }
 

@@ -63,11 +63,14 @@ denied authorized commits publish nothing, and protected embedded job bindings a
 
 ## Deliberate boundaries
 
-T-49 accepts already-typed records. Row payload digests are caller-declared commitments that the
+T-49 accepts already-typed records. Decision 0034 subsequently replaces the original composite
+candidate clone with request-sized graph/spatial/ledger deltas and preflights every component
+before mutation; see [bounded composite preparation](bounded-composite-preparation.md). Row payload
+digests are caller-declared commitments that the
 reducer does not independently recompute from aggregate graph/spatial effects; T-54 must verify
 canonical per-row envelopes before claiming mapping provenance. It does not parse CSV/JSON, execute a mapping manifest, advance
 over rejected source rows, create error reports or provide a CLI; T-54 owns those features and the
 item-linked exact-price fixture. Structural limits are not simultaneous capacity results; the
-in-memory clone and 256 MiB cache can bind first. No RSS, throughput, concurrency, platform crash or
+in-memory maps and 256 MiB cache can bind first. No RSS, throughput, concurrency, platform crash or
 power-loss result is claimed. T-19 records R1 acceptance and operating limits. T-62 remains an
 unrelated, unverified distribution prerequisite.

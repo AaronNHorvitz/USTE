@@ -2,14 +2,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 use uste_graph::{
-    EntityLifecycle, GraphSnapshot, GraphState, Operation, Record,
-    decode_transaction as decode_graph_transaction,
+    EntityLifecycle, GraphSnapshot, GraphState, Operation, PreparedGraph, PreparedGraphView,
+    Record, decode_transaction as decode_graph_transaction,
 };
 use uste_policy::{
     Action, AuthorizationRequirement, AuthorizationRequirements, NamespacePolicy, Target,
 };
 use uste_spatial::{
-    SpatialRecord, SpatialRecordRef, SpatialSnapshot, SpatialState,
+    PreparedSpatial, SpatialRecord, SpatialRecordRef, SpatialSnapshot, SpatialState,
     decode_transaction as decode_spatial_transaction,
 };
 use uste_storage::{BlobInventory, BlobReference, MAX_CHECKPOINT_BYTES};
@@ -35,8 +35,14 @@ const INGEST_REDUCER_PROFILE: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 ];
 const INGEST_CHECKPOINT_MAGIC: &[u8; 8] = b"UICP\0\x01\0\0";
-
-type ComponentOutcome = (ImportBatchOutcome, [u8; 32], Option<[u8; 32]>);
+type PreparedDomain = (
+    ImportBatchOutcome,
+    PreparedGraph,
+    Option<PreparedSpatial>,
+    PreparedJobMutation,
+    [u8; 32],
+    Option<[u8; 32]>,
+);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct BatchReceipt {
@@ -160,37 +166,42 @@ impl IngestState {
         if transaction.scope() != self.scope || revision != expected_revision {
             return Err(ImportError::InvalidCheckpoint);
         }
-        let mut candidate = self.clone();
         let request_digest: [u8; 32] = Sha256::digest(canonical_request).into();
-        let (outcome, graph_digest, spatial_digest) = match transaction {
-            EngineTransaction::Graph { graph_request, .. } => {
-                if blob_inventory.is_some() {
-                    return Err(ImportError::InventoryMismatch);
+        let (outcome, graph, spatial, job_mutation, graph_digest, spatial_digest) =
+            match transaction {
+                EngineTransaction::Graph { graph_request, .. } => {
+                    if blob_inventory.is_some() {
+                        return Err(ImportError::InventoryMismatch);
+                    }
+                    let (graph, graph_digest) =
+                        prepare_graph(&self.graph, self.scope, &graph_request, revision, true)?;
+                    let view = self
+                        .graph
+                        .prepared_view(&graph)
+                        .map_err(|_| ImportError::InvalidCheckpoint)?;
+                    validate_catalog_closure_import(
+                        &view,
+                        self.spatial.current_snapshot().catalog(),
+                    )?;
+                    validate_job_closure(&view, &self.jobs)?;
+                    (
+                        ImportBatchOutcome::GraphCommitted,
+                        graph,
+                        None,
+                        PreparedJobMutation::None,
+                        graph_digest,
+                        None,
+                    )
                 }
-                let graph_digest = apply_graph(
-                    &mut candidate.graph,
-                    self.scope,
-                    &graph_request,
-                    revision,
-                    true,
-                )?;
-                validate_catalog_closure_import(
-                    &candidate.graph.snapshot(),
-                    candidate.spatial.snapshot().catalog(),
-                )?;
-                validate_job_closure(&candidate.graph.snapshot(), &candidate.jobs)?;
-                (ImportBatchOutcome::GraphCommitted, graph_digest, None)
-            }
-            EngineTransaction::Import { action, .. } => match *action {
-                ImportAction::StartJob(start) => {
-                    candidate.prepare_start(&start, blob_inventory, request_digest, revision)?
-                }
-                ImportAction::ApplyBatch(batch) => {
-                    candidate.prepare_batch(*batch, blob_inventory, request_digest, revision)?
-                }
-            },
-        };
-        candidate.revision = Some(revision);
+                EngineTransaction::Import { action, .. } => match *action {
+                    ImportAction::StartJob(start) => {
+                        self.prepare_start(&start, blob_inventory, request_digest, revision)?
+                    }
+                    ImportAction::ApplyBatch(batch) => {
+                        self.prepare_batch(*batch, blob_inventory, request_digest, revision)?
+                    }
+                },
+            };
         let result_digest = digest_result(
             revision,
             request_digest,
@@ -199,19 +210,23 @@ impl IngestState {
             &outcome,
         );
         Ok(PreparedIngest {
-            state: candidate,
+            base_revision: self.revision,
+            revision,
+            graph,
+            spatial,
+            job_mutation,
             outcome,
             result_digest,
         })
     }
 
     fn prepare_start(
-        &mut self,
+        &self,
         start: &ImportStart,
         blob_inventory: Option<&BlobInventory>,
         request_digest: [u8; 32],
         revision: CommitRevision,
-    ) -> Result<ComponentOutcome, ImportError> {
+    ) -> Result<PreparedDomain, ImportError> {
         let job = start.job();
         let source = start.source();
         let mapping = start.mapping();
@@ -224,52 +239,55 @@ impl IngestState {
             return Err(ImportError::ResourceLimit);
         }
         validate_inventory(blob_inventory, [source.blob(), mapping.blob()])?;
-        let graph_digest = apply_graph(
-            &mut self.graph,
+        let (graph, graph_digest) = prepare_graph(
+            &self.graph,
             self.scope,
             start.graph_request(),
             revision,
             false,
         )?;
-        let graph = self.graph.snapshot();
-        require_active_entity(&graph, job)?;
-        require_bound_evidence(&graph, source)?;
-        require_bound_mapping(&graph, mapping)?;
+        let view = self
+            .graph
+            .prepared_view(&graph)
+            .map_err(|_| ImportError::InvalidCheckpoint)?;
+        require_active_entity(&view, job)?;
+        require_bound_evidence(&view, source)?;
+        require_bound_mapping(&view, mapping)?;
         let chain_digest = digest_chain([0; 32], request_digest, revision, graph_digest, None);
         let checkpoint =
             ImportCheckpoint::started(job, source.clone(), mapping.clone(), revision, chain_digest);
-        self.jobs.insert(
-            job,
-            JobState {
-                checkpoint: checkpoint.clone(),
-                batches: BTreeMap::new(),
-                source_events: BTreeMap::new(),
-            },
-        );
+        let state = JobState {
+            checkpoint: checkpoint.clone(),
+            batches: BTreeMap::new(),
+            source_events: BTreeMap::new(),
+        };
         Ok((
             ImportBatchOutcome::JobStarted(checkpoint),
+            graph,
+            None,
+            PreparedJobMutation::Start { job, state },
             graph_digest,
             None,
         ))
     }
 
     fn prepare_batch(
-        &mut self,
+        &self,
         batch: ImportBatch,
         blob_inventory: Option<&BlobInventory>,
         request_digest: [u8; 32],
         revision: CommitRevision,
-    ) -> Result<ComponentOutcome, ImportError> {
+    ) -> Result<PreparedDomain, ImportError> {
         if blob_inventory.is_some_and(|inventory| !inventory.is_empty()) {
             return Err(ImportError::InventoryMismatch);
         }
         let job_id = batch.id().job();
         require_scope(self.scope, job_id)?;
         let job = self.jobs.get(&job_id).ok_or(ImportError::MissingJob)?;
-        let current_graph = self.graph.snapshot();
-        require_active_entity(&current_graph, job_id)?;
-        require_bound_evidence(&current_graph, job.checkpoint.source())?;
-        require_bound_mapping(&current_graph, job.checkpoint.mapping())?;
+        let current_graph = self.graph.current_snapshot();
+        require_active_entity(current_graph, job_id)?;
+        require_bound_evidence(current_graph, job.checkpoint.source())?;
+        require_bound_mapping(current_graph, job.checkpoint.mapping())?;
         if batch.expected().source() != job.checkpoint.source()
             || batch.expected().mapping() != job.checkpoint.mapping()
         {
@@ -292,35 +310,37 @@ impl IngestState {
         }
         validate_rows(self.scope, &batch, &self.source_events)?;
 
-        let graph_digest = apply_graph(
-            &mut self.graph,
+        let (graph, graph_digest) = prepare_graph(
+            &self.graph,
             self.scope,
             batch.graph_request(),
             revision,
             false,
         )?;
+        let graph_view = self
+            .graph
+            .prepared_view(&graph)
+            .map_err(|_| ImportError::InvalidCheckpoint)?;
         let spatial_transaction = batch
             .spatial_request()
             .map(decode_spatial_transaction)
             .transpose()
             .map_err(|_| ImportError::InvalidEncoding)?;
-        let spatial_digest = match batch.spatial_request() {
+        let (spatial, spatial_digest) = match batch.spatial_request() {
             Some(request) => {
                 let prepared = self
                     .spatial
                     .prepare(request, None, revision)
                     .map_err(map_component_apply)?;
                 let digest = SpatialState::result_digest(&prepared);
-                self.spatial.publish(prepared);
-                Some(digest)
+                (Some(prepared), Some(digest))
             }
-            None => None,
+            None => (None, None),
         };
-        let graph = self.graph.snapshot();
-        require_bound_evidence(&graph, job.checkpoint.source())?;
-        require_bound_mapping(&graph, job.checkpoint.mapping())?;
+        require_bound_evidence(&graph_view, job.checkpoint.source())?;
+        require_bound_mapping(&graph_view, job.checkpoint.mapping())?;
         if let Some(transaction) = &spatial_transaction {
-            validate_external_closure(&graph, transaction.records())?;
+            validate_external_closure(&graph_view, transaction.records())?;
         }
         let previous_chain = job.checkpoint.chain_digest();
         let chain_digest = digest_chain(
@@ -338,26 +358,19 @@ impl IngestState {
             batch.final_batch(),
             chain_digest,
         )?;
-        let job = self.jobs.get_mut(&job_id).ok_or(ImportError::MissingJob)?;
+        let mut rows = Vec::new();
+        rows.try_reserve(batch.rows().len())
+            .map_err(|_| ImportError::ResourceLimit)?;
         for row in batch.rows() {
-            job.source_events
-                .insert(row.source_event(), row.declared_payload_digest());
-            self.source_events.insert(row.source_event(), job_id);
+            rows.push((row.source_event(), row.declared_payload_digest()));
         }
-        job.batches.insert(
-            batch.id().sequence(),
-            BatchReceipt {
-                request_digest,
-                revision,
-                row_count,
-                checkpoint: checkpoint.clone(),
-            },
-        );
-        job.checkpoint = checkpoint.clone();
-        self.batch_count = self
-            .batch_count
-            .checked_add(1)
-            .ok_or(ImportError::ResourceLimit)?;
+        let receipt = BatchReceipt {
+            request_digest,
+            revision,
+            row_count,
+            checkpoint: checkpoint.clone(),
+        };
+        let sequence = batch.id().sequence();
         Ok((
             ImportBatchOutcome::BatchCommitted {
                 id: batch.id(),
@@ -365,15 +378,54 @@ impl IngestState {
                 accepted: row_count,
                 checkpoint,
             },
+            graph,
+            spatial,
+            PreparedJobMutation::Batch {
+                job: job_id,
+                expected: job.checkpoint.clone(),
+                sequence,
+                receipt: Box::new(receipt),
+                rows,
+            },
             graph_digest,
             spatial_digest,
         ))
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+enum PreparedJobMutation {
+    None,
+    Start {
+        job: RecordRef,
+        state: JobState,
+    },
+    Batch {
+        job: RecordRef,
+        expected: ImportCheckpoint,
+        sequence: u64,
+        receipt: Box<BatchReceipt>,
+        rows: Vec<(SourceEventRef, [u8; 32])>,
+    },
+}
+
+impl PreparedJobMutation {
+    fn changed_entries(&self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::Start { .. } => 1,
+            Self::Batch { rows, .. } => rows.len().saturating_add(1),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PreparedIngest {
-    state: IngestState,
+    base_revision: Option<CommitRevision>,
+    revision: CommitRevision,
+    graph: PreparedGraph,
+    spatial: Option<PreparedSpatial>,
+    job_mutation: PreparedJobMutation,
     outcome: ImportBatchOutcome,
     result_digest: [u8; 32],
 }
@@ -382,6 +434,30 @@ impl PreparedIngest {
     #[must_use]
     pub const fn outcome(&self) -> &ImportBatchOutcome {
         &self.outcome
+    }
+
+    #[must_use]
+    pub fn graph_change_count(&self) -> usize {
+        self.graph.change_count()
+    }
+
+    /// Logical staged ledger items: one job/receipt plus any new source-event rows.
+    #[must_use]
+    pub fn job_change_count(&self) -> usize {
+        self.job_mutation.changed_entries()
+    }
+
+    #[must_use]
+    pub const fn has_spatial_change(&self) -> bool {
+        self.spatial.is_some()
+    }
+
+    /// Spatial records retained for publication; exact observation retries retain no record copy.
+    #[must_use]
+    pub fn spatial_change_count(&self) -> usize {
+        self.spatial
+            .as_ref()
+            .map_or(0, PreparedSpatial::inserted_record_count)
     }
 }
 
@@ -432,7 +508,81 @@ impl TransactionState for IngestState {
     }
 
     fn publish(&mut self, prepared: Self::Prepared) {
-        *self = prepared.state;
+        let PreparedIngest {
+            base_revision,
+            revision,
+            graph,
+            spatial,
+            job_mutation,
+            ..
+        } = prepared;
+        assert_eq!(
+            (self.revision, self.graph.current_revision()),
+            (base_revision, base_revision),
+            "prepared ingest delta must publish on its exact base state"
+        );
+        assert!(
+            self.graph.can_publish(&graph),
+            "prepared graph delta must publish before any ingest component mutates"
+        );
+        if let Some(spatial) = &spatial {
+            assert!(
+                self.spatial.can_publish(spatial),
+                "prepared spatial delta must publish before any ingest component mutates"
+            );
+        }
+        match &job_mutation {
+            PreparedJobMutation::None => {}
+            PreparedJobMutation::Start { job, .. } => {
+                assert!(!self.jobs.contains_key(job));
+            }
+            PreparedJobMutation::Batch {
+                job,
+                expected,
+                sequence,
+                rows,
+                ..
+            } => {
+                let current = self.jobs.get(job).expect("prepared job still exists");
+                assert_eq!(&current.checkpoint, expected);
+                assert!(!current.batches.contains_key(sequence));
+                assert!(
+                    rows.iter()
+                        .all(|(event, _)| !self.source_events.contains_key(event))
+                );
+            }
+        }
+
+        self.graph.publish(graph);
+        if let Some(spatial) = spatial {
+            self.spatial.publish(spatial);
+        }
+        match job_mutation {
+            PreparedJobMutation::None => {}
+            PreparedJobMutation::Start { job, state } => {
+                self.jobs.insert(job, state);
+            }
+            PreparedJobMutation::Batch {
+                job,
+                sequence,
+                receipt,
+                rows,
+                ..
+            } => {
+                let state = self.jobs.get_mut(&job).expect("prepared job still exists");
+                for (event, digest) in rows {
+                    state.source_events.insert(event, digest);
+                    self.source_events.insert(event, job);
+                }
+                state.checkpoint = receipt.checkpoint.clone();
+                state.batches.insert(sequence, *receipt);
+                self.batch_count = self
+                    .batch_count
+                    .checked_add(1)
+                    .expect("prepared batch count remains bounded");
+            }
+        }
+        self.revision = Some(revision);
     }
 
     fn snapshot(&self) -> Self::Snapshot {
@@ -541,13 +691,13 @@ impl AuthorizedReadState for IngestState {
     }
 }
 
-fn apply_graph(
-    graph: &mut GraphState,
+fn prepare_graph(
+    graph: &GraphState,
     scope: NamespaceRef,
     request: &[u8],
     revision: CommitRevision,
     allow_policy: bool,
-) -> Result<[u8; 32], ImportError> {
+) -> Result<(PreparedGraph, [u8; 32]), ImportError> {
     if request.is_empty() {
         return Err(ImportError::InvalidBatch);
     }
@@ -567,8 +717,7 @@ fn apply_graph(
         .prepare(request, None, revision)
         .map_err(map_component_apply)?;
     let digest = GraphState::result_digest(&prepared);
-    graph.publish(prepared);
-    Ok(digest)
+    Ok((prepared, digest))
 }
 
 fn validate_inventory(
@@ -633,11 +782,27 @@ fn require_binding_scope(
     Ok(())
 }
 
+trait CurrentGraphLookup {
+    fn current_record(&self, id: RecordRef) -> Option<&Record>;
+}
+
+impl CurrentGraphLookup for GraphSnapshot {
+    fn current_record(&self, id: RecordRef) -> Option<&Record> {
+        self.record(id)
+    }
+}
+
+impl CurrentGraphLookup for PreparedGraphView<'_> {
+    fn current_record(&self, id: RecordRef) -> Option<&Record> {
+        self.record(id)
+    }
+}
+
 fn require_bound_evidence(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     binding: &SourceBinding,
 ) -> Result<(), ImportError> {
-    match graph.record(binding.evidence()) {
+    match graph.current_record(binding.evidence()) {
         Some(Record::Evidence(record))
             if record.version.get() == binding.version()
                 && record.digest == binding.blob().content_digest() =>
@@ -650,10 +815,10 @@ fn require_bound_evidence(
 }
 
 fn require_bound_mapping(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     binding: &MappingBinding,
 ) -> Result<(), ImportError> {
-    match graph.record(binding.evidence()) {
+    match graph.current_record(binding.evidence()) {
         Some(Record::Evidence(record))
             if record.version.get() == binding.version()
                 && record.digest == binding.blob().content_digest() =>
@@ -706,7 +871,7 @@ fn require_bound_mapping_at(
 }
 
 fn validate_job_closure(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     jobs: &BTreeMap<RecordRef, JobState>,
 ) -> Result<(), ImportError> {
     for (id, job) in jobs {
@@ -718,7 +883,7 @@ fn validate_job_closure(
 }
 
 fn validate_external_closure(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     records: &[SpatialRecord],
 ) -> Result<(), ImportError> {
     for record in records {
@@ -728,7 +893,7 @@ fn validate_external_closure(
 }
 
 fn validate_external_record(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     record: SpatialRecordRef<'_>,
 ) -> Result<(), ImportError> {
     require_active_entity(graph, record.id())?;
@@ -803,8 +968,11 @@ fn validate_external_record_at(
     Ok(())
 }
 
-fn require_active_entity(graph: &GraphSnapshot, id: RecordRef) -> Result<(), ImportError> {
-    match graph.record(id) {
+fn require_active_entity(
+    graph: &impl CurrentGraphLookup,
+    id: RecordRef,
+) -> Result<(), ImportError> {
+    match graph.current_record(id) {
         Some(Record::Entity(entity)) if entity.lifecycle == EntityLifecycle::Active => Ok(()),
         Some(_) => Err(ImportError::WrongReferenceKind),
         None => Err(ImportError::MissingReference),
@@ -826,8 +994,8 @@ fn require_active_entity_at(
     }
 }
 
-fn require_evidence(graph: &GraphSnapshot, id: RecordRef) -> Result<(), ImportError> {
-    match graph.record(id) {
+fn require_evidence(graph: &impl CurrentGraphLookup, id: RecordRef) -> Result<(), ImportError> {
+    match graph.current_record(id) {
         Some(Record::Evidence(_)) => Ok(()),
         Some(_) => Err(ImportError::WrongReferenceKind),
         None => Err(ImportError::MissingReference),
@@ -1385,7 +1553,7 @@ fn validate_catalog_closure(
 }
 
 fn validate_catalog_closure_import(
-    graph: &GraphSnapshot,
+    graph: &impl CurrentGraphLookup,
     catalog: &uste_spatial::SpatialCatalog,
 ) -> Result<(), ImportError> {
     catalog.visit_records(|_, record| validate_external_record(graph, record))

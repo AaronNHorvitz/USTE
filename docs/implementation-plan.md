@@ -64,8 +64,10 @@ manifest explicitly is not engine benchmark evidence. Opaque checkpoint candidat
 authenticated and streamed without a complete transport buffer, but reducer decoding and
 Decision 0027 replaces graph prepared snapshots with ordered before/after deltas, changed-record
 validation and incremental derived-index publication. Decision 0028 adds the general in-memory
-reverse dependencies and removes deletion's full-record scan. Ingest writes still clone full
-candidates and reducer decoding remains full-memory. T-20 next requires new versioned state profiles
+reverse dependencies and removes deletion's full-record scan. Decision 0034 later removes the
+remaining ordinary spatial/composite ingest candidate clones with request-sized overlays and
+preflighted component deltas. Reducer decoding and current maps remain full-memory. T-20 next
+requires new versioned state profiles
 that persist those reverse references plus a genuine
 state-larger-than-memory BM-06 path before running the qualifying BM-01/BM-06 protocols.
 
@@ -82,8 +84,9 @@ replays the suffix. Decision 0032 adds the bounded authenticated storage-level b
 merge without changing `index-v1`. Decision 0033 connects exact bounded graph changes to all eight
 terminal families through an opaque base/outcome-bound plan, independently compares the merged
 descriptors with the postcommit graph and publishes one complete root. It still scans and retains
-the full in-memory reducer. T-20 next needs a live disk-backed base/overlay state, streaming semantic
-validation, ingest deltas and qualifying scale evidence.
+the full in-memory reducer. Decision 0034 bounds ordinary composite write preparation without
+changing that live-state boundary. T-20 next needs a live disk-backed base/overlay state, explicit-
+I/O streaming semantic validation and qualifying scale evidence.
 
 ## Architectural decomposition
 

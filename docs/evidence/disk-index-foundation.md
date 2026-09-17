@@ -95,6 +95,10 @@ family and postcommit publication independently checks the complete result befor
 [`graph-state-root-deltas.md`](graph-state-root-deltas.md). The live reducer and semantic comparison
 remain full-memory, so this is not T-20 closure.
 
+Decision 0034 separately bounds ordinary spatial/composite ingest preparation; see
+[`bounded-composite-preparation.md`](bounded-composite-preparation.md). It does not change the
+full-memory live reducer or recovery boundary listed above.
+
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
 stops after the first delivered entry in the regression.

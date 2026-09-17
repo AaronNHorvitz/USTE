@@ -3,14 +3,15 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `7b92b8f` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `75813f8` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
-Decision 0032 adds authenticated bounded base/delta scratch merge. The current Decision 0033
-increment connects one bounded graph transaction to an independently validated terminal
-`graph-state-v1` root. T-20 remains open pending a disk-backed larger-than-memory reducer path,
-streaming semantic validation, ingest deltas and qualifying BM-01/BM-06 results. Review was
+Decision 0032 adds authenticated bounded base/delta scratch merge, and Decision 0033 connects one
+bounded graph transaction to an independently validated terminal `graph-state-v1` root. The
+current Decision 0034 increment makes ordinary graph/spatial/composite ingest preparation
+request-bounded. T-20 remains open pending a disk-backed larger-than-memory reducer path, explicit-
+I/O streaming semantic validation and qualifying BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
@@ -150,8 +151,9 @@ unverified external distribution prerequisite.
   ceiling, cycle rejection, immutable observation IDs, idempotent source events and prior-commit
   same-entity/world corrections. An independent scan oracle agrees on every tested frame depth.
 - Added canonical transactions, effect-bound insert/retry results, cold replay and canonical
-  checkpoint rebuilding. A 64 MiB canonical logical-byte bound makes the clone-based R1 catalog's
-  hostile-input limit explicit; it is not a scalable index or BM-10 result.
+  checkpoint rebuilding. A 64 MiB canonical logical-byte bound makes the R1 catalog's hostile-input
+  limit explicit; Decision 0034 later removes its prepare clone, but it remains an in-memory
+  correctness catalog rather than a scalable index or BM-10 result.
 - Bound 11 spatial record variants plus a transaction and checkpoint to exact length/SHA-256
   fixtures. Every record/transaction/checkpoint truncation and trailing input fails; checkpoint
   count, scope, ordering, duplicate and future-revision mutations fail closed. Final agent review
@@ -279,6 +281,17 @@ unverified external distribution prerequisite.
   reopens both after restart. The
   independent validator remains a full in-memory scan, so no larger-than-memory or benchmark claim
   is made.
+- Added Decision 0034 and removed complete retained-state candidate copies from ordinary spatial
+  and composite ingest preparation. A borrowed graph view overlays exact changes for closure
+  validation; the spatial overlay retains request indexes, per-request effect revisions/outcomes
+  and inserted records only; the ingest ledger delta retains one job/receipt plus admitted rows.
+- Graph scope/revision/policy-version/touched before-values, the optional spatial scope/revision/catalog
+  fingerprint and job/sequence/source-event bases are all preflighted before component mutation.
+  Canonical request/result/checkpoint/reducer profiles and journal authority are unchanged.
+- Added pinned spatial and ingest result/chain digests plus same-batch version/forward-reference,
+  retry/correction, retry-only checkpoint, one-record-over-populated-base and stale/foreign-plan
+  atomicity coverage. Current maps, closure scans, snapshots and checkpoint decode remain
+  full-memory; this is not T-20 closure or BM evidence.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -350,16 +363,16 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 253 workspace tests including 77 uste-storage, 13
-# uste-crypto, 39 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 261 workspace tests including 77 uste-storage, 13
+# uste-crypto, 39 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 38 passed; 0 failed
+# 39 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
-# 26 passed; 0 failed
+# 34 passed; 0 failed
 cargo test -p uste-types --test spatial_primitives --locked
 # 4 passed; 0 failed
 cargo test -p uste-graph --test spatial_replay --locked
@@ -399,7 +412,8 @@ remaining mixed workload have not passed.
   Checkpoint discovery and seeded open each authenticate the journal, and publication can now stream
   with a one-new-payload-chunk buffer, and checkpoint transport can recover through a bounded chunk
   stream. Ordinary graph prepare/publish is now change-bounded, but checkpoint decoding, explicit
-  snapshots and composite ingest writes remain full-state boundaries. Reverse dependencies add an
+  snapshots remain full-state boundaries. Ordinary composite writes now retain request-sized
+  deltas, but graph-only closure still scans the complete borrowed catalog/job map. Reverse dependencies add an
   in-memory structure with no accepted aggregate/per-target fanout cap.
   The bounded scratch merge and graph terminal planner can rewrite and cross-check all eight
   families for one revision without collecting base runs, but the live base/overlay lifecycle and
@@ -413,8 +427,9 @@ remaining mixed workload have not passed.
   T-24 own those layers. The admitted named-zone behavior is pinned to embedded TZDB 2026c.
 - T-48's transform reference remains an opaque same-scope version binding. T-49 now proves its
   target exists as an active graph Entity, but T-50 still owns transform schema/version semantics
-  and evaluation. The 64 MiB spatial catalog and T-49 full-state/job-ledger clones are correctness
-  baselines; T-59 owns native disk indexing and the one-million-item BM-10 workload.
+  and evaluation. The 64 MiB spatial catalog and T-49 in-memory job ledger are correctness
+  baselines; Decision 0034 bounds their ordinary preparation deltas but does not make them
+  disk-backed. T-59 owns native disk indexing and the one-million-item BM-10 workload.
 - T-49 structural maxima are not simultaneous capacity claims. Its accepted-row cursor has only
   `Open`/`Completed` states; no rejected-row advancement/report, mapping execution, CSV/JSON parser,
   public authorized preview, item/price fixture, throughput/RSS/concurrency or platform-crash result
@@ -426,8 +441,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with the live disk-backed base/overlay state, streaming semantic validation, ingest
-deltas and larger-than-memory reducer recovery. Connect the pinned fixture to exact BM-01 and
+Continue T-20 with an explicit-I/O disk preparation view, then the live disk-backed base/overlay
+state, streaming semantic validation and larger-than-memory reducer recovery. Connect the pinned fixture to exact BM-01 and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

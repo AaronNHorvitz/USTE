@@ -21,7 +21,8 @@ pub use model::{
     SPATIAL_PROFILE, SpatialError, SpatialRecord, SpatialRecordRef, WorldDefinition,
 };
 pub use state::{
-    SpatialSnapshot, SpatialState, SpatialTransaction, decode_transaction, encode_transaction,
+    PreparedSpatial, SpatialSnapshot, SpatialState, SpatialTransaction, decode_transaction,
+    encode_transaction,
 };
 pub use uste_types::spatial::{
     AngularUnit, AxisOrder, CoordinateProfile, CoordinateSystem, GeographicBox, GeographicPoint,

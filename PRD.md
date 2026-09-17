@@ -122,9 +122,10 @@ rebuilds from ordinary successful graph transactions. Preparation retains only o
 changes and validates them against a merged view; publication updates history and index
 contributions incrementally without changing canonical bytes or the frozen current projection.
 Decision 0028 adds incremental reverse dependencies and makes graph delete discovery proportional
-to target fanout plus transaction changes instead of all records. Explicit snapshots, checkpoint
-decoding and ingest writes remain full-state boundaries, and reverse fanout has no accepted
-aggregate cap, so T-20 and both qualifying benchmarks remain open.
+to target fanout plus transaction changes instead of all records. At that increment, explicit
+snapshots, checkpoint decoding and ingest writes remained full-state boundaries; Decision 0034
+later bounds ordinary ingest preparation. Snapshots/decoding remain materialized and reverse fanout
+has no accepted aggregate cap, so T-20 and both qualifying benchmarks remain open.
 
 Decision 0029 freezes and implements the distinct certificate-anchored `graph-state-v1` derived
 root with complete current/history, adjacency, provenance, reverse and policy families. Admission
@@ -149,6 +150,13 @@ two-phase bridge: an opaque precommit plan binds exact family deltas to an admit
 digest, and postcommit maintenance merges all eight families, compares them with the actual live
 reducer and publishes only a complete matching root. The independent comparison and reducer remain
 full-memory; a live disk-backed reducer and qualifying BM-01/BM-06 measurements remain open.
+
+Decision 0034 removes complete retained-state candidate copies from ordinary graph, spatial and
+composite ingest preparation. Borrowed overlays retain only graph changes, spatial request effects
+and one job/row-ledger mutation; all component bases are preflighted before publication. Canonical
+requests, results, checkpoints and reducer profiles are unchanged. Current reducers, closure scans,
+snapshots and checkpoint reconstruction remain full-memory, so this is T-20 write-path groundwork,
+not larger-than-memory or benchmark qualification.
 
 ## Release gates
 
