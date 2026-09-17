@@ -2,9 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `65b0ed0` (partial T-13 encrypted journal/recovery foundation;
-T-13 remains open). Review was performed by Codex agents and does not represent independent
-external security certification.
+Latest reviewed implementation: `6b0b89d` (partial T-13 encrypted journal/recovery foundation and
+qualification; T-13 remains open). Review was performed by Codex agents and does not represent
+independent external security certification.
 
 ## Completed this increment
 

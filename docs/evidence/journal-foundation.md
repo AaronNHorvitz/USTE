@@ -9,6 +9,12 @@ implementation, recovery ordering, Linux capability boundary, tests and claims w
 final targeted review found no high-severity correctness or security blocker. This is automated
 implementation review, not independent recovery or security assessment.
 
+Qualification delta: commit `6b0b89d0760e8a01d45675eb014fd1c3dffb1358` · tree
+`9d38fa93e710c97aee05f9c0d05c2c442a8eb7af`. A further read-only delta review checked the
+exhaustive corruption offsets, error/short-progress matrices, committed-error classification,
+test-only filesystem snapshots and Linux process-loss/lock scenarios and found no blocker or
+high-severity issue.
+
 ## Implemented
 
 - Decision 0015 format-1.0 encrypted manifest, certificate-log header, segment headers, exact opaque
