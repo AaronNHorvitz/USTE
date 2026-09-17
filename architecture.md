@@ -122,10 +122,18 @@ Decision 0018 puts the storage-independent default-deny kernel in `uste-policy` 
 consumer facade in `uste-txn`. The facade derives the journaled principal from a trusted
 authentication adapter, authorizes before state/index/filesystem access, revalidates versioned
 revision-view/upload leases, conceals foreign outcomes and accounts exact staged/committed plaintext bytes.
-Raw coordinator and storage handles are privileged internal capabilities. The trusted local adapter
-supplies current policy at open until T-17 adds durable native policy records; absent policy denies.
+Raw coordinator and storage handles are privileged internal capabilities. Reducers without a native
+policy may use the trusted local adapter at open. Decision 0019 makes graph policy engine-native and
+durable: authorized graph open requires an exact recovered-policy match, while privileged raw
+bootstrap is the only initial-install path. Graph projections authorize targets and every embedded
+reference before returning content; absent policy denies.
 Recovered unique committed usage is rebuilt, while new uploads fail closed after reopen until T-35
 can enumerate every uncommitted reservation; known evidenced tokens remain recoverable.
+
+Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
+revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,
+durable policy records and reducer-owned authorized projections. Current indexes are rebuildable
+in-memory correctness structures; T-20 owns disk runs and bounded caches.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.

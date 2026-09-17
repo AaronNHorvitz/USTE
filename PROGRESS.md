@@ -2,8 +2,8 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest verified implementation: `d53dd2a` (completed local T-16 authorization and quota
-foundation over the T-13–T-15 journal/transaction/blob foundation). Review was performed by Codex
+Latest verified implementation: `8f035d7` (completed local T-17 transactional evidence graph over
+the T-13–T-16 journal/transaction/blob/authorization foundation). Review was performed by Codex
 agents and does not represent independent external security certification.
 
 ## Completed this increment
@@ -90,6 +90,23 @@ agents and does not represent independent external security certification.
 - Format 1.0 cannot enumerate abandoned uncommitted reservations, so a recovered authorized
   coordinator conservatively rejects new upload starts. Evidenced known uploads, including a
   zero-byte final marker, remain resumable for reconciliation/abort; T-35 owns complete enumeration.
+- Completed T-17 with Decision 0019 and the safe-Rust `uste-graph` production reducer: typed scoped
+  entities/evidence/assertions/relationships, strict canonical requests, revision history, explicit
+  valid time, lifecycle/corrections, reference closure and exact bounded cascade/retract deletion.
+- Added atomic ordered outgoing/incoming adjacency and evidence-provenance indexes with independent
+  rebuild checks. Cycles, self-loops, parallel edges and terminal transitions retain deterministic
+  behavior. A separate 1,000,000-candidate visit ceiling stops before over-limit allocation.
+- Added durable native graph policy bootstrap/replacement/history and reducer-owned authorized
+  projections. Missing/mismatched durable policy fails closed, consumer install is rejected, stale
+  idempotent replacement retries preserve the current version, revocation stales views and an
+  uncertain commit quarantines existing views.
+- Closed review-found graph disclosure paths: corrections require read authority on the new ID;
+  candidate caps apply after filtering; direct/traversal/provenance results authorize every embedded
+  endpoint, evidence, correction and nested property reference without returning hidden counts.
+- Bound recovery receipts to complete canonical affected-record and policy bytes. Future policy and
+  record history revisions fail explicitly. The production reducer agrees on shared modeled record
+  state with the independent ordered-map oracle after each of 160 generated transactions, validates
+  its derived-index rebuild separately, and restores graph/policy state after encrypted restart.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -154,8 +171,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 138 workspace tests including 64 uste-storage, 13
-# uste-crypto, 4 uste-policy and 24 uste-txn tests;
+# workspace format/clippy/test/doc pass; 152 workspace tests including 64 uste-storage, 13
+# uste-crypto, 13 uste-graph, 4 uste-policy and 25 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -183,13 +200,13 @@ remaining mixed workload have not passed.
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
 - The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
-  durable journal, transaction/blob coordinator and authorization foundation are implemented, but
-  there is still no graph engine, database executable or production qualification. Current native
-  policy records and concrete graph authorization paths remain T-17; policy is supplied by a
-  trusted local adapter at open. The
-  oracle intentionally retains full snapshots and scans records;
-  it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
-  Rust plus a C++ compiler, both confined to development tooling.
+  journal, transaction/blob coordinator, authorization foundation and transactional graph reducer
+  are implemented, but there is no database executable, disk graph index, replay checkpoint or
+  production qualification. Graph policy is durable; the trusted adapter must supply its exact
+  current copy at open. Production graph snapshots still retain full record history and derived
+  indexes in memory until T-20. The oracle intentionally scans records and is not a scalable
+  implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined to
+  development tooling.
 - T-13 local acceptance is complete on the reference Btrfs runner and the independently identified
   ext4 mount `/var/mnt/archive_vault` (`/dev/sda1`). These SIGKILL tests do not simulate controller
   cache loss or actual power loss. The certificate log fails closed at 1 GiB pending later
@@ -197,9 +214,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Begin dependency-permitted T-17 graph records, evidence-backed adjacency and durable native policy
-records over the authorized transaction foundation. Repeat VT-05/VT-06 through the real graph
-reducer, including corrections, deletion, conflicts, restart and authorization-before-expansion.
+Begin dependency-permitted T-18 deterministic replay and verified cache snapshots over the T-17
+graph reducer. Bind checkpoint identity to journal frontier, reducer/profile versions and canonical
+state, prove rebuild equivalence and corruption fallback without model/parser/network dependency.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

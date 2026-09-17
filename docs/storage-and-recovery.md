@@ -77,8 +77,9 @@ retains first-commit ownership for per-principal quota reconstruction.
 
 Staged and committed blob quotas count exact logical plaintext octets. A failed write reconciles
 the handle's observed accepted-byte delta; finalize does not release staging; accepted abort does;
-successful commit moves each unique reference to committed accounting once. T-17 must persist the
-current policy records supplied by the trusted local adapter in this foundation. Format 1.0 cannot
+successful commit moves each unique reference to committed accounting once. T-17 persists graph
+namespace policy in the same journal and requires an exact trusted-adapter match on authorized
+open. Format 1.0 cannot
 enumerate every abandoned upload reservation, so a reopened authorized coordinator denies new
 starts while permitting evidenced-token resume/abort; T-35 must replace this conservative rule
 with complete reconciliation.

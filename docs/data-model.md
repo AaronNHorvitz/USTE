@@ -1,6 +1,7 @@
 # Data model
 
-Draft contract · 2026-09-16 · Not implemented
+Living contract · 2026-09-17 · T-17 entity/evidence/assertion/relationship subset implemented;
+artifact, event, branch, purge and schema extensions remain later tasks
 
 Owns FR-01, FR-04, FR-05, FR-06 and the shared record vocabulary; FR-26 is detailed in
 [time normalization and ordering](time-and-ordering.md).
@@ -43,6 +44,13 @@ Location is optional. An object is not its coordinates, and a file is not its pa
 These are logical fields, not a frozen disk encoding. Security-relevant fields cannot be
 overridden through an arbitrary user-properties map. Required fields are validated at the
 API and again during import/recovery.
+
+Decision 0019 implements scoped entity/evidence/assertion/relationship records in `uste-graph`.
+The current evidence record contains an immutable digest and exact supplied locator; richer
+artifact/version/capture provenance remains T-22. The reducer retains current records and revision
+histories. Rebuildable outgoing/incoming indexes expose accepted current relationships; provenance
+retains every current claim that names an evidence record, including terminal claims needed for
+traceability. These are not yet bounded-cache disk indexes.
 
 ## Assertions and decisions
 

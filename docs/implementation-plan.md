@@ -74,8 +74,9 @@ Trusted authentication supplies the principal; consumer commit requests cannot s
 implemented revision-view/outcome/blob/commit path authorizes before existence access, version
 changes invalidate active handles, and exact committed-byte ownership rebuilds across restart.
 Because uncommitted reservations are not enumerable yet, reopened coordinators deny new upload
-starts while allowing evidenced-token reconciliation; T-35 owns removing that limitation. T-17
-adds durable policy records and record requirements before graph reducer state is inspected.
+starts while allowing evidenced-token reconciliation; T-35 owns removing that limitation. Decision
+0019/T-17 adds durable graph policy records, complete pre-state record requirements and
+reference-safe authorized graph projections. Its indexes remain in-memory until T-20.
 
 ## R0 design deliverables
 

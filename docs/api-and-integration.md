@@ -1,6 +1,7 @@
 # API and integration
 
-Draft contract · 2026-09-17 · T-16 view/outcome/blob/commit subset callable; later operations proposed
+Draft contract · 2026-09-17 · T-16 transaction/blob and T-17 graph-library subsets callable;
+public database/API/CLI operations remain proposed
 
 Owns FR-13, FR-14, FR-15, FR-25 and the consumer boundary.
 
@@ -15,9 +16,10 @@ The implemented T-16 subset authenticates through a trusted adapter during prote
 and returns an issuing-kernel-bound opaque principal; the consumer facade accepts no authenticator.
 Its external commit request has no identity field: the authorized
 coordinator derives the persisted principal. Pinned read views and upload handles are opaque and
-must be presented back for current-policy and coordinator-instance revalidation; generic views
-expose only the revision until T-17 supplies target-authorized projections. Direct raw transaction
-and storage handles are trusted internals, not an API for untrusted consumers.
+must be presented back for current-policy and coordinator-instance revalidation. Generic views
+expose only the revision; T-17 supplies reducer-owned direct-record, historical, one-hop adjacency
+and evidence-provenance projections without exposing the raw snapshot. Direct raw transaction and
+storage handles are trusted internals, not an API for untrusted consumers.
 
 | Surface | Required operations |
 |---|---|
