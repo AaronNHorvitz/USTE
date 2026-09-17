@@ -33,6 +33,9 @@ direct candidate surfaces with unsafe tokens include the RustCrypto stack, `html
 review and fuzz evidence remain required before admission. The experiment proves resolution,
 licensing feasibility and absence of native links, not memory safety.
 
+The direct-candidate classification and selected-feature dispositions are recorded in
+[`unsafe-boundaries.md`](unsafe-boundaries.md).
+
 ## Compatibility observations
 
 - `lopdf 0.45.0` resolves AES/MD5, Brotli, DEFLATE, text-encoding and SIMD-related transitives
@@ -57,6 +60,6 @@ same recorded `miniz_oxide` duplication.
 
 ## Remaining T-04 evidence
 
-Materialize and hash every generated fixture recipe, run every adapter under the supervisor
-limits, and review the exact unsafe blocks reachable on the supported target. The policy tool
-must be rerun against final split worker lockfiles. Until then T-04 remains unchecked.
+Run every adapter under the supervisor limits and validate the remaining reachable transitive
+unsafe blocks on the supported target. The policy tool must be rerun against final split worker
+lockfiles. Until then T-04 remains unchecked.

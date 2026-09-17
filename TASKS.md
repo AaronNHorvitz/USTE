@@ -42,8 +42,8 @@ appended spatial/physics tasks appear at their dependency gate rather than numer
   tests. They remain unchecked until the aggregate review accepts the contracts.
 - T-04 has an exact adapter registry, resolved candidate lockfile/native-link/license snapshot,
   clean advisory/license/source policy checks, and pinned logical/byte fixtures for every
-  family. It remains unchecked until reachable unsafe review and supervisor execution evidence
-  exist.
+  family. Direct unsafe boundaries are classified; T-04 remains unchecked until reachable
+  transitive validation and supervisor execution evidence exist.
 - T-05 has a named measured runner, hard limits, all BM-01…13 rows and a deterministic
   bounded-memory generator kernel. It remains unchecked until workload-specific materializers,
   measurements and review exist.
