@@ -21,14 +21,16 @@ tasks are not checked.
 - The storage-publication experiment exhaustively cuts both fixed experimental records and
   flips every byte; incomplete unacknowledged tails recover the old frontier while every
   complete-certificate data loss/corruption fails closed.
+- Nineteen generated parser fixtures have pinned byte lengths/SHA-256 values; smoke tests read
+  positive PDF/ZIP/PNG/JPEG/WAV/Y4M samples and inspect archive traversal/link negatives.
 
 ## Commands and results
 
 ~~~text
 $ rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 $ /tmp/uste-r0-vectors --nocapture
-running 10 tests
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 11 tests
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
 $ /tmp/uste-storage-publication
@@ -36,6 +38,10 @@ running 4 tests
 test result: ok. 4 passed; 0 failed
 
 $ cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
+running 4 tests
+test result: ok. 4 passed; 0 failed
+
+$ cargo test --manifest-path experiments/content-fixtures/Cargo.toml --locked --offline
 running 4 tests
 test result: ok. 4 passed; 0 failed
 

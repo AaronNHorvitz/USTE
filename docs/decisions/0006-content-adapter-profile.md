@@ -68,9 +68,12 @@ status/locator; unknown binaries must round-trip without invoking a worker.
 
 `acceptance/r0/content-fixtures.tsv` is the normative fixture registry. `hex:` and `utf8:`
 recipes are literal; `generated:` recipes are stable names reserved by the R0 materializer and
-must acquire exact byte hashes before their parser gate. The manifest contains positive and
+are materialized by `experiments/content-fixtures`. Exact byte counts and SHA-256 values are
+pinned in `acceptance/r0/content-generated.tsv`. The manifest contains positive and
 negative/inert cases for every baseline family, including unknown/zero bytes, depth, active
-content, encryption, traversal, expansion, dimensions and truncation.
+content, encryption, traversal, expansion, dimensions and truncation. The deterministic PDF
+password fixture uses legacy PDF V1 encryption only to exercise `PasswordRequired`; it is not
+the database encryption suite and is never accepted as a security profile.
 
 The absence of a credible strict OCR/transcription dependency is visible, not a gate waiver:
 the optional enrichments are not claimed. Exact R3 baseline parsing support remains gated on

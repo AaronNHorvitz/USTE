@@ -10,6 +10,7 @@ const SPATIAL: &str = include_str!("../acceptance/r0/spatial.tsv");
 const PHYSICS: &str = include_str!("../acceptance/r0/physics.tsv");
 const BENCHMARKS: &str = include_str!("../acceptance/r0/benchmark-manifest.tsv");
 const CONTENT: &str = include_str!("../acceptance/r0/content-fixtures.tsv");
+const CONTENT_GENERATED: &str = include_str!("../acceptance/r0/content-generated.tsv");
 
 fn rows(input: &str, columns: usize) -> Vec<Vec<&str>> {
     let mut lines = input.lines();
@@ -36,12 +37,31 @@ fn all_vector_files_are_structurally_valid_and_cases_are_unique() {
         (PHYSICS, 4),
         (BENCHMARKS, 5),
         (CONTENT, 6),
+        (CONTENT_GENERATED, 3),
     ] {
         let parsed = rows(input, columns);
         assert!(!parsed.is_empty());
         let cases: BTreeSet<_> = parsed.iter().map(|row| row[0]).collect();
         assert_eq!(cases.len(), parsed.len(), "duplicate case ID");
     }
+}
+
+#[test]
+fn generated_content_recipes_have_pinned_sha256_entries() {
+    let content = rows(CONTENT, 6);
+    let generated = rows(CONTENT_GENERATED, 3);
+    let generated_ids: BTreeSet<_> = generated.iter().map(|row| row[0]).collect();
+    let recipe_ids: BTreeSet<_> = content
+        .iter()
+        .filter(|row| row[3].starts_with("generated:"))
+        .map(|row| row[0])
+        .collect();
+    assert_eq!(generated_ids, recipe_ids);
+    assert!(generated.iter().all(|row| {
+        row[1].parse::<u64>().is_ok()
+            && row[2].len() == 64
+            && row[2].bytes().all(|byte| byte.is_ascii_hexdigit())
+    }));
 }
 
 #[test]

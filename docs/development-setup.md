@@ -38,9 +38,12 @@ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-stor
 /tmp/uste-storage-publication
 cargo build --manifest-path experiments/dependency-audit/Cargo.toml --locked
 cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked
+cargo test --manifest-path experiments/content-fixtures/Cargo.toml --locked
 .tools/bin/cargo-deny --manifest-path experiments/dependency-audit/Cargo.toml \
   --config deny.toml --locked check all --show-stats
 .tools/bin/cargo-deny --manifest-path experiments/fixture-generator/Cargo.toml \
+  --config deny.toml --locked check all --show-stats
+.tools/bin/cargo-deny --manifest-path experiments/content-fixtures/Cargo.toml \
   --config deny.toml --locked check all --show-stats
 cargo fmt --manifest-path experiments/dependency-audit/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/fixture-generator/Cargo.toml -- --check
@@ -71,3 +74,16 @@ wc -c /tmp/uste-synthetic-graph.bin
 
 The emitted stream is a benchmark input, not the production journal format. Do not commit
 generated corpora, benchmark output, databases, keys or private source files.
+
+List the byte-exact generated parser fixtures, or stream one to an isolated temporary path:
+
+~~~bash
+cargo run --quiet --locked --offline \
+  --manifest-path experiments/content-fixtures/Cargo.toml -- list
+cargo run --quiet --locked --offline \
+  --manifest-path experiments/content-fixtures/Cargo.toml -- emit pdf_text \
+  > /tmp/uste-synthetic.pdf
+~~~
+
+The list output must match `acceptance/r0/content-generated.tsv`. These are hostile/parser
+fixtures and must never be opened with an active desktop preview or executed.

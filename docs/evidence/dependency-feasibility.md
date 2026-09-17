@@ -46,11 +46,14 @@ licensing feasibility and absence of native links, not memory safety.
 
 ## Policy-check result
 
-`cargo-deny 0.20.2` was installed under `/tmp` and run against both experiment lockfiles with
+`cargo-deny 0.20.2` was installed under `/tmp` and run against all three experiment lockfiles with
 `deny.toml`, the cached RustSec database and `--frozen`. Advisories, licenses and sources pass
 with zero errors. The dependency candidate graph has one deliberate warning: `miniz_oxide`
 0.8.9 through `png` and 0.9.1 through current `flate2`; this duplicate is recorded rather than
-silently allowed. The fixture-generator graph passes all four checks without warnings.
+silently allowed. The fixture-generator graph passes all four checks without warnings. The
+content materializer initially failed policy on an unnecessary IJG-licensed JPEG encoder; the
+encoder was removed and the byte fixture pinned directly. Its final graph passes with only the
+same recorded `miniz_oxide` duplication.
 
 ## Remaining T-04 evidence
 
