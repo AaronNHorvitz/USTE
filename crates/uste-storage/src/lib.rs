@@ -9,6 +9,7 @@ mod adapter;
 pub mod blob;
 pub mod checkpoint;
 pub mod fault;
+pub mod index;
 pub mod journal;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod linux;
@@ -28,4 +29,11 @@ pub use blob::{
 pub use checkpoint::{
     CHECKPOINT_CHUNK_BYTES, CheckpointInput, DurableCheckpoint, MAX_CHECKPOINT_BYTES,
     RecoveredCheckpoint,
+};
+pub use index::{
+    DEFAULT_INDEX_CACHE_BYTES, DurableIndexRoot, INDEX_PAGE_BYTES, IndexEntry, IndexReadStats,
+    IndexRootInput, IndexRunDescriptor, IndexScan, IndexScanEntry, IndexScrubReport,
+    MAX_INDEX_CACHE_BYTES, MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_KEY_BYTES, MAX_INDEX_PAGES_PER_RUN,
+    MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUNS, MAX_INDEX_SCAN_RESULTS, MAX_INDEX_VALUE_BYTES,
+    PageCache, RecoveredIndexRoot,
 };

@@ -5,6 +5,7 @@ object_plaintext_cap	bytes	format=1.0	16777216
 small_frame	bytes	tag=01	4096
 blob_frame	bytes	tag=02	65536
 nonce_session_cap	count	writer_vault	1048576
+index_name_golden	bytes	master=11x32;database=4ax16;scope=database;epoch=1;writer=55x16;format=1.0;frame=4KiB;role=0D;input=66x32	b78b06458568c592ad2d7a8a725bf0848d442ff4178d3c6097c0ea1ea761fc4d
 recovery_header	bytes	format=1.0	66
 recovery_memory	KiB	argon2id-v1.3	262144
 recovery_iterations	count	argon2id-v1.3	3

@@ -21,7 +21,9 @@ use uste_crypto::{EntropySource, KeyAdapter};
 pub use uste_policy::PrincipalDigest;
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput, Clock,
-    DurableCheckpoint, EMPTY_BLOB_INVENTORY_DIGEST, OwnershipFileSystem, RecoveredCheckpoint,
+    DurableCheckpoint, DurableIndexRoot, EMPTY_BLOB_INVENTORY_DIGEST, IndexEntry, IndexReadStats,
+    IndexRootInput, IndexRunDescriptor, IndexScan, IndexScrubReport, OwnershipFileSystem,
+    PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -611,6 +613,152 @@ where
         }
         self.journal
             .publish_checkpoint(filesystem, input)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: write one invisible immutable index run at the current revision.
+    pub fn publish_index_run<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        entries: T,
+    ) -> Result<IndexRunDescriptor, TransactionError>
+    where
+        T: IntoIterator<Item = IndexEntry>,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .publish_index_run(
+                filesystem,
+                self.scope,
+                revision,
+                index_profile,
+                family,
+                entries,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Fallible streaming form for domain encoders; no root is published on encoder failure.
+    pub fn publish_index_run_fallible<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        entries: T,
+    ) -> Result<IndexRunDescriptor, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexEntry, StorageError>>,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .publish_index_run_fallible(
+                filesystem,
+                self.scope,
+                revision,
+                index_profile,
+                family,
+                entries,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: atomically publish a derived root bound to the exact journal anchor.
+    pub fn publish_index_root(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<DurableIndexRoot, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_index_root(filesystem, input, runs)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: load roots on this journal's authenticated certificate chain.
+    pub fn load_index_roots(
+        &self,
+        filesystem: &mut F,
+        index_profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .load_index_roots(filesystem, self.scope, index_profile)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted raw exact lookup. Consumer-facing callers must use an authorized projection.
+    pub fn index_get(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .index_get(filesystem, root, family, key, cache)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted raw bounded prefix scan. Consumer-facing callers must authorize before expansion.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .index_scan_prefix(
+                filesystem,
+                root,
+                family,
+                prefix,
+                maximum,
+                maximum_result_bytes,
+                cache,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance scrub of every page and logical entry digest in one root.
+    pub fn scrub_index_root(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        cache: &mut PageCache,
+    ) -> Result<IndexScrubReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .scrub_index_root(filesystem, root, cache)
             .map_err(TransactionError::Storage)
     }
 

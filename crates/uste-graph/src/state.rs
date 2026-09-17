@@ -51,11 +51,11 @@ pub enum AdjacencyDirection {
 pub struct GraphSnapshot {
     scope: NamespaceRef,
     revision: Option<CommitRevision>,
-    records: BTreeMap<RecordRef, Record>,
+    pub(crate) records: BTreeMap<RecordRef, Record>,
     history: BTreeMap<RecordRef, Vec<Record>>,
-    outgoing: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
-    incoming: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
-    provenance: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
+    pub(crate) outgoing: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
+    pub(crate) incoming: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
+    pub(crate) provenance: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
     policy: Option<NamespacePolicy>,
     policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
 }
@@ -260,6 +260,10 @@ impl GraphState {
     #[must_use]
     pub fn snapshot(&self) -> GraphSnapshot {
         self.snapshot.clone()
+    }
+
+    pub(crate) const fn current_snapshot(&self) -> &GraphSnapshot {
+        &self.snapshot
     }
 
     pub fn prepare_transaction(

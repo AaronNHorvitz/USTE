@@ -147,6 +147,13 @@ then applies the normal reducer only to the suffix. Invalid candidates fall back
 or cold replay; they never create commits or replace journal authority. The current two-open handoff
 and 256 MiB in-memory cache cap are correctness choices, not T-20/BM-06 performance claims.
 
+Decision 0025 adds the native Rust `index-v1` foundation: immutable encrypted 16 KiB logical pages,
+certificate-anchored two-slot cache roots, complete-context bounded decrypted caching and a
+semantically validated current-record/adjacency/provenance graph projection. The journal remains the
+only commit authority. The current graph projection is a privileged maintenance/raw surface;
+authorization-preserving disk queries, streaming larger-than-memory recovery and BM-01/BM-06 remain
+open T-20 work. T-35 still owns authoritative baseline switching, compaction and orphan reclamation.
+
 Decision 0021 adds the capability-free `uste-time` normalization kernel. `uste-types` retains the
 canonical instant pair without a timezone dependency. Strict explicit-offset and numeric-unit input
 can resolve directly; named local input uses only hash-verified embedded TZDB 2026c bytes. A bounded
@@ -163,11 +170,10 @@ spatial closure is rechecked after graph-only changes. Composite checkpoints are
 caches; the encrypted journal and coordinator retry identity remain authoritative. CSV/JSON parsing
 and mapping execution stay outside this capability-free reducer until T-54.
 
-Begin with an append journal and rebuildable reference indexes. The release engine adds
-immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.
-The exact binary layout and index algorithm are gated by D-01; no other database engine is
-silently introduced. Hot graph adjacency and cold temporal history require separate access
-paths, not a time-partition-only layout.
+Begin with an append journal and rebuildable reference indexes. Decision 0025 fixes the first
+immutable disk-index run, bounded-cache and versioned derived-root profile; T-35 adds atomic
+compaction and authoritative baselines. No other database engine is silently introduced. Hot graph
+adjacency and cold temporal history require separate access paths, not a time-partition-only layout.
 
 Avoid two independent sources of commit truth. The journal owns commits; projections and
 worker queues derive from it. A checkpoint is a cache until explicitly promoted to a new

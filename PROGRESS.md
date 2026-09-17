@@ -2,11 +2,10 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed implementation: `9ec08db` (T-49 capability-free atomic graph/spatial/import
-reducer, exact source/mapping bindings, authorization composition and durable job checkpoints over
-the T-14–T-18/T-48 foundation). Decision 0023 and linked evidence bind closure in the following
-documentation commit. Review was performed by Codex agents and does not represent independent
-external security certification.
+Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). T-20 now has a
+locally verified encrypted disk-index foundation in the current increment, but remains open pending
+its authorized query path, streaming larger-than-memory recovery and BM-01/BM-06 results. Review was
+performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -164,6 +163,20 @@ unverified external distribution prerequisite.
 - Kept the T-49 boundary explicit: payload digests are caller-declared commitments, preview is a
   trusted raw helper, batches are fully accepted and nonempty, and T-54 still owns canonical per-row
   effect verification, CSV/JSON mapping, rejected-row reports, CLI and exact item/price fixtures.
+- Advanced T-20 with Decision 0025 and native Rust encrypted immutable sorted runs: exact 16 KiB
+  logical pages, 2 KiB roots, opaque two-slot root names, exact certificate/profile bindings,
+  bounded prefix reads and a 64 MiB default/256 MiB maximum decrypted-page cache.
+- Added current-record, outgoing/incoming adjacency and provenance disk families. Admission now
+  compares the supplied snapshot with the coordinator's exact live reducer state, independently
+  recomputes mandatory family/count/digest expectations, fully scrubs durable pages and rejects a
+  stale handle after any later commit.
+- Closed review findings for cross-database cache confusion, run/root binding, plaintext-bearing
+  cache diagnostics, cached scrub bypass, same-length/trailing run corruption, transient I/O
+  misclassification, corrupt-newest overwrite fallback and same-revision foreign snapshots.
+- Pinned the page/root format and opaque `IndexName` role in literal acceptance vectors. Root and
+  run corruption, operational read faults, all root-publication crash boundaries, encrypted restart,
+  self-consistent wrong projections and raw graph reference equivalence pass. This is explicitly
+  not T-20 closure or BM evidence; see `docs/evidence/disk-index-foundation.md`.
 - Corrected review findings for normalizer-construction bypass, cap-before-copy behavior, malformed
   date-only inputs and open semantic reason combinations. Final review found no remaining high- or
   medium-severity T-45 finding; dependency unsafe remains explicitly inventoried.
@@ -231,8 +244,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 228 workspace tests including 69 uste-storage, 13
-# uste-crypto, 26 uste-graph, 4 uste-ingest, 26 uste-spatial, 22 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 234 workspace tests including 74 uste-storage, 13
+# uste-crypto, 27 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 8 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 cargo test -p uste-spatial --all-targets --locked
@@ -270,15 +283,14 @@ remaining mixed workload have not passed.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The canonical type/codec kernel, test-only logical oracle, envelope/key boundary, encrypted
-  journal, transaction/blob coordinator, authorization foundation, transactional graph reducer and
-  encrypted checkpoint recovery path are implemented, but there is no database executable, disk
-  graph index or production qualification. Checkpoint discovery and seeded open each authenticate
-  the journal, and the 256 MiB cache still retains full graph history in memory; T-20 owns disk
-  indexes, bounded caches and BM-06. Graph policy is durable; the trusted adapter must supply its
-  exact current copy at authorized open. The oracle intentionally scans records and is not a
-  scalable implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined
-  to development tooling.
+- The canonical kernel through T-49 plus T-20's encrypted current-graph disk projection is
+  implemented, but there is no database executable or production qualification. The new disk APIs
+  are privileged maintenance/raw surfaces, not an authorization-preserving consumer path.
+  Checkpoint discovery and seeded open each authenticate the journal, while the 256 MiB checkpoint
+  and reducer still retain/clone full graph history in memory; BM-01/BM-06 have not run. Graph policy
+  is durable; the trusted adapter must supply its exact current copy at authorized open. The oracle
+  intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
+  compiler, both confined to development tooling.
 - T-45 normalizes timestamps and preserves their provenance but does not add temporal indexes,
   content-adapter extraction, clock-drift estimation or leap/TAI/GPS conversion tables. T-21 and
   T-24 own those layers. The admitted named-zone behavior is pinned to embedded TZDB 2026c.
@@ -297,9 +309,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue with T-20: implement the versioned disk-index/bounded-cache foundation and its BM-01/BM-06
-enabling harness. Then return to T-19's remaining VT gaps and BM-02/BM-04 work; no failed or absent
-benchmark is accepted as passing.
+Continue T-20 with the authorization-preserving disk-query facade, streaming larger-than-memory
+checkpoint/state path and exact BM-01/BM-06 harnesses. Then return to T-19's remaining VT gaps and
+BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

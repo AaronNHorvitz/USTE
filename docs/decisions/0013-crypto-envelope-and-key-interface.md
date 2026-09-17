@@ -31,7 +31,9 @@ zeroizing owner while unlocked. HKDF-SHA-256 uses the literal extract salt
 
 Roles `01` through `08` are journal group, commit certificate, blob chunk, snapshot, index page,
 backup, temporary spill and worker output. Decision 0015 assigns role `09` to the immutable
-creation manifest. Free-form role strings are not admitted. The XChaCha
+creation manifest; Decision 0017 assigns `0A`–`0C` to blob inventory, manifest and opaque inventory
+name; Decision 0025 assigns `0D` to the opaque index-root-name domain. Free-form role strings are
+not admitted. The XChaCha
 associated data is the literal `USTE crypto-v1 AEAD`, the complete public envelope header and the
 complete context above, in that order. Consequently a wrong database, scope, epoch, role, object,
 sequence, incarnation, format or frame fails authentication.

@@ -336,6 +336,13 @@ pub(crate) fn encode_result_record(record: &Record) -> Result<Vec<u8>, GraphCode
     encode_value(&value).map_err(GraphCodecError::Encode)
 }
 
+/// Canonical complete stored-record encoding used by authenticated derived projections.
+///
+/// This is not a transaction request and does not grant publication authority.
+pub fn encode_stored_record(record: &Record) -> Result<Vec<u8>, GraphCodecError> {
+    encode_result_record(record)
+}
+
 pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecError> {
     let mut fields = Fields::new(decode_value(input).map_err(GraphCodecError::Decode)?)?;
     let kind = take_text(fields.take("kind")?)?;
@@ -392,6 +399,11 @@ pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecErr
     };
     fields.finish()?;
     Ok(record)
+}
+
+/// Decode one complete canonical stored record from a trusted derived projection.
+pub fn decode_stored_record(input: &[u8]) -> Result<Record, GraphCodecError> {
+    decode_result_record(input)
 }
 
 pub(crate) fn encode_result_policy(

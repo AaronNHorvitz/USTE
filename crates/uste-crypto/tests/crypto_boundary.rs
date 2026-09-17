@@ -224,6 +224,31 @@ fn public_opaque_identifier_has_a_pinned_domain_and_rejects_other_roles() {
             0x3f, 0xad, 0xab, 0x4b,
         ]
     );
+    let index_name = vault
+        .derive_opaque_identifier(
+            CryptoContext::new(
+                database,
+                Scope::Database,
+                KeyEpoch::FIRST,
+                ObjectRole::IndexName,
+                CryptoObjectId::from_bytes([0; 16]),
+                0,
+                WriterIncarnationId::from_bytes([0x55; 16]),
+                1,
+                0,
+                FrameClass::Small4KiB,
+            ),
+            &[0x66; 32],
+        )
+        .unwrap();
+    assert_eq!(
+        index_name,
+        [
+            0xb7, 0x8b, 0x06, 0x45, 0x85, 0x68, 0xc5, 0x92, 0xad, 0x2d, 0x7a, 0x8a, 0x72, 0x5b,
+            0xf0, 0x84, 0x8d, 0x44, 0x2f, 0xf4, 0x17, 0x8d, 0x3c, 0x60, 0x97, 0xc0, 0xea, 0x1e,
+            0xa7, 0x61, 0xfc, 0x4d,
+        ]
+    );
     assert_eq!(
         vault
             .derive_opaque_identifier(
@@ -298,7 +323,7 @@ fn literal_crypto_profile_matches_public_bounds() {
         expected("recovery_password_cap").parse::<usize>().unwrap(),
         MAX_RECOVERY_PASSWORD_BYTES
     );
-    assert_eq!(CRYPTO_VECTORS.lines().count(), 12);
+    assert_eq!(CRYPTO_VECTORS.lines().count(), 13);
 }
 
 #[test]

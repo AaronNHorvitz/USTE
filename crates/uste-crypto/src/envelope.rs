@@ -260,7 +260,12 @@ impl<W, E: EntropySource> KeyVault<W, E> {
         context: CryptoContext,
         input: &[u8; 32],
     ) -> Result<[u8; 32], CryptoError> {
-        if context.database() != self.database || context.role() != ObjectRole::BlobInventoryName {
+        if context.database() != self.database
+            || !matches!(
+                context.role(),
+                ObjectRole::BlobInventoryName | ObjectRole::IndexName
+            )
+        {
             return Err(CryptoError::InvalidContext);
         }
         let key = self.key.as_ref().ok_or(CryptoError::Locked)?;

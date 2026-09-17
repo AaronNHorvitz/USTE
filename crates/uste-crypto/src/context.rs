@@ -94,6 +94,7 @@ pub enum ObjectRole {
     BlobInventory = 10,
     BlobManifest = 11,
     BlobInventoryName = 12,
+    IndexName = 13,
 }
 
 /// Public ciphertext padding class.

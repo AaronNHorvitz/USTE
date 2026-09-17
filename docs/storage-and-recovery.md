@@ -134,10 +134,25 @@ Ciphertext identity is not the canonical logical state digest.
 
 ## Indexing and bounded resources
 
-Disk indexes provide entity lookup, both adjacency directions, property/type lookup,
-valid/recorded-time filters, and provenance dependency lookup. Time-partitioned history alone
-is not an adequate graph adjacency index. Each index run carries schema and revision coverage.
-Queries merge only compatible committed runs under one revision.
+Decision 0025 implements the first `index-v1` slice: immutable sorted runs use exact 16 KiB
+authenticated plaintext pages, roots alternate between two key-derived opaque names and every root
+is bound to the exact existing certificate, reducer/logical digest and index profile. Root recovery
+fully scrubs referenced durable pages before selecting a fallback or overwrite slot. The first
+`graph-current-v1` projection provides current record lookup, both adjacency directions and
+provenance. It independently compares the exact family set, counts and digests with the frozen graph
+snapshot before admission, and rechecks the live journal frontier on every raw read.
+
+The default decrypted-page cache is 64 MiB and rejects budgets over 256 MiB. Cache identity includes
+database, namespace, epoch, writer, revision, profile, generation, run and page; diagnostics redact
+keys and plaintext, and scrub bypasses cached bytes. Exact layout, scan and object limits are pinned
+in Decision 0025 and `acceptance/r1/index-v1.tsv`.
+
+These roots are rebuildable certificate-anchored caches, not committed baselines. The current graph
+surface is privileged maintenance/raw access and does not replace consumer authorization. Property/
+type and valid/recorded-time lookup remain T-21/T-25 work; streaming larger-than-memory checkpoint
+construction and the BM-01/BM-06 results remain required before T-20 closes. Time-partitioned
+history alone is not an adequate graph adjacency index. Queries merge only compatible committed
+runs under one revision.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

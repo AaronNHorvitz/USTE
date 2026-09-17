@@ -25,6 +25,10 @@ use crate::{
     checkpoint::{
         self, CheckpointContext, CheckpointInput, DurableCheckpoint, RecoveredCheckpoint,
     },
+    index::{
+        self, DurableIndexRoot, IndexContext, IndexEntry, IndexReadStats, IndexRootInput,
+        IndexRunDescriptor, IndexScan, IndexScrubReport, PageCache, RecoveredIndexRoot,
+    },
     read_exact_at, write_all_at,
 };
 
@@ -968,6 +972,218 @@ where
                 == Some(checkpoint.certificate_digest())
         })
         .collect()
+    }
+
+    /// Write one immutable encrypted sorted run. It is not visible until an exact anchored root
+    /// is published, and an interrupted write is only rebuildable orphan data.
+    pub fn publish_index_run<T>(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        entries: T,
+    ) -> Result<IndexRunDescriptor, StorageError>
+    where
+        T: IntoIterator<Item = IndexEntry>,
+    {
+        if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        index::publish_run(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            scope,
+            revision,
+            index_profile,
+            family,
+            entries.into_iter().map(Ok),
+        )
+    }
+
+    /// Fallible streaming variant for a domain projection encoder. An encoder error leaves at
+    /// most an unreferenced partial run and never publishes an index root.
+    pub fn publish_index_run_fallible<T>(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        entries: T,
+    ) -> Result<IndexRunDescriptor, StorageError>
+    where
+        T: IntoIterator<Item = Result<IndexEntry, StorageError>>,
+    {
+        if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        index::publish_run(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            scope,
+            revision,
+            index_profile,
+            family,
+            entries,
+        )
+    }
+
+    /// Atomically publish an optional two-slot derived root at the exact current certificate.
+    /// The root cannot create, advance or roll back a committed journal revision.
+    pub fn publish_index_root(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<DurableIndexRoot, StorageError> {
+        if self.poisoned
+            || self.frontier != Some(input.revision)
+            || self.previous_certificate_digest != input.certificate_digest
+            || input.scope.database() != self.database
+        {
+            return Err(StorageError::InvalidState);
+        }
+        index::publish_root(
+            filesystem,
+            IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            input,
+            runs,
+        )
+    }
+
+    /// Load authenticated derived roots whose exact certificate is present in this journal.
+    pub fn load_index_roots(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        index_profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, StorageError> {
+        let roots = index::load(
+            filesystem,
+            IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            scope,
+            index_profile,
+        )?;
+        Ok(roots
+            .into_iter()
+            .filter(|root| {
+                self.certificate_anchors.get(&root.revision()) == Some(root.certificate_digest())
+            })
+            .collect())
+    }
+
+    /// Exact key lookup in one family of an authenticated derived root.
+    pub fn index_get(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::get(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            key,
+            cache,
+        )
+    }
+
+    /// Bounded ordered prefix scan in one family of an authenticated derived root.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::scan_prefix(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            prefix,
+            maximum,
+            maximum_result_bytes,
+            cache,
+        )
+    }
+
+    /// Stream-authenticate and logically rehash every run without exceeding the page-cache bound.
+    pub fn scrub_index_root(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        cache: &mut PageCache,
+    ) -> Result<IndexScrubReport, StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::scrub(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            cache,
+        )
     }
 
     fn rollover(&mut self, filesystem: &mut F, first_revision: u64) -> Result<(), StorageError> {
@@ -2143,6 +2359,507 @@ mod tests {
             Err(StorageError::InvalidState)
         );
         assert!(store.load_checkpoints(&mut filesystem, scope).is_empty());
+    }
+
+    #[test]
+    fn encrypted_index_runs_round_trip_large_values_with_bounded_cache_and_root_fallback() {
+        let database = DatabaseId::from_bytes([0xd1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd2; 16]));
+        let mut filesystem = MemoryFileSystem::new(8 * 1024 * 1024);
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "index-runs"),
+            create_vault(database, 91_000),
+            CounterEntropy::new(92_000),
+        )
+        .unwrap();
+        let committed = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"index anchor",
+                    logical_event_digest: [0xd3; 32],
+                },
+            )
+            .unwrap();
+        let profile = [0xd4; 32];
+        let large = (0..index::INDEX_PAGE_BYTES * 2 + 137)
+            .map(|offset| u8::try_from(offset % 251).unwrap())
+            .collect::<Vec<_>>();
+        let run = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                committed.revision,
+                profile,
+                1,
+                [
+                    IndexEntry {
+                        key: b"alpha".to_vec(),
+                        value: Vec::new(),
+                    },
+                    IndexEntry {
+                        key: b"beta".to_vec(),
+                        value: large.clone(),
+                    },
+                    IndexEntry {
+                        key: b"gamma".to_vec(),
+                        value: b"tail".to_vec(),
+                    },
+                ],
+            )
+            .unwrap();
+        assert!(run.page_count() >= 3);
+        let input = IndexRootInput {
+            scope,
+            revision: committed.revision,
+            certificate_digest: committed.certificate_digest,
+            reducer_profile: [0xd5; 32],
+            logical_state_digest: [0xd6; 32],
+            index_profile: profile,
+        };
+        assert_eq!(
+            store
+                .publish_index_root(&mut filesystem, input, &[run])
+                .unwrap()
+                .generation,
+            1
+        );
+        assert_eq!(
+            store
+                .publish_index_root(&mut filesystem, input, &[run])
+                .unwrap()
+                .generation,
+            2
+        );
+        let mismatched = IndexRootInput {
+            scope: NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xee; 16])),
+            ..input
+        };
+        assert_eq!(
+            store
+                .publish_index_root(&mut filesystem, mismatched, &[run])
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+
+        let roots = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[0].generation(), 2);
+        let mut cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        let (read, cold) = store
+            .index_get(&mut filesystem, &roots[0], 1, b"beta", &mut cache)
+            .unwrap();
+        assert_eq!(read.as_deref(), Some(large.as_slice()));
+        assert!(cold.pages_read >= 3);
+        assert!(cache.accounted_bytes() <= cache.budget());
+        assert!(cache.evictions() > 0);
+
+        let scan = store
+            .index_scan_prefix(&mut filesystem, &roots[0], 1, b"g", 1, 64, &mut cache)
+            .unwrap();
+        assert_eq!(
+            scan.entries,
+            vec![index::IndexScanEntry {
+                key: b"gamma".to_vec(),
+                value: b"tail".to_vec(),
+            }]
+        );
+        let scrubbed = store
+            .scrub_index_root(&mut filesystem, &roots[0], &mut cache)
+            .unwrap();
+        assert_eq!(scrubbed.runs, 1);
+        assert_eq!(scrubbed.entries, 3);
+        assert_eq!(scrubbed.pages, run.page_count());
+
+        let root_directory = store.database_directory;
+        let root_names = filesystem
+            .test_child_names(&root_directory)
+            .unwrap()
+            .into_iter()
+            .filter(|name| name.as_str().starts_with("x-"))
+            .collect::<Vec<_>>();
+        assert_eq!(root_names.len(), 2);
+        for name in root_names {
+            let mut damaged = filesystem.clone();
+            damaged
+                .test_mutate_file(&root_directory, &name, 32)
+                .unwrap();
+            let recovered = store
+                .load_index_roots(&mut damaged, scope, profile)
+                .unwrap();
+            assert_eq!(recovered.len(), 1);
+        }
+
+        let mut warm_cache = PageCache::new(index::INDEX_PAGE_BYTES * 8).unwrap();
+        store
+            .index_get(&mut filesystem, &roots[0], 1, b"beta", &mut warm_cache)
+            .unwrap();
+        let run_name = filesystem
+            .test_child_names(&root_directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("i-"))
+            .unwrap();
+        let mut damaged_run = filesystem.clone();
+        damaged_run
+            .test_mutate_file(&root_directory, &run_name, 100)
+            .unwrap();
+        assert_eq!(
+            store
+                .scrub_index_root(&mut damaged_run, &roots[0], &mut warm_cache)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        let mut appended_run = filesystem.clone();
+        appended_run
+            .test_append_file(&root_directory, &run_name, b"trailing")
+            .unwrap();
+        assert_eq!(
+            store
+                .scrub_index_root(&mut appended_run, &roots[0], &mut warm_cache)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+    }
+
+    #[test]
+    fn page_cache_identity_includes_database_and_namespace_context() {
+        let mut filesystem = MemoryFileSystem::new(8 * 1024 * 1024);
+        let profile = [0xa4; 32];
+        let mut stores = Vec::new();
+        for (database_byte, namespace_byte, name, value) in [
+            (0xa1, 0xa2, "cache-scope-one", b"one".as_slice()),
+            (0xb1, 0xb2, "cache-scope-two", b"two".as_slice()),
+        ] {
+            let database = DatabaseId::from_bytes([database_byte; 16]);
+            let scope = NamespaceRef::new(
+                database,
+                uste_types::NamespaceId::from_bytes([namespace_byte; 16]),
+            );
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, name),
+                create_vault(database, 120_000),
+                CounterEntropy::new(121_000),
+            )
+            .unwrap();
+            let committed = store
+                .append_group(
+                    &mut filesystem,
+                    CommitInput {
+                        encoded_group: b"cache identity anchor",
+                        logical_event_digest: [0xa3; 32],
+                    },
+                )
+                .unwrap();
+            let run = store
+                .publish_index_run(
+                    &mut filesystem,
+                    scope,
+                    committed.revision,
+                    profile,
+                    1,
+                    [IndexEntry {
+                        key: b"key".to_vec(),
+                        value: value.to_vec(),
+                    }],
+                )
+                .unwrap();
+            store
+                .publish_index_root(
+                    &mut filesystem,
+                    IndexRootInput {
+                        scope,
+                        revision: committed.revision,
+                        certificate_digest: committed.certificate_digest,
+                        reducer_profile: [0xa5; 32],
+                        logical_state_digest: [0xa6; 32],
+                        index_profile: profile,
+                    },
+                    &[run],
+                )
+                .unwrap();
+            let root = store
+                .load_index_roots(&mut filesystem, scope, profile)
+                .unwrap()
+                .remove(0);
+            stores.push((store, root, value.to_vec()));
+        }
+
+        let mut cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        let (first, first_stats) = stores[0]
+            .0
+            .index_get(&mut filesystem, &stores[0].1, 1, b"key", &mut cache)
+            .unwrap();
+        assert_eq!(first, Some(stores[0].2.clone()));
+        assert_eq!(first_stats.pages_read, 1);
+        let misses_after_first = cache.misses();
+        let (second, second_stats) = stores[1]
+            .0
+            .index_get(&mut filesystem, &stores[1].1, 1, b"key", &mut cache)
+            .unwrap();
+        assert_eq!(second, Some(stores[1].2.clone()));
+        assert_eq!(second_stats.pages_read, 1);
+        assert_eq!(cache.misses(), misses_after_first + 1);
+    }
+
+    #[test]
+    fn every_index_root_publication_boundary_recovers_an_old_or_exact_new_root() {
+        let database = DatabaseId::from_bytes([0xda; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xdb; 16]));
+        let profile = [0xdc; 32];
+        let name = "index-root-faults";
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, name),
+            create_vault(database, 93_000),
+            CounterEntropy::new(94_000),
+        )
+        .unwrap();
+        let committed = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"index root fault anchor",
+                    logical_event_digest: [0xdd; 32],
+                },
+            )
+            .unwrap();
+        let input = IndexRootInput {
+            scope,
+            revision: committed.revision,
+            certificate_digest: committed.certificate_digest,
+            reducer_profile: [0xde; 32],
+            logical_state_digest: [0xdf; 32],
+            index_profile: profile,
+        };
+        for value in [b"one".as_slice(), b"two".as_slice()] {
+            let run = store
+                .publish_index_run(
+                    &mut base,
+                    scope,
+                    committed.revision,
+                    profile,
+                    1,
+                    [IndexEntry {
+                        key: b"key".to_vec(),
+                        value: value.to_vec(),
+                    }],
+                )
+                .unwrap();
+            store.publish_index_root(&mut base, input, &[run]).unwrap();
+        }
+        let root_directory = store.database_directory;
+        let mut newest_run_corrupt = None;
+        for run_name in base
+            .test_child_names(&root_directory)
+            .unwrap()
+            .into_iter()
+            .filter(|entry| entry.as_str().starts_with("i-"))
+        {
+            let mut candidate = base.clone();
+            candidate
+                .test_mutate_file(&root_directory, &run_name, 100)
+                .unwrap();
+            let roots = store
+                .load_index_roots(&mut candidate, scope, profile)
+                .unwrap();
+            if roots.len() == 1 && roots[0].generation() == 1 {
+                newest_run_corrupt = Some(candidate);
+                break;
+            }
+        }
+        let newest_run_corrupt = newest_run_corrupt.expect("newest run must be identifiable");
+        drop(store);
+        base.restart().unwrap();
+
+        let boundaries = [
+            (Operation::RemoveFile, 1_u64, "invalidate old root"),
+            (Operation::SyncDirectory, 1, "persist root invalidation"),
+            (Operation::CreateNew, 1, "create new root"),
+            (Operation::WriteAt, 1, "write root object id"),
+            (Operation::WriteAt, 2, "write encrypted root"),
+            (Operation::SetLen, 1, "size root"),
+            (Operation::SyncAll, 1, "persist root"),
+            (Operation::SyncDirectory, 2, "publish root"),
+        ];
+        let mut case_seed = 95_000_u64;
+        for (operation, occurrence, label) in boundaries {
+            for action in [FaultAction::CrashBefore, FaultAction::CrashAfter] {
+                case_seed += 10;
+                let mut filesystem = FaultFileSystem::new(base.clone(), FaultPlan::default());
+                let mut store = reopen_fault_store(&mut filesystem, database, name, case_seed);
+                let third = store
+                    .publish_index_run(
+                        &mut filesystem,
+                        scope,
+                        committed.revision,
+                        profile,
+                        1,
+                        [IndexEntry {
+                            key: b"key".to_vec(),
+                            value: b"three".to_vec(),
+                        }],
+                    )
+                    .unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    store
+                        .publish_index_root(&mut filesystem, input, &[third])
+                        .unwrap_err(),
+                    StorageError::Adapter(AdapterErrorKind::InjectedCrash),
+                    "boundary={label}, action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0, "boundary={label}");
+                drop(store);
+                filesystem.restart().unwrap();
+
+                let mut store = reopen_fault_store(&mut filesystem, database, name, case_seed + 2);
+                let roots = store
+                    .load_index_roots(&mut filesystem, scope, profile)
+                    .unwrap();
+                assert!(!roots.is_empty(), "boundary={label}, action={action:?}");
+                let mut cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+                let (value, _) = store
+                    .index_get(&mut filesystem, &roots[0], 1, b"key", &mut cache)
+                    .unwrap();
+                assert!(
+                    matches!(value.as_deref(), Some(b"two") | Some(b"three")),
+                    "boundary={label}, action={action:?}"
+                );
+                store
+                    .publish_index_root(&mut filesystem, input, &[third])
+                    .unwrap();
+                let retried = store
+                    .load_index_roots(&mut filesystem, scope, profile)
+                    .unwrap();
+                cache.clear();
+                let (value, _) = store
+                    .index_get(&mut filesystem, &retried[0], 1, b"key", &mut cache)
+                    .unwrap();
+                assert_eq!(
+                    value.as_deref(),
+                    Some(b"three".as_slice()),
+                    "boundary={label}"
+                );
+            }
+        }
+
+        for (operation, occurrence, kind) in [
+            (Operation::OpenExisting, 1, AdapterErrorKind::Io),
+            (Operation::ReadAt, 1, AdapterErrorKind::Io),
+            (
+                Operation::OpenExisting,
+                2,
+                AdapterErrorKind::PermissionDenied,
+            ),
+        ] {
+            let mut filesystem = FaultFileSystem::new(base.clone(), FaultPlan::default());
+            let mut store = reopen_fault_store(&mut filesystem, database, name, 97_000);
+            let replacement = store
+                .publish_index_run(
+                    &mut filesystem,
+                    scope,
+                    committed.revision,
+                    profile,
+                    1,
+                    [IndexEntry {
+                        key: b"key".to_vec(),
+                        value: b"replacement".to_vec(),
+                    }],
+                )
+                .unwrap();
+            filesystem
+                .arm(
+                    FaultPlan::new([FaultPoint {
+                        operation,
+                        occurrence,
+                        action: FaultAction::Error(kind),
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .publish_index_root(&mut filesystem, input, &[replacement])
+                    .unwrap_err(),
+                StorageError::Adapter(kind)
+            );
+            assert_eq!(filesystem.pending_faults(), 0);
+            assert_eq!(
+                store
+                    .load_index_roots(&mut filesystem, scope, profile)
+                    .unwrap()
+                    .len(),
+                2
+            );
+        }
+
+        // The overwrite decision must be based on usable roots, not merely authenticated root
+        // manifests. Otherwise deleting the older slot and crashing could strand only the newest
+        // root whose same-length run ciphertext is corrupt.
+        let mut filesystem = FaultFileSystem::new(newest_run_corrupt, FaultPlan::default());
+        filesystem.restart().unwrap();
+        let mut store = reopen_fault_store(&mut filesystem, database, name, 98_000);
+        let replacement = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                committed.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"key".to_vec(),
+                    value: b"replacement".to_vec(),
+                }],
+            )
+            .unwrap();
+        filesystem
+            .arm(
+                FaultPlan::new([FaultPoint {
+                    operation: Operation::RemoveFile,
+                    occurrence: 1,
+                    action: FaultAction::CrashAfter,
+                }])
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .publish_index_root(&mut filesystem, input, &[replacement])
+                .unwrap_err(),
+            StorageError::Adapter(AdapterErrorKind::InjectedCrash)
+        );
+        drop(store);
+        filesystem.restart().unwrap();
+        let store = reopen_fault_store(&mut filesystem, database, name, 98_100);
+        let roots = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].generation(), 1);
+        let mut cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        assert_eq!(
+            store
+                .index_get(&mut filesystem, &roots[0], 1, b"key", &mut cache)
+                .unwrap()
+                .0
+                .as_deref(),
+            Some(b"one".as_slice())
+        );
     }
 
     #[test]

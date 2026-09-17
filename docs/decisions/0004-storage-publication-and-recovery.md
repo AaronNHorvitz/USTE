@@ -64,8 +64,10 @@ anchor. This is the explicit distinction requested by D-01, not a “highest val
 
 Checkpoints are immutable caches until a retention transaction promotes one as a baseline.
 Their inventory, revision, epoch, schema/profile set and canonical logical digest must match
-independent replay. Immutable disk indexes use 16 KiB authenticated pages in sorted runs;
-roots are referenced only by committed maintenance events and remain rebuildable.
+independent replay. Immutable disk indexes use 16 KiB authenticated pages in sorted runs.
+Decision 0025 permits optional derived roots anchored directly to an exact existing certificate;
+they remain rebuildable and cannot advance commit or recovery. Only promotion to an authoritative
+retained baseline or compaction root requires the later committed maintenance protocol in T-35.
 
 ## Crash matrix
 
@@ -86,8 +88,10 @@ rollover or blob publication acknowledgment.
 
 ## Alternatives and acceptance
 
-Dual mutable root slots were rejected because damage to the newest slot is indistinguishable
-from interrupted publication without stronger assumptions. SQLite/RocksDB were rejected by
+Dual mutable **commit** root slots were rejected because damage to the newest slot is
+indistinguishable from interrupted publication without stronger assumptions. Decision 0025 uses
+two slots only for optional certificate-anchored caches and proves run usability before replacing
+their fallback; neither slot is commit truth. SQLite/RocksDB were rejected by
 the product direction. Copy-on-write filesystem snapshots are optional operator backups, not
 commit truth.
 
