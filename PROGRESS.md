@@ -2,8 +2,8 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `9953624` (T-10 independent state-machine oracle). Review was performed by
-Codex agents and does not represent independent external security certification.
+Latest reviewed implementation: `bbe4341` (T-11 authenticated crypto/key boundary). Review was
+performed by Codex agents and does not represent independent external security certification.
 
 ## Completed this increment
 
@@ -23,6 +23,16 @@ Codex agents and does not represent independent external security certification.
   instants, nonzero monotonic commit revisions and a strict canonical format-1.0 codec.
 - Completed T-10 with an independent `uste-testkit` oracle using ordered maps, clone-and-publish
   transactions, retained revision snapshots and scans rather than future production reducers.
+- Completed T-11 with Decision 0013 and a safe first-party `uste-crypto` boundary around the pinned
+  RustCrypto profile: exact object/recovery envelopes, fixed authenticated context, padded in-place
+  AEAD, bounded nonce sessions, redacted lockable key ownership and a portable fixed-cost Argon2id
+  recovery adapter.
+- Added literal `crypto-v1` profile vectors and fail-closed coverage for every context field and
+  ciphertext mutation, truncation, wrong key/password/database, entropy/nonce failures, locked use,
+  maximum payload, authenticated malformed recovery padding and writer-incarnation separation.
+- Corrected review findings before binding evidence: caller-sized crypto buffers now reserve
+  fallibly, rejected credentials zeroize, resource failures remain retryable, guarded-memory is not
+  claimed and future clone/restore/rotation/hardening responsibilities stay explicit.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -87,7 +97,7 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 33 workspace tests including 14 uste-testkit tests;
+# workspace format/clippy/test/doc pass; 45 workspace tests including 12 uste-crypto tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles: zero advisory/license/source errors; documented miniz_oxide warnings only
@@ -112,15 +122,15 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The canonical type/codec kernel and test-only logical oracle are implemented, but there is still
-  no database executable, production transaction coordinator, durable storage, encryption or
-  production qualification. The oracle intentionally retains full snapshots and scans records;
+- The canonical type/codec kernel, test-only logical oracle and envelope/key boundary are implemented,
+  but there is still no database executable, production transaction coordinator, durable storage
+  path, authorization or production qualification. Crypto is not yet wired to durable storage. The
+  oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
 
 ## Next dependency-permitted work
 
-Implement T-11's encryption/key boundary and T-12's deterministic I/O fault harness, both
-unblocked by T-09 and suitable as independent work packages. Their completion plus T-10 unblocks
+Implement T-12's deterministic I/O fault harness. T-10/T-11 are complete; T-12 completion unblocks
 T-13 journal/publication/recovery. T-62 remains independent and must not be represented as complete
 without owner-administered evidence.
