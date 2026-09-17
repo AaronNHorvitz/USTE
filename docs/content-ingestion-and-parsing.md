@@ -1,6 +1,7 @@
 # Unstructured content, ingestion, and parsing
 
-Draft contract · 2026-09-16 · No parser or file support is implemented yet
+Draft contract · 2026-09-17 · Opaque encrypted blob storage foundation implemented; parsers remain
+unimplemented
 
 Owns FR-17 through FR-23 and the content portions of FR-13/FR-24.
 

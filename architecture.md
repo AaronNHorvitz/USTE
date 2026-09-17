@@ -106,6 +106,14 @@ group, and only a synced certificate applies it. Pinned readers own reducer-prod
 results quarantine the coordinator until recovery; durable retry and transaction indexes rebuild
 from the same groups rather than becoming a second commit authority.
 
+Decision 0017 keeps blob authority inside that same journal owner. Namespace-scoped content is
+streamed into bounded encrypted chunks, finalized immutably, summarized by a canonical encrypted
+inventory under a key-derived opaque disk name and verified before its digest enters the commit
+certificate. Recovery verifies all certificate-named chunks before logical replay; only exact
+committed inventory references are readable. The profile bounds unique committed blobs, per-
+namespace logical bytes and total certificate-to-blob bindings so recovery state and work cannot
+grow outside recorded limits.
+
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.
 The exact binary layout and index algorithm are gated by D-01; no other database engine is

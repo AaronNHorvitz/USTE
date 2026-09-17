@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 use uste_crypto::{EntropySource, KeyAdapter};
 use uste_storage::{
-    Clock, OwnershipFileSystem,
+    BlobInventory, BlobReference, BlobUpload, BlobUploadToken, Clock, EMPTY_BLOB_INVENTORY_DIGEST,
+    OwnershipFileSystem,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -77,6 +78,7 @@ pub trait TransactionState {
     fn prepare(
         &self,
         canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
         revision: CommitRevision,
     ) -> Result<Self::Prepared, ApplyError>;
 
@@ -118,6 +120,8 @@ pub struct TransactionRequest<'a> {
     pub idempotency_key: IdempotencyKey,
     pub transaction_id: TransactionId,
     pub canonical_request: &'a [u8],
+    /// Newly referenced durable blobs, already finalized by this journal owner.
+    pub blob_inventory: Option<&'a BlobInventory>,
 }
 
 /// Durable commit outcome returned identically for an eligible retry.
@@ -278,6 +282,104 @@ where
         })
     }
 
+    pub fn start_blob_upload(
+        &mut self,
+        scope: NamespaceRef,
+    ) -> Result<BlobUpload, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .start_blob_upload(scope)
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn resume_blob_upload(
+        &self,
+        filesystem: &mut F,
+        token: BlobUploadToken,
+    ) -> Result<BlobUpload, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if token.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .resume_blob_upload(filesystem, token)
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn write_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+        input: &[u8],
+    ) -> Result<(), TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if upload.token().scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .write_blob_upload(filesystem, upload, input)
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn finish_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+    ) -> Result<BlobReference, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if upload.token().scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .finish_blob_upload(filesystem, upload)
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn abort_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+    ) -> Result<(), TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if upload.token().scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .abort_blob_upload(filesystem, upload)
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn read_blob_range(
+        &self,
+        filesystem: &mut F,
+        reference: BlobReference,
+        offset: u64,
+        output: &mut [u8],
+    ) -> Result<usize, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if reference.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .read_blob_range(filesystem, reference, offset, output)
+            .map_err(TransactionError::Storage)
+    }
+
     pub fn outcome(
         &self,
         principal: PrincipalDigest,
@@ -329,10 +431,21 @@ where
         }
         if request.canonical_request.is_empty()
             || request.canonical_request.len() > MAX_REQUEST_BYTES
+            || request.blob_inventory.is_some_and(BlobInventory::is_empty)
         {
             return Err(TransactionError::InvalidRequest);
         }
-        let request_digest = sha256(request.canonical_request);
+        if request
+            .blob_inventory
+            .is_some_and(|inventory| inventory.scope() != self.scope)
+        {
+            return Err(TransactionError::InvalidRequest);
+        }
+        let blob_inventory_digest = request
+            .blob_inventory
+            .map_or(EMPTY_BLOB_INVENTORY_DIGEST, BlobInventory::digest);
+        let request_digest =
+            transaction_request_digest(request.canonical_request, blob_inventory_digest);
         let accepted_at = clock
             .observe()
             .map_err(|_| TransactionError::RetryableUnavailable)?
@@ -371,7 +484,7 @@ where
         let expires_at = expiration(accepted_at, self.retention)?;
         let prepared = self
             .state
-            .prepare(request.canonical_request, revision)
+            .prepare(request.canonical_request, request.blob_inventory, revision)
             .map_err(map_apply_error)?;
         let result_digest = S::result_digest(&prepared);
         if cancellation.is_cancelled() {
@@ -386,13 +499,18 @@ where
         };
         let group = encode_group(self.scope, request, accepted_at, outcome)?;
         let logical_event_digest = sha256(&group);
-        if let Err(error) = self.journal.append_group(
-            filesystem,
-            CommitInput {
-                encoded_group: &group,
-                logical_event_digest,
-            },
-        ) {
+        let commit_input = CommitInput {
+            encoded_group: &group,
+            logical_event_digest,
+        };
+        let durable = match request.blob_inventory {
+            Some(inventory) if !inventory.is_empty() => {
+                self.journal
+                    .append_group_with_inventory(filesystem, commit_input, inventory)
+            }
+            _ => self.journal.append_group(filesystem, commit_input),
+        };
+        if let Err(error) = durable {
             let error = map_commit_error(error);
             if error == TransactionError::OutcomeUnknown {
                 self.uncertain = true;
@@ -416,13 +534,19 @@ fn replay_group<S: TransactionState>(
     if sha256(group.encoded_group) != group.logical_event_digest {
         return Err(StorageError::IntegrityFailure);
     }
-    let decoded = decode_group(scope, group.encoded_group, group.revision)
-        .map_err(|_| StorageError::IntegrityFailure)?;
+    let decoded = decode_group(
+        scope,
+        group.encoded_group,
+        group.revision,
+        group.blob_inventory_digest,
+        group.blob_inventory,
+    )
+    .map_err(|_| StorageError::IntegrityFailure)?;
     if outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE {
         return Err(StorageError::ResourceLimit);
     }
     let prepared = state
-        .prepare(decoded.request, group.revision)
+        .prepare(decoded.request, decoded.blob_inventory, group.revision)
         .map_err(|_| StorageError::IntegrityFailure)?;
     let result = S::result_digest(&prepared);
     if result != decoded.outcome.result_digest
@@ -444,6 +568,7 @@ struct DecodedGroup<'a> {
     retry_key: RetryKey,
     outcome: TransactionOutcome,
     request: &'a [u8],
+    blob_inventory: Option<&'a BlobInventory>,
 }
 
 fn encode_group(
@@ -482,6 +607,8 @@ fn decode_group<'a>(
     scope: NamespaceRef,
     bytes: &'a [u8],
     revision: CommitRevision,
+    blob_inventory_digest: [u8; 32],
+    blob_inventory: Option<&'a BlobInventory>,
 ) -> Result<DecodedGroup<'a>, TransactionError> {
     if bytes.len() < GROUP_HEADER_BYTES
         || &bytes[..4] != GROUP_MAGIC
@@ -491,6 +618,9 @@ fn decode_group<'a>(
         || bytes[8..24] != *scope.namespace().as_bytes()
         || bytes[184..192].iter().any(|byte| *byte != 0)
     {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    if blob_inventory.is_some_and(|inventory| inventory.scope() != scope) {
         return Err(TransactionError::IntegrityFailure);
     }
     let request_len =
@@ -503,7 +633,10 @@ fn decode_group<'a>(
     }
     let request = &bytes[GROUP_HEADER_BYTES..];
     let request_digest = read_array(bytes, 120)?;
-    if sha256(request) != request_digest {
+    if blob_inventory.map_or(EMPTY_BLOB_INVENTORY_DIGEST, BlobInventory::digest)
+        != blob_inventory_digest
+        || transaction_request_digest(request, blob_inventory_digest) != request_digest
+    {
         return Err(TransactionError::IntegrityFailure);
     }
     let accepted_at = read_instant(bytes, 88, 96)?;
@@ -537,6 +670,7 @@ fn decode_group<'a>(
             expires_at,
         },
         request,
+        blob_inventory,
     })
 }
 
@@ -583,6 +717,22 @@ fn read_array<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], Tr
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
+}
+
+fn transaction_request_digest(request: &[u8], blob_inventory_digest: [u8; 32]) -> [u8; 32] {
+    if blob_inventory_digest == EMPTY_BLOB_INVENTORY_DIGEST {
+        return sha256(request);
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(b"USTE transaction request+blob inventory v1");
+    hasher.update(
+        u64::try_from(request.len())
+            .unwrap_or(u64::MAX)
+            .to_be_bytes(),
+    );
+    hasher.update(request);
+    hasher.update(blob_inventory_digest);
+    hasher.finalize().into()
 }
 
 const fn map_apply_error(error: ApplyError) -> TransactionError {
@@ -655,6 +805,7 @@ mod tests {
                 idempotency_key: IdempotencyKey::from_bytes([4; 16]),
                 transaction_id: TransactionId::from_bytes([5; 16]),
                 canonical_request: &request_bytes,
+                blob_inventory: None,
             },
             UtcInstant::new(0, 123).unwrap(),
             outcome(),
@@ -662,7 +813,14 @@ mod tests {
         .unwrap();
         assert_eq!(encoded, golden_group());
 
-        let decoded = decode_group(scope(), &encoded, CommitRevision::FIRST).unwrap();
+        let decoded = decode_group(
+            scope(),
+            &encoded,
+            CommitRevision::FIRST,
+            EMPTY_BLOB_INVENTORY_DIGEST,
+            None,
+        )
+        .unwrap();
         assert_eq!(decoded.request, request_bytes);
         assert_eq!(
             decoded.retry_key.principal,
@@ -700,7 +858,14 @@ mod tests {
 
         for (case, bytes) in cases.iter().enumerate() {
             assert_eq!(
-                decode_group(scope(), bytes, CommitRevision::FIRST).unwrap_err(),
+                decode_group(
+                    scope(),
+                    bytes,
+                    CommitRevision::FIRST,
+                    EMPTY_BLOB_INVENTORY_DIGEST,
+                    None,
+                )
+                .unwrap_err(),
                 TransactionError::IntegrityFailure,
                 "malformed case {case} unexpectedly decoded"
             );

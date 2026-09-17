@@ -47,7 +47,8 @@ does not represent independent external security certification.
   explicit data/full/directory syncs, recovery truncation and unique-FD nonblocking ownership.
 - Implemented encrypted creation manifest, authenticated log/segment headers, exact opaque group
   envelopes, fixed hash-chained commit certificates, poisoned uncertain writers and bounded
-  streaming recovery. T-13 accepts only the canonical empty blob inventory until T-15.
+  streaming recovery. T-13's empty-inventory profile is extended by T-15's verified nonempty blob
+  inventories.
 - Verified exact byte replay, competing-owner rejection, durable lost-response recovery, previous-
   frontier recovery after certificate-sync failure, incomplete-tail repair and hard failure for
   complete certificate/group corruption. A Btrfs child was SIGKILLed after certificate sync and
@@ -57,6 +58,12 @@ does not represent independent external security certification.
   reconstruction, expiry and uncertain-handle quarantine. Literal group/malformed recovery,
   complete initial publication-fault, short-I/O, both cancellation-boundary, 32-caller conflict,
   restart and lost-response retry tests pass.
+- Began T-15 with Decision 0017: bounded encrypted blob chunks, resumable staging, immutable
+  finalization, key-derived opaque inventory names, canonical inventory publication, commit-gated
+  range reads and bounded recovery-time verification. Multi-chunk/zero-byte round trips,
+  uncertain-flush quarantine/resume, duplicate-handle rejection, durable partial-terminal resume,
+  repeated-inventory replay, abort and missing committed data pass; full fault/corruption and
+  measured-memory qualification remains open.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -121,8 +128,8 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 89 workspace tests including 36 uste-storage and 8
-# uste-txn tests;
+# workspace format/clippy/test/doc pass; 100 workspace tests including 42 uste-storage, 13
+# uste-crypto and 12 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -161,6 +168,6 @@ policy checks; no benchmark measurement exists yet.
 
 ## Next dependency-permitted work
 
-Implement T-15's streaming encrypted blob staging, publication, resume/cleanup and committed
-inventory verification. T-62 remains independent and must not be represented as complete without
+Continue T-15 with its full blob publication fault/corruption/retry matrix and measured bounded-RSS
+streaming trial. T-62 remains independent and must not be represented as complete without
 owner-administered evidence.

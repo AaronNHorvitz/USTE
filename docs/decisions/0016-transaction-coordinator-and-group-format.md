@@ -25,7 +25,9 @@ reopen/recovery before an outcome is reported.
 ## Retry identity and retention
 
 One retry key is `(database, namespace, authenticated-principal digest, idempotency key)`. It binds
-the SHA-256 digest of the exact canonical reducer request and the transaction ID. Reuse within the
+the request digest and the transaction ID. With an empty blob inventory the digest is SHA-256 of
+the exact canonical reducer request. Decision 0017 domain-separates and also binds the inventory
+digest when a transaction publishes blobs. Reuse within the
 retention interval returns the original revision/result; changed request or transaction identity is
 `Conflict`. Transaction IDs are independently unique in the namespace and support outcome lookup.
 

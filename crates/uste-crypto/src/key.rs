@@ -11,6 +11,7 @@ use crate::{CryptoContext, CryptoError, EntropySource};
 const MASTER_KEY_BYTES: usize = 32;
 const HKDF_SALT: &[u8] = b"USTE crypto-v1 HKDF-SHA256 extract";
 const HKDF_INFO: &[u8] = b"USTE crypto-v1 object-key";
+const HKDF_PUBLIC_TOKEN_INFO: &[u8] = b"USTE crypto-v1 public opaque token";
 
 /// Database master-key material. It is non-cloneable and redacted in diagnostics.
 pub struct SecretKeyMaterial([u8; MASTER_KEY_BYTES]);
@@ -48,6 +49,22 @@ impl SecretKeyMaterial {
         let mut output = Zeroizing::new([0_u8; 32]);
         hkdf.expand_multi_info(&[HKDF_INFO, &context_bytes], output.as_mut())
             .map_err(|_| CryptoError::InvalidContext)?;
+        Ok(output)
+    }
+
+    pub(crate) fn derive_public_token(
+        &self,
+        context: CryptoContext,
+        input: &[u8; 32],
+    ) -> Result<[u8; 32], CryptoError> {
+        let hkdf = Hkdf::<Sha256>::new(Some(HKDF_SALT), &self.0);
+        let context_bytes = context.canonical_bytes();
+        let mut output = [0_u8; 32];
+        hkdf.expand_multi_info(
+            &[HKDF_PUBLIC_TOKEN_INFO, &context_bytes, input],
+            &mut output,
+        )
+        .map_err(|_| CryptoError::InvalidContext)?;
         Ok(output)
     }
 }

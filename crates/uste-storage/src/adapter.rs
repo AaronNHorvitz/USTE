@@ -205,6 +205,14 @@ pub trait FileSystem {
         destination: &EntryName,
     ) -> Result<(), AdapterError>;
 
+    /// Remove one known regular-file entry. Callers must sync the containing directory before
+    /// treating the removal as durable.
+    fn remove_file(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<(), AdapterError>;
+
     fn sync_directory(&mut self, directory: &Self::Directory) -> Result<(), AdapterError>;
 }
 

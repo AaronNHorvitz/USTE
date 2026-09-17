@@ -4,6 +4,7 @@
 //! idempotency are deliberately owned by T-14 rather than inferred here.
 
 use core::fmt;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::{
@@ -11,11 +12,17 @@ use uste_crypto::{
     KeyAdapter, KeyEpoch, KeyVault, MAX_PLAINTEXT_BYTES, ObjectRole, RecoveryEnvelope, Scope,
     WriterIncarnationId,
 };
-use uste_types::{CommitRevision, DatabaseId};
+use uste_types::{CommitRevision, DatabaseId, NamespaceRef};
 
 use crate::{
-    AdapterError, AdapterErrorKind, EntryName, FileSystem, OwnershipFileSystem, read_exact_at,
-    write_all_at,
+    AdapterError, AdapterErrorKind, EntryName, FileSystem, OwnershipFileSystem,
+    blob::{
+        BlobInventory, BlobReference, BlobUpload, BlobUploadToken,
+        MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL, MAX_COMMITTED_BLOBS_PER_JOURNAL,
+        MAX_NAMESPACE_BLOB_BYTES, abort_upload, finish_upload, inventory_context, inventory_name,
+        read_range, resume_upload, verify_reference, write_upload,
+    },
+    read_exact_at, write_all_at,
 };
 
 const STORAGE_MAJOR: u8 = 1;
@@ -35,11 +42,7 @@ const RANDOM_ATTEMPTS: usize = 16;
 /// Fixed journal segment bound recorded by `linux-local-v1` format 1.0.
 pub const JOURNAL_SEGMENT_LIMIT: u64 = 256 * 1024 * 1024;
 
-/// SHA-256 of the canonical empty blob inventory. T-15 adds nonempty inventory verification.
-pub const EMPTY_BLOB_INVENTORY_DIGEST: [u8; 32] = [
-    0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-    0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
-];
+pub use crate::blob::EMPTY_BLOB_INVENTORY_DIGEST;
 
 /// Bounded durable encoding used by a trusted key adapter.
 pub trait DurableKeyEnvelope: Sized {
@@ -88,6 +91,7 @@ pub struct RecoveredGroup<'a> {
     pub revision: CommitRevision,
     pub encoded_group: &'a [u8],
     pub blob_inventory_digest: [u8; 32],
+    pub blob_inventory: Option<&'a BlobInventory>,
     pub logical_event_digest: [u8; 32],
 }
 
@@ -108,6 +112,7 @@ pub enum StorageError {
     IntegrityFailure,
     UnsupportedProfile,
     ResourceLimit,
+    InvalidState,
     NeedsRecovery,
     RevisionExhausted,
 }
@@ -121,6 +126,7 @@ impl StorageError {
             Self::IntegrityFailure => "USTE_STORAGE_INTEGRITY_FAILURE",
             Self::UnsupportedProfile => "USTE_STORAGE_UNSUPPORTED_PROFILE",
             Self::ResourceLimit => "USTE_STORAGE_RESOURCE_LIMIT",
+            Self::InvalidState => "USTE_STORAGE_INVALID_STATE",
             Self::NeedsRecovery => "USTE_STORAGE_NEEDS_RECOVERY",
             Self::RevisionExhausted => "USTE_STORAGE_REVISION_EXHAUSTED",
         }
@@ -166,6 +172,10 @@ where
     current_segment_offset: u64,
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
+    committed_blob_inventories: BTreeSet<[u8; 32]>,
+    committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
+    committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
+    committed_blob_reference_bindings: u64,
     poisoned: bool,
     vault: KeyVault<W, E>,
     identity_entropy: I,
@@ -293,6 +303,10 @@ where
             current_segment_offset: SMALL_ENVELOPE_BYTES,
             frontier: None,
             previous_certificate_digest: [0; 32],
+            committed_blob_inventories: BTreeSet::new(),
+            committed_blobs: BTreeMap::new(),
+            committed_blob_bytes: BTreeMap::new(),
+            committed_blob_reference_bindings: 0,
             poisoned: false,
             vault,
             identity_entropy,
@@ -405,6 +419,7 @@ where
         // First pass authenticates the complete committed frontier without exposing logical state.
         // This prevents a later corrupt certificate from producing an observable valid-prefix
         // replay. The second bounded streaming pass invokes the visitor only after validation.
+        let no_trusted_inventories = BTreeMap::new();
         let validated = scan_certificates(
             filesystem,
             &vault,
@@ -415,6 +430,8 @@ where
             epoch,
             writer,
             certificate_count,
+            &no_trusted_inventories,
+            false,
             &mut |_group| Ok(()),
         )?;
 
@@ -448,12 +465,19 @@ where
             epoch,
             writer,
             certificate_count,
+            &validated.verified_blob_inventories,
+            true,
             &mut visitor,
         )?;
         if replayed.current_segment_id != validated.current_segment_id
             || replayed.current_segment_offset != validated.current_segment_offset
             || replayed.frontier != validated.frontier
             || replayed.previous_certificate_digest != validated.previous_certificate_digest
+            || replayed.committed_blob_inventories != validated.committed_blob_inventories
+            || replayed.committed_blobs != validated.committed_blobs
+            || replayed.committed_blob_bytes != validated.committed_blob_bytes
+            || replayed.committed_blob_reference_bindings
+                != validated.committed_blob_reference_bindings
         {
             return Err(StorageError::IntegrityFailure);
         }
@@ -477,6 +501,10 @@ where
                 current_segment_offset: replayed.current_segment_offset,
                 frontier: replayed.frontier,
                 previous_certificate_digest: replayed.previous_certificate_digest,
+                committed_blob_inventories: replayed.committed_blob_inventories,
+                committed_blobs: replayed.committed_blobs,
+                committed_blob_bytes: replayed.committed_blob_bytes,
+                committed_blob_reference_bindings: replayed.committed_blob_reference_bindings,
                 poisoned: false,
                 vault,
                 identity_entropy,
@@ -486,11 +514,180 @@ where
         ))
     }
 
+    /// Start a namespace-scoped resumable blob upload with random opaque identities.
+    pub fn start_blob_upload(&mut self, scope: NamespaceRef) -> Result<BlobUpload, StorageError> {
+        if scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        let upload = random_nonzero_id(&mut self.identity_entropy)?;
+        BlobUpload::new(BlobUploadToken::from_upload_id(scope, upload))
+    }
+
+    /// Rebuild a resumable upload from authenticated durable chunks after interruption.
+    pub fn resume_blob_upload(
+        &self,
+        filesystem: &mut F,
+        token: BlobUploadToken,
+    ) -> Result<BlobUpload, StorageError> {
+        resume_upload(
+            filesystem,
+            &self.database_directory,
+            &self.vault,
+            self.database,
+            self.epoch,
+            self.writer,
+            token,
+        )
+    }
+
+    /// Accept bytes into a bounded upload buffer, flushing complete encrypted chunks durably.
+    pub fn write_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+        input: &[u8],
+    ) -> Result<(), StorageError> {
+        write_upload(
+            filesystem,
+            &self.database_directory,
+            &mut self.vault,
+            self.database,
+            self.epoch,
+            self.writer,
+            upload,
+            input,
+        )
+    }
+
+    /// Seal all chunks under immutable names and return their canonical content reference.
+    pub fn finish_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+    ) -> Result<BlobReference, StorageError> {
+        finish_upload(
+            filesystem,
+            &self.database_directory,
+            &mut self.vault,
+            self.database,
+            self.epoch,
+            self.writer,
+            upload,
+        )
+    }
+
+    /// Remove the known durable staging chunks for an upload that has not begun finalization.
+    pub fn abort_blob_upload(
+        &mut self,
+        filesystem: &mut F,
+        upload: &mut BlobUpload,
+    ) -> Result<(), StorageError> {
+        abort_upload(
+            filesystem,
+            &self.database_directory,
+            &mut self.vault,
+            self.database,
+            self.epoch,
+            self.writer,
+            upload,
+        )
+    }
+
+    /// Read at most one bounded chunk-sized range from an immutable blob reference.
+    pub fn read_blob_range(
+        &self,
+        filesystem: &mut F,
+        reference: BlobReference,
+        offset: u64,
+        output: &mut [u8],
+    ) -> Result<usize, StorageError> {
+        if self
+            .committed_blobs
+            .get(&(reference.scope(), reference.id()))
+            != Some(&reference)
+        {
+            return Err(StorageError::InvalidState);
+        }
+        read_range(
+            filesystem,
+            &self.database_directory,
+            &self.vault,
+            self.epoch,
+            self.writer,
+            reference,
+            offset,
+            output,
+        )
+    }
+
     /// Publish one encrypted group followed by its authenticated commit certificate.
     pub fn append_group(
         &mut self,
         filesystem: &mut F,
         input: CommitInput<'_>,
+    ) -> Result<DurableCommit, StorageError> {
+        self.append_group_internal(filesystem, input, EMPTY_BLOB_INVENTORY_DIGEST)
+    }
+
+    /// Durably verify and bind a nonempty canonical blob inventory to the commit certificate.
+    pub fn append_group_with_inventory(
+        &mut self,
+        filesystem: &mut F,
+        input: CommitInput<'_>,
+        inventory: &BlobInventory,
+    ) -> Result<DurableCommit, StorageError> {
+        if inventory.scope().database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        if inventory.is_empty() {
+            return self.append_group(filesystem, input);
+        }
+        for reference in inventory.references() {
+            if self
+                .committed_blobs
+                .get(&(reference.scope(), reference.id()))
+                .is_some_and(|existing| existing != reference)
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+        }
+        check_blob_capacity(
+            &self.committed_blobs,
+            &self.committed_blob_bytes,
+            inventory.references(),
+        )?;
+        let added_bindings =
+            u64::try_from(inventory.references().len()).map_err(|_| StorageError::ResourceLimit)?;
+        let projected_bindings = self
+            .committed_blob_reference_bindings
+            .checked_add(added_bindings)
+            .ok_or(StorageError::ResourceLimit)?;
+        if projected_bindings > MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL {
+            return Err(StorageError::ResourceLimit);
+        }
+        self.publish_blob_inventory(filesystem, inventory)?;
+        let durable = self.append_group_internal(filesystem, input, inventory.digest())?;
+        for reference in inventory.references() {
+            if register_committed_blob(
+                &mut self.committed_blobs,
+                &mut self.committed_blob_bytes,
+                *reference,
+            )
+            .is_err()
+            {
+                self.poisoned = true;
+                return Err(StorageError::NeedsRecovery);
+            }
+        }
+        self.committed_blob_reference_bindings = projected_bindings;
+        Ok(durable)
+    }
+
+    fn append_group_internal(
+        &mut self,
+        filesystem: &mut F,
+        input: CommitInput<'_>,
+        blob_inventory_digest: [u8; 32],
     ) -> Result<DurableCommit, StorageError> {
         if self.poisoned {
             return Err(StorageError::NeedsRecovery);
@@ -574,7 +771,7 @@ where
             group_offset,
             group_length,
             group_digest: sha256(&encoded_group),
-            blob_inventory_digest: EMPTY_BLOB_INVENTORY_DIGEST,
+            blob_inventory_digest,
             logical_event_digest: input.logical_event_digest,
         };
         let encoded_certificate = self
@@ -603,11 +800,87 @@ where
         self.current_segment_offset = group_offset + group_length;
         self.frontier = Some(revision);
         self.previous_certificate_digest = certificate_digest;
+        if blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST {
+            self.committed_blob_inventories
+                .insert(blob_inventory_digest);
+        }
         self.poisoned = false;
         Ok(DurableCommit {
             revision,
             certificate_digest,
         })
+    }
+
+    fn publish_blob_inventory(
+        &mut self,
+        filesystem: &mut F,
+        inventory: &BlobInventory,
+    ) -> Result<(), StorageError> {
+        for reference in inventory.references() {
+            verify_reference(
+                filesystem,
+                &self.database_directory,
+                &self.vault,
+                self.database,
+                self.epoch,
+                self.writer,
+                *reference,
+            )?;
+        }
+        let digest = inventory.digest();
+        let name = inventory_name(&self.vault, self.database, self.epoch, self.writer, digest)?;
+        match filesystem.open_existing(&self.database_directory, &name) {
+            Ok(file) => {
+                if load_blob_inventory(
+                    filesystem,
+                    &self.vault,
+                    &self.database_directory,
+                    self.database,
+                    self.epoch,
+                    self.writer,
+                    digest,
+                    true,
+                )
+                .is_ok()
+                {
+                    filesystem.sync_all(&file)?;
+                    filesystem.sync_directory(&self.database_directory)?;
+                    return Ok(());
+                }
+                if self.committed_blob_inventories.contains(&digest) {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                filesystem.set_len(&file, 0)?;
+                let encoded = self
+                    .vault
+                    .encrypt(
+                        inventory_context(self.database, self.epoch, self.writer, digest),
+                        inventory.encoded(),
+                    )?
+                    .encode()?;
+                write_all_at(filesystem, &file, 0, &encoded)?;
+                filesystem.set_len(
+                    &file,
+                    u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?,
+                )?;
+                filesystem.sync_all(&file)?;
+            }
+            Err(error) if error.kind() == AdapterErrorKind::NotFound => {
+                let encoded = self
+                    .vault
+                    .encrypt(
+                        inventory_context(self.database, self.epoch, self.writer, digest),
+                        inventory.encoded(),
+                    )?
+                    .encode()?;
+                let file = filesystem.create_new(&self.database_directory, &name)?;
+                write_all_at(filesystem, &file, 0, &encoded)?;
+                filesystem.sync_all(&file)?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        filesystem.sync_directory(&self.database_directory)?;
+        Ok(())
     }
 
     #[must_use]
@@ -827,6 +1100,11 @@ struct ScanState<H> {
     current_segment_offset: u64,
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
+    committed_blob_inventories: BTreeSet<[u8; 32]>,
+    committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
+    committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
+    committed_blob_reference_bindings: u64,
+    verified_blob_inventories: BTreeMap<[u8; 32], u32>,
     uncommitted_tails: Vec<SegmentTail>,
 }
 
@@ -834,6 +1112,141 @@ struct SegmentTail {
     segment_id: [u8; 16],
     committed_end: u64,
     extra_bytes: u64,
+}
+
+fn check_blob_capacity(
+    committed_blobs: &BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
+    committed_blob_bytes: &BTreeMap<NamespaceRef, u64>,
+    references: &[BlobReference],
+) -> Result<(), StorageError> {
+    let mut projected_count = committed_blobs.len();
+    let mut additions = BTreeMap::<NamespaceRef, u64>::new();
+    let mut new_keys = BTreeSet::new();
+    for reference in references {
+        let key = (reference.scope(), reference.id());
+        if let Some(existing) = committed_blobs.get(&key) {
+            if existing != reference {
+                return Err(StorageError::IntegrityFailure);
+            }
+            continue;
+        }
+        if !new_keys.insert(key) {
+            return Err(StorageError::IntegrityFailure);
+        }
+        projected_count = projected_count
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        if projected_count > MAX_COMMITTED_BLOBS_PER_JOURNAL {
+            return Err(StorageError::ResourceLimit);
+        }
+        let namespace_addition = additions.entry(reference.scope()).or_default();
+        *namespace_addition = namespace_addition
+            .checked_add(reference.byte_len())
+            .ok_or(StorageError::ResourceLimit)?;
+    }
+    for (scope, addition) in additions {
+        let projected = committed_blob_bytes
+            .get(&scope)
+            .copied()
+            .unwrap_or_default()
+            .checked_add(addition)
+            .ok_or(StorageError::ResourceLimit)?;
+        if projected > MAX_NAMESPACE_BLOB_BYTES {
+            return Err(StorageError::ResourceLimit);
+        }
+    }
+    Ok(())
+}
+
+fn register_committed_blob(
+    committed_blobs: &mut BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
+    committed_blob_bytes: &mut BTreeMap<NamespaceRef, u64>,
+    reference: BlobReference,
+) -> Result<(), StorageError> {
+    let key = (reference.scope(), reference.id());
+    if let Some(existing) = committed_blobs.get(&key) {
+        return if *existing == reference {
+            Ok(())
+        } else {
+            Err(StorageError::IntegrityFailure)
+        };
+    }
+    if committed_blobs.len() >= MAX_COMMITTED_BLOBS_PER_JOURNAL {
+        return Err(StorageError::ResourceLimit);
+    }
+    let current_bytes = committed_blob_bytes
+        .get(&reference.scope())
+        .copied()
+        .unwrap_or_default();
+    let projected_bytes = current_bytes
+        .checked_add(reference.byte_len())
+        .ok_or(StorageError::ResourceLimit)?;
+    if projected_bytes > MAX_NAMESPACE_BLOB_BYTES {
+        return Err(StorageError::ResourceLimit);
+    }
+    committed_blobs.insert(key, reference);
+    committed_blob_bytes.insert(reference.scope(), projected_bytes);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_blob_inventory<F, W, E>(
+    filesystem: &mut F,
+    vault: &KeyVault<W, E>,
+    database_directory: &F::Directory,
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    digest: [u8; 32],
+    verify_blobs: bool,
+) -> Result<BlobInventory, StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
+    if digest == EMPTY_BLOB_INVENTORY_DIGEST {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let file = filesystem
+        .open_existing(
+            database_directory,
+            &inventory_name(vault, database, epoch, writer, digest)?,
+        )
+        .map_err(|_| StorageError::IntegrityFailure)?;
+    let len = filesystem.metadata(&file)?.len;
+    let maximum = u64::try_from(MAX_PLAINTEXT_BYTES)
+        .map_err(|_| StorageError::ResourceLimit)?
+        .checked_add(8 * 1024)
+        .ok_or(StorageError::ResourceLimit)?;
+    if len == 0 || len > maximum {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let encoded = read_bounded(filesystem, &file, 0, len)?;
+    let envelope = EncryptedEnvelope::decode(&encoded).map_err(committed_crypto_error)?;
+    let plaintext = vault
+        .decrypt(
+            inventory_context(database, epoch, writer, digest),
+            &envelope,
+        )
+        .map_err(committed_crypto_error)?;
+    let inventory = BlobInventory::decode(database, plaintext.as_slice())?;
+    if inventory.digest() != digest {
+        return Err(StorageError::IntegrityFailure);
+    }
+    if verify_blobs {
+        for reference in inventory.references() {
+            verify_reference(
+                filesystem,
+                database_directory,
+                vault,
+                database,
+                epoch,
+                writer,
+                *reference,
+            )?;
+        }
+    }
+    Ok(inventory)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -847,6 +1260,8 @@ fn scan_certificates<F, W, E, V>(
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     certificate_count: u64,
+    trusted_blob_inventories: &BTreeMap<[u8; 32], u32>,
+    invoke_visitor: bool,
     visitor: &mut V,
 ) -> Result<ScanState<F::File>, StorageError>
 where
@@ -860,6 +1275,11 @@ where
     let mut current_segment_offset = SMALL_ENVELOPE_BYTES;
     let mut previous_certificate_digest = [0_u8; 32];
     let mut frontier = None;
+    let mut committed_blob_inventories = BTreeSet::new();
+    let mut committed_blobs = BTreeMap::new();
+    let mut committed_blob_bytes = BTreeMap::new();
+    let mut committed_blob_reference_bindings = 0_u64;
+    let mut verified_blob_inventories = BTreeMap::new();
     let mut uncommitted_tails = Vec::new();
 
     for sequence in 1..=certificate_count {
@@ -884,7 +1304,6 @@ where
         )?;
         if certificate.revision != sequence
             || certificate.previous_digest != previous_certificate_digest
-            || certificate.blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST
         {
             return Err(StorageError::IntegrityFailure);
         }
@@ -959,12 +1378,79 @@ where
         if plaintext.as_slice().len() > MAX_PLAINTEXT_BYTES {
             return Err(StorageError::IntegrityFailure);
         }
-        visitor(RecoveredGroup {
-            revision,
-            encoded_group: plaintext.as_slice(),
-            blob_inventory_digest: certificate.blob_inventory_digest,
-            logical_event_digest: certificate.logical_event_digest,
-        })?;
+        let blob_inventory: Option<BlobInventory> =
+            if certificate.blob_inventory_digest == EMPTY_BLOB_INVENTORY_DIGEST {
+                None
+            } else {
+                let digest = certificate.blob_inventory_digest;
+                let trusted_count = trusted_blob_inventories
+                    .get(&digest)
+                    .copied()
+                    .or_else(|| verified_blob_inventories.get(&digest).copied());
+                let already_verified = trusted_count.is_some();
+                let inventory = if !already_verified || invoke_visitor {
+                    Some(load_blob_inventory(
+                        filesystem,
+                        vault,
+                        database_directory,
+                        manifest.database,
+                        epoch,
+                        writer,
+                        digest,
+                        !already_verified,
+                    )?)
+                } else {
+                    None
+                };
+                if !already_verified {
+                    let count = u32::try_from(
+                        inventory
+                            .as_ref()
+                            .ok_or(StorageError::IntegrityFailure)?
+                            .references()
+                            .len(),
+                    )
+                    .map_err(|_| StorageError::ResourceLimit)?;
+                    verified_blob_inventories.insert(digest, count);
+                } else if inventory.as_ref().is_some_and(|value| {
+                    usize::try_from(trusted_count.unwrap_or_default())
+                        .ok()
+                        .is_none_or(|count| count != value.references().len())
+                }) {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                committed_blob_inventories.insert(digest);
+                let reference_count = match inventory.as_ref() {
+                    Some(inventory) => u64::try_from(inventory.references().len())
+                        .map_err(|_| StorageError::ResourceLimit)?,
+                    None => u64::from(trusted_count.ok_or(StorageError::IntegrityFailure)?),
+                };
+                committed_blob_reference_bindings = committed_blob_reference_bindings
+                    .checked_add(reference_count)
+                    .ok_or(StorageError::ResourceLimit)?;
+                if committed_blob_reference_bindings > MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL {
+                    return Err(StorageError::ResourceLimit);
+                }
+                if let Some(inventory) = inventory.as_ref() {
+                    for reference in inventory.references() {
+                        register_committed_blob(
+                            &mut committed_blobs,
+                            &mut committed_blob_bytes,
+                            *reference,
+                        )?;
+                    }
+                }
+                inventory
+            };
+        if invoke_visitor {
+            visitor(RecoveredGroup {
+                revision,
+                encoded_group: plaintext.as_slice(),
+                blob_inventory_digest: certificate.blob_inventory_digest,
+                blob_inventory: blob_inventory.as_ref(),
+                logical_event_digest: certificate.logical_event_digest,
+            })?;
+        }
         current_segment_offset = group_end;
         previous_certificate_digest = sha256(&encoded_certificate);
         frontier = Some(revision);
@@ -984,6 +1470,11 @@ where
         current_segment_offset,
         frontier,
         previous_certificate_digest,
+        committed_blob_inventories,
+        committed_blobs,
+        committed_blob_bytes,
+        committed_blob_reference_bindings,
+        verified_blob_inventories,
         uncommitted_tails,
     })
 }
@@ -2093,6 +2584,210 @@ mod tests {
                 assert_eq!(callbacks, 0);
             }
         }
+    }
+
+    #[test]
+    fn duplicate_upload_handles_cannot_replace_a_staged_chunk() {
+        let database = DatabaseId::from_bytes([0x90; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x91; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "immutable-staging"),
+            create_vault(database, 40_000),
+            CounterEntropy::new(41_000),
+        )
+        .unwrap();
+        let mut first = store.start_blob_upload(scope).unwrap();
+        let token = first.token();
+        let mut duplicate = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        let original = vec![0x31; crate::blob::BLOB_CHUNK_BYTES];
+        let alternate = vec![0x32; crate::blob::BLOB_CHUNK_BYTES];
+        store
+            .write_blob_upload(&mut filesystem, &mut first, &original)
+            .unwrap();
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut duplicate, &alternate)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut duplicate, &[])
+                .unwrap_err(),
+            StorageError::NeedsRecovery
+        );
+        let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        let reference = store
+            .finish_blob_upload(&mut filesystem, &mut resumed)
+            .unwrap();
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        store
+            .append_group_with_inventory(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"immutable chunk",
+                    logical_event_digest: [0x92; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let mut output = vec![0_u8; crate::blob::BLOB_CHUNK_BYTES];
+        assert_eq!(
+            store
+                .read_blob_range(&mut filesystem, reference, 0, &mut output)
+                .unwrap(),
+            original.len()
+        );
+        assert_eq!(output, original);
+    }
+
+    #[test]
+    fn failed_chunk_flush_requires_resume_without_duplicate_input() {
+        let database = DatabaseId::from_bytes([0x93; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x94; 16]));
+        let plan = FaultPlan::new([FaultPoint {
+            operation: Operation::SyncAll,
+            occurrence: 6,
+            action: FaultAction::Error(AdapterErrorKind::Io),
+        }])
+        .unwrap();
+        let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "flush-resume"),
+            create_vault(database, 42_000),
+            CounterEntropy::new(43_000),
+        )
+        .unwrap();
+        let bytes = vec![0x41; crate::blob::BLOB_CHUNK_BYTES];
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+                .unwrap_err(),
+            StorageError::Adapter(AdapterErrorKind::Io)
+        );
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+                .unwrap_err(),
+            StorageError::NeedsRecovery
+        );
+        let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        assert_eq!(
+            resumed.durable_bytes(),
+            u64::try_from(crate::blob::BLOB_CHUNK_BYTES).unwrap()
+        );
+        let reference = store
+            .finish_blob_upload(&mut filesystem, &mut resumed)
+            .unwrap();
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        store
+            .append_group_with_inventory(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"resumed exactly once",
+                    logical_event_digest: [0x95; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let mut output = vec![0_u8; crate::blob::BLOB_CHUNK_BYTES];
+        store
+            .read_blob_range(&mut filesystem, reference, 0, &mut output)
+            .unwrap();
+        assert_eq!(output, bytes);
+    }
+
+    #[test]
+    fn partial_terminal_chunk_survives_repeated_resume_before_finish() {
+        let database = DatabaseId::from_bytes([0x96; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x97; 16]));
+        let plan = FaultPlan::new([FaultPoint {
+            operation: Operation::RenameNoReplace,
+            occurrence: 2,
+            action: FaultAction::CrashBefore,
+        }])
+        .unwrap();
+        let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "partial-resume"),
+            create_vault(database, 44_000),
+            CounterEntropy::new(45_000),
+        )
+        .unwrap();
+        let bytes = b"durable terminal bytes";
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .write_blob_upload(&mut filesystem, &mut upload, bytes)
+            .unwrap();
+        assert_eq!(
+            store
+                .finish_blob_upload(&mut filesystem, &mut upload)
+                .unwrap_err(),
+            StorageError::Adapter(AdapterErrorKind::InjectedCrash)
+        );
+        drop(store);
+        filesystem.restart().unwrap();
+
+        let (store, _) = JournalStore::open(
+            &mut filesystem,
+            &entry("partial-resume"),
+            database,
+            CounterEntropy::new(46_000),
+            CounterEntropy::new(47_000),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        )
+        .unwrap();
+        let resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        assert_eq!(resumed.durable_bytes(), u64::try_from(bytes.len()).unwrap());
+        drop(resumed);
+        drop(store);
+        filesystem.restart().unwrap();
+
+        let (mut store, _) = JournalStore::open(
+            &mut filesystem,
+            &entry("partial-resume"),
+            database,
+            CounterEntropy::new(48_000),
+            CounterEntropy::new(49_000),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        )
+        .unwrap();
+        let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        assert_eq!(resumed.durable_bytes(), u64::try_from(bytes.len()).unwrap());
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut resumed, b"extra")
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        let reference = store
+            .finish_blob_upload(&mut filesystem, &mut resumed)
+            .unwrap();
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        store
+            .append_group_with_inventory(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"partial terminal",
+                    logical_event_digest: [0x98; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let mut output = [0_u8; 64];
+        let count = store
+            .read_blob_range(&mut filesystem, reference, 0, &mut output)
+            .unwrap();
+        assert_eq!(&output[..count], bytes);
     }
 
     #[test]

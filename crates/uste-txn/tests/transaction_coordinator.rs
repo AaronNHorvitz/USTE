@@ -4,7 +4,7 @@ use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_storage::{
-    AdapterErrorKind, ClockObservation, EntryName,
+    AdapterErrorKind, BLOB_CHUNK_BYTES, BlobInventory, ClockObservation, EntryName, FileSystem,
     fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation, ScriptedClock},
     journal::{CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore},
     memory::MemoryFileSystem,
@@ -27,6 +27,7 @@ impl TransactionState for CounterState {
     fn prepare(
         &self,
         canonical_request: &[u8],
+        _blob_inventory: Option<&BlobInventory>,
         _revision: uste_types::CommitRevision,
     ) -> Result<Self::Prepared, ApplyError> {
         if canonical_request.len() != 16 {
@@ -79,6 +80,7 @@ fn request<'a>(key: u8, transaction: u8, bytes: &'a [u8]) -> TransactionRequest<
         idempotency_key: IdempotencyKey::from_bytes([key; 16]),
         transaction_id: TransactionId::from_bytes([transaction; 16]),
         canonical_request: bytes,
+        blob_inventory: None,
     }
 }
 
@@ -506,6 +508,408 @@ fn authenticated_but_malformed_groups_are_rejected_during_recovery() {
         );
         assert!(matches!(result, Err(TransactionError::IntegrityFailure)));
     }
+}
+
+#[test]
+fn arbitrary_blob_round_trip_is_commit_gated_and_survives_restart() {
+    let mut filesystem = MemoryFileSystem::default();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("blob-round-trip").unwrap(),
+        create_vault(scope().database(), 17_000),
+        CounterEntropy(18_000),
+        CounterState::default(),
+    )
+    .unwrap();
+    let empty_inventory = BlobInventory::new(scope(), []).unwrap();
+    assert_eq!(
+        coordinator
+            .commit(
+                &mut filesystem,
+                TransactionRequest {
+                    blob_inventory: Some(&empty_inventory),
+                    ..request(19, 20, &mutation(0, 1))
+                },
+                &mut clock(0),
+                &NeverCancel,
+            )
+            .unwrap_err(),
+        TransactionError::InvalidRequest
+    );
+    let bytes: Vec<u8> = (0..(BLOB_CHUNK_BYTES * 2 + 37))
+        .map(|index| u8::try_from(index % 251).unwrap())
+        .collect();
+    let mut upload = coordinator.start_blob_upload(scope()).unwrap();
+    for part in bytes.chunks(333_333) {
+        coordinator
+            .write_blob_upload(&mut filesystem, &mut upload, part)
+            .unwrap();
+    }
+    let reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut upload)
+        .unwrap();
+    assert_eq!(reference.byte_len(), u64::try_from(bytes.len()).unwrap());
+    assert_eq!(reference.chunk_count(), 3);
+    assert!(matches!(
+        coordinator.read_blob_range(&mut filesystem, reference, 0, &mut [0_u8; 1]),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+    let inventory = BlobInventory::new(scope(), [reference]).unwrap();
+    let initial_mutation = mutation(0, 5);
+    let transaction = TransactionRequest {
+        blob_inventory: Some(&inventory),
+        ..request(21, 22, &initial_mutation)
+    };
+    let committed = coordinator
+        .commit(&mut filesystem, transaction, &mut clock(0), &NeverCancel)
+        .unwrap();
+    assert_blob_equals(&coordinator, &mut filesystem, reference, &bytes);
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (mut coordinator, report) = CommitCoordinator::open(
+        &mut filesystem,
+        &EntryName::new("blob-round-trip").unwrap(),
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(19_000),
+        CounterEntropy(20_000),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    assert_eq!(report.frontier, Some(committed.revision));
+    assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(5));
+    assert_blob_equals(&coordinator, &mut filesystem, reference, &bytes);
+    let retry = coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(21, 22, &initial_mutation)
+            },
+            &mut clock(1),
+            &NeverCancel,
+        )
+        .unwrap();
+    assert_eq!(retry, committed);
+
+    let mut other_upload = coordinator.start_blob_upload(scope()).unwrap();
+    let other_reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut other_upload)
+        .unwrap();
+    let changed_inventory = BlobInventory::new(scope(), [other_reference]).unwrap();
+    assert_eq!(
+        coordinator
+            .commit(
+                &mut filesystem,
+                TransactionRequest {
+                    blob_inventory: Some(&changed_inventory),
+                    ..request(21, 22, &initial_mutation)
+                },
+                &mut clock(1),
+                &NeverCancel,
+            )
+            .unwrap_err(),
+        TransactionError::Conflict
+    );
+
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(27, 28, &mutation(5, 1))
+            },
+            &mut clock(2),
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (coordinator, report) = CommitCoordinator::open(
+        &mut filesystem,
+        &EntryName::new("blob-round-trip").unwrap(),
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(29_000),
+        CounterEntropy(30_000),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    assert_eq!(report.frontier.map(|revision| revision.get()), Some(2));
+    assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(6));
+}
+
+#[test]
+fn upload_resume_abort_and_zero_byte_content_are_explicit() {
+    let mut filesystem = MemoryFileSystem::default();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("blob-resume").unwrap(),
+        create_vault(scope().database(), 21_000),
+        CounterEntropy(22_000),
+        CounterState::default(),
+    )
+    .unwrap();
+    let full = vec![0x5a; BLOB_CHUNK_BYTES];
+    let tail = b"resumed tail";
+    let mut upload = coordinator.start_blob_upload(scope()).unwrap();
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut upload, &full)
+        .unwrap();
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut upload, tail)
+        .unwrap();
+    let token = upload.token();
+    assert_eq!(
+        upload.durable_bytes(),
+        u64::try_from(BLOB_CHUNK_BYTES).unwrap()
+    );
+    drop(upload);
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (mut coordinator, _) = CommitCoordinator::open(
+        &mut filesystem,
+        &EntryName::new("blob-resume").unwrap(),
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(23_000),
+        CounterEntropy(24_000),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    let mut upload = coordinator
+        .resume_blob_upload(&mut filesystem, token)
+        .unwrap();
+    assert_eq!(
+        upload.durable_bytes(),
+        u64::try_from(BLOB_CHUNK_BYTES).unwrap()
+    );
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut upload, tail)
+        .unwrap();
+    let resumed_reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut upload)
+        .unwrap();
+    let mut expected = full;
+    expected.extend_from_slice(tail);
+
+    let mut aborted = coordinator.start_blob_upload(scope()).unwrap();
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut aborted, &vec![7; BLOB_CHUNK_BYTES])
+        .unwrap();
+    let aborted_token = aborted.token();
+    coordinator
+        .abort_blob_upload(&mut filesystem, &mut aborted)
+        .unwrap();
+    assert!(matches!(
+        coordinator.write_blob_upload(&mut filesystem, &mut aborted, b"resurrect"),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+    assert!(matches!(
+        coordinator.resume_blob_upload(&mut filesystem, aborted_token),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+
+    let mut zero_upload = coordinator.start_blob_upload(scope()).unwrap();
+    let zero_token = zero_upload.token();
+    let zero_reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut zero_upload)
+        .unwrap();
+    assert_eq!(
+        coordinator
+            .finish_blob_upload(&mut filesystem, &mut zero_upload)
+            .unwrap(),
+        zero_reference
+    );
+    let mut resumed_zero = coordinator
+        .resume_blob_upload(&mut filesystem, zero_token)
+        .unwrap();
+    assert!(matches!(
+        coordinator.write_blob_upload(&mut filesystem, &mut resumed_zero, b"not empty"),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+    assert_eq!(zero_reference.byte_len(), 0);
+    assert_eq!(zero_reference.chunk_count(), 0);
+    let inventory = BlobInventory::new(scope(), [resumed_reference, zero_reference]).unwrap();
+    let mutation = mutation(0, 1);
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(23, 24, &mutation)
+            },
+            &mut clock(0),
+            &NeverCancel,
+        )
+        .unwrap();
+    assert_blob_equals(&coordinator, &mut filesystem, resumed_reference, &expected);
+    assert_eq!(
+        coordinator
+            .read_blob_range(&mut filesystem, zero_reference, 0, &mut [])
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn missing_blob_named_by_committed_inventory_fails_recovery() {
+    let mut filesystem = MemoryFileSystem::default();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("missing-blob").unwrap(),
+        create_vault(scope().database(), 25_000),
+        CounterEntropy(26_000),
+        CounterState::default(),
+    )
+    .unwrap();
+    let mut upload = coordinator.start_blob_upload(scope()).unwrap();
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut upload, b"committed content")
+        .unwrap();
+    let reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut upload)
+        .unwrap();
+    let inventory = BlobInventory::new(scope(), [reference]).unwrap();
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(25, 26, &mutation(0, 1))
+            },
+            &mut clock(0),
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let root = filesystem.root();
+    let directory = filesystem
+        .open_directory(&root, &EntryName::new("missing-blob").unwrap())
+        .unwrap();
+    let name = EntryName::new(format!("b-{}-00000000", hex(reference.id().as_bytes()))).unwrap();
+    filesystem.remove_file(&directory, &name).unwrap();
+    filesystem.sync_directory(&directory).unwrap();
+    filesystem.restart().unwrap();
+    let result = CommitCoordinator::open(
+        &mut filesystem,
+        &EntryName::new("missing-blob").unwrap(),
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(27_000),
+        CounterEntropy(28_000),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    );
+    assert!(matches!(result, Err(TransactionError::IntegrityFailure)));
+}
+
+#[test]
+fn finalized_and_aborted_upload_markers_survive_restart() {
+    let mut filesystem = MemoryFileSystem::default();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        EntryName::new("blob-markers").unwrap(),
+        create_vault(scope().database(), 29_000),
+        CounterEntropy(30_000),
+        CounterState::default(),
+    )
+    .unwrap();
+    let mut finalized = coordinator.start_blob_upload(scope()).unwrap();
+    let finalized_token = finalized.token();
+    let finalized_reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut finalized)
+        .unwrap();
+    let mut aborted = coordinator.start_blob_upload(scope()).unwrap();
+    let aborted_token = aborted.token();
+    coordinator
+        .abort_blob_upload(&mut filesystem, &mut aborted)
+        .unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (mut coordinator, _) = CommitCoordinator::open(
+        &mut filesystem,
+        &EntryName::new("blob-markers").unwrap(),
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(31_000),
+        CounterEntropy(32_000),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    let mut resumed_final = coordinator
+        .resume_blob_upload(&mut filesystem, finalized_token)
+        .unwrap();
+    assert!(matches!(
+        coordinator.write_blob_upload(&mut filesystem, &mut resumed_final, b"mutation"),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+    assert_eq!(
+        coordinator
+            .finish_blob_upload(&mut filesystem, &mut resumed_final)
+            .unwrap(),
+        finalized_reference
+    );
+    assert!(matches!(
+        coordinator.resume_blob_upload(&mut filesystem, aborted_token),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::InvalidState
+        ))
+    ));
+}
+
+fn assert_blob_equals<F>(
+    coordinator: &CommitCoordinator<CounterState, F, TestEnvelope, CounterEntropy, CounterEntropy>,
+    filesystem: &mut F,
+    reference: uste_storage::BlobReference,
+    expected: &[u8],
+) where
+    F: uste_storage::OwnershipFileSystem,
+{
+    let mut actual = Vec::new();
+    let mut offset = 0_u64;
+    let mut buffer = vec![0_u8; 700_001];
+    loop {
+        let count = coordinator
+            .read_blob_range(filesystem, reference, offset, &mut buffer)
+            .unwrap();
+        if count == 0 {
+            break;
+        }
+        actual.extend_from_slice(&buffer[..count]);
+        offset += u64::try_from(count).unwrap();
+    }
+    assert_eq!(actual, expected);
+}
+
+fn hex(bytes: [u8; 16]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 fn decode_hex(text: &str) -> Vec<u8> {

@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod adapter;
+pub mod blob;
 pub mod fault;
 pub mod journal;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -16,4 +17,9 @@ pub use adapter::{
     AdapterError, AdapterErrorKind, Clock, ClockObservation, EntryName, EntryNameError,
     FileMetadata, FileSystem, MAX_ENTRY_NAME_BYTES, OwnershipFileSystem, RandomSource,
     RestartableFileSystem, read_exact_at, write_all_at,
+};
+pub use blob::{
+    BLOB_CHUNK_BYTES, BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken,
+    EMPTY_BLOB_INVENTORY_DIGEST, MAX_BLOB_BYTES, MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL,
+    MAX_BLOBS_PER_INVENTORY, MAX_COMMITTED_BLOBS_PER_JOURNAL, MAX_NAMESPACE_BLOB_BYTES,
 };

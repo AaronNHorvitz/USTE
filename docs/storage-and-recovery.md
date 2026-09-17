@@ -1,6 +1,7 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-13 journal/recovery and T-14 transaction coordination implemented
+Draft contract · 2026-09-17 · T-13/T-14 journal and transactions implemented; T-15 blob
+qualification in progress
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 

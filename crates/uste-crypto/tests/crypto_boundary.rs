@@ -199,6 +199,54 @@ fn deterministic_object_envelope_has_a_pinned_digest() {
 }
 
 #[test]
+fn public_opaque_identifier_has_a_pinned_domain_and_rejects_other_roles() {
+    let database = database(0x4a);
+    let vault = test_vault(database, vec![]);
+    let context = CryptoContext::new(
+        database,
+        Scope::Database,
+        KeyEpoch::FIRST,
+        ObjectRole::BlobInventoryName,
+        CryptoObjectId::from_bytes([0; 16]),
+        0,
+        WriterIncarnationId::from_bytes([0x55; 16]),
+        1,
+        0,
+        FrameClass::Small4KiB,
+    );
+    assert_eq!(
+        vault
+            .derive_opaque_identifier(context, &[0x66; 32])
+            .unwrap(),
+        [
+            0xc2, 0xd4, 0xec, 0x31, 0x45, 0x43, 0xb5, 0x87, 0xf6, 0xb2, 0xf5, 0x85, 0x4c, 0x4c,
+            0x21, 0x31, 0x77, 0x6b, 0x97, 0x3d, 0xa4, 0xf1, 0x19, 0xda, 0x59, 0x03, 0xb2, 0x41,
+            0x3f, 0xad, 0xab, 0x4b,
+        ]
+    );
+    assert_eq!(
+        vault
+            .derive_opaque_identifier(
+                CryptoContext::new(
+                    database,
+                    Scope::Database,
+                    KeyEpoch::FIRST,
+                    ObjectRole::BlobInventory,
+                    CryptoObjectId::from_bytes([0; 16]),
+                    0,
+                    WriterIncarnationId::from_bytes([0x55; 16]),
+                    1,
+                    0,
+                    FrameClass::Small4KiB,
+                ),
+                &[0x66; 32],
+            )
+            .unwrap_err(),
+        CryptoError::InvalidContext
+    );
+}
+
+#[test]
 fn literal_crypto_profile_matches_public_bounds() {
     let expected = |case: &str| {
         CRYPTO_VECTORS

@@ -8,8 +8,8 @@ use uste_types::DatabaseId;
 use zeroize::Zeroizing;
 
 use crate::{
-    CryptoContext, CryptoError, EntropySource, FrameClass, KeyAdapter, KeyEpoch, SecretBytes,
-    SecretKeyMaterial,
+    CryptoContext, CryptoError, EntropySource, FrameClass, KeyAdapter, KeyEpoch, ObjectRole,
+    SecretBytes, SecretKeyMaterial,
 };
 
 pub const ENVELOPE_FORMAT_MAJOR: u8 = 1;
@@ -250,6 +250,21 @@ impl<W, E: EntropySource> KeyVault<W, E> {
         }
         let key = self.key.as_ref().ok_or(CryptoError::Locked)?;
         decrypt(key, context, envelope)
+    }
+
+    /// Derive a deterministic public opaque identifier under the dedicated name-token role.
+    ///
+    /// The returned bytes are safe to expose as an on-disk name but are not an encryption key.
+    pub fn derive_opaque_identifier(
+        &self,
+        context: CryptoContext,
+        input: &[u8; 32],
+    ) -> Result<[u8; 32], CryptoError> {
+        if context.database() != self.database || context.role() != ObjectRole::BlobInventoryName {
+            return Err(CryptoError::InvalidContext);
+        }
+        let key = self.key.as_ref().ok_or(CryptoError::Locked)?;
+        key.derive_public_token(context, input)
     }
 }
 

@@ -64,7 +64,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-12 | Filesystem/clock/random adapters and fault harness; FR-03, NFR-03 | T-09 | [Narrow I/O interfaces and deterministic failure injection](docs/evidence/io-fault-harness.md) | Reproducible short-write/read, file/directory-sync, rename, disk-full and SIGKILL/reopen scenarios; production Linux adapter remains T-13 |
 | [x] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | [uste-storage journal/recovery evidence](docs/evidence/journal-foundation.md) | VT-03/04 pass every initial publication boundary and hard-corruption case |
 | [x] T-14 | Commit coordinator, readers, conflict checks, idempotency; FR-02 | T-13 | [uste-txn coordinator and qualification](docs/evidence/transaction-coordinator-foundation.md) with durable outcome lookup | T-14 slice of VT-02 passes lost response, competing mutations, cancellation and restart; graph phantom predicates remain T-17 |
-| [ ] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | Staging/finalization/resume/cleanup and inventory | VT-08 plus blob-specific VT-03: exact unknown-binary round-trip, bounded RSS, no committed dangling object |
+| [ ] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | [Encrypted blob-store foundation](docs/evidence/blob-store-foundation.md): staging/finalization/resume/cleanup and inventory | VT-08 plus blob-specific VT-03: exact unknown-binary round-trip, bounded RSS, no committed dangling object |
 | [ ] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | uste-policy and trusted adapter checks | VT-06 proves no cross-scope graph/blob/existence leakage; quotas enforced on actual bytes |
 | [ ] T-17 | Graph records, evidence and transactional adjacency; FR-01/04/06 | T-10, T-14, T-16 | uste-graph basic records and traversal | VT-05 agrees with reference through create/correct/delete/conflict and restart |
 | [ ] T-18 | Deterministic replay and verified cache snapshots; FR-03/07 | T-13, T-17 | uste-replay, checkpoint and scrub prototypes | VT-04/14 show exact logical equivalence, no model/parser/network dependency |
@@ -86,6 +86,12 @@ encrypted `UTXN` publication, coherent owned-snapshot readers, durable retry/tra
 expiry and uncertain-handle quarantine are implemented. The literal format golden, complete initial
 publication fault matrix, both eligible cancellation boundaries, malformed authenticated recovery,
 32-caller stale-mutation race, retry and restart cases pass.
+
+T-15 progress: Decision 0017 adds 1 MiB encrypted blob chunks, resumable staging, immutable
+finalization, opaque inventory names, commit-gated reads and canonical certificate-bound
+inventories. Multi-chunk, zero-byte, uncertain-flush resume, duplicate-handle rejection, durable
+terminal-chunk resume, abort, restart/replay and missing-committed-chunk cases pass; the task
+remains open for its complete fault/corruption/retry-binding matrix and measured memory evidence.
 
 ## R2 — Developer alpha
 

@@ -20,6 +20,7 @@ pub enum Operation {
     SyncData,
     SyncAll,
     RenameNoReplace,
+    RemoveFile,
     SyncDirectory,
     TryLockExclusive,
 }
@@ -347,6 +348,19 @@ impl<F: FileSystem> FileSystem for FaultFileSystem<F> {
             destination_directory,
             destination,
         );
+        self.finish(result, crash_after)
+    }
+
+    fn remove_file(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<(), AdapterError> {
+        let (crash_after, error) = self.ordinary_action(Operation::RemoveFile)?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let result = self.inner.remove_file(directory, name);
         self.finish(result, crash_after)
     }
 

@@ -10,8 +10,8 @@ use std::{fmt, os::fd::OwnedFd, sync::Arc};
 use rustix::{
     fd::AsFd,
     fs::{
-        FileType, FlockOperation, Mode, OFlags, RenameFlags, ResolveFlags, fdatasync, flock, fstat,
-        fstatfs, fsync, ftruncate, mkdirat, openat2, renameat_with,
+        AtFlags, FileType, FlockOperation, Mode, OFlags, RenameFlags, ResolveFlags, fdatasync,
+        flock, fstat, fstatfs, fsync, ftruncate, mkdirat, openat2, renameat_with, unlinkat,
     },
     io::{Errno, fcntl_dupfd_cloexec, pread, pwrite},
 };
@@ -211,6 +211,14 @@ impl FileSystem for LinuxFileSystem {
             RenameFlags::NOREPLACE,
         )
         .map_err(map_rename_errno)
+    }
+
+    fn remove_file(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<(), AdapterError> {
+        unlinkat(directory.0.as_ref(), name.as_str(), AtFlags::empty()).map_err(map_errno)
     }
 
     fn sync_directory(&mut self, directory: &Self::Directory) -> Result<(), AdapterError> {

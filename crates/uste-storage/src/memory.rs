@@ -418,6 +418,26 @@ impl FileSystem for MemoryFileSystem {
         Ok(())
     }
 
+    fn remove_file(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<(), AdapterError> {
+        let node = self
+            .directory(directory)?
+            .volatile
+            .get(name)
+            .copied()
+            .ok_or_else(|| AdapterError::new(AdapterErrorKind::NotFound))?;
+        match node {
+            Node::File(_) => {
+                self.directory_mut(directory)?.volatile.remove(name);
+                Ok(())
+            }
+            Node::Directory(_) => Err(AdapterErrorKind::WrongEntryType.into()),
+        }
+    }
+
     fn sync_directory(&mut self, directory: &Self::Directory) -> Result<(), AdapterError> {
         let directory = self.directory_mut(directory)?;
         directory.durable.clone_from(&directory.volatile);

@@ -91,6 +91,9 @@ pub enum ObjectRole {
     TemporarySpill = 7,
     WorkerOutput = 8,
     CreationManifest = 9,
+    BlobInventory = 10,
+    BlobManifest = 11,
+    BlobInventoryName = 12,
 }
 
 /// Public ciphertext padding class.
@@ -161,6 +164,11 @@ impl CryptoContext {
             object_format_minor,
             frame,
         }
+    }
+
+    #[must_use]
+    pub const fn role(self) -> ObjectRole {
+        self.role
     }
 
     #[must_use]
