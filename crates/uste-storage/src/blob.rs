@@ -69,6 +69,27 @@ pub struct BlobReference {
 }
 
 impl BlobReference {
+    pub fn new(
+        scope: NamespaceRef,
+        id: BlobId,
+        byte_len: u64,
+        chunk_count: u32,
+        content_digest: [u8; 32],
+    ) -> Result<Self, StorageError> {
+        let reference = Self {
+            scope,
+            id,
+            byte_len,
+            chunk_count,
+            content_digest,
+        };
+        if valid_reference_shape(reference) {
+            Ok(reference)
+        } else {
+            Err(StorageError::InvalidState)
+        }
+    }
+
     #[must_use]
     pub const fn scope(self) -> NamespaceRef {
         self.scope

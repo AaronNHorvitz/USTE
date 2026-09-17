@@ -20,8 +20,8 @@ use sha2::{Digest, Sha256};
 use uste_crypto::{EntropySource, KeyAdapter};
 pub use uste_policy::PrincipalDigest;
 use uste_storage::{
-    BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, Clock,
-    EMPTY_BLOB_INVENTORY_DIGEST, OwnershipFileSystem,
+    BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput, Clock,
+    DurableCheckpoint, EMPTY_BLOB_INVENTORY_DIGEST, OwnershipFileSystem, RecoveredCheckpoint,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -40,6 +40,39 @@ const MAX_RETENTION_DAYS: u16 = 365;
 pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024 - GROUP_HEADER_BYTES;
 /// Accepted `limits-v1` cap for retained idempotency outcomes in one namespace.
 pub const MAX_OUTCOMES_PER_NAMESPACE: usize = 10_000_000;
+
+/// Authenticate the complete journal and return only cache candidates whose certificate anchor is
+/// on that exact chain. `open_seeded` revalidates the anchor after this temporary reader releases
+/// ownership, closing the read/open race without trusting the cache as authority.
+#[allow(clippy::too_many_arguments)]
+pub fn load_verified_checkpoint_candidates<F, W, E, I, A>(
+    filesystem: &mut F,
+    final_name: &uste_storage::EntryName,
+    scope: NamespaceRef,
+    vault_entropy: E,
+    identity_entropy: I,
+    key_adapter: &mut A,
+) -> Result<(Vec<RecoveredCheckpoint>, RecoveryReport), TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+    A: KeyAdapter<Envelope = W>,
+{
+    let (journal, report) = JournalStore::open(
+        filesystem,
+        final_name,
+        scope.database(),
+        vault_entropy,
+        identity_entropy,
+        key_adapter,
+        |_group| Ok(()),
+    )
+    .map_err(map_open_error)?;
+    let candidates = journal.load_checkpoints(filesystem, scope);
+    Ok((candidates, report))
+}
 
 /// Retry-outcome retention fixed by Decision 0003.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -200,6 +233,100 @@ struct RetryKey {
     key: IdempotencyKey,
 }
 
+/// Trusted replay seed decoded from an authenticated checkpoint cache.
+pub struct CoordinatorRecoverySeed<S> {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    certificate_digest: [u8; 32],
+    state: S,
+    outcomes: BTreeMap<RetryKey, TransactionOutcome>,
+    transactions: BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    committed_blob_owners: BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+}
+
+impl<S> core::fmt::Debug for CoordinatorRecoverySeed<S> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("CoordinatorRecoverySeed")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("outcome_count", &self.outcomes.len())
+            .field("committed_blob_count", &self.committed_blob_owners.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<S> CoordinatorRecoverySeed<S>
+where
+    S: CheckpointState,
+{
+    /// Bind decoded reducer and coordinator state to a storage-authenticated, journal-anchored
+    /// checkpoint candidate. `RecoveredCheckpoint` has no public constructor, so callers cannot
+    /// manufacture the provenance required by `open_seeded`.
+    pub fn from_authenticated_checkpoint(
+        checkpoint: &RecoveredCheckpoint,
+        state: S,
+        outcomes: impl IntoIterator<Item = (PrincipalDigest, IdempotencyKey, TransactionOutcome)>,
+        committed_blob_owners: impl IntoIterator<Item = (BlobReference, PrincipalDigest)>,
+    ) -> Result<Self, TransactionError> {
+        let scope = checkpoint.scope();
+        let revision = checkpoint.revision();
+        let snapshot = state.snapshot();
+        if S::checkpoint_scope(&snapshot) != scope
+            || S::checkpoint_revision(&snapshot) != Some(revision)
+            || checkpoint.reducer_profile() != &S::REDUCER_PROFILE
+            || S::logical_state_digest(&snapshot).map_err(|error| match error {
+                CheckpointStateError::ResourceLimit => TransactionError::ResourceLimit,
+                CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
+                    TransactionError::IntegrityFailure
+                }
+            })? != *checkpoint.logical_state_digest()
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let mut outcome_map = BTreeMap::new();
+        let mut transactions = BTreeMap::new();
+        for (principal, key, outcome) in outcomes {
+            if outcome_map.len() == MAX_OUTCOMES_PER_NAMESPACE {
+                return Err(TransactionError::ResourceLimit);
+            }
+            if outcome.revision > revision
+                || outcome_map
+                    .insert(RetryKey { principal, key }, outcome)
+                    .is_some()
+                || transactions
+                    .insert(outcome.transaction_id, (principal, outcome))
+                    .is_some()
+            {
+                return Err(TransactionError::IntegrityFailure);
+            }
+        }
+        let mut owners = BTreeMap::new();
+        for (reference, principal) in committed_blob_owners {
+            if owners.len() == uste_storage::MAX_COMMITTED_BLOBS_PER_JOURNAL {
+                return Err(TransactionError::ResourceLimit);
+            }
+            if reference.scope() != scope
+                || owners
+                    .insert((reference.scope(), reference.id()), (reference, principal))
+                    .is_some()
+            {
+                return Err(TransactionError::IntegrityFailure);
+            }
+        }
+        Ok(Self {
+            scope,
+            revision,
+            certificate_digest: *checkpoint.certificate_digest(),
+            state,
+            outcomes: outcome_map,
+            transactions,
+            committed_blob_owners: owners,
+        })
+    }
+}
+
 /// One serialized commit coordinator and its fully recovered logical state.
 pub struct CommitCoordinator<S, F, W, E, I>
 where
@@ -313,6 +440,100 @@ where
         ))
     }
 
+    /// Open after validating an authenticated reducer/coordinator cache against the exact journal
+    /// certificate at its revision, then replay only the reducer suffix. The journal itself is
+    /// still authenticated in full before any callback.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_seeded<A>(
+        filesystem: &mut F,
+        final_name: &uste_storage::EntryName,
+        scope: NamespaceRef,
+        retention: RetentionDays,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        seed: CoordinatorRecoverySeed<S>,
+    ) -> Result<(Self, RecoveryReport), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+        S: CheckpointState,
+    {
+        if seed.scope != scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let checkpoint_revision = seed.revision;
+        let checkpoint_certificate_digest = seed.certificate_digest;
+        let mut state = seed.state;
+        let mut outcomes = seed.outcomes;
+        let mut transactions = seed.transactions;
+        let mut committed_blob_owners = seed.committed_blob_owners;
+        let mut verified_outcomes = BTreeMap::new();
+        let mut verified_transactions = BTreeMap::new();
+        let mut verified_blob_owners = BTreeMap::new();
+        let mut anchor_verified = false;
+        let (journal, report) = JournalStore::open(
+            filesystem,
+            final_name,
+            scope.database(),
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            |group| {
+                if group.revision <= checkpoint_revision {
+                    replay_group_metadata(
+                        scope,
+                        &mut verified_outcomes,
+                        &mut verified_transactions,
+                        &mut verified_blob_owners,
+                        group,
+                    )?;
+                    if group.revision == checkpoint_revision {
+                        if group.certificate_digest != checkpoint_certificate_digest
+                            || verified_outcomes != outcomes
+                            || verified_transactions != transactions
+                            || verified_blob_owners != committed_blob_owners
+                        {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        anchor_verified = true;
+                    }
+                    Ok(())
+                } else {
+                    replay_group(
+                        scope,
+                        &mut state,
+                        &mut outcomes,
+                        &mut transactions,
+                        &mut committed_blob_owners,
+                        group,
+                    )
+                }
+            },
+        )
+        .map_err(map_open_error)?;
+        if !anchor_verified
+            || report
+                .frontier
+                .is_none_or(|frontier| frontier < checkpoint_revision)
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok((
+            Self {
+                scope,
+                retention,
+                journal,
+                state,
+                outcomes,
+                transactions,
+                committed_blob_owners,
+                recovered: true,
+                uncertain: false,
+            },
+            report,
+        ))
+    }
+
     pub fn read_view(&self) -> Result<ReadView<S::Snapshot>, TransactionError> {
         if self.uncertain {
             return Err(TransactionError::OutcomeUnknown);
@@ -342,6 +563,53 @@ where
     #[must_use]
     pub const fn was_recovered(&self) -> bool {
         self.recovered
+    }
+
+    /// Trusted maintenance access used only to capture a reducer checkpoint.
+    pub fn reducer_state_for_checkpoint(&self) -> Result<&S, TransactionError> {
+        if self.uncertain {
+            Err(TransactionError::OutcomeUnknown)
+        } else {
+            Ok(&self.state)
+        }
+    }
+
+    /// Current journal certificate anchor for an optional cache publication.
+    pub fn checkpoint_anchor(
+        &self,
+    ) -> Result<Option<(CommitRevision, [u8; 32])>, TransactionError> {
+        if self.uncertain {
+            Err(TransactionError::OutcomeUnknown)
+        } else {
+            Ok(self.journal.checkpoint_anchor())
+        }
+    }
+
+    /// Canonically ordered retained retry outcomes for trusted checkpoint maintenance.
+    pub fn checkpoint_outcomes(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (PrincipalDigest, IdempotencyKey, TransactionOutcome)> + '_
+    {
+        self.outcomes
+            .iter()
+            .map(|(key, outcome)| (key.principal, key.key, *outcome))
+    }
+
+    /// Publish a captured coordinator checkpoint through the journal's optional cache owner.
+    pub fn publish_checkpoint(
+        &mut self,
+        filesystem: &mut F,
+        input: CheckpointInput<'_>,
+    ) -> Result<DurableCheckpoint, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_checkpoint(filesystem, input)
+            .map_err(TransactionError::Storage)
     }
 
     /// Recovered first-commit ownership for every unique committed blob.
@@ -684,6 +952,47 @@ fn replay_group<S: TransactionState>(
         return Err(StorageError::IntegrityFailure);
     }
     state.publish(prepared);
+    if let Some(inventory) = decoded.blob_inventory {
+        for reference in inventory.references() {
+            committed_blob_owners
+                .entry((reference.scope(), reference.id()))
+                .or_insert((*reference, decoded.retry_key.principal));
+        }
+    }
+    Ok(())
+}
+
+fn replay_group_metadata(
+    scope: NamespaceRef,
+    outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
+    transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    committed_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    group: RecoveredGroup<'_>,
+) -> Result<(), StorageError> {
+    if sha256(group.encoded_group) != group.logical_event_digest {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let decoded = decode_group(
+        scope,
+        group.encoded_group,
+        group.revision,
+        group.blob_inventory_digest,
+        group.blob_inventory,
+    )
+    .map_err(|_| StorageError::IntegrityFailure)?;
+    if outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE
+        || outcomes
+            .insert(decoded.retry_key, decoded.outcome)
+            .is_some()
+        || transactions
+            .insert(
+                decoded.outcome.transaction_id,
+                (decoded.retry_key.principal, decoded.outcome),
+            )
+            .is_some()
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
     if let Some(inventory) = decoded.blob_inventory {
         for reference in inventory.references() {
             committed_blob_owners

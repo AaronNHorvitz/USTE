@@ -334,6 +334,7 @@ dependencies = [
 name = "uste-replay"
 version = "0.1.0"
 dependencies = [
+ "uste-crypto",
  "uste-storage",
  "uste-txn",
  "uste-types",

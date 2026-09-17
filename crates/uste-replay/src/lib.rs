@@ -5,9 +5,22 @@
 
 #![forbid(unsafe_code)]
 
-use uste_storage::BlobInventory;
-use uste_txn::{CheckpointState, CheckpointStateError};
-use uste_types::{CommitRevision, NamespaceRef};
+use uste_storage::{
+    BlobId, BlobInventory, BlobReference, CheckpointInput, MAX_CHECKPOINT_BYTES,
+    MAX_COMMITTED_BLOBS_PER_JOURNAL, RecoveredCheckpoint,
+};
+use uste_txn::{
+    CheckpointState, CheckpointStateError, CoordinatorRecoverySeed, MAX_OUTCOMES_PER_NAMESPACE,
+    PrincipalDigest, TransactionError, TransactionOutcome,
+};
+use uste_types::{
+    CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, TransactionId,
+    UtcInstant,
+};
+
+const COORDINATOR_MAGIC: &[u8; 8] = b"UCCP\0\x01\0\0";
+const OUTCOME_BYTES: usize = 148;
+const BLOB_OWNER_BYTES: usize = 92;
 
 #[derive(Clone, Copy)]
 pub struct ReplayEvent<'a> {
@@ -93,6 +106,44 @@ impl ReducerCheckpoint {
     #[must_use]
     pub fn payload(&self) -> &[u8] {
         &self.payload
+    }
+}
+
+/// Canonical reducer plus coordinator retry/ownership cache ready for encrypted publication.
+pub struct CoordinatorCheckpoint {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    certificate_digest: [u8; 32],
+    reducer_profile: [u8; 32],
+    logical_state_digest: [u8; 32],
+    payload: Vec<u8>,
+}
+
+impl core::fmt::Debug for CoordinatorCheckpoint {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("CoordinatorCheckpoint")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("reducer_profile", &"[REDACTED]")
+            .field("logical_state_digest", &"[REDACTED]")
+            .field("payload_len", &self.payload.len())
+            .finish()
+    }
+}
+
+impl CoordinatorCheckpoint {
+    #[must_use]
+    pub fn storage_input(&self) -> CheckpointInput<'_> {
+        CheckpointInput {
+            scope: self.scope,
+            revision: self.revision,
+            certificate_digest: self.certificate_digest,
+            reducer_profile: self.reducer_profile,
+            logical_state_digest: self.logical_state_digest,
+            payload: &self.payload,
+        }
     }
 }
 
@@ -229,6 +280,318 @@ where
         return Err(ReplayError::NonCanonicalCheckpoint);
     }
     Ok(state)
+}
+
+/// Capture all reducer and coordinator state needed to resume after the checkpoint revision.
+pub fn capture_coordinator_checkpoint<S>(
+    state: &S,
+    anchor: (CommitRevision, [u8; 32]),
+    outcomes: impl IntoIterator<Item = (PrincipalDigest, IdempotencyKey, TransactionOutcome)>,
+    committed_blob_owners: impl IntoIterator<Item = (BlobReference, PrincipalDigest)>,
+) -> Result<CoordinatorCheckpoint, ReplayError>
+where
+    S: CheckpointState,
+{
+    let reducer = capture_reducer_checkpoint(state)?;
+    if reducer.revision != anchor.0 {
+        return Err(ReplayError::CheckpointRevisionMismatch);
+    }
+    let mut payload = Vec::new();
+    coordinator_extend(&mut payload, COORDINATOR_MAGIC)?;
+    coordinator_extend(&mut payload, reducer.scope.database().as_bytes())?;
+    coordinator_extend(&mut payload, reducer.scope.namespace().as_bytes())?;
+    coordinator_extend(&mut payload, &reducer.revision.get().to_be_bytes())?;
+    coordinator_extend(&mut payload, &anchor.1)?;
+    coordinator_extend(&mut payload, &reducer.reducer_profile)?;
+    coordinator_extend(&mut payload, &reducer.logical_state_digest)?;
+    coordinator_frame(&mut payload, &reducer.payload)?;
+
+    let outcome_count_at = payload.len();
+    coordinator_extend(&mut payload, &[0; 8])?;
+    let mut outcome_count = 0_u64;
+    let mut previous_outcome = None;
+    let mut transaction_ids = Vec::new();
+    for (principal, key, outcome) in outcomes {
+        let order = (principal, key);
+        if previous_outcome.is_some_and(|previous| previous >= order)
+            || outcome.revision > reducer.revision
+        {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+        }
+        if usize::try_from(outcome_count).map_err(|_| ReplayError::EventCountExhausted)?
+            == MAX_OUTCOMES_PER_NAMESPACE
+        {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+        }
+        previous_outcome = Some(order);
+        outcome_count = outcome_count
+            .checked_add(1)
+            .ok_or(ReplayError::EventCountExhausted)?;
+        transaction_ids
+            .try_reserve(1)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+        transaction_ids.push(outcome.transaction_id);
+        coordinator_extend(&mut payload, &principal.as_bytes())?;
+        coordinator_extend(&mut payload, key.as_bytes())?;
+        coordinator_extend(&mut payload, outcome.transaction_id.as_bytes())?;
+        coordinator_extend(&mut payload, &outcome.revision.get().to_be_bytes())?;
+        coordinator_extend(&mut payload, &outcome.request_digest)?;
+        coordinator_extend(&mut payload, &outcome.result_digest)?;
+        coordinator_extend(&mut payload, &outcome.expires_at.seconds().to_be_bytes())?;
+        coordinator_extend(
+            &mut payload,
+            &outcome.expires_at.nanoseconds().to_be_bytes(),
+        )?;
+    }
+    transaction_ids.sort_unstable();
+    if transaction_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+    }
+    payload[outcome_count_at..outcome_count_at + 8].copy_from_slice(&outcome_count.to_be_bytes());
+
+    let owner_count_at = payload.len();
+    coordinator_extend(&mut payload, &[0; 8])?;
+    let mut owner_count = 0_u64;
+    let mut previous_owner = None;
+    for (reference, principal) in committed_blob_owners {
+        if usize::try_from(owner_count).map_err(|_| ReplayError::EventCountExhausted)?
+            == MAX_COMMITTED_BLOBS_PER_JOURNAL
+        {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+        }
+        if reference.scope() != reducer.scope {
+            return Err(ReplayError::CheckpointScopeMismatch);
+        }
+        let order = (reference.scope(), reference.id());
+        if previous_owner.is_some_and(|previous| previous >= order) {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+        }
+        previous_owner = Some(order);
+        owner_count = owner_count
+            .checked_add(1)
+            .ok_or(ReplayError::EventCountExhausted)?;
+        coordinator_extend(&mut payload, &reference.id().as_bytes())?;
+        coordinator_extend(&mut payload, &reference.byte_len().to_be_bytes())?;
+        coordinator_extend(&mut payload, &reference.chunk_count().to_be_bytes())?;
+        coordinator_extend(&mut payload, &reference.content_digest())?;
+        coordinator_extend(&mut payload, &principal.as_bytes())?;
+    }
+    payload[owner_count_at..owner_count_at + 8].copy_from_slice(&owner_count.to_be_bytes());
+    Ok(CoordinatorCheckpoint {
+        scope: reducer.scope,
+        revision: reducer.revision,
+        certificate_digest: anchor.1,
+        reducer_profile: reducer.reducer_profile,
+        logical_state_digest: reducer.logical_state_digest,
+        payload,
+    })
+}
+
+/// Decode an authenticated storage candidate into a seed that `CommitCoordinator::open_seeded`
+/// will independently compare with journal metadata and its exact certificate anchor.
+pub fn decode_coordinator_checkpoint<S>(
+    checkpoint: &RecoveredCheckpoint,
+) -> Result<CoordinatorRecoverySeed<S>, ReplayError>
+where
+    S: CheckpointState,
+{
+    if checkpoint.payload().len() > MAX_CHECKPOINT_BYTES {
+        return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+    }
+    let mut cursor = CoordinatorCursor::new(checkpoint.payload());
+    if cursor.read_array::<8>()? != *COORDINATOR_MAGIC {
+        return Err(ReplayError::Checkpoint(
+            CheckpointStateError::UnsupportedProfile,
+        ));
+    }
+    let scope = NamespaceRef::new(
+        DatabaseId::from_bytes(cursor.read_array()?),
+        NamespaceId::from_bytes(cursor.read_array()?),
+    );
+    let revision = cursor.read_revision()?;
+    let certificate_digest = cursor.read_array()?;
+    let reducer_profile = cursor.read_array()?;
+    let logical_state_digest = cursor.read_array()?;
+    if scope != checkpoint.scope()
+        || revision != checkpoint.revision()
+        || certificate_digest != *checkpoint.certificate_digest()
+        || reducer_profile != *checkpoint.reducer_profile()
+        || logical_state_digest != *checkpoint.logical_state_digest()
+    {
+        return Err(ReplayError::CheckpointStateMismatch);
+    }
+    let reducer_bytes = cursor.read_frame()?;
+    let mut reducer_payload = Vec::new();
+    reducer_payload
+        .try_reserve_exact(reducer_bytes.len())
+        .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+    reducer_payload.extend_from_slice(reducer_bytes);
+    let reducer = ReducerCheckpoint {
+        scope,
+        revision,
+        reducer_profile,
+        logical_state_digest,
+        payload: reducer_payload,
+    };
+    let state = verify_reducer_checkpoint::<S>(scope, &reducer)?;
+
+    let outcome_count = cursor.read_bounded_count(OUTCOME_BYTES)?;
+    if outcome_count > MAX_OUTCOMES_PER_NAMESPACE {
+        return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+    }
+    let mut outcomes = Vec::new();
+    let mut previous_outcome = None;
+    for _ in 0..outcome_count {
+        let principal = PrincipalDigest::from_bytes(cursor.read_array()?);
+        let key = IdempotencyKey::from_bytes(cursor.read_array()?);
+        let order = (principal, key);
+        if previous_outcome.is_some_and(|previous| previous >= order) {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+        }
+        previous_outcome = Some(order);
+        let transaction_id = TransactionId::from_bytes(cursor.read_array()?);
+        let outcome_revision = cursor.read_revision()?;
+        let request_digest = cursor.read_array()?;
+        let result_digest = cursor.read_array()?;
+        let expires_at = UtcInstant::new(cursor.read_i64()?, cursor.read_u32()?)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::Invalid))?;
+        outcomes
+            .try_reserve(1)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+        outcomes.push((
+            principal,
+            key,
+            TransactionOutcome {
+                transaction_id,
+                revision: outcome_revision,
+                request_digest,
+                result_digest,
+                expires_at,
+            },
+        ));
+    }
+
+    let owner_count = cursor.read_bounded_count(BLOB_OWNER_BYTES)?;
+    if owner_count > MAX_COMMITTED_BLOBS_PER_JOURNAL {
+        return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+    }
+    let mut owners = Vec::new();
+    let mut previous_owner = None;
+    for _ in 0..owner_count {
+        let id = BlobId::from_bytes(cursor.read_array()?);
+        let byte_len = cursor.read_u64()?;
+        let chunk_count = cursor.read_u32()?;
+        let content_digest = cursor.read_array()?;
+        let principal = PrincipalDigest::from_bytes(cursor.read_array()?);
+        let reference = BlobReference::new(scope, id, byte_len, chunk_count, content_digest)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::Invalid))?;
+        let order = (reference.scope(), reference.id());
+        if previous_owner.is_some_and(|previous| previous >= order) {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+        }
+        previous_owner = Some(order);
+        owners
+            .try_reserve(1)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+        owners.push((reference, principal));
+    }
+    if !cursor.is_empty() {
+        return Err(ReplayError::NonCanonicalCheckpoint);
+    }
+    CoordinatorRecoverySeed::from_authenticated_checkpoint(checkpoint, state, outcomes, owners)
+        .map_err(coordinator_seed_error)
+}
+
+fn coordinator_seed_error(error: TransactionError) -> ReplayError {
+    match error {
+        TransactionError::ResourceLimit => {
+            ReplayError::Checkpoint(CheckpointStateError::ResourceLimit)
+        }
+        _ => ReplayError::Checkpoint(CheckpointStateError::Invalid),
+    }
+}
+
+fn coordinator_frame(output: &mut Vec<u8>, value: &[u8]) -> Result<(), ReplayError> {
+    let length = u64::try_from(value.len())
+        .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+    coordinator_extend(output, &length.to_be_bytes())?;
+    coordinator_extend(output, value)
+}
+
+fn coordinator_extend(output: &mut Vec<u8>, value: &[u8]) -> Result<(), ReplayError> {
+    let next = output
+        .len()
+        .checked_add(value.len())
+        .ok_or(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+    if next > MAX_CHECKPOINT_BYTES {
+        return Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit));
+    }
+    output
+        .try_reserve(value.len())
+        .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+    output.extend_from_slice(value);
+    Ok(())
+}
+
+struct CoordinatorCursor<'a> {
+    remaining: &'a [u8],
+}
+
+impl<'a> CoordinatorCursor<'a> {
+    const fn new(bytes: &'a [u8]) -> Self {
+        Self { remaining: bytes }
+    }
+
+    fn read(&mut self, length: usize) -> Result<&'a [u8], ReplayError> {
+        let (value, remaining) = self
+            .remaining
+            .split_at_checked(length)
+            .ok_or(ReplayError::Checkpoint(CheckpointStateError::Invalid))?;
+        self.remaining = remaining;
+        Ok(value)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], ReplayError> {
+        self.read(N)?
+            .try_into()
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::Invalid))
+    }
+
+    fn read_u64(&mut self) -> Result<u64, ReplayError> {
+        Ok(u64::from_be_bytes(self.read_array()?))
+    }
+
+    fn read_i64(&mut self) -> Result<i64, ReplayError> {
+        Ok(i64::from_be_bytes(self.read_array()?))
+    }
+
+    fn read_u32(&mut self) -> Result<u32, ReplayError> {
+        Ok(u32::from_be_bytes(self.read_array()?))
+    }
+
+    fn read_revision(&mut self) -> Result<CommitRevision, ReplayError> {
+        CommitRevision::new(self.read_u64()?)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::Invalid))
+    }
+
+    fn read_frame(&mut self) -> Result<&'a [u8], ReplayError> {
+        let length = usize::try_from(self.read_u64()?)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+        self.read(length)
+    }
+
+    fn read_bounded_count(&mut self, minimum_entry_bytes: usize) -> Result<usize, ReplayError> {
+        let count = usize::try_from(self.read_u64()?)
+            .map_err(|_| ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))?;
+        if count > self.remaining.len() / minimum_entry_bytes {
+            return Err(ReplayError::Checkpoint(CheckpointStateError::Invalid));
+        }
+        Ok(count)
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.remaining.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -486,6 +849,49 @@ mod tests {
         assert_eq!(
             capture_reducer_checkpoint(&state),
             Err(ReplayError::Checkpoint(CheckpointStateError::ResourceLimit))
+        );
+    }
+
+    #[test]
+    fn coordinator_capture_rejects_future_outcomes_and_duplicate_transaction_ids() {
+        let revision = CommitRevision::new(2).unwrap();
+        let state = Counter {
+            revision: Some(revision),
+            value: 7,
+        };
+        let outcome = |owner: u8, outcome_revision: CommitRevision| {
+            (
+                PrincipalDigest::from_bytes([owner; 32]),
+                IdempotencyKey::from_bytes([owner; 16]),
+                TransactionOutcome {
+                    transaction_id: TransactionId::from_bytes([0x71; 16]),
+                    revision: outcome_revision,
+                    request_digest: [owner; 32],
+                    result_digest: [owner.wrapping_add(1); 32],
+                    expires_at: UtcInstant::new(86_400, 0).unwrap(),
+                },
+            )
+        };
+        let no_owners = || core::iter::empty::<(BlobReference, PrincipalDigest)>();
+        assert_eq!(
+            capture_coordinator_checkpoint(
+                &state,
+                (revision, [0x72; 32]),
+                [outcome(1, CommitRevision::new(3).unwrap())],
+                no_owners(),
+            )
+            .unwrap_err(),
+            ReplayError::Checkpoint(CheckpointStateError::Invalid)
+        );
+        assert_eq!(
+            capture_coordinator_checkpoint(
+                &state,
+                (revision, [0x72; 32]),
+                [outcome(1, CommitRevision::FIRST), outcome(2, revision),],
+                no_owners(),
+            )
+            .unwrap_err(),
+            ReplayError::Checkpoint(CheckpointStateError::Invalid)
         );
     }
 

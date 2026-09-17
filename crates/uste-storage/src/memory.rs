@@ -244,6 +244,42 @@ impl MemoryFileSystem {
         }
         Ok(())
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_swap_file_contents(
+        &mut self,
+        directory: &MemoryDirectory,
+        first: &EntryName,
+        second: &EntryName,
+    ) -> Result<(), AdapterError> {
+        let (first_id, second_id) = {
+            let directory = self.directory(directory)?;
+            let resolve = |name: &EntryName| -> Result<u64, AdapterError> {
+                match directory.volatile.get(name) {
+                    Some(Node::File(id)) => Ok(*id),
+                    Some(Node::Directory(_)) => Err(AdapterErrorKind::AdapterContract.into()),
+                    None => Err(AdapterErrorKind::NotFound.into()),
+                }
+            };
+            (resolve(first)?, resolve(second)?)
+        };
+        if first_id == second_id {
+            return Ok(());
+        }
+        let first_state = self
+            .files
+            .get(&first_id)
+            .cloned()
+            .ok_or_else(|| AdapterError::new(AdapterErrorKind::NotFound))?;
+        let second_state = self
+            .files
+            .get(&second_id)
+            .cloned()
+            .ok_or_else(|| AdapterError::new(AdapterErrorKind::NotFound))?;
+        self.files.insert(first_id, second_state);
+        self.files.insert(second_id, first_state);
+        Ok(())
+    }
 }
 
 impl FileSystem for MemoryFileSystem {

@@ -22,6 +22,9 @@ use crate::{
         MAX_NAMESPACE_BLOB_BYTES, abort_upload, finish_upload, inventory_context, inventory_name,
         read_range, resume_upload, verify_reference, write_upload,
     },
+    checkpoint::{
+        self, CheckpointContext, CheckpointInput, DurableCheckpoint, RecoveredCheckpoint,
+    },
     read_exact_at, write_all_at,
 };
 
@@ -89,6 +92,7 @@ pub struct DurableCommit {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecoveredGroup<'a> {
     pub revision: CommitRevision,
+    pub certificate_digest: [u8; 32],
     pub encoded_group: &'a [u8],
     pub blob_inventory_digest: [u8; 32],
     pub blob_inventory: Option<&'a BlobInventory>,
@@ -172,6 +176,7 @@ where
     current_segment_offset: u64,
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
+    certificate_anchors: BTreeMap<CommitRevision, [u8; 32]>,
     committed_blob_inventories: BTreeSet<[u8; 32]>,
     committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
     committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
@@ -303,6 +308,7 @@ where
             current_segment_offset: SMALL_ENVELOPE_BYTES,
             frontier: None,
             previous_certificate_digest: [0; 32],
+            certificate_anchors: BTreeMap::new(),
             committed_blob_inventories: BTreeSet::new(),
             committed_blobs: BTreeMap::new(),
             committed_blob_bytes: BTreeMap::new(),
@@ -476,6 +482,7 @@ where
             || replayed.current_segment_offset != validated.current_segment_offset
             || replayed.frontier != validated.frontier
             || replayed.previous_certificate_digest != validated.previous_certificate_digest
+            || replayed.certificate_anchors != validated.certificate_anchors
             || replayed.committed_blob_inventories != validated.committed_blob_inventories
             || replayed.committed_blobs != validated.committed_blobs
             || replayed.committed_blob_bytes != validated.committed_blob_bytes
@@ -504,6 +511,7 @@ where
                 current_segment_offset: replayed.current_segment_offset,
                 frontier: replayed.frontier,
                 previous_certificate_digest: replayed.previous_certificate_digest,
+                certificate_anchors: replayed.certificate_anchors,
                 committed_blob_inventories: replayed.committed_blob_inventories,
                 committed_blobs: replayed.committed_blobs,
                 committed_blob_bytes: replayed.committed_blob_bytes,
@@ -805,6 +813,8 @@ where
         self.current_segment_offset = group_offset + group_length;
         self.frontier = Some(revision);
         self.previous_certificate_digest = certificate_digest;
+        self.certificate_anchors
+            .insert(revision, certificate_digest);
         if blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST {
             self.committed_blob_inventories
                 .insert(blob_inventory_digest);
@@ -895,6 +905,69 @@ where
     #[must_use]
     pub const fn frontier(&self) -> Option<CommitRevision> {
         self.frontier
+    }
+
+    /// Exact authenticated journal anchor required for publishing a cache at the current frontier.
+    #[must_use]
+    pub const fn checkpoint_anchor(&self) -> Option<(CommitRevision, [u8; 32])> {
+        match self.frontier {
+            Some(revision) => Some((revision, self.previous_certificate_digest)),
+            None => None,
+        }
+    }
+
+    /// Publish an optional encrypted checkpoint cache without changing journal authority.
+    pub fn publish_checkpoint(
+        &mut self,
+        filesystem: &mut F,
+        input: CheckpointInput<'_>,
+    ) -> Result<DurableCheckpoint, StorageError> {
+        if self.poisoned
+            || self.frontier != Some(input.revision)
+            || self.previous_certificate_digest != input.certificate_digest
+            || input.scope.database() != self.database
+        {
+            return Err(StorageError::InvalidState);
+        }
+        checkpoint::publish(
+            filesystem,
+            CheckpointContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            input,
+        )
+    }
+
+    /// Load up to two authenticated cache candidates, newest first. Invalid cache objects are
+    /// omitted so callers can cold-replay the authoritative journal.
+    #[must_use]
+    pub fn load_checkpoints(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+    ) -> Vec<RecoveredCheckpoint> {
+        checkpoint::load(
+            filesystem,
+            CheckpointContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            scope,
+        )
+        .into_iter()
+        .filter(|checkpoint| {
+            self.certificate_anchors.get(&checkpoint.revision())
+                == Some(checkpoint.certificate_digest())
+        })
+        .collect()
     }
 
     fn rollover(&mut self, filesystem: &mut F, first_revision: u64) -> Result<(), StorageError> {
@@ -1109,6 +1182,7 @@ struct ScanState<H> {
     current_segment_offset: u64,
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
+    certificate_anchors: BTreeMap<CommitRevision, [u8; 32]>,
     committed_blob_inventories: BTreeSet<[u8; 32]>,
     committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
     committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
@@ -1301,6 +1375,7 @@ where
     let mut current_segment_file = initial_segment_file;
     let mut current_segment_offset = SMALL_ENVELOPE_BYTES;
     let mut previous_certificate_digest = [0_u8; 32];
+    let mut certificate_anchors = BTreeMap::new();
     let mut frontier = None;
     let mut committed_blob_inventories = BTreeSet::new();
     let mut committed_blobs = BTreeMap::new();
@@ -1467,9 +1542,12 @@ where
                 }
                 inventory
             };
+        let certificate_digest = sha256(&encoded_certificate);
+        certificate_anchors.insert(revision, certificate_digest);
         if invoke_visitor {
             visitor(RecoveredGroup {
                 revision,
+                certificate_digest,
                 encoded_group: plaintext.as_slice(),
                 blob_inventory_digest: certificate.blob_inventory_digest,
                 blob_inventory: blob_inventory.as_ref(),
@@ -1477,7 +1555,7 @@ where
             })?;
         }
         current_segment_offset = group_end;
-        previous_certificate_digest = sha256(&encoded_certificate);
+        previous_certificate_digest = certificate_digest;
         frontier = Some(revision);
     }
 
@@ -1495,6 +1573,7 @@ where
         current_segment_offset,
         frontier,
         previous_certificate_digest,
+        certificate_anchors,
         committed_blob_inventories,
         committed_blobs,
         committed_blob_bytes,
@@ -1916,6 +1995,391 @@ mod tests {
         CreationOptions {
             database,
             final_name: EntryName::new(name).unwrap(),
+        }
+    }
+
+    #[test]
+    fn encrypted_checkpoint_slots_round_trip_and_corruption_falls_back() {
+        let database = DatabaseId::from_bytes([0xc1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc2; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "checkpoint-slots"),
+            create_vault(database, 81_000),
+            CounterEntropy::new(82_000),
+        )
+        .unwrap();
+        let committed = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"checkpoint anchor",
+                    logical_event_digest: [0xc3; 32],
+                },
+            )
+            .unwrap();
+        let first_payload = (0..checkpoint::CHECKPOINT_CHUNK_BYTES + 17)
+            .map(|index| u8::try_from(index % 251).unwrap())
+            .collect::<Vec<_>>();
+        let first = store
+            .publish_checkpoint(
+                &mut filesystem,
+                CheckpointInput {
+                    scope,
+                    revision: committed.revision,
+                    certificate_digest: committed.certificate_digest,
+                    reducer_profile: [0xc4; 32],
+                    logical_state_digest: [0xc5; 32],
+                    payload: &first_payload,
+                },
+            )
+            .unwrap();
+        assert_eq!(first.generation, 1);
+        let loaded = store.load_checkpoints(&mut filesystem, scope);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].payload(), first_payload);
+        assert!(format!("{:?}", loaded[0]).contains("[REDACTED]"));
+
+        let second_commit = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"suffix after first checkpoint",
+                    logical_event_digest: [0xc8; 32],
+                },
+            )
+            .unwrap();
+        let second_payload = b"newest complete cache";
+        let second = store
+            .publish_checkpoint(
+                &mut filesystem,
+                CheckpointInput {
+                    scope,
+                    revision: second_commit.revision,
+                    certificate_digest: second_commit.certificate_digest,
+                    reducer_profile: [0xc4; 32],
+                    logical_state_digest: [0xc6; 32],
+                    payload: second_payload,
+                },
+            )
+            .unwrap();
+        assert_eq!(second.generation, 2);
+        let loaded = store.load_checkpoints(&mut filesystem, scope);
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].payload(), second_payload);
+        assert_eq!(loaded[1].payload(), first_payload);
+
+        let saved_anchor = store
+            .certificate_anchors
+            .remove(&second_commit.revision)
+            .unwrap();
+        let future_rejected = store.load_checkpoints(&mut filesystem, scope);
+        assert_eq!(future_rejected.len(), 1);
+        assert_eq!(future_rejected[0].generation(), 1);
+        let mut divergent_anchor = saved_anchor;
+        divergent_anchor[0] ^= 0x80;
+        store
+            .certificate_anchors
+            .insert(second_commit.revision, divergent_anchor);
+        let divergent_rejected = store.load_checkpoints(&mut filesystem, scope);
+        assert_eq!(divergent_rejected.len(), 1);
+        assert_eq!(divergent_rejected[0].generation(), 1);
+        store
+            .certificate_anchors
+            .insert(second_commit.revision, saved_anchor);
+
+        filesystem
+            .test_mutate_file(&store.database_directory, &entry("CHECKPOINT-B"), 32)
+            .unwrap();
+        let fallback = store.load_checkpoints(&mut filesystem, scope);
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback[0].generation(), 1);
+        assert_eq!(fallback[0].payload(), first_payload);
+        let other_scope =
+            NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc7; 16]));
+        assert!(
+            store
+                .load_checkpoints(&mut filesystem, other_scope)
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn checkpoint_publication_requires_the_exact_current_certificate_anchor() {
+        let database = DatabaseId::from_bytes([0xd1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd2; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "checkpoint-anchor"),
+            create_vault(database, 83_000),
+            CounterEntropy::new(84_000),
+        )
+        .unwrap();
+        let committed = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"authoritative group",
+                    logical_event_digest: [0xd3; 32],
+                },
+            )
+            .unwrap();
+        let mut wrong = committed.certificate_digest;
+        wrong[0] ^= 0x80;
+        assert_eq!(
+            store.publish_checkpoint(
+                &mut filesystem,
+                CheckpointInput {
+                    scope,
+                    revision: committed.revision,
+                    certificate_digest: wrong,
+                    reducer_profile: [0xd4; 32],
+                    logical_state_digest: [0xd5; 32],
+                    payload: b"must not publish",
+                },
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert!(store.load_checkpoints(&mut filesystem, scope).is_empty());
+    }
+
+    #[test]
+    fn every_checkpoint_publication_boundary_recovers_an_old_or_exact_new_cache() {
+        let database = DatabaseId::from_bytes([0xe1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xe2; 16]));
+        let name = "checkpoint-faults";
+        let first_payload = b"durable first checkpoint";
+        let second_payload = b"durable second checkpoint";
+        let third_payload = b"replacement checkpoint after every injected crash";
+
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, name),
+            create_vault(database, 85_000),
+            CounterEntropy::new(86_000),
+        )
+        .unwrap();
+        let first = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"checkpoint fault anchor one",
+                    logical_event_digest: [0xe3; 32],
+                },
+            )
+            .unwrap();
+        store
+            .publish_checkpoint(
+                &mut base,
+                CheckpointInput {
+                    scope,
+                    revision: first.revision,
+                    certificate_digest: first.certificate_digest,
+                    reducer_profile: [0xe4; 32],
+                    logical_state_digest: [0xe5; 32],
+                    payload: first_payload,
+                },
+            )
+            .unwrap();
+        let second = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"checkpoint fault anchor two",
+                    logical_event_digest: [0xe6; 32],
+                },
+            )
+            .unwrap();
+        store
+            .publish_checkpoint(
+                &mut base,
+                CheckpointInput {
+                    scope,
+                    revision: second.revision,
+                    certificate_digest: second.certificate_digest,
+                    reducer_profile: [0xe4; 32],
+                    logical_state_digest: [0xe7; 32],
+                    payload: second_payload,
+                },
+            )
+            .unwrap();
+        let third = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"checkpoint fault anchor three",
+                    logical_event_digest: [0xe8; 32],
+                },
+            )
+            .unwrap();
+        drop(store);
+        base.restart().unwrap();
+
+        let boundaries = [
+            (Operation::RemoveFile, 1_u64, "invalidate manifest"),
+            (Operation::SyncDirectory, 1, "persist invalidation"),
+            (Operation::RemoveFile, 2, "replace chunk"),
+            (Operation::CreateNew, 1, "create chunk"),
+            (Operation::WriteAt, 1, "write chunk"),
+            (Operation::SetLen, 1, "size chunk"),
+            (Operation::SyncAll, 1, "persist chunk"),
+            (Operation::SyncDirectory, 2, "publish chunks"),
+            (Operation::CreateNew, 2, "create manifest"),
+            (Operation::WriteAt, 2, "write manifest object id"),
+            (Operation::WriteAt, 3, "write encrypted manifest"),
+            (Operation::SetLen, 2, "size manifest"),
+            (Operation::SyncAll, 2, "persist manifest"),
+            (Operation::SyncDirectory, 3, "publish manifest"),
+        ];
+        let mut case_seed = 90_000_u64;
+        for (operation, occurrence, label) in boundaries {
+            for action in [FaultAction::CrashBefore, FaultAction::CrashAfter] {
+                case_seed += 10;
+                let mut filesystem = FaultFileSystem::new(base.clone(), FaultPlan::default());
+                let mut store = reopen_fault_store(&mut filesystem, database, name, case_seed);
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    store
+                        .publish_checkpoint(
+                            &mut filesystem,
+                            CheckpointInput {
+                                scope,
+                                revision: third.revision,
+                                certificate_digest: third.certificate_digest,
+                                reducer_profile: [0xe4; 32],
+                                logical_state_digest: [0xe9; 32],
+                                payload: third_payload,
+                            },
+                        )
+                        .unwrap_err(),
+                    StorageError::Adapter(AdapterErrorKind::InjectedCrash),
+                    "boundary={label}, action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0, "boundary={label}");
+                drop(store);
+                filesystem.restart().unwrap();
+
+                let mut store = reopen_fault_store(&mut filesystem, database, name, case_seed + 2);
+                let recovered = store.load_checkpoints(&mut filesystem, scope);
+                assert!(
+                    recovered.iter().any(|checkpoint| {
+                        (checkpoint.revision() == second.revision
+                            && checkpoint.payload() == second_payload)
+                            || (checkpoint.revision() == third.revision
+                                && checkpoint.payload() == third_payload)
+                    }),
+                    "boundary={label}, action={action:?}"
+                );
+                store
+                    .publish_checkpoint(
+                        &mut filesystem,
+                        CheckpointInput {
+                            scope,
+                            revision: third.revision,
+                            certificate_digest: third.certificate_digest,
+                            reducer_profile: [0xe4; 32],
+                            logical_state_digest: [0xe9; 32],
+                            payload: third_payload,
+                        },
+                    )
+                    .unwrap();
+                let retried = store.load_checkpoints(&mut filesystem, scope);
+                assert_eq!(retried[0].revision(), third.revision, "boundary={label}");
+                assert_eq!(retried[0].payload(), third_payload, "boundary={label}");
+            }
+        }
+    }
+
+    #[test]
+    fn missing_corrupt_or_swapped_checkpoint_chunks_fall_back_to_the_other_slot() {
+        let database = DatabaseId::from_bytes([0xf1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xf2; 16]));
+        let name = "checkpoint-chunk-damage";
+        let first_payload = vec![0x31; checkpoint::CHECKPOINT_CHUNK_BYTES + 23];
+        let second_payload = vec![0x32; checkpoint::CHECKPOINT_CHUNK_BYTES + 31];
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, name),
+            create_vault(database, 100_000),
+            CounterEntropy::new(101_000),
+        )
+        .unwrap();
+        for (index, payload) in [&first_payload, &second_payload].into_iter().enumerate() {
+            let committed = store
+                .append_group(
+                    &mut base,
+                    CommitInput {
+                        encoded_group: if index == 0 {
+                            b"chunk damage anchor one"
+                        } else {
+                            b"chunk damage anchor two"
+                        },
+                        logical_event_digest: [u8::try_from(0xf3 + index).unwrap(); 32],
+                    },
+                )
+                .unwrap();
+            store
+                .publish_checkpoint(
+                    &mut base,
+                    CheckpointInput {
+                        scope,
+                        revision: committed.revision,
+                        certificate_digest: committed.certificate_digest,
+                        reducer_profile: [0xf5; 32],
+                        logical_state_digest: [u8::try_from(0xf6 + index).unwrap(); 32],
+                        payload,
+                    },
+                )
+                .unwrap();
+        }
+        drop(store);
+        base.restart().unwrap();
+
+        for damage in 0..3 {
+            let mut filesystem = base.clone();
+            let (store, _) = JournalStore::open(
+                &mut filesystem,
+                &entry(name),
+                database,
+                CounterEntropy::new(102_000 + damage),
+                CounterEntropy::new(103_000 + damage),
+                &mut TestKeyAdapter,
+                |_group| Ok(()),
+            )
+            .unwrap();
+            match damage {
+                0 => filesystem
+                    .test_remove_entry(&store.database_directory, &entry("CHECKPOINT-B-000"))
+                    .unwrap(),
+                1 => filesystem
+                    .test_mutate_file(&store.database_directory, &entry("CHECKPOINT-B-001"), 32)
+                    .unwrap(),
+                2 => filesystem
+                    .test_swap_file_contents(
+                        &store.database_directory,
+                        &entry("CHECKPOINT-B-000"),
+                        &entry("CHECKPOINT-B-001"),
+                    )
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            let recovered = store.load_checkpoints(&mut filesystem, scope);
+            assert_eq!(recovered.len(), 1, "damage={damage}");
+            assert_eq!(recovered[0].generation(), 1, "damage={damage}");
+            assert_eq!(recovered[0].payload(), first_payload, "damage={damage}");
         }
     }
 

@@ -11,13 +11,15 @@ use uste_policy::{
     Action, AuthenticationError, NamespaceGrant, NamespacePolicy, PermissionSet, PolicyKernel,
     PolicyVersion, PrincipalDigest, QuotaLimits, TrustedPrincipalAdapter,
 };
+use uste_replay::{capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
     ClockObservation, EntryName, fault::ScriptedClock, journal::DurableKeyEnvelope,
     memory::MemoryFileSystem,
 };
 use uste_txn::{
     AuthorizedCoordinator, AuthorizedError, AuthorizedReadError, AuthorizedTransactionRequest,
-    CommitCoordinator, NeverCancel, RetentionDays, TransactionRequest, open_authorized,
+    CommitCoordinator, NeverCancel, RetentionDays, TransactionRequest,
+    load_verified_checkpoint_candidates, open_authorized,
 };
 use uste_types::{
     BoundedString, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, RecordId, RecordRef,
@@ -583,6 +585,116 @@ fn durable_policy_graph_queries_revocation_and_restart_are_coherent() {
         reopened.read_view(&bob),
         Err(AuthorizedError::Unauthorized)
     ));
+}
+
+#[test]
+fn encrypted_graph_checkpoint_matches_cold_state_and_replays_only_the_suffix() {
+    let scope = scope();
+    let name = EntryName::new("graph-checkpoint-recovery").unwrap();
+    let entity = record(81);
+    let mut filesystem = MemoryFileSystem::default();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        create_vault(scope.database(), 700),
+        CounterEntropy(800),
+        GraphState::new(scope),
+    )
+    .unwrap();
+    let create = encode_transaction(&GraphTransaction::new(
+        scope,
+        vec![Operation::Create {
+            expected: Expected::Absent,
+            record: NewRecord::Entity(NewEntity {
+                id: entity,
+                entity_type: text("checkpointed-item"),
+                schema_version: 1,
+                properties: Value::Unsigned(1),
+            }),
+        }],
+    ))
+    .unwrap();
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                principal: PrincipalDigest::from_bytes([3; 32]),
+                idempotency_key: IdempotencyKey::from_bytes([81; 16]),
+                transaction_id: TransactionId::from_bytes([181; 16]),
+                canonical_request: &create,
+                blob_inventory: None,
+            },
+            &mut clock(10),
+            &NeverCancel,
+        )
+        .unwrap();
+    let checkpoint = capture_coordinator_checkpoint(
+        coordinator.reducer_state_for_checkpoint().unwrap(),
+        coordinator.checkpoint_anchor().unwrap().unwrap(),
+        coordinator.checkpoint_outcomes(),
+        coordinator.committed_blob_owners(),
+    )
+    .unwrap();
+    coordinator
+        .publish_checkpoint(&mut filesystem, checkpoint.storage_input())
+        .unwrap();
+
+    let replace = encode_transaction(&GraphTransaction::new(
+        scope,
+        vec![Operation::ReplaceEntity {
+            target: entity,
+            expected: Expected::Version(RecordVersion::FIRST),
+            properties: Value::Unsigned(2),
+        }],
+    ))
+    .unwrap();
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                principal: PrincipalDigest::from_bytes([3; 32]),
+                idempotency_key: IdempotencyKey::from_bytes([82; 16]),
+                transaction_id: TransactionId::from_bytes([182; 16]),
+                canonical_request: &replace,
+                blob_inventory: None,
+            },
+            &mut clock(11),
+            &NeverCancel,
+        )
+        .unwrap();
+    let expected = coordinator.read_view().unwrap().state().clone();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (candidates, verified) = load_verified_checkpoint_candidates::<_, TestEnvelope, _, _, _>(
+        &mut filesystem,
+        &name,
+        scope,
+        CounterEntropy(900),
+        CounterEntropy(1_000),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    assert_eq!(verified.frontier.unwrap().get(), 2);
+    let seed = decode_coordinator_checkpoint::<GraphState>(&candidates[0]).unwrap();
+    let (recovered, report) = CommitCoordinator::open_seeded(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(1_100),
+        CounterEntropy(1_200),
+        &mut TestKeyAdapter,
+        seed,
+    )
+    .unwrap();
+    assert_eq!(report.frontier.unwrap().get(), 2);
+    let actual = recovered.read_view().unwrap().state().clone();
+    assert_eq!(actual, expected);
+    actual.validate_derived_indexes().unwrap();
+    assert_eq!(actual.record(entity).unwrap().version().get(), 2);
 }
 
 #[derive(Debug)]
