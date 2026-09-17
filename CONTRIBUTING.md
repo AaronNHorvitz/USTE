@@ -1,7 +1,7 @@
 # Contributing
 
-The current repository contains design documents only. Build and test commands will be
-documented when a runnable workspace exists; none are implied by this file.
+The current repository contains design documents and pre-gate R0 experiments, not a database
+executable. Reproduce them using [the Fedora Kinoite setup](docs/development-setup.md).
 
 ## Work sequence and completion
 

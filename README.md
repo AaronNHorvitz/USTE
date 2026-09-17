@@ -84,6 +84,7 @@ guarantee is made.
 | [Replay and simulation](docs/replay-and-simulation.md) | Replay, branches, models, and determinism |
 | [API and integration](docs/api-and-integration.md) | Consumer contract, adapters, and error semantics |
 | [Verification and benchmarks](docs/verification-and-benchmarks.md) | Test suites, workloads, and required evidence |
+| [Fedora Kinoite development setup](docs/development-setup.md) | Reproduce current R0 experiments and synthetic fixtures |
 | [Task list](TASKS.md) | Sequenced implementation work and completion evidence |
 | [Security policy](SECURITY.md) | Reporting readiness and supported versions |
 | [Contributing](CONTRIBUTING.md) | Development, review, and provenance rules |
@@ -100,8 +101,9 @@ implementer to choose the most convenient interpretation.
 4. R3: hardened beta with rich formats, disk spatial history, constrained contacts and lifecycle hardening.
 5. R4: production candidate with independent review and measured operating limits.
 
-There are no setup or run commands yet. See [TASKS.md](TASKS.md); all implementation work
-is currently open.
+There is not yet a database executable. The current R0 experiments and deterministic synthetic
+fixture generator are runnable using the [Fedora Kinoite development setup](docs/development-setup.md).
+See [TASKS.md](TASKS.md) for gate status; production implementation work remains gated.
 
 ## License
 

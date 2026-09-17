@@ -44,8 +44,16 @@ licensing feasibility and absence of native links, not memory safety.
 - Core storage will not depend on parser crates. Worker crates will split by format so an
   operator does not load the entire candidate set for one parse.
 
+## Policy-check result
+
+`cargo-deny 0.20.2` was installed under `/tmp` and run against both experiment lockfiles with
+`deny.toml`, the cached RustSec database and `--frozen`. Advisories, licenses and sources pass
+with zero errors. The dependency candidate graph has one deliberate warning: `miniz_oxide`
+0.8.9 through `png` and 0.9.1 through current `flate2`; this duplicate is recorded rather than
+silently allowed. The fixture-generator graph passes all four checks without warnings.
+
 ## Remaining T-04 evidence
 
-Create the synthetic licensed fixtures, run every adapter under the supervisor limits, review
-the exact unsafe blocks reachable on the supported target, and execute a policy/advisory tool
-against the final worker lockfiles. Until then T-04 remains unchecked.
+Materialize and hash every generated fixture recipe, run every adapter under the supervisor
+limits, and review the exact unsafe blocks reachable on the supported target. The policy tool
+must be rerun against final split worker lockfiles. Until then T-04 remains unchecked.

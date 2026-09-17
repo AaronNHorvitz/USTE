@@ -61,7 +61,8 @@ fn recover(group_bytes: &[u8], certificate_bytes: &[u8]) -> Recovery {
     if revision != 1 || previous != 0 || group_bytes.len() != named_group_len {
         return Recovery::IntegrityFailure;
     }
-    if group_bytes.len() < 21 || group_bytes[0] != b'G' || digest(group_bytes) != named_group_digest {
+    if group_bytes.len() < 21 || group_bytes[0] != b'G' || digest(group_bytes) != named_group_digest
+    {
         return Recovery::IntegrityFailure;
     }
 

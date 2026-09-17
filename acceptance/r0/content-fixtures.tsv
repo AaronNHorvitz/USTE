@@ -1,0 +1,31 @@
+id	family	adapter	materializer	expected	required_check
+unknown_roundtrip	unknown	opaque-store	hex:000102fffe804255535445	Stored	exact_bytes_no_worker
+unknown_zero	unknown	opaque-store	hex:	Stored	zero_length_valid
+text_utf8	text	text-v1	hex:55535445206c696e6520310a6c696e6520320a	Complete	exact_byte_line_map
+text_invalid_utf8	text	text-v1	hex:666f6f80ff	Partial	invalid_offsets_reported
+json_object	json	json-v1	utf8:{"id":1,"when":"2026-09-16T14:00:00Z"}	Complete	raw_number_and_field_offsets
+json_depth_33	json	json-v1	generated:nested_array:33	LimitExceeded	no_unbounded_recursion
+csv_basic	csv	csv-v1	utf8:id,name\n1,alpha\n2,"beta,b"\n	Complete	row_and_byte_locators
+csv_bad_quote	csv	csv-v1	utf8:id,name\n1,"unterminated\n	Malformed	bounded_error
+xml_basic	xml	xml-v1	utf8:<root><item id="1">value</item></root>	Complete	structural_path
+xml_doctype	xml	xml-v1	utf8:<!DOCTYPE root [<!ENTITY x SYSTEM "file:///etc/passwd">]><root>&x;</root>	Malformed	no_entity_or_file_access
+html_basic	html	html-v1	utf8:<html><body><p>Hello</p></body></html>	Complete	text_structure_only
+html_active	html	html-v1	utf8:<script>fetch('https://invalid.example')</script><img src="file:///etc/passwd">	Complete	active_content_inert_no_egress
+pdf_text	pdf	pdf-v1	generated:minimal_pdf:text_page	Complete	page_1_locator
+pdf_truncated	pdf	pdf-v1	generated:minimal_pdf:truncate_8	Malformed	bounded_error
+pdf_encrypted	pdf	pdf-v1	generated:minimal_pdf:password	PasswordRequired	no_password_persistence
+ooxml_docx	ooxml	ooxml-v1	generated:minimal_docx:text	Complete	paragraph_locator
+ooxml_macro	ooxml	ooxml-v1	generated:minimal_docm:macro_member	Partial	macro_not_executed
+zip_basic	zip	zip-v1	generated:zip:regular_member	Complete	member_locator
+zip_traversal	zip	zip-v1	generated:zip:parent_member	Malformed	no_path_escape
+zip_bomb	zip	zip-v1	generated:zip:ratio_101	LimitExceeded	no_over_limit_expansion
+tar_basic	tar	tar-v1	generated:tar:regular_member	Complete	member_locator
+tar_symlink	tar	tar-v1	generated:tar:symlink	Malformed	link_not_followed
+png_pixel	png	png-v1	generated:png:1x1_rgb	Complete	dimensions_and_pixel_bound
+png_huge_header	png	png-v1	generated:png:32769x1_header	LimitExceeded	refuse_before_allocation
+jpeg_pixel	jpeg	jpeg-v1	generated:jpeg:1x1_rgb	Complete	dimensions_and_pixel_bound
+jpeg_truncated	jpeg	jpeg-v1	generated:jpeg:truncate_scan	Malformed	bounded_error
+wav_pcm	wav	wav-pcm-v1	generated:wav:pcm16_mono_8000hz_1s	Complete	duration_and_sample_locator
+wav_length_mismatch	wav	wav-pcm-v1	generated:wav:declared_data_overrun	Malformed	no_read_past_end
+y4m_frame	y4m	y4m-v1	generated:y4m:2x2_420_1frame	Complete	frame_0_time_locator
+y4m_truncated	y4m	y4m-v1	generated:y4m:truncated_frame	Malformed	bounded_error

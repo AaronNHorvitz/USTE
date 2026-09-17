@@ -27,8 +27,8 @@ tasks are not checked.
 ~~~text
 $ rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 $ /tmp/uste-r0-vectors --nocapture
-running 9 tests
-test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+running 10 tests
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
 $ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
 $ /tmp/uste-storage-publication
@@ -36,8 +36,12 @@ running 4 tests
 test result: ok. 4 passed; 0 failed
 
 $ cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
-running 3 tests
-test result: ok. 3 passed; 0 failed
+running 4 tests
+test result: ok. 4 passed; 0 failed
+
+$ cargo-deny ... --frozen check all --show-stats
+# dependency candidates: advisories/licenses/sources clean; one recorded duplicate-version warning
+# fixture generator: all checks clean
 ~~~
 
 Crates.io metadata was inspected with `cargo search`/`cargo info`; this selected candidates,

@@ -9,6 +9,7 @@ const SECURITY: &str = include_str!("../acceptance/r0/security-lifecycle.tsv");
 const SPATIAL: &str = include_str!("../acceptance/r0/spatial.tsv");
 const PHYSICS: &str = include_str!("../acceptance/r0/physics.tsv");
 const BENCHMARKS: &str = include_str!("../acceptance/r0/benchmark-manifest.tsv");
+const CONTENT: &str = include_str!("../acceptance/r0/content-fixtures.tsv");
 
 fn rows(input: &str, columns: usize) -> Vec<Vec<&str>> {
     let mut lines = input.lines();
@@ -34,12 +35,32 @@ fn all_vector_files_are_structurally_valid_and_cases_are_unique() {
         (SPATIAL, 4),
         (PHYSICS, 4),
         (BENCHMARKS, 5),
+        (CONTENT, 6),
     ] {
         let parsed = rows(input, columns);
         assert!(!parsed.is_empty());
         let cases: BTreeSet<_> = parsed.iter().map(|row| row[0]).collect();
         assert_eq!(cases.len(), parsed.len(), "duplicate case ID");
     }
+}
+
+#[test]
+fn every_content_family_has_positive_and_negative_or_inert_coverage() {
+    let parsed = rows(CONTENT, 6);
+    let families: BTreeSet<_> = parsed.iter().map(|row| row[1]).collect();
+    for required in [
+        "unknown", "text", "json", "csv", "xml", "html", "pdf", "ooxml", "zip", "tar", "png",
+        "jpeg", "wav", "y4m",
+    ] {
+        assert!(
+            families.contains(required),
+            "missing fixture family {required}"
+        );
+        assert!(parsed.iter().filter(|row| row[1] == required).count() >= 2);
+    }
+    assert!(parsed.iter().any(|row| row[5].contains("no_egress")));
+    assert!(parsed.iter().any(|row| row[5].contains("no_path_escape")));
+    assert!(parsed.iter().any(|row| row[4] == "LimitExceeded"));
 }
 
 #[test]
@@ -156,7 +177,9 @@ fn benchmark_seeds_are_256_bit_hex_and_unique() {
     let parsed = rows(BENCHMARKS, 5);
     let seeds: BTreeSet<_> = parsed.iter().map(|row| row[2]).collect();
     assert_eq!(seeds.len(), parsed.len());
-    assert!(seeds
-        .iter()
-        .all(|seed| seed.len() == 64 && seed.bytes().all(|b| b.is_ascii_hexdigit())));
+    assert!(
+        seeds
+            .iter()
+            .all(|seed| seed.len() == 64 && seed.bytes().all(|b| b.is_ascii_hexdigit()))
+    );
 }

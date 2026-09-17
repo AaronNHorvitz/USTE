@@ -66,6 +66,12 @@ pages, malformed image dimensions, WAV length mismatch and Y4M frame truncation 
 negative cases. The fixture manifest stores bytes, SHA-256, redistribution origin and expected
 status/locator; unknown binaries must round-trip without invoking a worker.
 
+`acceptance/r0/content-fixtures.tsv` is the normative fixture registry. `hex:` and `utf8:`
+recipes are literal; `generated:` recipes are stable names reserved by the R0 materializer and
+must acquire exact byte hashes before their parser gate. The manifest contains positive and
+negative/inert cases for every baseline family, including unknown/zero bytes, depth, active
+content, encryption, traversal, expansion, dimensions and truncation.
+
 The absence of a credible strict OCR/transcription dependency is visible, not a gate waiver:
 the optional enrichments are not claimed. Exact R3 baseline parsing support remains gated on
 implementation and VT-09/10 evidence.

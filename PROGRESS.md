@@ -15,7 +15,10 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
 - Resolved and compiled the pinned strict-profile dependency candidates; recorded a lockfile,
   native-link/license feasibility and the remaining unsafe/advisory review scope.
 - Added the `synthetic-v1` Rust fixture-generator kernel with strict seed parsing, domain
-  separation and a pinned BLAKE3 golden digest.
+  separation, bounded-memory emission and a pinned BLAKE3 golden digest.
+- Added reproducible Fedora Kinoite/Toolbox setup and runnable synthetic commands.
+- Added a committed dependency policy and ran cargo-deny 0.20.2: zero advisory, license or
+  source errors; one documented duplicate-version warning in the combined parser graph.
 - Recorded the exact external governance blocker; did not claim R0 or any release gate.
 
 ## Verification run
@@ -23,27 +26,32 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
 ~~~text
 rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 /tmp/uste-r0-vectors --nocapture
-# 9 passed; 0 failed
+# 10 passed; 0 failed
 rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
 /tmp/uste-storage-publication
 # 4 passed; 0 failed
 cargo build --manifest-path experiments/dependency-audit/Cargo.toml --locked --offline
 # success
 cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
-# 3 passed; 0 failed
+# 4 passed; 0 failed
+cargo-deny ... --frozen check all --show-stats
+# both lockfiles: 0 errors; parser graph: one documented duplicate warning
+cargo fmt ... -- --check; rustfmt --check ...
+# success
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
-64 GiB RAM, Rust/Cargo 1.95.0. Dependency metadata was queried from crates.io, but no resolved
-lockfile audit or benchmark measurement exists yet.
+64 GiB RAM, Rust/Cargo 1.95.0. Pinned lockfiles now pass cargo-deny advisory/license/source
+policy checks; no benchmark measurement exists yet.
 
 ## Limitations and blockers
 
 - D-07/T-06 requires the repository owner to enable and test GitHub private vulnerability
   reporting. The configured GitHub CLI token is invalid; changing repository security settings
   is outside this task's authority. T-07 and dependent R1 tasks remain open.
-- T-04 now has a resolved lock/native-link/license feasibility snapshot, but still needs
-  reachable unsafe review, policy/advisory tooling and fixtures.
+- T-04 now has a resolved lock/native-link/license feasibility snapshot, cargo-deny results
+  and a complete logical fixture registry, but still needs byte materialization/hashes,
+  reachable unsafe review and supervisor execution.
 - T-05 has all BM-01…13 manifest rows and a deterministic generator kernel, but benchmark
   drivers/materializers and measured results remain; targets are not achieved performance.
 - The Rust files are design-vector experiments, not a database executable or production format.

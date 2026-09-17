@@ -73,11 +73,12 @@ with 100k moving objects and simultaneous 10k-row batches.
 
 `experiments/fixture-generator` is the executable generator kernel. Benchmark drivers use
 `cargo run --release --locked --offline --manifest-path experiments/fixture-generator/Cargo.toml
--- KIND COUNT SEED`, with domain kinds `graph`, `events`, `blobs`, `content`, `points`,
+-- digest KIND COUNT SEED`, with domain kinds `graph`, `events`, `blobs`, `content`, `points`,
 `observations`, `bodies` and `mixed`. Its output is the BLAKE3 digest of the logical generated
-record stream; drivers must record that digest and their materialization version. The pinned
+record stream; replacing `digest` with `emit` streams the exact bounded-memory binary corpus
+to stdout. Drivers must record that digest and their materialization version. The pinned
 three-record graph golden digest is
-`eb2cf7582dcdd97ccf55925e9c4b5026fbf6dc05dcd2d4f773485e6961568203`.
+`03e40364c7454f76790af26062ab4094483bb5df6dfc0d0feac4f0b4c2c1f499`.
 
 `acceptance/r0/benchmark-manifest.tsv` is the machine-readable registry. Initial values are
 targets based on the intended local workstation class, not achieved results. Bench reports

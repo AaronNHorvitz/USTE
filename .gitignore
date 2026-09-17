@@ -7,3 +7,4 @@ target/
 *.key
 benchmark-results/local/
 evidence/local/
+.tools/
