@@ -213,6 +213,13 @@ without scanning the catalog; it is neither persistent authority nor a storage a
 format. Reducer maps, graph-only closure scans, snapshots and checkpoint decoding remain
 materialized pending the explicit-I/O disk-backed base/overlay design.
 
+Decision 0035 introduces that separation for a bounded current-state subset. A privileged loader
+authenticates only the policy and positive/negative current-record closure required by one
+transaction, using caller-owned cache and proof budgets. The returned capability contains no I/O
+handle and runs the unchanged pure reducer over a private partial base. Deletion and historical
+predicates fail before storage access until reverse-bucket and history-predecessor proofs exist;
+the live coordinator and terminal-root validator remain full-memory.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

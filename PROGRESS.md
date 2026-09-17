@@ -3,15 +3,16 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `75813f8` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `a033709` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
 Decision 0032 adds authenticated bounded base/delta scratch merge, and Decision 0033 connects one
 bounded graph transaction to an independently validated terminal `graph-state-v1` root. The
-current Decision 0034 increment makes ordinary graph/spatial/composite ingest preparation
-request-bounded. T-20 remains open pending a disk-backed larger-than-memory reducer path, explicit-
-I/O streaming semantic validation and qualifying BM-01/BM-06 results. Review was
+Decision 0034 makes ordinary graph/spatial/composite ingest preparation request-bounded. The
+current Decision 0035 increment adds a bounded explicit-I/O current-record proof phase followed by
+storage-free graph preparation. T-20 remains open pending complete reverse/history proofs, a live
+disk-backed larger-than-memory reducer path and qualifying BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
@@ -292,6 +293,19 @@ unverified external distribution prerequisite.
   retry/correction, retry-only checkpoint, one-record-over-populated-base and stale/foreign-plan
   atomicity coverage. Current maps, closure scans, snapshots and checkpoint decode remain
   full-memory; this is not T-20 closure or BM evidence.
+- Added Decision 0035 and a privileged `graph-state-v1` preparation loader that retains only the
+  exact positive/negative current-record closure plus current policy. Caller limits bound unique
+  proofs, reference occurrences and logical proof bytes; the caller-owned page cache remains
+  explicit and authenticated index work is reported.
+- The resulting view owns no storage/coordinator/key capability and reuses the existing reducer in
+  a pure consuming phase. Durable commit result digests match for a referenced assertion create
+  and an existing assertion transition whose unchanged references must be proven.
+- Exact proof budgets pass; one-less proof/reference/logical-byte budgets fail; an occupied
+  correction ID is proven and rejected; stale roots fail; deletion and historical predicates fail
+  as unsupported before root/page access. Review-found correction-ID and preallocation/work-limit
+  holes were corrected before acceptance. Complete
+  reverse/history proofs, root-delta generation from the partial view, live disk overlays and
+  BM-01/BM-06 remain open.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -363,12 +377,12 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 261 workspace tests including 77 uste-storage, 13
-# uste-crypto, 39 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
+# uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 39 passed; 0 failed
+# 40 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -417,7 +431,10 @@ remaining mixed workload have not passed.
   in-memory structure with no accepted aggregate/per-target fanout cap.
   The bounded scratch merge and graph terminal planner can rewrite and cross-check all eight
   families for one revision without collecting base runs, but the live base/overlay lifecycle and
-  semantic validator remain fully memory-resident. BM-01/BM-06 have not run. Graph policy is
+  semantic validator remain fully memory-resident. The explicit-I/O preparation proof supports
+  current-state creates/replacements/claim actions/corrections and policy mutations, but not
+  deletion or historical predicates; it does not yet feed coordinator commit/root publication.
+  BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
@@ -441,8 +458,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with an explicit-I/O disk preparation view, then the live disk-backed base/overlay
-state, streaming semantic validation and larger-than-memory reducer recovery. Connect the pinned fixture to exact BM-01 and
+Continue T-20 by extending the explicit-I/O preparation view with complete bounded reverse-family
+and history-predecessor proofs, then connect it to the live disk-backed base/overlay state,
+streaming semantic validation and larger-than-memory reducer recovery. Connect the pinned fixture to exact BM-01 and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

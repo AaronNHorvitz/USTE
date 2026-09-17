@@ -99,6 +99,11 @@ Decision 0034 separately bounds ordinary spatial/composite ingest preparation; s
 [`bounded-composite-preparation.md`](bounded-composite-preparation.md). It does not change the
 full-memory live reducer or recovery boundary listed above.
 
+Decision 0035 adds bounded explicit-I/O positive/negative current-record proofs followed by a
+storage-free preparation phase for the supported graph subset; see
+[`explicit-io-graph-preparation.md`](explicit-io-graph-preparation.md). Deletion, historical
+predicates, live overlay publication and the full-memory recovery boundary remain open.
+
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
 stops after the first delivered entry in the regression.

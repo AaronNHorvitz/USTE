@@ -46,6 +46,8 @@ This evidence does not close T-20. Delta preparation is transaction-bounded, and
 bounded buffers, but the current reducer and independent expected-descriptor pass retain and scan
 the full graph in memory. Decision 0034 subsequently makes composite ingest preparation
 request-bounded too, while root discovery/reconstruction, live reducer maps and coordinator
-metadata remain full-memory. The derived plan limit is debited during retained family-map construction,
+metadata remain full-memory. Decision 0035 later adds a bounded explicit-I/O current-record proof
+and pure preparation phase, but does not yet derive this root delta from its partial view. The
+derived plan limit is debited during retained family-map construction,
 but graph prepare and one-record reference-role coalescing remain under the graph's existing
 operation/reference caps. No allocator/RSS proof or BM-01/BM-06 result is claimed.

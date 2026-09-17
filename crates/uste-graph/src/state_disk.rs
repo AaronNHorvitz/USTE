@@ -3,16 +3,16 @@
 //! This profile remains optional and read-only. The authenticated journal is the only commit
 //! authority; reconstructed state becomes usable only through exact-paired seeded recovery.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_storage::{
-    DurableIndexRoot, IndexDelta, IndexEntry, IndexRootAnchor, IndexRootInput, IndexRunDescriptor,
-    IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits, IndexRunReadReport,
-    IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES, MAX_INDEX_ENTRIES_PER_RUN,
-    MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES, OwnershipFileSystem, PageCache,
-    RecoveredIndexRoot,
+    DurableIndexRoot, IndexDelta, IndexEntry, IndexReadStats, IndexRootAnchor, IndexRootInput,
+    IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits,
+    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES,
+    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES,
+    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
 use uste_txn::{
@@ -21,13 +21,18 @@ use uste_txn::{
     CoordinatorRecoverySeed, TransactionError, TransactionOutcome,
     reconstruct_coordinator_metadata_seed_for_recovery,
 };
-use uste_types::{CommitRevision, RecordId, RecordRef};
+use uste_types::{CommitRevision, NamespaceRef, RecordId, RecordRef, Value};
 
 use crate::codec::{decode_result_policy, encode_result_policy};
 use crate::{
-    GraphCodecError, GraphDiskError, GraphSnapshot, GraphState, GraphTransaction, Record,
+    AssertionAction, Expected, GraphCodecError, GraphDiskError, GraphSnapshot, GraphState,
+    GraphTransaction, NewAssertion, NewRecord, NewRelationship, Operation, Record,
     decode_stored_record, encode_stored_record,
-    state::{PreparedGraph, ReverseReference, record_reverse_references},
+    state::{
+        MAX_GRAPH_CHECKPOINT_BYTES, PreparedGraph, ReverseReference,
+        prepare_from_complete_current_subset, record_reverse_references,
+        try_visit_record_references, validate_request_limits, visit_record_references,
+    },
 };
 
 pub const GRAPH_STATE_PROFILE_V1: [u8; 32] = [
@@ -168,7 +173,7 @@ impl GraphStateDeltaLimits {
 
 /// Opaque, bounded exact family changes prepared against one journal-certified graph revision.
 pub struct GraphStateRootDelta {
-    scope: uste_types::NamespaceRef,
+    scope: NamespaceRef,
     base_anchor: IndexRootAnchor,
     base_revision: CommitRevision,
     revision: CommitRevision,
@@ -262,7 +267,7 @@ trait GraphStateIndexReader<F>
 where
     F: OwnershipFileSystem,
 {
-    fn reader_scope(&self) -> uste_types::NamespaceRef;
+    fn reader_scope(&self) -> NamespaceRef;
 
     fn reader_load_roots(
         &self,
@@ -287,7 +292,7 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    fn reader_scope(&self) -> uste_types::NamespaceRef {
+    fn reader_scope(&self) -> NamespaceRef {
         self.scope()
     }
 
@@ -318,7 +323,7 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    fn reader_scope(&self) -> uste_types::NamespaceRef {
+    fn reader_scope(&self) -> NamespaceRef {
         self.scope()
     }
 
@@ -362,6 +367,580 @@ impl DerivedGraphStateRoot {
     pub const fn generation(&self) -> u64 {
         self.root.generation()
     }
+}
+
+/// Caller-selected aggregate bounds for one current-state disk preparation proof.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GraphDiskPreparationLimits {
+    maximum_record_proofs: u64,
+    maximum_reference_visits: u64,
+    maximum_proof_logical_bytes: u64,
+}
+
+impl GraphDiskPreparationLimits {
+    pub const fn new(
+        maximum_record_proofs: u64,
+        maximum_reference_visits: u64,
+        maximum_proof_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        if maximum_record_proofs == 0
+            || maximum_record_proofs
+                > (crate::MAX_TRANSACTION_OPERATIONS + crate::MAX_TRANSACTION_REFERENCES) as u64
+            || maximum_reference_visits == 0
+            || maximum_reference_visits > crate::MAX_TRAVERSAL_VISITS as u64
+            || maximum_proof_logical_bytes == 0
+            || maximum_proof_logical_bytes > MAX_GRAPH_CHECKPOINT_BYTES as u64
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(Self {
+            maximum_record_proofs,
+            maximum_reference_visits,
+            maximum_proof_logical_bytes,
+        })
+    }
+}
+
+/// Observed logical proof and authenticated-index work for disk-backed preparation.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphDiskPreparationReport {
+    pub record_proofs: u64,
+    pub present_records: u64,
+    pub absent_records: u64,
+    pub reference_visits: u64,
+    pub proof_logical_bytes: u64,
+    pub index_lookups: u64,
+    pub pages_read: u64,
+    pub cache_hits: u64,
+    pub fragments_visited: u64,
+}
+
+enum CurrentRecordProof {
+    Absent,
+    Present(Box<Record>),
+}
+
+/// Complete bounded current-record proof for the supported disk preparation subset.
+///
+/// This value owns no filesystem, coordinator, key-vault, or cache capability. Consequently its
+/// pure `prepare` phase cannot perform hidden I/O.
+pub struct GraphDiskPreparationView {
+    scope: NamespaceRef,
+    base_revision: CommitRevision,
+    transaction: GraphTransaction,
+    current: BTreeMap<RecordRef, CurrentRecordProof>,
+    current_policy: Option<uste_policy::NamespacePolicy>,
+    report: GraphDiskPreparationReport,
+}
+
+impl core::fmt::Debug for GraphDiskPreparationView {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphDiskPreparationView")
+            .field("scope", &"[REDACTED]")
+            .field("base_revision", &self.base_revision)
+            .field("record_proofs", &self.current.len())
+            .field("report", &self.report)
+            .finish()
+    }
+}
+
+impl GraphDiskPreparationView {
+    #[must_use]
+    pub const fn base_revision(&self) -> CommitRevision {
+        self.base_revision
+    }
+
+    #[must_use]
+    pub const fn report(&self) -> &GraphDiskPreparationReport {
+        &self.report
+    }
+
+    /// Run the existing graph reducer using only the already authenticated proof closure.
+    pub fn prepare(self) -> Result<DiskPreparedGraph, GraphDiskError> {
+        let required = required_current_ids(&self.transaction, &self.current);
+        if required.iter().any(|id| !self.current.contains_key(id)) {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        let records = self
+            .current
+            .into_iter()
+            .filter_map(|(id, proof)| match proof {
+                CurrentRecordProof::Absent => None,
+                CurrentRecordProof::Present(record) => Some((id, *record)),
+            })
+            .collect();
+        let prepared = prepare_from_complete_current_subset(
+            self.scope,
+            self.base_revision,
+            records,
+            self.current_policy,
+            &self.transaction,
+        )?;
+        Ok(DiskPreparedGraph { prepared })
+    }
+}
+
+/// Opaque reducer result produced from a disk preparation proof.
+pub struct DiskPreparedGraph {
+    prepared: PreparedGraph,
+}
+
+impl core::fmt::Debug for DiskPreparedGraph {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("DiskPreparedGraph")
+            .field("base_revision", &self.prepared.base_revision)
+            .field("revision", &self.prepared.revision)
+            .field("change_count", &self.prepared.change_count())
+            .finish()
+    }
+}
+
+impl DiskPreparedGraph {
+    #[must_use]
+    pub const fn base_revision(&self) -> CommitRevision {
+        self.prepared
+            .base_revision
+            .expect("disk preparation always has a current base revision")
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.prepared.revision
+    }
+
+    #[must_use]
+    pub const fn result_digest(&self) -> [u8; 32] {
+        self.prepared.result_digest
+    }
+
+    #[must_use]
+    pub fn change_count(&self) -> usize {
+        self.prepared.change_count()
+    }
+}
+
+/// Load a bounded authenticated proof for a current-state graph transaction.
+///
+/// Deletion and historical read-view predicates are rejected before any storage access because
+/// they require complete reverse/history proofs not represented by this current-state slice.
+pub fn load_graph_disk_preparation_view<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    base: &DerivedGraphStateRoot,
+    transaction: GraphTransaction,
+    limits: GraphDiskPreparationLimits,
+    cache: &mut PageCache,
+) -> Result<GraphDiskPreparationView, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    validate_disk_preparation_subset(&transaction)?;
+    validate_request_limits(&transaction)?;
+    if transaction.scope() != coordinator.scope() {
+        return Err(GraphDiskError::Graph(
+            crate::GraphError::TransactionScopeMismatch,
+        ));
+    }
+    let mut report = GraphDiskPreparationReport::default();
+    let mut pending = transaction_required_ids(&transaction, &mut report, &limits)?;
+    validate_current_root(coordinator, base)?;
+
+    charge_logical_bytes(&mut report, &limits, 1)?;
+    let current_policy = if has_family(&base.root, FAMILY_POLICY) {
+        let (encoded, stats) =
+            coordinator.index_get(filesystem, &base.root, FAMILY_POLICY, &[0], cache)?;
+        add_read_stats(&mut report, stats)?;
+        let encoded = encoded.ok_or(GraphDiskError::IndexCorrupt)?;
+        charge_logical_bytes(&mut report, &limits, encoded.len())?;
+        let policy = decode_result_policy(&encoded)?.ok_or(GraphDiskError::IndexCorrupt)?;
+        if policy.scope() != transaction.scope() {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        Some(policy)
+    } else {
+        None
+    };
+
+    let mut current = BTreeMap::new();
+    while let Some(id) = pending.pop_first() {
+        if current.contains_key(&id) {
+            continue;
+        }
+        report.record_proofs += 1;
+        let proof = if has_family(&base.root, FAMILY_CURRENT_RECORD) {
+            let (encoded, stats) = coordinator.index_get(
+                filesystem,
+                &base.root,
+                FAMILY_CURRENT_RECORD,
+                id.record().as_bytes(),
+                cache,
+            )?;
+            add_read_stats(&mut report, stats)?;
+            match encoded {
+                Some(encoded) => {
+                    charge_logical_bytes(&mut report, &limits, encoded.len())?;
+                    let record = decode_stored_record(&encoded)?;
+                    if record.id() != id || record.modified_revision() > base.revision() {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    }
+                    report.present_records += 1;
+                    CurrentRecordProof::Present(Box::new(record))
+                }
+                None => {
+                    report.absent_records += 1;
+                    CurrentRecordProof::Absent
+                }
+            }
+        } else {
+            report.absent_records += 1;
+            CurrentRecordProof::Absent
+        };
+        current.insert(id, proof);
+        if needs_retained_references(&transaction, id)
+            && let Some(CurrentRecordProof::Present(record)) = current.get(&id)
+        {
+            try_visit_record_references(record, &mut |reference, _| {
+                charge_reference(&mut report, &limits)?;
+                add_pending(reference, &current, &mut pending, &mut report, &limits)
+            })?;
+        }
+    }
+
+    Ok(GraphDiskPreparationView {
+        scope: transaction.scope(),
+        base_revision: base.revision(),
+        transaction,
+        current,
+        current_policy,
+        report,
+    })
+}
+
+fn validate_disk_preparation_subset(transaction: &GraphTransaction) -> Result<(), GraphDiskError> {
+    fn validate_expected(expected: &Expected) -> Result<(), GraphDiskError> {
+        match expected {
+            Expected::Absent | Expected::Version(_) => Ok(()),
+            Expected::ReadView { .. } => Err(GraphDiskError::UnsupportedRequest),
+        }
+    }
+
+    for operation in transaction.operations() {
+        match operation {
+            Operation::Create { expected, .. } | Operation::ReplaceEntity { expected, .. } => {
+                validate_expected(expected)?;
+            }
+            Operation::ActOnAssertion {
+                expected,
+                correction_expected,
+                ..
+            }
+            | Operation::ActOnRelationship {
+                expected,
+                correction_expected,
+                ..
+            } => {
+                validate_expected(expected)?;
+                if let Some(expected) = correction_expected {
+                    validate_expected(expected)?;
+                }
+            }
+            Operation::DeleteEntity { .. } => return Err(GraphDiskError::UnsupportedRequest),
+        }
+    }
+    Ok(())
+}
+
+fn transaction_required_ids(
+    transaction: &GraphTransaction,
+    report: &mut GraphDiskPreparationReport,
+    limits: &GraphDiskPreparationLimits,
+) -> Result<BTreeSet<RecordRef>, GraphDiskError> {
+    let mut required = BTreeSet::new();
+    for operation in transaction.operations() {
+        add_required(
+            transaction.scope(),
+            operation.target(),
+            &mut required,
+            report,
+            limits,
+        )?;
+        match operation {
+            Operation::Create { record, .. } => {
+                visit_new_record_references(record, &mut |id| {
+                    add_required(transaction.scope(), id, &mut required, report, limits)
+                })?;
+            }
+            Operation::ReplaceEntity { properties, .. } => {
+                visit_value_record_references(properties, &mut |id| {
+                    add_required(transaction.scope(), id, &mut required, report, limits)
+                })?;
+            }
+            Operation::ActOnAssertion { correction, .. } => {
+                if let Some(correction) = correction {
+                    add_required(
+                        transaction.scope(),
+                        correction.id,
+                        &mut required,
+                        report,
+                        limits,
+                    )?;
+                    visit_new_assertion_references(correction, &mut |id| {
+                        add_required(transaction.scope(), id, &mut required, report, limits)
+                    })?;
+                }
+            }
+            Operation::ActOnRelationship { correction, .. } => {
+                if let Some(correction) = correction {
+                    add_required(
+                        transaction.scope(),
+                        correction.id,
+                        &mut required,
+                        report,
+                        limits,
+                    )?;
+                    visit_new_relationship_references(correction, &mut |id| {
+                        add_required(transaction.scope(), id, &mut required, report, limits)
+                    })?;
+                }
+            }
+            Operation::DeleteEntity { .. } => return Err(GraphDiskError::UnsupportedRequest),
+        }
+    }
+    Ok(required)
+}
+
+fn required_current_ids(
+    transaction: &GraphTransaction,
+    current: &BTreeMap<RecordRef, CurrentRecordProof>,
+) -> BTreeSet<RecordRef> {
+    let mut required = BTreeSet::new();
+    let mut add = |id| {
+        required.insert(id);
+        Ok::<(), GraphDiskError>(())
+    };
+    for operation in transaction.operations() {
+        add(operation.target()).expect("infallible proof-set insertion");
+        match operation {
+            Operation::Create { record, .. } => {
+                visit_new_record_references(record, &mut add)
+                    .expect("infallible proof-set insertion");
+            }
+            Operation::ReplaceEntity { properties, .. } => {
+                visit_value_record_references(properties, &mut add)
+                    .expect("infallible proof-set insertion");
+            }
+            Operation::ActOnAssertion { correction, .. } => {
+                if let Some(correction) = correction {
+                    add(correction.id).expect("infallible proof-set insertion");
+                    visit_new_assertion_references(correction, &mut add)
+                        .expect("infallible proof-set insertion");
+                }
+            }
+            Operation::ActOnRelationship { correction, .. } => {
+                if let Some(correction) = correction {
+                    add(correction.id).expect("infallible proof-set insertion");
+                    visit_new_relationship_references(correction, &mut add)
+                        .expect("infallible proof-set insertion");
+                }
+            }
+            Operation::DeleteEntity { .. } => {}
+        }
+    }
+    for (id, proof) in current {
+        if needs_retained_references(transaction, *id)
+            && let CurrentRecordProof::Present(record) = proof
+        {
+            visit_record_references(record, &mut |reference, _| {
+                required.insert(reference);
+            });
+        }
+    }
+    required
+}
+
+fn needs_retained_references(transaction: &GraphTransaction, id: RecordRef) -> bool {
+    transaction
+        .operations()
+        .iter()
+        .any(|operation| match operation {
+            Operation::ActOnAssertion { target, action, .. }
+            | Operation::ActOnRelationship { target, action, .. } => {
+                *target == id && *action != AssertionAction::Correct
+            }
+            Operation::Create { .. }
+            | Operation::ReplaceEntity { .. }
+            | Operation::DeleteEntity { .. } => false,
+        })
+}
+
+fn add_required(
+    scope: NamespaceRef,
+    id: RecordRef,
+    required: &mut BTreeSet<RecordRef>,
+    report: &mut GraphDiskPreparationReport,
+    limits: &GraphDiskPreparationLimits,
+) -> Result<(), GraphDiskError> {
+    if id.database() != scope.database() || id.namespace() != scope.namespace() {
+        return Err(GraphDiskError::Graph(crate::GraphError::ScopeMismatch(id)));
+    }
+    charge_reference(report, limits)?;
+    if !required.contains(&id) {
+        if u64::try_from(required.len())
+            .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?
+            >= limits.maximum_record_proofs
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        charge_logical_bytes(report, limits, 16)?;
+        required.insert(id);
+    }
+    Ok(())
+}
+
+fn add_pending(
+    id: RecordRef,
+    current: &BTreeMap<RecordRef, CurrentRecordProof>,
+    pending: &mut BTreeSet<RecordRef>,
+    report: &mut GraphDiskPreparationReport,
+    limits: &GraphDiskPreparationLimits,
+) -> Result<(), GraphDiskError> {
+    if current.contains_key(&id) || pending.contains(&id) {
+        return Ok(());
+    }
+    let retained = current
+        .len()
+        .checked_add(pending.len())
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if u64::try_from(retained).map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?
+        >= limits.maximum_record_proofs
+    {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    charge_logical_bytes(report, limits, 16)?;
+    pending.insert(id);
+    Ok(())
+}
+
+fn charge_reference(
+    report: &mut GraphDiskPreparationReport,
+    limits: &GraphDiskPreparationLimits,
+) -> Result<(), GraphDiskError> {
+    if report.reference_visits == limits.maximum_reference_visits {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    report.reference_visits += 1;
+    Ok(())
+}
+
+fn visit_new_record_references(
+    record: &NewRecord,
+    visitor: &mut impl FnMut(RecordRef) -> Result<(), GraphDiskError>,
+) -> Result<(), GraphDiskError> {
+    match record {
+        NewRecord::Entity(entity) => visit_value_record_references(&entity.properties, visitor),
+        NewRecord::Evidence(_) => Ok(()),
+        NewRecord::Assertion(assertion) => visit_new_assertion_references(assertion, visitor),
+        NewRecord::Relationship(relationship) => {
+            visit_new_relationship_references(relationship, visitor)
+        }
+    }
+}
+
+fn visit_new_assertion_references(
+    assertion: &NewAssertion,
+    visitor: &mut impl FnMut(RecordRef) -> Result<(), GraphDiskError>,
+) -> Result<(), GraphDiskError> {
+    visitor(assertion.subject)?;
+    visit_value_record_references(&assertion.object, visitor)?;
+    for evidence in &assertion.evidence {
+        visitor(*evidence)?;
+    }
+    Ok(())
+}
+
+fn visit_new_relationship_references(
+    relationship: &NewRelationship,
+    visitor: &mut impl FnMut(RecordRef) -> Result<(), GraphDiskError>,
+) -> Result<(), GraphDiskError> {
+    visitor(relationship.from)?;
+    visitor(relationship.to)?;
+    visit_value_record_references(&relationship.properties, visitor)?;
+    for evidence in &relationship.evidence {
+        visitor(*evidence)?;
+    }
+    Ok(())
+}
+
+fn visit_value_record_references(
+    value: &Value,
+    visitor: &mut impl FnMut(RecordRef) -> Result<(), GraphDiskError>,
+) -> Result<(), GraphDiskError> {
+    match value {
+        Value::RecordRef(id) => visitor(*id),
+        Value::List(values) => {
+            for value in values.as_slice() {
+                visit_value_record_references(value, visitor)?;
+            }
+            Ok(())
+        }
+        Value::Map(values) => {
+            for (_, value) in values.as_slice() {
+                visit_value_record_references(value, visitor)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn has_family(root: &RecoveredIndexRoot, family: u8) -> bool {
+    root.runs().any(|run| run.family() == family)
+}
+
+fn charge_logical_bytes(
+    report: &mut GraphDiskPreparationReport,
+    limits: &GraphDiskPreparationLimits,
+    bytes: usize,
+) -> Result<(), GraphDiskError> {
+    let bytes =
+        u64::try_from(bytes).map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let next = report
+        .proof_logical_bytes
+        .checked_add(bytes)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if next > limits.maximum_proof_logical_bytes {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    report.proof_logical_bytes = next;
+    Ok(())
+}
+
+fn add_read_stats(
+    report: &mut GraphDiskPreparationReport,
+    stats: IndexReadStats,
+) -> Result<(), GraphDiskError> {
+    report.index_lookups = report
+        .index_lookups
+        .checked_add(1)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    report.pages_read = report
+        .pages_read
+        .checked_add(stats.pages_read)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    report.cache_hits = report
+        .cache_hits
+        .checked_add(stats.cache_hits)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    report.fragments_visited = report
+        .fragments_visited
+        .checked_add(stats.fragments_visited)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    Ok(())
 }
 
 /// Prepare exact, bounded family deltas before the corresponding graph transaction is committed.
@@ -1450,7 +2029,7 @@ fn validate_candidate_shape(
     Ok(())
 }
 
-fn record_key(scope: uste_types::NamespaceRef, key: &[u8]) -> Result<RecordRef, StorageError> {
+fn record_key(scope: NamespaceRef, key: &[u8]) -> Result<RecordRef, StorageError> {
     let bytes: [u8; 16] = key.try_into().map_err(|_| StorageError::IntegrityFailure)?;
     Ok(RecordRef::new(
         scope.database(),

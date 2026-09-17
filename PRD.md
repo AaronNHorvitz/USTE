@@ -158,6 +158,12 @@ requests, results, checkpoints and reducer profiles are unchanged. Current reduc
 snapshots and checkpoint reconstruction remain full-memory, so this is T-20 write-path groundwork,
 not larger-than-memory or benchmark qualification.
 
+Decision 0035 separates bounded authenticated graph proof loading from pure reducer preparation.
+Supported current-state transactions retain exact positive/negative record proofs and policy from
+the admitted disk root, then prepare without an I/O capability. Deletion and historical predicates
+remain explicitly unsupported pending complete reverse/history proofs; the live coordinator,
+root-delta metadata and recovery state remain full-memory. T-20 and BM-01/BM-06 remain open.
+
 ## Release gates
 
 | Gate | Required outcome |

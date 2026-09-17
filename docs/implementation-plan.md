@@ -86,7 +86,9 @@ terminal families through an opaque base/outcome-bound plan, independently compa
 descriptors with the postcommit graph and publishes one complete root. It still scans and retains
 the full in-memory reducer. Decision 0034 bounds ordinary composite write preparation without
 changing that live-state boundary. T-20 next needs a live disk-backed base/overlay state, explicit-
-I/O streaming semantic validation and qualifying scale evidence.
+I/O streaming semantic validation and qualifying scale evidence. Decision 0035 supplies the first
+explicit-I/O current-record proof/preparation slice, including exact negative proofs and a pure
+post-load phase. Complete reverse/history proofs, live persistent overlays and benchmarks remain.
 
 ## Architectural decomposition
 

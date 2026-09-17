@@ -1723,7 +1723,7 @@ fn collect_value(value: &Value, output: &mut BTreeSet<(Action, RecordRef)>) {
     }
 }
 
-fn validate_request_limits(transaction: &GraphTransaction) -> Result<(), GraphError> {
+pub(crate) fn validate_request_limits(transaction: &GraphTransaction) -> Result<(), GraphError> {
     let count = transaction.operations().len();
     if count == 0 && transaction.policy_mutation().is_none() {
         return Err(GraphError::EmptyTransaction);
@@ -2711,54 +2711,109 @@ const fn reverse_assertion_state(status: AssertionStatus) -> u8 {
     }
 }
 
-fn visit_record_references(record: &Record, visitor: &mut impl FnMut(RecordRef, u16)) {
-    match record {
-        Record::Entity(entity) => {
-            visit_value_references(&entity.properties, REVERSE_ROLE_ENTITY_PROPERTY, visitor);
-        }
-        Record::Evidence(_) => {}
-        Record::Assertion(assertion) => {
-            visitor(assertion.subject, REVERSE_ROLE_ASSERTION_SUBJECT);
-            visit_value_references(&assertion.object, REVERSE_ROLE_ASSERTION_OBJECT, visitor);
-            for evidence in &assertion.evidence {
-                visitor(*evidence, REVERSE_ROLE_EVIDENCE);
-            }
-            if let Some(previous) = assertion.correction_of {
-                visitor(previous, REVERSE_ROLE_CORRECTION_OF);
-            }
-        }
-        Record::Relationship(relationship) => {
-            visitor(relationship.from, REVERSE_ROLE_RELATIONSHIP_FROM);
-            visitor(relationship.to, REVERSE_ROLE_RELATIONSHIP_TO);
-            visit_value_references(
-                &relationship.properties,
-                REVERSE_ROLE_RELATIONSHIP_PROPERTY,
-                visitor,
-            );
-            for evidence in &relationship.evidence {
-                visitor(*evidence, REVERSE_ROLE_EVIDENCE);
-            }
-            if let Some(previous) = relationship.correction_of {
-                visitor(previous, REVERSE_ROLE_CORRECTION_OF);
-            }
-        }
+pub(crate) fn visit_record_references(record: &Record, visitor: &mut impl FnMut(RecordRef, u16)) {
+    let result: Result<(), core::convert::Infallible> =
+        try_visit_record_references(record, &mut |id, role| {
+            visitor(id, role);
+            Ok(())
+        });
+    match result {
+        Ok(()) => {}
+        Err(error) => match error {},
     }
 }
 
-fn visit_value_references(value: &Value, role: u16, visitor: &mut impl FnMut(RecordRef, u16)) {
+pub(crate) fn try_visit_record_references<E>(
+    record: &Record,
+    visitor: &mut impl FnMut(RecordRef, u16) -> Result<(), E>,
+) -> Result<(), E> {
+    match record {
+        Record::Entity(entity) => {
+            try_visit_value_references(&entity.properties, REVERSE_ROLE_ENTITY_PROPERTY, visitor)?;
+        }
+        Record::Evidence(_) => {}
+        Record::Assertion(assertion) => {
+            visitor(assertion.subject, REVERSE_ROLE_ASSERTION_SUBJECT)?;
+            try_visit_value_references(&assertion.object, REVERSE_ROLE_ASSERTION_OBJECT, visitor)?;
+            for evidence in &assertion.evidence {
+                visitor(*evidence, REVERSE_ROLE_EVIDENCE)?;
+            }
+            if let Some(previous) = assertion.correction_of {
+                visitor(previous, REVERSE_ROLE_CORRECTION_OF)?;
+            }
+        }
+        Record::Relationship(relationship) => {
+            visitor(relationship.from, REVERSE_ROLE_RELATIONSHIP_FROM)?;
+            visitor(relationship.to, REVERSE_ROLE_RELATIONSHIP_TO)?;
+            try_visit_value_references(
+                &relationship.properties,
+                REVERSE_ROLE_RELATIONSHIP_PROPERTY,
+                visitor,
+            )?;
+            for evidence in &relationship.evidence {
+                visitor(*evidence, REVERSE_ROLE_EVIDENCE)?;
+            }
+            if let Some(previous) = relationship.correction_of {
+                visitor(previous, REVERSE_ROLE_CORRECTION_OF)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Prepare against a complete proof of the current records needed by the supported disk subset.
+///
+/// History and reverse families are deliberately absent: the caller must reject operations that
+/// depend on them before constructing this narrow reducer base.
+pub(crate) fn prepare_from_complete_current_subset(
+    scope: NamespaceRef,
+    base_revision: CommitRevision,
+    records: BTreeMap<RecordRef, Record>,
+    policy: Option<NamespacePolicy>,
+    transaction: &GraphTransaction,
+) -> Result<PreparedGraph, GraphError> {
+    GraphState {
+        snapshot: GraphSnapshot {
+            scope,
+            revision: Some(base_revision),
+            records,
+            history: BTreeMap::new(),
+            outgoing: BTreeMap::new(),
+            incoming: BTreeMap::new(),
+            provenance: BTreeMap::new(),
+            reverse: BTreeMap::new(),
+            policy,
+            policy_history: BTreeMap::new(),
+        },
+    }
+    .prepare_transaction(
+        transaction,
+        base_revision
+            .checked_next()
+            .map_err(|_| GraphError::RevisionExhausted)?,
+    )
+}
+
+fn try_visit_value_references<E>(
+    value: &Value,
+    role: u16,
+    visitor: &mut impl FnMut(RecordRef, u16) -> Result<(), E>,
+) -> Result<(), E> {
     match value {
         Value::RecordRef(record) => visitor(*record, role),
         Value::List(values) => {
             for value in values.as_slice() {
-                visit_value_references(value, role, visitor);
+                try_visit_value_references(value, role, visitor)?;
             }
+            Ok(())
         }
         Value::Map(values) => {
             for (_, value) in values.as_slice() {
-                visit_value_references(value, role, visitor);
+                try_visit_value_references(value, role, visitor)?;
             }
+            Ok(())
         }
-        _ => {}
+        _ => Ok(()),
     }
 }
 

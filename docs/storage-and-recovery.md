@@ -219,6 +219,13 @@ full-memory live reducer, checkpoint decoder or complete semantic closure scans.
 disk-backed preparation view must expose explicit bounded storage I/O rather than hiding reads
 inside the current pure `TransactionState::prepare` contract.
 
+Decision 0035 adds a separate privileged loader for supported current-state graph transactions.
+It authenticates an admitted root, current policy and only the required positive/negative current
+record closure under aggregate proof budgets and a caller-owned page cache. The returned view has
+no filesystem or coordinator capability, so its consuming reducer preparation is storage-free.
+Deletion and `ReadView` predicates are rejected before storage access pending bounded complete
+reverse/history proof APIs. The live reducer and root-delta metadata remain full-memory.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections
