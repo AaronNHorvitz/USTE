@@ -7,6 +7,12 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 blake3 = { version = "=1.8.7", default-features = false, features = ["std", "pure"] }
+uste-crypto = { path = "../../crates/uste-crypto" }
+uste-graph = { path = "../../crates/uste-graph" }
+uste-policy = { path = "../../crates/uste-policy" }
+uste-storage = { path = "../../crates/uste-storage" }
+uste-txn = { path = "../../crates/uste-txn" }
+uste-types = { path = "../../crates/uste-types" }
 
 [lints.rust]
 unsafe_code = "forbid"

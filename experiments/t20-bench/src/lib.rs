@@ -1,15 +1,18 @@
 //! Deterministic BM-01 fixture semantics and an independent adjacency-array oracle.
 //!
-//! This experiment intentionally does not call the USTE engine or make performance claims.
+//! The bounded development verifier calls the production encrypted/authorized/durable engine but
+//! intentionally does not make performance or BM-01 qualification claims.
 
 #![forbid(unsafe_code)]
 
+pub mod engine;
 pub mod manifest;
 pub mod materialization;
 pub mod oracle;
 pub mod query;
 pub mod synthetic;
 
+pub use engine::{DevelopmentVerification, verify_development_profile};
 pub use manifest::Bm01Manifest;
 pub use materialization::{
     ACCEPTED_SEED, Bm01Profile, Edge, EntityId, Materializer, RelationshipId, Topology,

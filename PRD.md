@@ -181,6 +181,11 @@ bound to the issuing coordinator. It does not claim control of kernel/device cac
 honest BM-01 measurement through the authorization boundary but supplies no performance result;
 the exact qualifying run and full-memory boundaries remain open.
 
+Decision 0040 connects that boundary to the pinned fixture and independent oracle at a hard-capped
+development scale. After durable transactions, index publication and simulated restart, all 384
+measured query shapes must agree exactly. Its memory adapter, test key wrapper and absent timing/RSS
+make it semantic groundwork only; it always reports `engine_benchmark:false`.
+
 ## Release gates
 
 | Gate | Required outcome |

@@ -240,6 +240,12 @@ it. Clearing zeroizes pages without resetting counters; it does not evict kernel
 device caches. Production benchmark reports must distinguish those cache layers and derive work
 from counter deltas.
 
+Decision 0040 validates the benchmark adapter without promoting it to engine authority: fixture
+IDs and topology map deterministically into source-backed graph records, while an independent
+adjacency-array oracle remains the expected result. Multi-hop development queries compose ordered
+authorized one-hop reads after restart; the capped memory/test-key environment is not performance
+or platform evidence.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

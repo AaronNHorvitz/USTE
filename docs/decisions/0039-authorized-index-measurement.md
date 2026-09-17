@@ -67,7 +67,7 @@ cargo test -p uste-graph --all-targets --locked
 cargo clippy -p uste-txn -p uste-graph --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 10 isolated t20-bench tests passed; format, strict clippy, rustdoc,
+# 262 workspace tests and 11 isolated t20-bench tests passed; format, strict clippy, rustdoc,
 # docs (98 links, 95 active IDs, 146 definitions), task graph, R0 vectors, storage publication
 # model and isolated builds passed
 ~~~

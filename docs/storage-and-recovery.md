@@ -243,6 +243,10 @@ so an issuer-instance-bound root plus current `ManageSchema` authorization gates
 clear; outcome-uncertain coordinators reject them before possibly stale policy is used. Clearing
 does not evict kernel, filesystem, controller or device caches.
 
+Decision 0040 exercises this path after memory-adapter restart and journal replay: it discovers the
+persisted encrypted graph root and runs oracle-checked authorized queries. That establishes bounded
+semantic recovery equivalence, not Linux durability, portable recovery cost or BM-01 scale.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

@@ -1,8 +1,9 @@
 # T-20 benchmark fixture foundation
 
 This standalone experiment pins `bm01-materialization-v1`. It prepares deterministic synthetic
-fixture semantics and an independent adjacency-array BFS oracle; it does **not** run USTE engine
-queries, measure latency, or provide BM-01 acceptance evidence.
+fixture semantics and an independent adjacency-array BFS oracle. Its bounded `engine-check`
+command also validates the mapping against production encrypted, authorized, durable graph/index
+code after a simulated restart. It does **not** measure latency or provide BM-01 acceptance evidence.
 
 The qualifying-size profile always uses the accepted BM-01 seed and exactly:
 
@@ -26,6 +27,7 @@ From this directory:
 ```text
 cargo run --release --locked --offline -- manifest
 cargo run --release --locked --offline -- manifest --entities 1000
+cargo run --release --locked --offline -- engine-check --entities 20
 cargo test --locked --offline
 cargo clippy --all-targets --locked --offline -- -D warnings
 ```
@@ -33,6 +35,13 @@ cargo clippy --all-targets --locked --offline -- -D warnings
 The default is the exact qualifying fixture size. `--entities N` derives exactly `10*N`
 relationships while preserving the 80/10/10 split and a full `N`-entity ring. Any value below
 100,000 is labeled `nonqualifying-small-scale`; it is only for development and tests.
+
+`engine-check` is capped at 1,000 entities and always emits `engine_benchmark: false`. It maps typed
+fixture IDs to scoped graph IDs, adds one shared source Evidence record, creates relationships and
+then accepts them in a separate durable revision. After encrypted index publication it restarts the
+durable memory adapter, replays the journal, loads the persisted authorized root and compares all
+384 measured query shapes with the independent oracle. The 20-entity/200-relationship golden output
+digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
 
 ## Oracle semantics
 
@@ -46,10 +55,11 @@ returning a truncated answer.
 
 ## Deliberate limitations
 
-- The crate does not open a durable database, publish an encrypted index, authorize a principal,
-  control caches, or execute an engine query.
-- It does not collect latency, RSS, I/O, result-byte, recovery, or correctness-equivalence evidence
-  against the engine.
+- The development verifier uses the durable memory fault model, deterministic development entropy
+  and a test key wrapper, not the Linux adapter or portable recovery profile.
+- It does not collect latency, RSS, real-filesystem I/O, result-byte or performance evidence.
+- Multi-hop traversal is stable client-side composition of production one-hop authorized reads;
+  there is no native multi-hop engine request yet.
 - `qualification: qualifying-fixture-size` describes only exact fixture dimensions. It is not a
   performance or release claim.
 - BM-01 still needs cold/warm authorized encrypted disk-query runs on the reference machine. BM-06

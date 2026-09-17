@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 10 isolated t20-bench tests passed; format, clippy, rustdoc,
+# 262 workspace tests and 11 isolated t20-bench tests passed; format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
 
@@ -124,8 +124,12 @@ stops after the first delivered entry in the regression.
 The isolated `experiments/t20-bench` crate pins the exact BM-01 seed, 100,000/1,000,000 fixture,
 80/10/10 uniform/hub/ring topology, typed identifiers, measured/warm-up query corpora and an
 independent adjacency-array BFS oracle. Its exact digests are recorded in
-`acceptance/r1/bm01-materialization-v1.tsv` and checked in the normal repository script. It neither
-opens USTE nor measures it and explicitly emits `engine_benchmark: false`; BM-01 remains unrun.
+`acceptance/r1/bm01-materialization-v1.tsv` and checked in the normal repository script. It now also
+has a production-backed development verifier capped at 1,000 entities. Its 20/200 golden
+materializes and accepts records through the authorized durable coordinator, restarts/replays,
+loads the encrypted index and matches all 384 measured query shapes against the independent oracle.
+It explicitly emits `engine_benchmark: false`, uses the memory fault model and test key wrapper,
+and records no timing/RSS; BM-01 remains unrun.
 
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
@@ -134,4 +138,4 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all docs,
-strict clippy/rustdoc, the storage publication model, and 10 isolated T-20 fixture tests passed.
+strict clippy/rustdoc, the storage publication model, and 11 isolated T-20 fixture/engine tests passed.

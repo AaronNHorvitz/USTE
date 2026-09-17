@@ -102,6 +102,12 @@ telemetry is cardinality-sensitive. Clearing establishes only an empty USTE user
 qualifying reports must separately describe process and host storage-cache conditions. It is
 instrumentation, not BM-01 evidence.
 
+Decision 0040 performs the first connection at a hard-capped development scale. It durably maps,
+accepts, restarts and queries the production graph/index, then requires exact equality with the
+independent oracle for all measured query shapes. The remaining qualifying driver must replace the
+memory/test-key environment with Linux/Btrfs and portable recovery, batch the exact 100k/1m profile,
+separate oracle generation, and collect the accepted repeated latency/RSS/environment evidence.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

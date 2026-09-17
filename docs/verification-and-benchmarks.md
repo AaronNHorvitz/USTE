@@ -99,6 +99,11 @@ issuer-instance-bound root. Benchmark samples use counter deltas and must label 
 separately from process, kernel, filesystem, controller and device cache state. The clear operation
 alone is not evidence of a fully cold host.
 
+Decision 0040 connects the fixture and oracle to production authorized encrypted disk reads at an
+explicitly capped development scale. Its restart-backed 20/200 golden checks all 384 measured query
+shapes, but the memory fault-model adapter, test key wrapper, absent timings/RSS and client-composed
+multi-hop path make it semantic groundwork only. It always reports `engine_benchmark:false`.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

@@ -3,7 +3,7 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `5ab3988` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `035e4e9` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
@@ -13,10 +13,11 @@ Decision 0034 makes ordinary graph/spatial/composite ingest preparation request-
 Decision 0035 adds a bounded explicit-I/O current-record proof phase followed by storage-free graph
 preparation. Decision 0036 adds complete bounded history/reverse proof buckets so every graph
 operation and precondition variant can use that phase. Decision 0037 carries authenticated
-metadata/counts into a proof-derived terminal-root plan. The current Decision 0038 increment binds
+metadata/counts into a proof-derived terminal-root plan. Decision 0038 binds
 that proof result into the authoritative coordinator commit without repeating full-state
-preparation. The current Decision 0039 increment adds explicit authorized cache/I/O measurement;
-it is not a benchmark result. T-20 remains open pending a disk-backed live publication target,
+preparation. Decision 0039 adds explicit authorized cache/I/O measurement. The current Decision
+0040 increment connects a capped, nonqualifying production-engine equivalence driver to the pinned
+fixture and oracle. Neither is a benchmark result. T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -353,6 +354,14 @@ unverified external distribution prerequisite.
   available and essentially all 8 GiB swap occupied, so it could not provide the accepted 24 GiB
   reservation. The Btrfs/NVMe volume still had 999 GiB free. This is a transient measurement-only
   blocker; no smaller workload is presented as qualifying evidence.
+- Added Decision 0040 and the `engine-check` development verifier. It maps fixture IDs to exact
+  scoped graph IDs, adds shared source Evidence, commits proposed then accepted relationships,
+  publishes the encrypted index, restarts/replays and loads the persisted authorized root.
+- At 20 entities/200 relationships, all 384 measured depth/class/direction queries composed from
+  production one-hop reads exactly match the independent oracle after revision-4 recovery. The
+  aggregate digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
+  The command is capped at 1,000 entities, emits `engine_benchmark:false`, and is not timing/RSS,
+  Linux-filesystem, portable-recovery or BM-01 qualification evidence.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -427,8 +436,8 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (98 links, 95 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 10 isolated T-20 fixture tests pass
+# docs=ok (99 links, 96 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 11 isolated T-20 fixture/engine-equivalence tests pass
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
