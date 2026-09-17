@@ -8,9 +8,10 @@ the T-14–T-18/T-48 foundation). Decision 0023 and linked evidence bind closure
 documentation commit. Review was performed by Codex agents and does not represent independent
 external security certification.
 
-T-49 is complete at its typed R1 transaction-contract scope. T-19 R1 acceptance and operating-
-limitations evidence is the next dependency-permitted task; R1 is not yet accepted. T-62 remains
-an independent, unverified external distribution prerequisite.
+T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
+BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
+every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 remains an independent,
+unverified external distribution prerequisite.
 
 ## Completed this increment
 
@@ -296,8 +297,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue with T-19: assemble and independently audit the R1 acceptance/operating-limit evidence and
-runnable kernel instructions without treating unmet later performance or production work as passed.
+Continue with T-20: implement the versioned disk-index/bounded-cache foundation and its BM-01/BM-06
+enabling harness. Then return to T-19's remaining VT gaps and BM-02/BM-04 work; no failed or absent
+benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

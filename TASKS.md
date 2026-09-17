@@ -71,7 +71,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-45 | Shared UTC/time types, normalization, source envelopes and replay integration; FR-26 | T-09, T-12, T-18 | [`uste-time`, Decision 0021 and evidence](docs/evidence/time-normalization.md) | VT-17 kernel cases pass: no silent guessing, clock rollback does not reorder commits, replay preserves accepted interpretation |
 | [x] T-48 | World/frame/geometry/observation schemas and typed units; FR-27/28 | T-09, T-45 | [`uste-types` primitives, `uste-spatial` records/history and evidence](docs/evidence/spatial-schema-history.md) | VT-18/19 schema subset rejects invalid units, frame cycles, nonfinite values and invented missing positions |
 | [x] T-49 | Bounded import transaction contracts and durable checkpoints; FR-34 | T-14, T-15, T-16, T-17, T-18, T-48 | [`uste-ingest`, Decision 0023 and evidence](docs/evidence/atomic-import-transactions.md) | VT-23 transaction subset proves atomic batches, retry identity, changed-source refusal and no dangling references |
-| [ ] T-19 | R1 acceptance and operating limitations | T-15, T-16, T-17, T-18, T-45, T-48, T-49 | R1 evidence report and runnable kernel instructions | Required R1 VT/BM scope passes; clear non-production and scalability limits |
+| [ ] T-19 | R1 acceptance and operating limitations | T-15, T-16, T-17, T-18, T-20, T-45, T-48, T-49 | R1 evidence report and runnable kernel instructions | Required R1 VT/BM scope passes; clear non-production and scalability limits |
 
 T-13 progress: Decision 0015, the Linux capability adapter, exclusive ownership, encrypted
 manifest/log/segment headers, opaque transaction groups, fixed commit certificates and streaming
@@ -113,7 +113,7 @@ and content-adapter timestamp extraction remain T-21/T-24 rather than implied co
 
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
 |---|---|---|---|---|
-| [ ] T-20 | Disk-index foundation and bounded cache; FR-16 | T-19 | Versioned graph/index runs and root publication | VT-05/14 and BM-01/06 verify rebuild, visibility and cache pressure; no full-RAM assumption hidden |
+| [ ] T-20 | Disk-index foundation and bounded cache; FR-16 | T-17, T-18, T-49 | Versioned graph/index runs and root publication | VT-05/14 and BM-01/06 verify rebuild, visibility and cache pressure; no full-RAM assumption hidden |
 | [ ] T-21 | Bitemporal queries, corrections and contradictions; FR-05/26 | T-20, T-45 | Temporal indexes and typed query plans | VT-01/05/17 distinguish valid time from recorded revision, including late facts, derivation availability and retained-boundary errors |
 | [ ] T-22 | Artifact/evidence/derivation graph and locators; FR-06/18/20 | T-20 | Version lineage, dependencies, chunk and citation schemas | Exact source-version resolution; no invented locators; source replacement is distinguishable |
 | [ ] T-23 | Worker supervisor, leases, protocol and isolation; FR-19/22 | T-16, T-22 | Restricted process worker framework | VT-10 proves timeout/cancel/descendant cleanup/no-egress/no-host-file access; revoked output rejected |
@@ -130,7 +130,7 @@ and content-adapter timestamp extraction remain T-21/T-24 rather than implied co
 | [ ] T-55 | Supplied-graph navigation with constraints and stable path ordering; FR-30 | T-52, T-53 | Bounded path operator and route provenance | VT-18/22 checks directed/disconnected graphs, costs, hidden routes, equal-cost ties and resource exhaustion |
 | [ ] T-57 | Deterministic 2D/3D kinematics and branch checkpoint/resume; FR-31 | T-26, T-50, T-51 | uste-physics baseline and virtual-time mappings | VT-20 matches independent analytic cases, pins profile and preserves observed/simulated separation after restart |
 | [ ] T-56 | Synthetic world end-to-end CLI/read fixture and consumer examples; FR-27/28/29/30/31/33/34 | T-27, T-53, T-54, T-55, T-57 | Headless game-world state and tracked items linked to locally imported prices/documents | VT-15/17/18/19/20/22/23 R2 scope passes offline: UTC/local display, permissions, corrections, price provenance and byte retrieval; no provider accounts/secrets |
-| [ ] T-29 | R2 local developer-alpha acceptance and documentation | T-20, T-21, T-24, T-25, T-26, T-27, T-28, T-56 | Local alpha evidence and examples | R2 suites pass; unsupported formats explicitly visible; no R3 capabilities or distribution readiness implied |
+| [ ] T-29 | R2 local developer-alpha acceptance and documentation | T-19, T-20, T-21, T-24, T-25, T-26, T-27, T-28, T-56 | Local alpha evidence and examples | R2 suites pass; unsupported formats explicitly visible; no R3 capabilities or distribution readiness implied |
 
 ## R3 — Hardened beta
 

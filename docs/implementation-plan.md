@@ -45,6 +45,11 @@ T-54 still owns CSV/JSON parsing, mapping execution, rejected-row reports and op
 Task IDs are stable, not execution order. New tasks inserted in earlier gates must complete
 before those gates close. No green documentation check marks an implementation row complete.
 
+Decision 0024 corrects one semantic ordering contradiction without weakening acceptance: T-20's
+disk-index/cache work must precede T-19 because T-19 requires BM-01/BM-06 results that T-20 owns.
+T-19 remains open and still requires all applicable R1 VT/BM results, including the currently
+failed BM-04 target. T-29 directly depends on T-19, so the reorder cannot bypass R1 acceptance.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

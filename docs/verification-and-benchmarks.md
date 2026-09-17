@@ -105,6 +105,9 @@ tested separately from timing variability.
 ## Release evidence
 
 R1 requires VT-01 through VT-08 as applicable to the kernel and baseline BM-01/02/04/06.
+Decision 0024 orders T-20 before T-19 solely because T-20 supplies BM-01/BM-06's disk-index and
+bounded-cache prerequisites. All four benchmark targets still must genuinely pass before T-19;
+a recorded failed or missing baseline is not acceptance.
 R1 also requires VT-17 kernel normalization/clock/replay cases; R2 extends VT-17 to queries
 and supported parsers, with explicit source and derivation availability cutoffs.
 R2 adds VT-09 through VT-12 and VT-15 for its supported parser/API scope.
