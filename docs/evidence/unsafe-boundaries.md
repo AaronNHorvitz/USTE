@@ -4,10 +4,11 @@ Date: 2026-09-17 · target: x86_64-unknown-linux-gnu · status: product/candidat
 
 This review covers direct dependencies selected by Decisions 0005/0006 at the pinned versions
 in `experiments/dependency-audit/Cargo.lock`. The Decision 0005 subset is now also admitted to the
-root product `Cargo.lock` through `uste-crypto` with those exact features; the parser candidates
-remain confined to the experiment graph. This review distinguishes source that contains `unsafe`
-from code reachable under selected features. Transitive blocks still require ongoing review,
-fuzzing and advisory monitoring; this document is not an independent security assessment.
+root product `Cargo.lock` through `uste-crypto` with those exact features. T-45 additionally admits
+the safe-Rust Jiff time-rule subset described below; parser candidates remain confined to the
+experiment graph. This review distinguishes source that contains `unsafe` from code reachable
+under selected features. Transitive blocks still require ongoing review, fuzzing and advisory
+monitoring; this document is not an independent security assessment.
 
 ## Engine/key dependencies
 
@@ -18,10 +19,12 @@ fuzzing and advisory monitoring; this document is not an independent security as
 | `getrandom 0.4.3` | std | OS syscall/platform implementations | sole entropy boundary; fail closed, deterministic injection only in tests |
 | `libc 0.2.189` | transitive/platform | OS ABI calls | platform support under entropy and related dependencies; never exposed as arbitrary syscall capability |
 | `rustix 1.1.5` | std, fs; normal Linux raw-sys backend | syscall marshalling and initialized-buffer boundary | descriptor-rooted storage adapter only; `openat2`, positional I/O, sync, rename and lock operations |
+| `jiff 0.2.37` / `jiff-core 0.1.1` | defaults off; `std` only | compact tagged timezone representation uses raw-pointer casts, manual `Arc` handling and `Send`/`Sync`; core has checked-call-site unchecked constructors and a fixed-array UTF-8 view | pure-Rust checked civil/TZif public path only; no system timezone, filesystem or network feature; malformed/profile tests and upstream review remain continuous |
+| `jiff-tzdb 0.1.8` | embedded data, no defaults | generated no-std name table and included TZif bytes; no `unsafe` token | exact 2026c version/content hash verified before use |
 
-No first-party core crate contains unsafe code. `uste-crypto` has `#![forbid(unsafe_code)]` and its
-root product graph has no native `links` package. Dependency unsafe and the OS syscall boundary are
-not hidden by that lint and remain inventory.
+No first-party core crate contains unsafe code. `uste-crypto` and `uste-time` have
+`#![forbid(unsafe_code)]`, and the root product graph has no native `links` package. Dependency
+unsafe and the OS syscall boundary are not hidden by that lint and remain inventory.
 
 ## Parser/fixture candidates
 

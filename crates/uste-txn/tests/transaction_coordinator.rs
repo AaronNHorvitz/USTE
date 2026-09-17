@@ -92,6 +92,56 @@ fn clock(day: i64) -> ScriptedClock {
 }
 
 #[test]
+fn equal_and_rolling_back_wall_samples_never_order_or_merge_commits() {
+    let scope = scope();
+    let mut filesystem = MemoryFileSystem::default();
+    let name = EntryName::new("wall-ordering").unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        create_vault(scope.database(), 9),
+        CounterEntropy(90),
+        CounterState::default(),
+    )
+    .unwrap();
+    for (index, wall_day) in [10_i64, 10, -10].into_iter().enumerate() {
+        let expected = i64::try_from(index).unwrap();
+        let bytes = mutation(expected, 1);
+        let outcome = coordinator
+            .commit(
+                &mut filesystem,
+                request(
+                    u8::try_from(index + 1).unwrap(),
+                    u8::try_from(index + 11).unwrap(),
+                    &bytes,
+                ),
+                &mut clock(wall_day),
+                &NeverCancel,
+            )
+            .unwrap();
+        assert_eq!(outcome.revision.get(), u64::try_from(index + 1).unwrap());
+    }
+    assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(3));
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (coordinator, report) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(91),
+        CounterEntropy(92),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    assert_eq!(report.frontier.unwrap().get(), 3);
+    assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(3));
+}
+
+#[test]
 fn retry_conflict_cancellation_reader_and_restart_are_coherent() {
     let scope = scope();
     let mut filesystem = MemoryFileSystem::default();

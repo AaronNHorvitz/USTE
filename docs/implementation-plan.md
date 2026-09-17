@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.8 · 2026-09-17 · R0 design ready; T-08–T-18 foundation implemented
+Design draft 1.9 · 2026-09-17 · R0 design ready; T-08–T-18/T-45 foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -113,6 +113,11 @@ authenticates the journal before accepting an opaque candidate, verifies prefix 
 and replays the reducer suffix; damaged or unsupported candidates fall back to the other slot or
 cold replay. The current double-open handoff and 256 MiB in-memory limit are explicit correctness
 constraints pending T-20/BM-06 rather than capacity claims.
+
+Decision 0021 completes T-45's R1 kernel with the safe-Rust `uste-time` crate, strict explicit
+normalization, embedded/hash-verified TZDB 2026c rules, bounded canonical source envelopes and
+replay-stable graph values. It does not pull timezone code into `uste-types`, consult host zone
+configuration or implement the T-21 temporal index/T-24 adapter layers.
 
 Required end-to-end slices are raw binary round-trip; source-backed temporal assertion;
 moving object with attached document; combined location/content/relationship query; navigation

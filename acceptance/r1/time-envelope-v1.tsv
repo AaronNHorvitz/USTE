@@ -1,0 +1,3 @@
+case	profile	canonical_bytes	sha256
+fold_envelope	uste-time-envelope-v1	849	52920090900e58df57da9fb816a032b76c3a9d6c227f94a9c9605790923f5cc9
+tzdb	uste-tzdb-profile-v1	bundled-2026c	8e18c4fd3aad2c58d45340e356a02229ce6811c83427c5b086ad4468b7582209

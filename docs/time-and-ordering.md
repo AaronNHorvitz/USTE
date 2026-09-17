@@ -1,6 +1,6 @@
 # Time normalization and ordering
 
-Draft contract · 2026-09-16 · Not implemented
+Implemented R1 kernel contract · 2026-09-17 · temporal-query integration remains T-21
 
 Owns FR-26 and the time semantics shared by FR-05/07/20/24. This contract defines
 requirements. Decision 0003 approves the exact v1 codec, supported ranges, pinned local-zone
@@ -127,6 +127,15 @@ folds/gaps, zone conflicts, missing/date-only values, unsupported time scales, t
 updates, equal timestamps, clock rollback/restart, and source/derivation knowledge boundaries.
 R1 requires the type/normalization/replay subset; R2 adds temporal-query and parser integration.
 T-01 freezes the profile; T-45 implements the shared kernel; T-21 integrates temporal queries.
+
+Decision 0021 implements the T-45 kernel in `uste-time`: strict explicit-offset and numeric-unit
+normalization, embedded/hash-verified TZDB 2026c local-zone rules, bounded canonical source
+envelopes, explicit local presentation and replay-stable accepted pairs. The normalizer has no
+clock, filesystem, environment or network capability. RFC 3339 `-00:00` remains an unknown offset;
+a fold always requires an explicit earlier/later choice and any supplied offset must agree. The
+codec is a closed schema inside the existing canonical generic `Value` record; unknown profiles or
+fields fail rather than being guessed. `acceptance/r1/time-envelope-v1.tsv` binds the timezone and
+envelope goldens. File parser integration and temporal indexes are not implied by this kernel.
 
 Standards references: [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339) defines interoperable
 Internet timestamps; the [IANA Time Zone Database](https://www.iana.org/time-zones) supplies

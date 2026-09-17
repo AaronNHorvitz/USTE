@@ -1,7 +1,7 @@
 # API and integration
 
-Draft contract · 2026-09-17 · T-16 transaction/blob and T-17 graph-library subsets callable;
-public database/API/CLI operations remain proposed
+Draft contract · 2026-09-17 · T-16 transaction/blob, T-17 graph and T-45 time-library subsets
+callable; public database/API/CLI operations remain proposed
 
 Owns FR-13, FR-14, FR-15, FR-25 and the consumer boundary.
 
@@ -57,6 +57,10 @@ Timestamp input/output obeys [time and ordering](time-and-ordering.md): resolved
 use UTC, interpretation provenance remains available, and local display is a presentation
 choice. Unknown dates are not replaced with now. Historical queries constrain both source
 and derivation availability; wall-clock cutoffs cannot silently substitute for revisions.
+The implemented `uste-time` subset accepts strict RFC 3339, declared numeric units or explicit
+local interpretation, returns a bounded `TimestampEnvelope`, and can embed that envelope as a
+canonical graph `Value`. Local presentation requires an explicit IANA zone. Content adapters do
+not yet populate these envelopes; that remains T-24.
 
 Writes return a transaction identity, durable revision, result digest and operation outcome.
 On lost connection, clients query/retry using the same idempotency key. Reusing a key with

@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.5 · 2026-09-17 · R0 design ready; T-08–T-16 foundation implemented
+Database design draft 1.6 · 2026-09-17 · R0 design ready; T-08–T-18/T-45 foundation implemented
 
 ## Component boundaries
 
@@ -36,13 +36,15 @@ See [application use cases](docs/application-use-cases.md).
 
 ## Proposed Rust workspace
 
-The workspace now implements `uste-types`, `uste-policy`, `uste-crypto`, `uste-storage`,
-`uste-txn` and the independent `uste-testkit`; later rows remain planned component boundaries,
-not claims of implemented directories or a fixed public API.
+The workspace now implements `uste-types`, `uste-time`, `uste-policy`, `uste-crypto`,
+`uste-storage`, `uste-txn`, `uste-graph`, `uste-replay` and the independent `uste-testkit`; later
+rows remain planned component boundaries, not claims of implemented directories or a fixed public
+API.
 
 | Crate | Responsibility |
 |---|---|
 | uste-types | Stable identities, schemas, canonical encodings, bounded values |
+| uste-time | Pinned UTC normalization, source timestamp envelopes and explicit local presentation |
 | uste-policy | Principal/capability checks, labels, retention decisions |
 | uste-storage | Journal, commit metadata, blob segments, checkpoints, I/O adapters |
 | uste-txn | Commit sequencing, optimistic validation, idempotency, reader revisions |
@@ -144,6 +146,14 @@ journal, reconstructs and compares all retry/transaction/blob-owner metadata thr
 then applies the normal reducer only to the suffix. Invalid candidates fall back to the other slot
 or cold replay; they never create commits or replace journal authority. The current two-open handoff
 and 256 MiB in-memory cache cap are correctness choices, not T-20/BM-06 performance claims.
+
+Decision 0021 adds the capability-free `uste-time` normalization kernel. `uste-types` retains the
+canonical instant pair without a timezone dependency. Strict explicit-offset and numeric-unit input
+can resolve directly; named local input uses only hash-verified embedded TZDB 2026c bytes. A bounded
+canonical source envelope preserves the original token, interpretation, precision, uncertainty and
+accepted pair. Graph transactions journal that complete value, so replay restores the pair without
+parsing text or resolving a zone. Commit revision remains authoritative when wall observations are
+equal or move backward.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.

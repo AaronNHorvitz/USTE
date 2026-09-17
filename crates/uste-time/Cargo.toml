@@ -1,0 +1,18 @@
+[package]
+name = "uste-time"
+description = "Pinned UTC normalization and replay-stable source timestamp envelopes for USTE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+jiff = { version = "=0.2.37", default-features = false, features = ["std"] }
+jiff-tzdb = { version = "=0.1.8", default-features = false }
+sha2 = { version = "=0.11.0", default-features = false }
+uste-types = { path = "../uste-types", version = "=0.1.0" }
+
+[lints]
+workspace = true
