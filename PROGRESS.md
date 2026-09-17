@@ -2,14 +2,15 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed implementation: `274e5d2` (local T-45 pinned time normalization, bounded source
-envelopes and replay-preserved interpretation over the T-09/T-12/T-18 foundation). Decision 0021
-and the linked evidence bind closure in the following documentation commit. Review was performed
-by Codex agents and does not represent independent external security certification.
+Latest completed implementation: `5f24e76` (local T-48 exact spatial primitives, canonical
+world/frame/geometry/observation records, bounded immutable reference histories and durable replay
+over the T-09/T-45 foundation). Decision 0022 and the linked evidence bind closure in the following
+documentation commit. Review was performed by Codex agents and does not represent independent
+external security certification.
 
-T-45 is complete at its local correctness scope. T-48 world/frame/geometry/observation schemas and
-typed units is the next dependency-permitted R1 task. T-62 remains an independent, unverified
-external distribution prerequisite.
+T-48 is complete at its local schema/history correctness scope. T-49 bounded import transaction
+contracts and durable checkpoints is the next dependency-permitted R1 task. T-62 remains an
+independent, unverified external distribution prerequisite.
 
 ## Completed this increment
 
@@ -134,6 +135,21 @@ external distribution prerequisite.
   token or resolving a zone. Equal and rolling-back wall samples still publish and recover distinct
   consecutive revisions. All 12 R0 time vectors execute across time/graph tests, and all 3,652,059
   supported Gregorian days round-trip through the independent checked calendar arithmetic.
+- Completed T-48 with Decision 0022, exact fixed-point local/geographic primitives in std-only
+  `uste-types`, and safe-Rust `uste-spatial` schemas for worlds, immutable frames/geometries and
+  source-backed position observations. Missing height/position stays unknown and stored spatial
+  truth has no floating/nonfinite representation.
+- Added a bounded atomic reference-history catalog with exact recorded-revision visibility,
+  gap-free versions, category/scope/dimension checks, root/parent closure, a 32-edge frame-depth
+  ceiling, cycle rejection, immutable observation IDs, idempotent source events and prior-commit
+  same-entity/world corrections. An independent scan oracle agrees on every tested frame depth.
+- Added canonical transactions, effect-bound insert/retry results, cold replay and canonical
+  checkpoint rebuilding. A 64 MiB canonical logical-byte bound makes the clone-based R1 catalog's
+  hostile-input limit explicit; it is not a scalable index or BM-10 result.
+- Bound 11 spatial record variants plus a transaction and checkpoint to exact length/SHA-256
+  fixtures. Every record/transaction/checkpoint truncation and trailing input fails; checkpoint
+  count, scope, ordering, duplicate and future-revision mutations fail closed. Final agent review
+  found no remaining high-severity T-48 core issue.
 - Corrected review findings for normalizer-construction bypass, cap-before-copy behavior, malformed
   date-only inputs and open semantic reason combinations. Final review found no remaining high- or
   medium-severity T-45 finding; dependency unsafe remains explicitly inventoried.
@@ -201,9 +217,18 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 193 workspace tests including 69 uste-storage, 13
-# uste-crypto, 25 uste-graph, 15 uste-time, 8 uste-replay, 4 uste-policy and 26 uste-txn tests;
+# workspace format/clippy/test/doc pass; 224 workspace tests including 69 uste-storage, 13
+# uste-crypto, 26 uste-graph, 26 uste-spatial, 22 uste-types, 15 uste-time, 8 uste-replay,
+# 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
+cargo test -p uste-spatial --all-targets --locked
+# 26 passed; 0 failed
+cargo test -p uste-types --test spatial_primitives --locked
+# 4 passed; 0 failed
+cargo test -p uste-graph --test spatial_replay --locked
+# 1 passed; 0 failed
+cargo clippy -p uste-spatial --all-targets --locked -- -D warnings
+# passed
 /tmp/uste-t09-tools/bin/cargo-deny --locked check advisories licenses sources bans
 # advisories ok, bans ok, licenses ok, sources ok
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
@@ -243,6 +268,11 @@ remaining mixed workload have not passed.
 - T-45 normalizes timestamps and preserves their provenance but does not add temporal indexes,
   content-adapter extraction, clock-drift estimation or leap/TAI/GPS conversion tables. T-21 and
   T-24 own those layers. The admitted named-zone behavior is pinned to embedded TZDB 2026c.
+- T-48's transform reference is an opaque same-scope version binding; T-50 owns target closure and
+  evaluation. The qualification `SpatialState` is intentionally not an authorized public
+  coordinator: T-49 must compose graph/spatial/import authorization and external entity/evidence/
+  source closure. The 64 MiB logical-byte clone catalog is a correctness baseline; T-59 owns native
+  disk indexing and the one-million-item BM-10 workload.
 - T-13 local acceptance is complete on the reference Btrfs runner and the independently identified
   ext4 mount `/var/mnt/archive_vault` (`/dev/sda1`). These SIGKILL tests do not simulate controller
   cache loss or actual power loss. The certificate log fails closed at 1 GiB pending later
@@ -250,8 +280,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue with T-48: implement world/frame/geometry/observation schemas, typed units, reference
-histories and VT-18/19 validation for cycles, nonfinite values and absent observations.
+Continue with T-49: implement bounded mapping/batch identities, preview/commit outcomes, changed-
+source refusal, resumable durable checkpoints and authorized atomic graph/spatial reference closure.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

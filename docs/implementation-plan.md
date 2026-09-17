@@ -33,6 +33,10 @@ secrets. Decision 0011 separately governs the external executable-distribution g
 | Distribution readiness | T-62 | Owner/admin enables and harmlessly verifies private vulnerability reporting with reporter and authorized security-triage participation before any executable leaves the authorized development group |
 | R4: production decision | T-41–44, T-62 | Independent security/recovery assessment, verified disclosure route, signed packages, dependency/license review, supported-platform trials and honest published limits |
 
+T-48's accepted R1 catalog is a bounded in-memory correctness implementation, not the native disk
+index or BM-10 capacity result. T-49 owns authorized atomic graph/import reference closure; T-50
+turns T-48's opaque transform bindings into validated transform records and algorithms.
+
 Task IDs are stable, not execution order. New tasks inserted in earlier gates must complete
 before those gates close. No green documentation check marks an implementation row complete.
 

@@ -49,7 +49,7 @@ API.
 | uste-storage | Journal, commit metadata, blob segments, checkpoints, I/O adapters |
 | uste-txn | Commit sequencing, optimistic validation, idempotency, reader revisions |
 | uste-graph | Native graph records, adjacency/property/temporal indexes, traversal |
-| uste-spatial | Typed geometry, versioned frames/transforms, spatial predicates and native indexes |
+| uste-spatial | Typed geometry and versioned-frame history; later transform evaluation, predicates and native indexes |
 | uste-motion | Observations, trajectories, state-at-time, uncertainty and correction dependencies |
 | uste-content | Artifact lifecycle, parser protocol, derivation and citation validation |
 | uste-query | Typed plans, budgets, ranking, explain output, lexical retrieval |

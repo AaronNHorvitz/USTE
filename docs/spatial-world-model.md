@@ -1,10 +1,15 @@
 # Spatial world model, movement and navigation
 
-Draft contract · 2026-09-16 · Not implemented
+Accepted contract · updated 2026-09-17 · T-48 schema/history subset implemented
 
 Owns FR-27 through FR-30. Decision 0009 freezes v1 numeric representations, reference frames,
 exact geometry predicates, error tolerances, index layout and limits. All operations inherit
 namespace authorization, current permissions, retention and bounded-query rules.
+
+Decision 0022 implements the R1 exact-unit schemas, canonical records, immutable reference
+histories, observation correction rules and qualification reducer. Transform bindings are opaque
+until T-50; authorized external graph/source closure is composed by T-49. Movement queries,
+predicates, navigation and scalable indexes remain at their assigned later tasks.
 
 ## Records and identity
 
