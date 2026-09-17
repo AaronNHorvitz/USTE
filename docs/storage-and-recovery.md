@@ -196,6 +196,14 @@ reauthenticates and compares the transaction prefix before suffix replay. Prefix
 entries from expected to verified maps instead of duplicating complete maps. Graph/coordinator
 state and root discovery remain memory-resident, so this is not the BM-06 endpoint.
 
+Decision 0032 adds an authenticated bounded merge from one optional base run and sorted exact
+before/after deltas into one unpublished encrypted run. Present before-values must match byte-for-
+byte, absent before-values require absence and absent after-values are tombstones. The merge holds a
+stable source handle through exact terminal verification and separately caps source, delta and
+output work. Empty output creates no run. Errors can leave only unreferenced scratch bytes; a domain
+validator and exact root publication are still required before visibility. `index-v1` remains a
+single-run-per-family terminal format rather than a persistent overlay manifest.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

@@ -78,7 +78,10 @@ Decision 0030 supplies that bounded root reader and semantic reconstruction cand
 the contiguous checkpoint payload from this path but still constructs a complete in-memory
 `GraphState` and reads candidates twice. Decision 0031 pairs it with a versioned coordinator
 metadata root through a temporary authenticated recovery owner; seeded open rechecks the prefix and
-replays the suffix. T-20 next needs disk-backed base/overlay state, scratch merge and ingest deltas.
+replays the suffix. Decision 0032 adds the bounded authenticated storage-level base/delta scratch
+merge without changing `index-v1`; it does not yet connect graph-family deltas or replace the
+in-memory reducer. T-20 next needs graph terminal-root delta construction, a live disk-backed
+base/overlay state, streaming semantic validation and ingest deltas.
 
 ## Architectural decomposition
 

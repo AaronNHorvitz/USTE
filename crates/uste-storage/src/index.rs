@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 use uste_crypto::{
     CryptoContext, CryptoError, CryptoObjectId, EncryptedEnvelope, EntropySource, FrameClass,
-    KeyEpoch, KeyVault, ObjectRole, Scope, WriterIncarnationId,
+    KeyEpoch, KeyVault, ObjectRole, Scope, SecretBytes, WriterIncarnationId,
 };
 use uste_types::{CommitRevision, DatabaseId, NamespaceId, NamespaceRef};
 use zeroize::Zeroizing;
@@ -30,6 +30,7 @@ pub const DEFAULT_INDEX_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_INDEX_SCAN_RESULTS: usize = 1_000_000;
 pub const MAX_INDEX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_INDEX_RUN_LOGICAL_BYTES: u64 = MAX_INDEX_PAGES_PER_RUN * INDEX_PAGE_BYTES as u64;
+pub const MAX_INDEX_DELTA_LOGICAL_BYTES: u64 = MAX_INDEX_RUN_LOGICAL_BYTES * 2;
 
 const PAGE_HEADER_BYTES: usize = 80;
 const FRAGMENT_HEADER_BYTES: usize = 16;
@@ -50,6 +51,77 @@ const CACHE_ENTRY_BYTES: usize = INDEX_PAGE_BYTES + CACHE_ENTRY_OVERHEAD;
 pub struct IndexEntry {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
+}
+
+/// One exact before/after mutation in a sorted merge overlay.
+///
+/// `before == None` requires the key to be absent. `after == None` is a tombstone. At least one
+/// side must be present, and a present `before` is compared byte-for-byte with the authenticated
+/// base run before any replacement is emitted.
+#[derive(Clone, Eq, PartialEq)]
+pub struct IndexDelta {
+    key: Vec<u8>,
+    before: Option<Vec<u8>>,
+    after: Option<Vec<u8>>,
+}
+
+impl core::fmt::Debug for IndexDelta {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("IndexDelta")
+            .field("key", &"[REDACTED]")
+            .field("before", &self.before.as_ref().map(|value| value.len()))
+            .field("after", &self.after.as_ref().map(|value| value.len()))
+            .finish()
+    }
+}
+
+impl IndexDelta {
+    pub fn new(
+        key: Vec<u8>,
+        before: Option<Vec<u8>>,
+        after: Option<Vec<u8>>,
+    ) -> Result<Self, StorageError> {
+        if key.is_empty()
+            || key.len() > MAX_INDEX_KEY_BYTES
+            || before.is_none() && after.is_none()
+            || before
+                .as_ref()
+                .is_some_and(|value| value.len() > MAX_INDEX_VALUE_BYTES)
+            || after
+                .as_ref()
+                .is_some_and(|value| value.len() > MAX_INDEX_VALUE_BYTES)
+        {
+            return Err(StorageError::InvalidState);
+        }
+        Ok(Self { key, before, after })
+    }
+
+    #[must_use]
+    pub fn key(&self) -> &[u8] {
+        &self.key
+    }
+
+    #[must_use]
+    pub fn before(&self) -> Option<&[u8]> {
+        self.before.as_deref()
+    }
+
+    #[must_use]
+    pub fn after(&self) -> Option<&[u8]> {
+        self.after.as_deref()
+    }
+
+    fn logical_bytes(&self) -> Result<u64, StorageError> {
+        u64::try_from(
+            self.key
+                .len()
+                .checked_add(self.before.as_ref().map_or(0, Vec::len))
+                .and_then(|bytes| bytes.checked_add(self.after.as_ref().map_or(0, Vec::len)))
+                .ok_or(StorageError::ResourceLimit)?,
+        )
+        .map_err(|_| StorageError::ResourceLimit)
+    }
 }
 
 impl core::fmt::Debug for IndexEntry {
@@ -318,6 +390,88 @@ pub struct IndexRunReadReport {
     pub stats: IndexReadStats,
 }
 
+/// Explicit input and output bounds for one authenticated base/delta merge.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexRunMergeLimits {
+    base: IndexRunReadLimits,
+    maximum_deltas: u64,
+    maximum_delta_logical_bytes: u64,
+    maximum_output_entries: u64,
+    maximum_output_logical_bytes: u64,
+}
+
+impl IndexRunMergeLimits {
+    pub const fn new(
+        base: IndexRunReadLimits,
+        maximum_deltas: u64,
+        maximum_delta_logical_bytes: u64,
+        maximum_output_entries: u64,
+        maximum_output_logical_bytes: u64,
+    ) -> Result<Self, StorageError> {
+        if maximum_deltas == 0
+            || maximum_deltas > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_delta_logical_bytes == 0
+            || maximum_delta_logical_bytes > MAX_INDEX_DELTA_LOGICAL_BYTES
+            || maximum_output_entries == 0
+            || maximum_output_entries > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_output_logical_bytes == 0
+            || maximum_output_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Self {
+            base,
+            maximum_deltas,
+            maximum_delta_logical_bytes,
+            maximum_output_entries,
+            maximum_output_logical_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn base(self) -> IndexRunReadLimits {
+        self.base
+    }
+
+    #[must_use]
+    pub const fn maximum_deltas(self) -> u64 {
+        self.maximum_deltas
+    }
+
+    #[must_use]
+    pub const fn maximum_delta_logical_bytes(self) -> u64 {
+        self.maximum_delta_logical_bytes
+    }
+
+    #[must_use]
+    pub const fn maximum_output_entries(self) -> u64 {
+        self.maximum_output_entries
+    }
+
+    #[must_use]
+    pub const fn maximum_output_logical_bytes(self) -> u64 {
+        self.maximum_output_logical_bytes
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IndexRunMergeReport {
+    pub base: IndexRunReadReport,
+    pub deltas: u64,
+    pub delta_logical_bytes: u64,
+    pub insertions: u64,
+    pub replacements: u64,
+    pub deletions: u64,
+    pub output_entries: u64,
+    pub output_logical_bytes: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MergedIndexRun {
+    pub run: Option<IndexRunDescriptor>,
+    pub report: IndexRunMergeReport,
+}
+
 pub type IndexRunVisitor<'a> = dyn FnMut(&[u8], &[u8]) -> Result<(), StorageError> + 'a;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -525,10 +679,8 @@ where
     let name = run_name(object_id)?;
     let file = filesystem.create_new(context.directory, &name)?;
     let mut writer = RunWriter::new(
-        filesystem,
-        &file,
+        file,
         context,
-        vault,
         scope,
         revision,
         index_profile,
@@ -536,9 +688,9 @@ where
         object_id,
     );
     for entry in entries {
-        writer.push(entry?)?;
+        writer.push(filesystem, vault, entry?)?;
     }
-    let descriptor = writer.finish()?;
+    let descriptor = writer.finish(filesystem, vault)?;
     filesystem.sync_directory(context.directory)?;
     Ok(descriptor)
 }
@@ -827,6 +979,332 @@ where
     Ok(report)
 }
 
+/// Single-handle authenticated cursor used by both full-run visitors and bounded scratch merges.
+/// Entries returned before `report` succeeds remain provisional.
+struct RunReader<F>
+where
+    F: FileSystem,
+{
+    file: F::File,
+    root: RecoveredIndexRoot,
+    run: IndexRunDescriptor,
+    limits: IndexRunReadLimits,
+    expected_len: u64,
+    page_index: u64,
+    page: Option<SecretBytes>,
+    page_used: usize,
+    fragment_offset: usize,
+    fragments_remaining: usize,
+    previous_key: Option<Vec<u8>>,
+    current_key: Vec<u8>,
+    current_value: Vec<u8>,
+    current_total: Option<usize>,
+    entries: u64,
+    logical_bytes: u64,
+    stats: IndexReadStats,
+    digest: Option<Sha256>,
+    finished: bool,
+}
+
+impl<F> RunReader<F>
+where
+    F: FileSystem,
+{
+    fn open<W, E>(
+        filesystem: &mut F,
+        context: &IndexContext<'_, F::Directory>,
+        _vault: &KeyVault<W, E>,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<Self, StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
+        if root.scope.database() != context.database {
+            return Err(StorageError::InvalidState);
+        }
+        let run = *root.run(family)?;
+        if run.page_count > limits.maximum_pages || run.entry_count > limits.maximum_entries {
+            return Err(StorageError::ResourceLimit);
+        }
+        let file = filesystem
+            .open_existing(context.directory, &run_name(run.object_id)?)
+            .map_err(|error| {
+                if error.kind() == AdapterErrorKind::NotFound {
+                    StorageError::IntegrityFailure
+                } else {
+                    error.into()
+                }
+            })?;
+        let expected_len = run
+            .page_count
+            .checked_mul(ENCODED_PAGE_BYTES)
+            .ok_or(StorageError::ResourceLimit)?;
+        if filesystem.metadata(&file)?.len != expected_len {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let mut digest = Sha256::new();
+        digest.update(b"USTE-INDEX-RUN-V1\0");
+        digest.update(root.scope.namespace().as_bytes());
+        digest.update(root.revision.get().to_be_bytes());
+        digest.update(root.index_profile);
+        digest.update([run.family]);
+        Ok(Self {
+            file,
+            root: root.clone(),
+            run,
+            limits,
+            expected_len,
+            page_index: 0,
+            page: None,
+            page_used: 0,
+            fragment_offset: 0,
+            fragments_remaining: 0,
+            previous_key: None,
+            current_key: Vec::new(),
+            current_value: Vec::new(),
+            current_total: None,
+            entries: 0,
+            logical_bytes: 0,
+            stats: IndexReadStats::default(),
+            digest: Some(digest),
+            finished: false,
+        })
+    }
+
+    fn next<W, E>(
+        &mut self,
+        filesystem: &mut F,
+        context: &IndexContext<'_, F::Directory>,
+        vault: &KeyVault<W, E>,
+    ) -> Result<Option<IndexEntry>, StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
+        loop {
+            if self.page.is_none() && self.page_index == self.run.page_count {
+                self.finish(filesystem)?;
+                return Ok(None);
+            }
+            if self.page.is_none() {
+                self.read_page(filesystem, context, vault)?;
+            }
+            let fragment = self.take_fragment()?;
+            if self.accept_fragment(fragment)? {
+                return Ok(Some(IndexEntry {
+                    key: core::mem::take(&mut self.current_key),
+                    value: core::mem::take(&mut self.current_value),
+                }));
+            }
+        }
+    }
+
+    fn read_page<W, E>(
+        &mut self,
+        filesystem: &mut F,
+        context: &IndexContext<'_, F::Directory>,
+        vault: &KeyVault<W, E>,
+    ) -> Result<(), StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
+        let page_index = self.page_index;
+        let offset = page_index
+            .checked_mul(ENCODED_PAGE_BYTES)
+            .ok_or(StorageError::ResourceLimit)?;
+        let mut encoded = vec![0_u8; ENCODED_PAGE_BYTES as usize];
+        read_exact_at(filesystem, &self.file, offset, &mut encoded).map_err(|error| {
+            if error.kind() == AdapterErrorKind::UnexpectedEof {
+                StorageError::IntegrityFailure
+            } else {
+                error.into()
+            }
+        })?;
+        let envelope = EncryptedEnvelope::decode(&encoded).map_err(index_crypto_error)?;
+        let plaintext = vault
+            .decrypt(
+                index_context(
+                    context,
+                    self.root.scope.namespace(),
+                    self.run.object_id,
+                    page_index
+                        .checked_add(1)
+                        .ok_or(StorageError::ResourceLimit)?,
+                    FrameClass::Small4KiB,
+                    ObjectRole::IndexPage,
+                ),
+                &envelope,
+            )
+            .map_err(index_crypto_error)?;
+        if plaintext.as_slice().len() != INDEX_PAGE_BYTES {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.stats.pages_read = self.stats.pages_read.saturating_add(1);
+        let parsed = ParsedPage::new(plaintext.as_slice(), &self.root, &self.run, page_index)?;
+        self.page_used = parsed.used;
+        self.fragment_offset = PAGE_HEADER_BYTES;
+        self.fragments_remaining = parsed.fragment_count;
+        self.page = Some(plaintext);
+        Ok(())
+    }
+
+    fn take_fragment(&mut self) -> Result<OwnedFragment, StorageError> {
+        let page = self.page.as_ref().ok_or(StorageError::InvalidState)?;
+        let mut fragments = FragmentIter {
+            remaining: page
+                .as_slice()
+                .get(self.fragment_offset..self.page_used)
+                .ok_or(StorageError::IntegrityFailure)?,
+            remaining_count: self.fragments_remaining,
+        };
+        let fragment = fragments.next().ok_or(StorageError::IntegrityFailure)??;
+        let consumed = self
+            .page_used
+            .checked_sub(self.fragment_offset)
+            .and_then(|remaining| remaining.checked_sub(fragments.remaining.len()))
+            .ok_or(StorageError::IntegrityFailure)?;
+        let owned = OwnedFragment {
+            key: fragment.key.to_vec(),
+            total_len: fragment.total_len,
+            offset: fragment.offset,
+            value: fragment.value.to_vec(),
+        };
+        self.fragment_offset = self
+            .fragment_offset
+            .checked_add(consumed)
+            .ok_or(StorageError::ResourceLimit)?;
+        self.fragments_remaining = self
+            .fragments_remaining
+            .checked_sub(1)
+            .ok_or(StorageError::IntegrityFailure)?;
+        if self.fragments_remaining == 0 {
+            if self.fragment_offset != self.page_used || !fragments.remaining.is_empty() {
+                return Err(StorageError::IntegrityFailure);
+            }
+            self.page = None;
+            self.page_index = self
+                .page_index
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
+        }
+        Ok(owned)
+    }
+
+    fn accept_fragment(&mut self, fragment: OwnedFragment) -> Result<bool, StorageError> {
+        self.stats.fragments_visited = self.stats.fragments_visited.saturating_add(1);
+        if self.current_total.is_none() {
+            if fragment.offset != 0
+                || self
+                    .previous_key
+                    .as_ref()
+                    .is_some_and(|previous| previous.as_slice() >= fragment.key.as_slice())
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let entry_bytes = u64::try_from(
+                fragment
+                    .key
+                    .len()
+                    .checked_add(fragment.total_len)
+                    .ok_or(StorageError::ResourceLimit)?,
+            )
+            .map_err(|_| StorageError::ResourceLimit)?;
+            let projected = self
+                .logical_bytes
+                .checked_add(entry_bytes)
+                .ok_or(StorageError::ResourceLimit)?;
+            if projected > self.limits.maximum_logical_bytes {
+                return Err(StorageError::ResourceLimit);
+            }
+            self.current_key = fragment.key.clone();
+            self.current_total = Some(fragment.total_len);
+            self.current_value
+                .try_reserve_exact(fragment.total_len)
+                .map_err(|_| StorageError::ResourceLimit)?;
+        }
+        if self.current_key != fragment.key
+            || self.current_total != Some(fragment.total_len)
+            || self.current_value.len() != fragment.offset
+        {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.current_value.extend_from_slice(&fragment.value);
+        if self.current_value.len() != fragment.total_len {
+            return Ok(false);
+        }
+        self.entries = self
+            .entries
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        if self.entries > self.run.entry_count {
+            return Err(StorageError::IntegrityFailure);
+        }
+        if self.entries > self.limits.maximum_entries {
+            return Err(StorageError::ResourceLimit);
+        }
+        let entry_bytes = u64::try_from(
+            self.current_key
+                .len()
+                .checked_add(self.current_value.len())
+                .ok_or(StorageError::ResourceLimit)?,
+        )
+        .map_err(|_| StorageError::ResourceLimit)?;
+        self.logical_bytes = self
+            .logical_bytes
+            .checked_add(entry_bytes)
+            .ok_or(StorageError::ResourceLimit)?;
+        debug_assert!(self.logical_bytes <= self.limits.maximum_logical_bytes);
+        let digest = self.digest.as_mut().ok_or(StorageError::InvalidState)?;
+        digest.update(
+            u32::try_from(self.current_key.len())
+                .map_err(|_| StorageError::ResourceLimit)?
+                .to_be_bytes(),
+        );
+        digest.update(
+            u64::try_from(self.current_value.len())
+                .map_err(|_| StorageError::ResourceLimit)?
+                .to_be_bytes(),
+        );
+        digest.update(&self.current_key);
+        digest.update(&self.current_value);
+        self.previous_key = Some(self.current_key.clone());
+        self.current_total = None;
+        Ok(true)
+    }
+
+    fn finish(&mut self, filesystem: &mut F) -> Result<(), StorageError> {
+        if self.finished {
+            return Ok(());
+        }
+        let digest = self.digest.take().ok_or(StorageError::InvalidState)?;
+        if self.current_total.is_some()
+            || self.entries != self.run.entry_count
+            || <[u8; 32]>::from(digest.finalize()) != self.run.logical_digest
+            || filesystem.metadata(&self.file)?.len != self.expected_len
+        {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.stats.result_bytes = self.logical_bytes;
+        self.finished = true;
+        Ok(())
+    }
+
+    fn report(&self) -> Result<IndexRunReadReport, StorageError> {
+        if !self.finished || self.page.is_some() {
+            return Err(StorageError::InvalidState);
+        }
+        Ok(IndexRunReadReport {
+            entries: self.entries,
+            logical_bytes: self.logical_bytes,
+            stats: self.stats.clone(),
+        })
+    }
+}
+
 /// Visit one complete immutable run in canonical key order while re-authenticating every page
 /// and recomputing the terminal logical digest.
 ///
@@ -847,171 +1325,355 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    if root.scope.database() != context.database {
+    let mut reader = RunReader::open(filesystem, context, vault, root, family, limits)?;
+    while let Some(entry) = reader.next(filesystem, context, vault)? {
+        visitor(&entry.key, &entry.value)?;
+    }
+    reader.report()
+}
+
+/// Merge one authenticated optional base run with an exact ordered before/after delta stream into
+/// one invisible encrypted run at `revision`. The caller may publish the returned descriptor only
+/// after separately validating its domain semantics and exact journal anchor.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn merge_run<F, W, E, I, T>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    identity_entropy: &mut I,
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    index_profile: [u8; 32],
+    family: u8,
+    base_root: Option<&RecoveredIndexRoot>,
+    limits: IndexRunMergeLimits,
+    deltas: T,
+) -> Result<MergedIndexRun, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+    T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+{
+    if scope.database() != context.database || family == 0 {
         return Err(StorageError::InvalidState);
     }
-    let run = root.run(family)?;
-    if run.page_count > limits.maximum_pages || run.entry_count > limits.maximum_entries {
-        return Err(StorageError::ResourceLimit);
-    }
-
-    // A recovery/maintenance stream attests one stable durable object, not a mixture of path
-    // reopenings or cached plaintext. Retain one handle for the exact-length check and every page.
-    let file = filesystem
-        .open_existing(context.directory, &run_name(run.object_id)?)
-        .map_err(|error| {
-            if error.kind() == AdapterErrorKind::NotFound {
-                StorageError::IntegrityFailure
-            } else {
-                error.into()
-            }
-        })?;
-    let expected_len = run
-        .page_count
-        .checked_mul(ENCODED_PAGE_BYTES)
-        .ok_or(StorageError::ResourceLimit)?;
-    if filesystem.metadata(&file)?.len != expected_len {
-        return Err(StorageError::IntegrityFailure);
-    }
-
-    let mut digest = Sha256::new();
-    digest.update(b"USTE-INDEX-RUN-V1\0");
-    digest.update(root.scope.namespace().as_bytes());
-    digest.update(root.revision.get().to_be_bytes());
-    digest.update(root.index_profile);
-    digest.update([run.family]);
-    let mut stats = IndexReadStats::default();
-    let mut previous_key: Option<Vec<u8>> = None;
-    let mut current_key = Vec::new();
-    let mut current_value = Vec::new();
-    let mut current_total = None;
-    let mut entries = 0_u64;
-    let mut logical_bytes = 0_u64;
-    for page_index in 0..run.page_count {
-        let offset = page_index
-            .checked_mul(ENCODED_PAGE_BYTES)
-            .ok_or(StorageError::ResourceLimit)?;
-        let mut encoded = vec![0_u8; ENCODED_PAGE_BYTES as usize];
-        read_exact_at(filesystem, &file, offset, &mut encoded).map_err(|error| {
-            if error.kind() == AdapterErrorKind::UnexpectedEof {
-                StorageError::IntegrityFailure
-            } else {
-                error.into()
-            }
-        })?;
-        let envelope = EncryptedEnvelope::decode(&encoded).map_err(index_crypto_error)?;
-        let plaintext = vault
-            .decrypt(
-                index_context(
-                    context,
-                    root.scope.namespace(),
-                    run.object_id,
-                    page_index
-                        .checked_add(1)
-                        .ok_or(StorageError::ResourceLimit)?,
-                    FrameClass::Small4KiB,
-                    ObjectRole::IndexPage,
-                ),
-                &envelope,
-            )
-            .map_err(index_crypto_error)?;
-        if plaintext.as_slice().len() != INDEX_PAGE_BYTES {
-            return Err(StorageError::IntegrityFailure);
-        }
-        stats.pages_read = stats.pages_read.saturating_add(1);
-        let parsed = ParsedPage::new(plaintext.as_slice(), root, run, page_index)?;
-        for fragment in parsed.fragments() {
-            let fragment = fragment?;
-            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
-            if current_total.is_none() {
-                if fragment.offset != 0
-                    || previous_key
-                        .as_ref()
-                        .is_some_and(|previous| previous.as_slice() >= fragment.key)
-                {
-                    return Err(StorageError::IntegrityFailure);
-                }
-                // Reject the complete logical entry before reserving its declared value length.
-                // The first authenticated fragment carries the canonical key and total length;
-                // later fragments must repeat both exactly.
-                let entry_bytes = u64::try_from(
-                    fragment
-                        .key
-                        .len()
-                        .checked_add(fragment.total_len)
-                        .ok_or(StorageError::ResourceLimit)?,
-                )
-                .map_err(|_| StorageError::ResourceLimit)?;
-                let projected_bytes = logical_bytes
-                    .checked_add(entry_bytes)
-                    .ok_or(StorageError::ResourceLimit)?;
-                if projected_bytes > limits.maximum_logical_bytes {
-                    return Err(StorageError::ResourceLimit);
-                }
-                current_key.extend_from_slice(fragment.key);
-                current_total = Some(fragment.total_len);
-                current_value
-                    .try_reserve_exact(fragment.total_len)
-                    .map_err(|_| StorageError::ResourceLimit)?;
-            }
-            if current_key.as_slice() != fragment.key
-                || current_total != Some(fragment.total_len)
-                || current_value.len() != fragment.offset
-            {
-                return Err(StorageError::IntegrityFailure);
-            }
-            current_value.extend_from_slice(fragment.value);
-            if current_value.len() == fragment.total_len {
-                entries = entries.checked_add(1).ok_or(StorageError::ResourceLimit)?;
-                if entries > run.entry_count {
-                    return Err(StorageError::IntegrityFailure);
-                }
-                if entries > limits.maximum_entries {
-                    return Err(StorageError::ResourceLimit);
-                }
-                let entry_bytes = u64::try_from(
-                    current_key
-                        .len()
-                        .checked_add(current_value.len())
-                        .ok_or(StorageError::ResourceLimit)?,
-                )
-                .map_err(|_| StorageError::ResourceLimit)?;
-                logical_bytes = logical_bytes
-                    .checked_add(entry_bytes)
-                    .ok_or(StorageError::ResourceLimit)?;
-                debug_assert!(logical_bytes <= limits.maximum_logical_bytes);
-                digest.update(
-                    u32::try_from(current_key.len())
-                        .map_err(|_| StorageError::ResourceLimit)?
-                        .to_be_bytes(),
-                );
-                digest.update(
-                    u64::try_from(current_value.len())
-                        .map_err(|_| StorageError::ResourceLimit)?
-                        .to_be_bytes(),
-                );
-                digest.update(&current_key);
-                digest.update(&current_value);
-                visitor(&current_key, &current_value)?;
-                previous_key = Some(core::mem::take(&mut current_key));
-                current_value.clear();
-                current_total = None;
-            }
-        }
-    }
-    if current_total.is_some()
-        || entries != run.entry_count
-        || <[u8; 32]>::from(digest.finalize()) != run.logical_digest
-        || filesystem.metadata(&file)?.len != expected_len
+    if let Some(root) = base_root
+        && (root.scope != scope || root.index_profile != index_profile)
     {
-        return Err(StorageError::IntegrityFailure);
+        return Err(StorageError::InvalidState);
     }
-    stats.result_bytes = logical_bytes;
-    Ok(IndexRunReadReport {
-        entries,
-        logical_bytes,
-        stats,
-    })
+
+    let mut base_reader = match base_root {
+        Some(root) => Some(RunReader::open(
+            filesystem,
+            context,
+            vault,
+            root,
+            family,
+            limits.base,
+        )?),
+        None => None,
+    };
+    let mut base = match base_reader.as_mut() {
+        Some(reader) => reader.next(filesystem, context, vault)?,
+        None => None,
+    };
+    let mut delta_iter = deltas.into_iter();
+    let mut previous_delta_key = None;
+    let mut report = IndexRunMergeReport::default();
+    let mut delta = next_delta(
+        &mut delta_iter,
+        &mut previous_delta_key,
+        &mut report,
+        limits,
+    )?;
+    let mut writer = None;
+
+    while base.is_some() || delta.is_some() {
+        match (base.as_ref(), delta.as_ref()) {
+            (Some(base_entry), Some(change)) => match base_entry.key.cmp(&change.key) {
+                core::cmp::Ordering::Less => {
+                    emit_merged_entry(
+                        filesystem,
+                        context,
+                        vault,
+                        identity_entropy,
+                        scope,
+                        revision,
+                        index_profile,
+                        family,
+                        limits,
+                        &mut report,
+                        &mut writer,
+                        base.take().ok_or(StorageError::InvalidState)?,
+                    )?;
+                    base = base_reader
+                        .as_mut()
+                        .ok_or(StorageError::InvalidState)?
+                        .next(filesystem, context, vault)?;
+                }
+                core::cmp::Ordering::Equal => {
+                    let base_entry = base.take().ok_or(StorageError::InvalidState)?;
+                    let change = delta.take().ok_or(StorageError::InvalidState)?;
+                    if change.before.as_deref() != Some(base_entry.value.as_slice()) {
+                        return Err(StorageError::InvalidState);
+                    }
+                    match change.after {
+                        Some(value) => {
+                            report.replacements = report.replacements.saturating_add(1);
+                            emit_merged_entry(
+                                filesystem,
+                                context,
+                                vault,
+                                identity_entropy,
+                                scope,
+                                revision,
+                                index_profile,
+                                family,
+                                limits,
+                                &mut report,
+                                &mut writer,
+                                IndexEntry {
+                                    key: change.key,
+                                    value,
+                                },
+                            )?;
+                        }
+                        None => report.deletions = report.deletions.saturating_add(1),
+                    }
+                    base = base_reader
+                        .as_mut()
+                        .ok_or(StorageError::InvalidState)?
+                        .next(filesystem, context, vault)?;
+                    delta = next_delta(
+                        &mut delta_iter,
+                        &mut previous_delta_key,
+                        &mut report,
+                        limits,
+                    )?;
+                }
+                core::cmp::Ordering::Greater => {
+                    let change = delta.take().ok_or(StorageError::InvalidState)?;
+                    apply_absent_delta(
+                        filesystem,
+                        context,
+                        vault,
+                        identity_entropy,
+                        scope,
+                        revision,
+                        index_profile,
+                        family,
+                        limits,
+                        &mut report,
+                        &mut writer,
+                        change,
+                    )?;
+                    delta = next_delta(
+                        &mut delta_iter,
+                        &mut previous_delta_key,
+                        &mut report,
+                        limits,
+                    )?;
+                }
+            },
+            (Some(_), None) => {
+                emit_merged_entry(
+                    filesystem,
+                    context,
+                    vault,
+                    identity_entropy,
+                    scope,
+                    revision,
+                    index_profile,
+                    family,
+                    limits,
+                    &mut report,
+                    &mut writer,
+                    base.take().ok_or(StorageError::InvalidState)?,
+                )?;
+                base = base_reader
+                    .as_mut()
+                    .ok_or(StorageError::InvalidState)?
+                    .next(filesystem, context, vault)?;
+            }
+            (None, Some(_)) => {
+                let change = delta.take().ok_or(StorageError::InvalidState)?;
+                apply_absent_delta(
+                    filesystem,
+                    context,
+                    vault,
+                    identity_entropy,
+                    scope,
+                    revision,
+                    index_profile,
+                    family,
+                    limits,
+                    &mut report,
+                    &mut writer,
+                    change,
+                )?;
+                delta = next_delta(
+                    &mut delta_iter,
+                    &mut previous_delta_key,
+                    &mut report,
+                    limits,
+                )?;
+            }
+            (None, None) => break,
+        }
+    }
+
+    if let Some(reader) = base_reader.as_ref() {
+        report.base = reader.report()?;
+    }
+    let run = match writer {
+        Some(writer) => {
+            let descriptor = writer.finish(filesystem, vault)?;
+            filesystem.sync_directory(context.directory)?;
+            Some(descriptor)
+        }
+        None => None,
+    };
+    Ok(MergedIndexRun { run, report })
+}
+
+fn next_delta<T>(
+    deltas: &mut T,
+    previous_key: &mut Option<Vec<u8>>,
+    report: &mut IndexRunMergeReport,
+    limits: IndexRunMergeLimits,
+) -> Result<Option<IndexDelta>, StorageError>
+where
+    T: Iterator<Item = Result<IndexDelta, StorageError>>,
+{
+    let Some(delta) = deltas.next() else {
+        return Ok(None);
+    };
+    let delta = delta?;
+    if previous_key
+        .as_ref()
+        .is_some_and(|previous| previous.as_slice() >= delta.key.as_slice())
+    {
+        return Err(StorageError::InvalidState);
+    }
+    let logical_bytes = delta.logical_bytes()?;
+    report.deltas = report
+        .deltas
+        .checked_add(1)
+        .filter(|count| *count <= limits.maximum_deltas)
+        .ok_or(StorageError::ResourceLimit)?;
+    report.delta_logical_bytes = report
+        .delta_logical_bytes
+        .checked_add(logical_bytes)
+        .filter(|bytes| *bytes <= limits.maximum_delta_logical_bytes)
+        .ok_or(StorageError::ResourceLimit)?;
+    *previous_key = Some(delta.key.clone());
+    Ok(Some(delta))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_absent_delta<F, W, E, I>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    identity_entropy: &mut I,
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    index_profile: [u8; 32],
+    family: u8,
+    limits: IndexRunMergeLimits,
+    report: &mut IndexRunMergeReport,
+    writer: &mut Option<RunWriter<F>>,
+    delta: IndexDelta,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if delta.before.is_some() {
+        return Err(StorageError::InvalidState);
+    }
+    let value = delta.after.ok_or(StorageError::InvalidState)?;
+    report.insertions = report.insertions.saturating_add(1);
+    emit_merged_entry(
+        filesystem,
+        context,
+        vault,
+        identity_entropy,
+        scope,
+        revision,
+        index_profile,
+        family,
+        limits,
+        report,
+        writer,
+        IndexEntry {
+            key: delta.key,
+            value,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_merged_entry<F, W, E, I>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    identity_entropy: &mut I,
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    index_profile: [u8; 32],
+    family: u8,
+    limits: IndexRunMergeLimits,
+    report: &mut IndexRunMergeReport,
+    writer: &mut Option<RunWriter<F>>,
+    entry: IndexEntry,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let logical_bytes = u64::try_from(
+        entry
+            .key
+            .len()
+            .checked_add(entry.value.len())
+            .ok_or(StorageError::ResourceLimit)?,
+    )
+    .map_err(|_| StorageError::ResourceLimit)?;
+    report.output_entries = report
+        .output_entries
+        .checked_add(1)
+        .filter(|count| *count <= limits.maximum_output_entries)
+        .ok_or(StorageError::ResourceLimit)?;
+    report.output_logical_bytes = report
+        .output_logical_bytes
+        .checked_add(logical_bytes)
+        .filter(|bytes| *bytes <= limits.maximum_output_logical_bytes)
+        .ok_or(StorageError::ResourceLimit)?;
+    if writer.is_none() {
+        let object_id = random_nonzero_id(identity_entropy)?;
+        let file = filesystem.create_new(context.directory, &run_name(object_id)?)?;
+        *writer = Some(RunWriter::new(
+            file,
+            context,
+            scope,
+            revision,
+            index_profile,
+            family,
+            object_id,
+        ));
+    }
+    writer
+        .as_mut()
+        .ok_or(StorageError::InvalidState)?
+        .push(filesystem, vault, entry)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1158,16 +1820,15 @@ where
     Ok(stats)
 }
 
-struct RunWriter<'a, F, W, E>
+struct RunWriter<F>
 where
     F: FileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
 {
-    filesystem: &'a mut F,
-    file: &'a F::File,
-    context: &'a IndexContext<'a, F::Directory>,
-    vault: &'a mut KeyVault<W, E>,
+    file: F::File,
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    directory: F::Directory,
     scope: NamespaceRef,
     revision: CommitRevision,
     index_profile: [u8; 32],
@@ -1181,18 +1842,14 @@ where
     digest: Sha256,
 }
 
-impl<'a, F, W, E> RunWriter<'a, F, W, E>
+impl<F> RunWriter<F>
 where
     F: FileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        filesystem: &'a mut F,
-        file: &'a F::File,
-        context: &'a IndexContext<'a, F::Directory>,
-        vault: &'a mut KeyVault<W, E>,
+        file: F::File,
+        context: &IndexContext<'_, F::Directory>,
         scope: NamespaceRef,
         revision: CommitRevision,
         index_profile: [u8; 32],
@@ -1206,10 +1863,11 @@ where
         digest.update(index_profile);
         digest.update([family]);
         Self {
-            filesystem,
             file,
-            context,
-            vault,
+            database: context.database,
+            epoch: context.epoch,
+            writer: context.writer,
+            directory: context.directory.clone(),
             scope,
             revision,
             index_profile,
@@ -1224,7 +1882,16 @@ where
         }
     }
 
-    fn push(&mut self, entry: IndexEntry) -> Result<(), StorageError> {
+    fn push<W, E>(
+        &mut self,
+        filesystem: &mut F,
+        vault: &mut KeyVault<W, E>,
+        entry: IndexEntry,
+    ) -> Result<(), StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
         if entry.key.is_empty()
             || entry.key.len() > MAX_INDEX_KEY_BYTES
             || entry.value.len() > MAX_INDEX_VALUE_BYTES
@@ -1265,7 +1932,7 @@ where
                 .ok_or(StorageError::ResourceLimit)?
                 > INDEX_PAGE_BYTES
             {
-                self.flush_page()?;
+                self.flush_page(filesystem, vault)?;
             }
             let available = INDEX_PAGE_BYTES
                 .checked_sub(self.page.len())
@@ -1274,7 +1941,7 @@ where
             let remaining = entry.value.len() - offset;
             let fragment_len = remaining.min(available);
             if remaining != 0 && fragment_len == 0 {
-                self.flush_page()?;
+                self.flush_page(filesystem, vault)?;
                 continue;
             }
             extend(&mut self.page, &(entry.key.len() as u32).to_be_bytes())?;
@@ -1308,13 +1975,21 @@ where
             if offset == entry.value.len() {
                 break;
             }
-            self.flush_page()?;
+            self.flush_page(filesystem, vault)?;
         }
         self.previous_key = Some(entry.key);
         Ok(())
     }
 
-    fn flush_page(&mut self) -> Result<(), StorageError> {
+    fn flush_page<W, E>(
+        &mut self,
+        filesystem: &mut F,
+        vault: &mut KeyVault<W, E>,
+    ) -> Result<(), StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
         if self.fragment_count == 0 {
             return Err(StorageError::InvalidState);
         }
@@ -1333,11 +2008,16 @@ where
             .page_count
             .checked_add(1)
             .ok_or(StorageError::ResourceLimit)?;
-        let encoded = self
-            .vault
+        let context = IndexContext {
+            database: self.database,
+            epoch: self.epoch,
+            writer: self.writer,
+            directory: &self.directory,
+        };
+        let encoded = vault
             .encrypt(
                 index_context(
-                    self.context,
+                    &context,
                     self.scope.namespace(),
                     self.object_id,
                     sequence,
@@ -1356,7 +2036,7 @@ where
             .page_count
             .checked_mul(ENCODED_PAGE_BYTES)
             .ok_or(StorageError::ResourceLimit)?;
-        write_all_at(self.filesystem, self.file, file_offset, &encoded)?;
+        write_all_at(filesystem, &self.file, file_offset, &encoded)?;
         self.page_count = sequence;
         self.page = new_page(
             self.revision,
@@ -1369,25 +2049,33 @@ where
         Ok(())
     }
 
-    fn finish(mut self) -> Result<IndexRunDescriptor, StorageError> {
+    fn finish<W, E>(
+        mut self,
+        filesystem: &mut F,
+        vault: &mut KeyVault<W, E>,
+    ) -> Result<IndexRunDescriptor, StorageError>
+    where
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+    {
         if self.entry_count == 0 {
             return Err(StorageError::InvalidState);
         }
         if self.fragment_count != 0 {
-            self.flush_page()?;
+            self.flush_page(filesystem, vault)?;
         }
         let exact_len = self
             .page_count
             .checked_mul(ENCODED_PAGE_BYTES)
             .ok_or(StorageError::ResourceLimit)?;
-        self.filesystem.set_len(self.file, exact_len)?;
-        self.filesystem.sync_all(self.file)?;
+        filesystem.set_len(&self.file, exact_len)?;
+        filesystem.sync_all(&self.file)?;
         Ok(IndexRunDescriptor {
             scope: self.scope,
             revision: self.revision,
             index_profile: self.index_profile,
-            epoch: self.context.epoch,
-            writer: self.context.writer,
+            epoch: self.epoch,
+            writer: self.writer,
             family: self.family,
             object_id: self.object_id,
             page_count: self.page_count,
@@ -1921,6 +2609,13 @@ struct Fragment<'a> {
     total_len: usize,
     offset: usize,
     value: &'a [u8],
+}
+
+struct OwnedFragment {
+    key: Vec<u8>,
+    total_len: usize,
+    offset: usize,
+    value: Vec<u8>,
 }
 
 struct FragmentIter<'a> {

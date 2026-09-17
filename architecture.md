@@ -188,6 +188,14 @@ dropped before seeded coordinator open reauthenticates the journal, verifies pre
 transaction and first-blob-owner state, then applies the reducer suffix. Neither root advances the
 journal. State/maps remain memory-resident pending the disk-backed base/overlay path.
 
+Decision 0032 adds a trusted bounded scratch merge: one optional authenticated `index-v1` base and
+a strictly ordered exact before/after delta stream produce one invisible encrypted current-revision
+run. The merge uses one stable source handle, verifies terminal source length/count/digest, enforces
+separate base/delta/output budgets and returns no descriptor for empty output. A separate domain
+validator and exact root publication remain mandatory. Frozen roots still allow one run per family,
+so a newer terminal root must rewrite every nonempty family; persistent multi-run overlays require
+a new versioned profile.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

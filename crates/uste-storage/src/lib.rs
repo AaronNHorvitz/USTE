@@ -31,10 +31,11 @@ pub use checkpoint::{
     DurableCheckpoint, MAX_CHECKPOINT_BYTES, RecoveredCheckpoint,
 };
 pub use index::{
-    DEFAULT_INDEX_CACHE_BYTES, DurableIndexRoot, INDEX_PAGE_BYTES, IndexEntry, IndexReadStats,
-    IndexRootAnchor, IndexRootInput, IndexRunDescriptor, IndexRunReadLimits, IndexRunReadReport,
-    IndexRunVisitor, IndexScan, IndexScanEntry, IndexScrubReport, MAX_INDEX_CACHE_BYTES,
+    DEFAULT_INDEX_CACHE_BYTES, DurableIndexRoot, INDEX_PAGE_BYTES, IndexDelta, IndexEntry,
+    IndexReadStats, IndexRootAnchor, IndexRootInput, IndexRunDescriptor, IndexRunMergeLimits,
+    IndexRunMergeReport, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
+    IndexScanEntry, IndexScrubReport, MAX_INDEX_CACHE_BYTES, MAX_INDEX_DELTA_LOGICAL_BYTES,
     MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_KEY_BYTES, MAX_INDEX_PAGES_PER_RUN,
     MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_RUNS, MAX_INDEX_SCAN_RESULTS,
-    MAX_INDEX_VALUE_BYTES, PageCache, RecoveredIndexRoot,
+    MAX_INDEX_VALUE_BYTES, MergedIndexRun, PageCache, RecoveredIndexRoot,
 };

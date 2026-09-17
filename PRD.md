@@ -141,6 +141,12 @@ owner. An exact certificate/state pair can now form a graph coordinator seed bef
 seeded open independently verifies all prefix transaction metadata and replays the suffix. The
 result remains full-memory recovery and does not close T-20 or qualify BM-01/BM-06.
 
+Decision 0032 adds a bounded authenticated merge from one optional `index-v1` base plus exact
+ordered before/after deltas into one unpublished encrypted terminal run. It validates absent/
+present preconditions, tombstones, source integrity and independent source/delta/output budgets
+without changing the frozen format or journal authority. Graph-family integration, a live
+disk-backed reducer and qualifying BM-01/BM-06 measurements remain open.
+
 ## Release gates
 
 | Gate | Required outcome |

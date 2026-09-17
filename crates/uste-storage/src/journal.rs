@@ -27,9 +27,10 @@ use crate::{
         DurableCheckpoint, RecoveredCheckpoint,
     },
     index::{
-        self, DurableIndexRoot, IndexContext, IndexEntry, IndexReadStats, IndexRootInput,
-        IndexRunDescriptor, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
-        IndexScanEntry, IndexScrubReport, PageCache, RecoveredIndexRoot,
+        self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexReadStats,
+        IndexRootInput, IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits,
+        IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScanEntry, IndexScrubReport,
+        MergedIndexRun, PageCache, RecoveredIndexRoot,
     },
     read_exact_at, write_all_at,
 };
@@ -1134,6 +1135,52 @@ where
             index_profile,
             family,
             entries,
+        )
+    }
+
+    /// Authenticated bounded merge from one optional derived base run and an ordered exact delta
+    /// stream into one invisible encrypted run at the current frontier. Errors can leave only an
+    /// unreferenced orphan; no root or journal state is changed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn merge_index_run<T>(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+    ) -> Result<MergedIndexRun, StorageError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        if let Some(root) = base_root
+            && self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
+        {
+            return Err(StorageError::InvalidState);
+        }
+        index::merge_run(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            scope,
+            revision,
+            index_profile,
+            family,
+            base_root,
+            limits,
+            deltas,
         )
     }
 
@@ -3032,6 +3079,832 @@ mod tests {
             ),
             Err(StorageError::IntegrityFailure)
         );
+    }
+
+    #[test]
+    fn authenticated_index_merge_streams_exact_deltas_and_publishes_only_terminal_output() {
+        let database = DatabaseId::from_bytes([0x31; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x32; 16]));
+        let mut filesystem = MemoryFileSystem::new(16 * 1024 * 1024);
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "index-merge"),
+            create_vault(database, 210_000),
+            CounterEntropy::new(211_000),
+        )
+        .unwrap();
+        let first = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"merge base",
+                    logical_event_digest: [0x33; 32],
+                },
+            )
+            .unwrap();
+        let profile = [0x34; 32];
+        let large = vec![0x35; index::INDEX_PAGE_BYTES + 211];
+        let base_run = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                first.revision,
+                profile,
+                1,
+                [
+                    IndexEntry {
+                        key: b"alpha".to_vec(),
+                        value: b"one".to_vec(),
+                    },
+                    IndexEntry {
+                        key: b"beta".to_vec(),
+                        value: large.clone(),
+                    },
+                    IndexEntry {
+                        key: b"gamma".to_vec(),
+                        value: b"three".to_vec(),
+                    },
+                ],
+            )
+            .unwrap();
+        store
+            .publish_index_root(
+                &mut filesystem,
+                IndexRootInput {
+                    scope,
+                    revision: first.revision,
+                    certificate_digest: first.certificate_digest,
+                    reducer_profile: [0x36; 32],
+                    logical_state_digest: [0x37; 32],
+                    index_profile: profile,
+                },
+                &[base_run],
+            )
+            .unwrap();
+        let base = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap()
+            .remove(0);
+        let second = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"merge target",
+                    logical_event_digest: [0x38; 32],
+                },
+            )
+            .unwrap();
+        let base_logical_bytes = u64::try_from(
+            b"alpha".len()
+                + b"one".len()
+                + b"beta".len()
+                + large.len()
+                + b"gamma".len()
+                + b"three".len(),
+        )
+        .unwrap();
+        let limits = IndexRunMergeLimits::new(
+            IndexRunReadLimits::new(base_run.page_count(), 3, base_logical_bytes).unwrap(),
+            4,
+            2 * 1024 * 1024,
+            4,
+            2 * 1024 * 1024,
+        )
+        .unwrap();
+        let merged = store
+            .merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(&base),
+                limits,
+                [
+                    IndexDelta::new(b"aardvark".to_vec(), None, Some(b"zero".to_vec())),
+                    IndexDelta::new(b"beta".to_vec(), Some(large), Some(b"two".to_vec())),
+                    IndexDelta::new(b"gamma".to_vec(), Some(b"three".to_vec()), None),
+                    IndexDelta::new(b"zeta".to_vec(), None, Some(b"last".to_vec())),
+                ],
+            )
+            .unwrap();
+        assert_eq!(merged.report.base.entries, 3);
+        assert_eq!(merged.report.deltas, 4);
+        assert_eq!(merged.report.insertions, 2);
+        assert_eq!(merged.report.replacements, 1);
+        assert_eq!(merged.report.deletions, 1);
+        assert_eq!(merged.report.output_entries, 4);
+        let merged_run = merged.run.unwrap();
+        assert_eq!(merged_run.entry_count(), 4);
+        store
+            .publish_index_root(
+                &mut filesystem,
+                IndexRootInput {
+                    scope,
+                    revision: second.revision,
+                    certificate_digest: second.certificate_digest,
+                    reducer_profile: [0x36; 32],
+                    logical_state_digest: [0x39; 32],
+                    index_profile: profile,
+                },
+                &[merged_run],
+            )
+            .unwrap();
+        let roots = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap();
+        let newest = roots
+            .iter()
+            .find(|root| root.revision() == second.revision)
+            .unwrap();
+        let mut observed = Vec::new();
+        let read = store
+            .visit_index_run(
+                &mut filesystem,
+                newest,
+                1,
+                IndexRunReadLimits::new(
+                    merged_run.page_count(),
+                    merged.report.output_entries,
+                    merged.report.output_logical_bytes,
+                )
+                .unwrap(),
+                &mut |key, value| {
+                    observed.push((key.to_vec(), value.to_vec()));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(read.entries, 4);
+        assert_eq!(
+            observed,
+            [
+                (b"aardvark".to_vec(), b"zero".to_vec()),
+                (b"alpha".to_vec(), b"one".to_vec()),
+                (b"beta".to_vec(), b"two".to_vec()),
+                (b"zeta".to_vec(), b"last".to_vec()),
+            ]
+        );
+
+        let exact_current = roots
+            .iter()
+            .find(|root| root.revision() == second.revision)
+            .unwrap();
+        let current_limits = IndexRunMergeLimits::new(
+            IndexRunReadLimits::new(
+                merged_run.page_count(),
+                merged.report.output_entries,
+                merged.report.output_logical_bytes,
+            )
+            .unwrap(),
+            4,
+            128,
+            4,
+            merged.report.output_logical_bytes,
+        )
+        .unwrap();
+        let delete_all = store
+            .merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                IndexRunMergeLimits::new(
+                    IndexRunReadLimits::new(
+                        merged_run.page_count(),
+                        merged.report.output_entries,
+                        merged.report.output_logical_bytes,
+                    )
+                    .unwrap(),
+                    4,
+                    128,
+                    1,
+                    1,
+                )
+                .unwrap(),
+                observed
+                    .iter()
+                    .map(|(key, value)| IndexDelta::new(key.clone(), Some(value.clone()), None)),
+            )
+            .unwrap();
+        assert!(delete_all.run.is_none());
+        assert_eq!(delete_all.report.deletions, 4);
+        assert_eq!(delete_all.report.output_entries, 0);
+
+        assert!(
+            IndexDelta::new(
+                vec![0x5a; index::MAX_INDEX_KEY_BYTES],
+                None,
+                Some(Vec::new())
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            IndexDelta::new(
+                vec![0x5a; index::MAX_INDEX_KEY_BYTES + 1],
+                None,
+                Some(Vec::new())
+            ),
+            Err(StorageError::InvalidState)
+        );
+
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                [IndexDelta::new(
+                    b"alpha".to_vec(),
+                    Some(b"wrong".to_vec()),
+                    None,
+                )],
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                [IndexDelta::new(
+                    b"alpha".to_vec(),
+                    None,
+                    Some(b"unexpected insert".to_vec()),
+                )],
+            ),
+            Err(StorageError::InvalidState)
+        );
+        for missing in [
+            IndexDelta::new(
+                b"missing".to_vec(),
+                Some(b"expected".to_vec()),
+                Some(b"replacement".to_vec()),
+            ),
+            IndexDelta::new(b"missing".to_vec(), Some(b"expected".to_vec()), None),
+        ] {
+            assert_eq!(
+                store.merge_index_run(
+                    &mut filesystem,
+                    scope,
+                    second.revision,
+                    profile,
+                    1,
+                    Some(exact_current),
+                    current_limits,
+                    [missing],
+                ),
+                Err(StorageError::InvalidState)
+            );
+        }
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                [
+                    IndexDelta::new(b"z".to_vec(), None, Some(Vec::new())),
+                    IndexDelta::new(b"a".to_vec(), None, Some(Vec::new())),
+                ],
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                [
+                    IndexDelta::new(b"z".to_vec(), None, Some(b"one".to_vec())),
+                    IndexDelta::new(b"z".to_vec(), None, Some(b"two".to_vec())),
+                ],
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                first.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x3a; 16]),),
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                [0x3b; 32],
+                1,
+                Some(exact_current),
+                current_limits,
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                2,
+                Some(exact_current),
+                current_limits,
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                IndexRunMergeLimits::new(
+                    IndexRunReadLimits::new(merged_run.page_count(), 3, 1).unwrap(),
+                    1,
+                    1,
+                    1,
+                    1,
+                )
+                .unwrap(),
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                2,
+                None,
+                IndexRunMergeLimits::new(IndexRunReadLimits::new(1, 1, 1).unwrap(), 1, 1, 1, 16,)
+                    .unwrap(),
+                [IndexDelta::new(
+                    b"delta".to_vec(),
+                    None,
+                    Some(b"too large".to_vec()),
+                )],
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                2,
+                None,
+                IndexRunMergeLimits::new(IndexRunReadLimits::new(1, 1, 1).unwrap(), 1, 64, 2, 64,)
+                    .unwrap(),
+                [
+                    IndexDelta::new(b"a".to_vec(), None, Some(b"one".to_vec())),
+                    IndexDelta::new(b"b".to_vec(), None, Some(b"two".to_vec())),
+                ],
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                IndexRunMergeLimits::new(
+                    IndexRunReadLimits::new(
+                        merged_run.page_count(),
+                        merged.report.output_entries,
+                        merged.report.output_logical_bytes,
+                    )
+                    .unwrap(),
+                    1,
+                    1,
+                    3,
+                    merged.report.output_logical_bytes,
+                )
+                .unwrap(),
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        let inserted = store
+            .merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                2,
+                None,
+                IndexRunMergeLimits::new(IndexRunReadLimits::new(1, 1, 1).unwrap(), 1, 16, 1, 16)
+                    .unwrap(),
+                [IndexDelta::new(
+                    b"new".to_vec(),
+                    None,
+                    Some(b"value".to_vec()),
+                )],
+            )
+            .unwrap();
+        assert_eq!(inserted.report.base.entries, 0);
+        assert_eq!(inserted.report.insertions, 1);
+        assert!(inserted.run.is_some());
+        let maximum_key = store
+            .merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                3,
+                None,
+                IndexRunMergeLimits::new(
+                    IndexRunReadLimits::new(1, 1, 1).unwrap(),
+                    1,
+                    u64::try_from(index::MAX_INDEX_KEY_BYTES).unwrap(),
+                    1,
+                    u64::try_from(index::MAX_INDEX_KEY_BYTES).unwrap(),
+                )
+                .unwrap(),
+                [IndexDelta::new(
+                    vec![0x5a; index::MAX_INDEX_KEY_BYTES],
+                    None,
+                    Some(Vec::new()),
+                )],
+            )
+            .unwrap();
+        assert_eq!(maximum_key.report.output_entries, 1);
+        assert!(maximum_key.run.is_some());
+
+        filesystem.test_reset_open_existing_calls();
+        let copied = store
+            .merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(exact_current),
+                current_limits,
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            )
+            .unwrap();
+        assert_eq!(copied.report.base.entries, 4);
+        assert_eq!(copied.report.deltas, 0);
+        assert_eq!(copied.report.output_entries, 4);
+        assert!(copied.run.is_some());
+        assert_eq!(filesystem.test_open_existing_calls(), 1);
+
+        let mut foreign_filesystem = MemoryFileSystem::new(2 * 1024 * 1024);
+        let mut foreign_store = JournalStore::create(
+            &mut foreign_filesystem,
+            options(database, "index-merge-foreign"),
+            create_vault(database, 214_000),
+            CounterEntropy::new(215_000),
+        )
+        .unwrap();
+        let foreign_commit = foreign_store
+            .append_group(
+                &mut foreign_filesystem,
+                CommitInput {
+                    encoded_group: b"foreign certificate",
+                    logical_event_digest: [0x3c; 32],
+                },
+            )
+            .unwrap();
+        let foreign_run = foreign_store
+            .publish_index_run(
+                &mut foreign_filesystem,
+                scope,
+                foreign_commit.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"foreign".to_vec(),
+                    value: b"value".to_vec(),
+                }],
+            )
+            .unwrap();
+        foreign_store
+            .publish_index_root(
+                &mut foreign_filesystem,
+                IndexRootInput {
+                    scope,
+                    revision: foreign_commit.revision,
+                    certificate_digest: foreign_commit.certificate_digest,
+                    reducer_profile: [0x36; 32],
+                    logical_state_digest: [0x3d; 32],
+                    index_profile: profile,
+                },
+                &[foreign_run],
+            )
+            .unwrap();
+        let foreign_root = foreign_store
+            .load_index_roots(&mut foreign_filesystem, scope, profile)
+            .unwrap()
+            .remove(0);
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(&foreign_root),
+                IndexRunMergeLimits::new(IndexRunReadLimits::new(1, 1, 32).unwrap(), 1, 1, 1, 32,)
+                    .unwrap(),
+                Vec::<Result<IndexDelta, StorageError>>::new(),
+            ),
+            Err(StorageError::InvalidState)
+        );
+    }
+
+    #[test]
+    fn index_merge_rejects_late_source_corruption_after_provisional_output() {
+        let database = DatabaseId::from_bytes([0x41; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x42; 16]));
+        let mut filesystem = MemoryFileSystem::new(8 * 1024 * 1024);
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "index-merge-corrupt"),
+            create_vault(database, 212_000),
+            CounterEntropy::new(213_000),
+        )
+        .unwrap();
+        let first = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"corrupt merge base",
+                    logical_event_digest: [0x43; 32],
+                },
+            )
+            .unwrap();
+        let profile = [0x44; 32];
+        let large = vec![0x45; index::INDEX_PAGE_BYTES * 2];
+        let run = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                first.revision,
+                profile,
+                1,
+                [
+                    IndexEntry {
+                        key: b"middle".to_vec(),
+                        value: large.clone(),
+                    },
+                    IndexEntry {
+                        key: b"tail".to_vec(),
+                        value: b"tail".to_vec(),
+                    },
+                ],
+            )
+            .unwrap();
+        store
+            .publish_index_root(
+                &mut filesystem,
+                IndexRootInput {
+                    scope,
+                    revision: first.revision,
+                    certificate_digest: first.certificate_digest,
+                    reducer_profile: [0x46; 32],
+                    logical_state_digest: [0x47; 32],
+                    index_profile: profile,
+                },
+                &[run],
+            )
+            .unwrap();
+        let root = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap()
+            .remove(0);
+        let directory = store.database_directory;
+        let run_name = filesystem
+            .test_child_names(&directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("i-"))
+            .unwrap();
+        filesystem
+            .test_mutate_file(
+                &directory,
+                &run_name,
+                index::ENCODED_PAGE_BYTES as usize + 100,
+            )
+            .unwrap();
+        let second = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"corrupt merge target",
+                    logical_event_digest: [0x48; 32],
+                },
+            )
+            .unwrap();
+        let base_bytes = u64::try_from(b"middle".len() + large.len() + 2 * b"tail".len()).unwrap();
+        assert_eq!(
+            store.merge_index_run(
+                &mut filesystem,
+                scope,
+                second.revision,
+                profile,
+                1,
+                Some(&root),
+                IndexRunMergeLimits::new(
+                    IndexRunReadLimits::new(run.page_count(), 2, base_bytes).unwrap(),
+                    1,
+                    32,
+                    3,
+                    base_bytes + 32,
+                )
+                .unwrap(),
+                [IndexDelta::new(
+                    b"first".to_vec(),
+                    None,
+                    Some(b"provisional".to_vec()),
+                )],
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert!(
+            store
+                .load_index_roots(&mut filesystem, scope, profile)
+                .unwrap()
+                .iter()
+                .all(|candidate| candidate.revision() != second.revision)
+        );
+        assert_eq!(
+            filesystem
+                .test_child_names(&directory)
+                .unwrap()
+                .iter()
+                .filter(|name| name.as_str().starts_with("x-"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn every_index_merge_output_boundary_leaves_only_the_old_published_root() {
+        let database = DatabaseId::from_bytes([0x51; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x52; 16]));
+        let name = "index-merge-faults";
+        let profile = [0x53; 32];
+        let mut base = MemoryFileSystem::new(8 * 1024 * 1024);
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, name),
+            create_vault(database, 216_000),
+            CounterEntropy::new(217_000),
+        )
+        .unwrap();
+        let first = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"merge fault base",
+                    logical_event_digest: [0x54; 32],
+                },
+            )
+            .unwrap();
+        let base_run = store
+            .publish_index_run(
+                &mut base,
+                scope,
+                first.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"key".to_vec(),
+                    value: b"value".to_vec(),
+                }],
+            )
+            .unwrap();
+        store
+            .publish_index_root(
+                &mut base,
+                IndexRootInput {
+                    scope,
+                    revision: first.revision,
+                    certificate_digest: first.certificate_digest,
+                    reducer_profile: [0x55; 32],
+                    logical_state_digest: [0x56; 32],
+                    index_profile: profile,
+                },
+                &[base_run],
+            )
+            .unwrap();
+        let second = store
+            .append_group(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"merge fault target",
+                    logical_event_digest: [0x57; 32],
+                },
+            )
+            .unwrap();
+        drop(store);
+        base.restart().unwrap();
+
+        for (operation, occurrence) in [
+            (Operation::CreateNew, 1_u64),
+            (Operation::WriteAt, 1),
+            (Operation::SetLen, 1),
+            (Operation::SyncAll, 1),
+            (Operation::SyncDirectory, 1),
+        ] {
+            for action in [FaultAction::CrashBefore, FaultAction::CrashAfter] {
+                let mut filesystem = FaultFileSystem::new(base.clone(), FaultPlan::default());
+                let mut store = reopen_fault_store(&mut filesystem, database, name, 218_000);
+                let root = store
+                    .load_index_roots(&mut filesystem, scope, profile)
+                    .unwrap()
+                    .into_iter()
+                    .find(|root| root.revision() == first.revision)
+                    .unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    store.merge_index_run(
+                        &mut filesystem,
+                        scope,
+                        second.revision,
+                        profile,
+                        1,
+                        Some(&root),
+                        IndexRunMergeLimits::new(
+                            IndexRunReadLimits::new(base_run.page_count(), 1, 8).unwrap(),
+                            1,
+                            1,
+                            1,
+                            8,
+                        )
+                        .unwrap(),
+                        Vec::<Result<IndexDelta, StorageError>>::new(),
+                    ),
+                    Err(StorageError::Adapter(AdapterErrorKind::InjectedCrash)),
+                    "operation={operation:?}, action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(store);
+                filesystem.restart().unwrap();
+                let store = reopen_fault_store(&mut filesystem, database, name, 219_000);
+                let roots = store
+                    .load_index_roots(&mut filesystem, scope, profile)
+                    .unwrap();
+                assert_eq!(roots.len(), 1);
+                assert_eq!(roots[0].revision(), first.revision);
+            }
+        }
     }
 
     #[test]

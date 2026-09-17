@@ -31,9 +31,10 @@ pub use uste_policy::PrincipalDigest;
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
     CheckpointStreamCandidate, CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot,
-    EMPTY_BLOB_INVENTORY_DIGEST, IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor,
-    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScrubReport,
-    OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
+    EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexReadStats, IndexRootInput,
+    IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport,
+    IndexRunVisitor, IndexScan, IndexScrubReport, MergedIndexRun, OwnershipFileSystem, PageCache,
+    RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -841,6 +842,40 @@ where
                 index_profile,
                 family,
                 entries,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: merge an authenticated optional base run and exact sorted deltas into
+    /// one invisible encrypted current-revision run. Domain code must validate and root the result
+    /// separately; any error leaves journal authority unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub fn merge_index_run<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+    ) -> Result<MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .merge_index_run(
+                filesystem,
+                self.scope,
+                revision,
+                index_profile,
+                family,
+                base_root,
+                limits,
+                deltas,
             )
             .map_err(TransactionError::Storage)
     }
