@@ -52,9 +52,17 @@ recovery wrapper.
   parent, is killed with SIGKILL, and the production adapter reopens the exact committed bytes.
 - every initial creation, commit and segment-rollover operation is crashed immediately before and
   after in the deterministic durability model, selecting only absent/previous/exact-new outcomes;
+- every initial creation/commit operation returns injected non-crash I/O failure without false
+  durability, and every initial journal short-write/read position is retried to exact completion;
+- every encoded byte of `KEY`, `MANIFEST`, `UCLG` and `USEG`, plus missing/truncated bootstrap
+  objects, fails closed; every byte of a late committed certificate and group is rejected before
+  any replay callback, and a corrupt later record prevents pending tail repair;
 - the real portable recovery wrapper uses `OsEntropy`, persists through `KEY`, rejects a wrong
   Argon2id credential and reopens the exact group with its authenticated logical digest. The Btrfs
   SIGKILL test separately uses a deterministic test key adapter for child reproducibility.
+- real Btrfs child processes are killed after group sync before certification and after certificate
+  sync. Recovery respectively removes the uncertified tail or replays the exact new frontier; a
+  competing process is rejected while the writer lives and admitted after SIGKILL releases `flock`.
 
 `cargo clippy -p uste-storage --all-targets -- -D warnings`, documentation validation and the
 62-task dependency-graph check also pass. Full-workspace and supply-chain results are recorded in
@@ -62,11 +70,10 @@ recovery wrapper.
 
 ## Honest limits and remaining T-13 work
 
-T-13 stays open. Injected non-crash errors and short-progress cases at every journal-specific
-boundary, exhaustive bootstrap/header corruption, cross-process lock death and additional real
-process publication boundaries, and the ext4 mount/device trial are not yet complete. The current
-SIGKILL case demonstrates process loss after a synced certificate, not controller cache loss or
-power-cut behavior. `fstatfs` cannot itself establish ext4, local-device or hardware semantics.
+T-13 stays open. Real-process creation publication boundaries and the ext4 mount/device trial are
+not yet complete. The current SIGKILL cases demonstrate process loss after group/certificate
+sync, not controller cache loss or power-cut behavior. `fstatfs` cannot itself establish ext4,
+local-device or hardware semantics.
 Failed creation and rollover may leave hidden siblings or unreferenced segments; they are never
 committed, but enumeration and bounded reclamation are explicitly assigned to T-35. The 1 GiB
 certificate log fails closed after 258,047 commits; T-35 owns its rollover.

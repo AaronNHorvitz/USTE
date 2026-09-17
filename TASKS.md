@@ -76,9 +76,10 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 T-13 progress: Decision 0015, the Linux capability adapter, exclusive ownership, encrypted
 manifest/log/segment headers, opaque transaction groups, fixed commit certificates and streaming
 recovery are implemented. Deterministic every-operation creation/commit/rollover crash tests,
-targeted corruption, real portable-key wiring and a Btrfs SIGKILL-after-certificate case pass. The
-task remains open for the remaining error/short-progress, hard-corruption and real-process matrix
-plus ext4 qualification; no partial evidence is represented as task completion.
+byte-exhaustive corruption, real portable-key wiring, injected error/short-progress matrices and
+Btrfs SIGKILL after group/certificate sync pass. Live cross-process exclusion and lock release on
+death also pass. The task remains open for real-process creation boundaries and ext4 qualification;
+no partial evidence is represented as task completion.
 
 ## R2 — Developer alpha
 

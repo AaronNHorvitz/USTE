@@ -1128,13 +1128,13 @@ where
         return Err(StorageError::IntegrityFailure);
     }
     let encoded = read_bounded(filesystem, file, 0, SMALL_ENVELOPE_BYTES)?;
-    let envelope = EncryptedEnvelope::decode(&encoded).map_err(recovery_crypto_error)?;
+    let envelope = EncryptedEnvelope::decode(&encoded).map_err(committed_crypto_error)?;
     let plaintext = vault
         .decrypt(
             segment_context(database, epoch, segment_id, writer, 0),
             &envelope,
         )
-        .map_err(recovery_crypto_error)?;
+        .map_err(committed_crypto_error)?;
     let header = SegmentHeader::decode(plaintext.as_slice())?;
     if header.database != database
         || header.segment_id != segment_id
@@ -1789,6 +1789,313 @@ mod tests {
     }
 
     #[test]
+    fn every_bootstrap_envelope_byte_is_authenticated() {
+        let database = DatabaseId::from_bytes([0x86; 16]);
+        let mut base = MemoryFileSystem::default();
+        let store = JournalStore::create(
+            &mut base,
+            options(database, "bootstrap-corruption"),
+            create_vault(database, 1_100),
+            CounterEntropy::new(1_200),
+        )
+        .unwrap();
+        drop(store);
+        base.restart().unwrap();
+        let root = base.root();
+        let database_directory = base
+            .open_directory(&root, &entry("bootstrap-corruption"))
+            .unwrap();
+        let segment = base
+            .test_child_names(&database_directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("j-"))
+            .unwrap();
+
+        for (name, bytes, allow_unsupported_profile) in [
+            (entry("KEY"), 32_usize, false),
+            (
+                entry("MANIFEST"),
+                usize::try_from(SMALL_ENVELOPE_BYTES).unwrap(),
+                true,
+            ),
+            (
+                entry("CERTIFICATES"),
+                usize::try_from(SMALL_ENVELOPE_BYTES).unwrap(),
+                false,
+            ),
+            (
+                segment,
+                usize::try_from(SMALL_ENVELOPE_BYTES).unwrap(),
+                false,
+            ),
+        ] {
+            for offset in 0..bytes {
+                let mut filesystem = base.clone();
+                let root = filesystem.root();
+                let directory = filesystem
+                    .open_directory(&root, &entry("bootstrap-corruption"))
+                    .unwrap();
+                filesystem
+                    .test_mutate_file(&directory, &name, offset)
+                    .unwrap();
+                let error = JournalStore::open(
+                    &mut filesystem,
+                    &entry("bootstrap-corruption"),
+                    database,
+                    CounterEntropy::new(1_300),
+                    CounterEntropy::new(1_400),
+                    &mut TestKeyAdapter,
+                    |_group| Ok(()),
+                )
+                .unwrap_err();
+                assert!(
+                    error == StorageError::IntegrityFailure
+                        || (allow_unsupported_profile
+                            && matches!(
+                                error,
+                                StorageError::UnsupportedProfile | StorageError::ResourceLimit
+                            )),
+                    "name={} offset={offset} error={error:?}",
+                    name.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn missing_and_truncated_bootstrap_objects_fail_closed() {
+        let database = DatabaseId::from_bytes([0x89; 16]);
+        let mut base = MemoryFileSystem::default();
+        let store = JournalStore::create(
+            &mut base,
+            options(database, "bootstrap-shape"),
+            create_vault(database, 2_300),
+            CounterEntropy::new(2_400),
+        )
+        .unwrap();
+        drop(store);
+        base.restart().unwrap();
+        let root = base.root();
+        let directory = base
+            .open_directory(&root, &entry("bootstrap-shape"))
+            .unwrap();
+        let segment = base
+            .test_child_names(&directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("j-"))
+            .unwrap();
+
+        for name in [
+            entry("LOCK"),
+            entry("KEY"),
+            entry("MANIFEST"),
+            entry("CERTIFICATES"),
+            segment.clone(),
+        ] {
+            let mut filesystem = base.clone();
+            let root = filesystem.root();
+            let directory = filesystem
+                .open_directory(&root, &entry("bootstrap-shape"))
+                .unwrap();
+            filesystem.test_remove_entry(&directory, &name).unwrap();
+            assert_eq!(
+                JournalStore::open(
+                    &mut filesystem,
+                    &entry("bootstrap-shape"),
+                    database,
+                    CounterEntropy::new(2_500),
+                    CounterEntropy::new(2_600),
+                    &mut TestKeyAdapter,
+                    |_group| Ok(()),
+                )
+                .unwrap_err(),
+                StorageError::IntegrityFailure,
+                "missing {}",
+                name.as_str()
+            );
+        }
+
+        for (name, lengths) in [
+            (entry("KEY"), vec![0_u64, 1, 31, 33]),
+            (
+                entry("MANIFEST"),
+                vec![0, 1, SMALL_ENVELOPE_BYTES - 1, SMALL_ENVELOPE_BYTES + 1],
+            ),
+            (entry("CERTIFICATES"), vec![0, 1, SMALL_ENVELOPE_BYTES - 1]),
+            (segment, vec![0, 1, SMALL_ENVELOPE_BYTES - 1]),
+        ] {
+            for length in lengths {
+                let mut filesystem = base.clone();
+                let root = filesystem.root();
+                let directory = filesystem
+                    .open_directory(&root, &entry("bootstrap-shape"))
+                    .unwrap();
+                let file = filesystem.open_existing(&directory, &name).unwrap();
+                filesystem.set_len(&file, length).unwrap();
+                filesystem.sync_data(&file).unwrap();
+                assert_eq!(
+                    JournalStore::open(
+                        &mut filesystem,
+                        &entry("bootstrap-shape"),
+                        database,
+                        CounterEntropy::new(2_700),
+                        CounterEntropy::new(2_800),
+                        &mut TestKeyAdapter,
+                        |_group| Ok(()),
+                    )
+                    .unwrap_err(),
+                    StorageError::IntegrityFailure,
+                    "name={} length={length}",
+                    name.as_str()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn late_certificate_corruption_emits_no_callbacks_or_repairs() {
+        let database = DatabaseId::from_bytes([0x87; 16]);
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "late-corruption"),
+            create_vault(database, 1_500),
+            CounterEntropy::new(1_600),
+        )
+        .unwrap();
+        for (bytes, digest) in [(b"first".as_slice(), [1; 32]), (b"second", [2; 32])] {
+            store
+                .append_group(
+                    &mut filesystem,
+                    CommitInput {
+                        encoded_group: bytes,
+                        logical_event_digest: digest,
+                    },
+                )
+                .unwrap();
+        }
+        drop(store);
+        let root = filesystem.root();
+        let directory = filesystem
+            .open_directory(&root, &entry("late-corruption"))
+            .unwrap();
+        filesystem
+            .test_append_file(&directory, &entry("CERTIFICATES"), &[0xa5; 23])
+            .unwrap();
+        filesystem
+            .test_mutate_file(
+                &directory,
+                &entry("CERTIFICATES"),
+                usize::try_from(2 * SMALL_ENVELOPE_BYTES).unwrap() + 127,
+            )
+            .unwrap();
+        let certificate_file = filesystem
+            .open_existing(&directory, &entry("CERTIFICATES"))
+            .unwrap();
+        let length_before = filesystem.metadata(&certificate_file).unwrap().len;
+        let mut callbacks = 0_u64;
+
+        assert_eq!(
+            JournalStore::open(
+                &mut filesystem,
+                &entry("late-corruption"),
+                database,
+                CounterEntropy::new(1_700),
+                CounterEntropy::new(1_800),
+                &mut TestKeyAdapter,
+                |_group| {
+                    callbacks += 1;
+                    Ok(())
+                },
+            )
+            .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        assert_eq!(callbacks, 0);
+        assert_eq!(
+            filesystem.metadata(&certificate_file).unwrap().len,
+            length_before,
+            "repair must be deferred until the full committed prefix validates"
+        );
+    }
+
+    #[test]
+    fn every_late_committed_byte_is_authenticated_before_replay() {
+        let database = DatabaseId::from_bytes([0x88; 16]);
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, "committed-byte-corruption"),
+            create_vault(database, 1_900),
+            CounterEntropy::new(2_000),
+        )
+        .unwrap();
+        for (bytes, digest) in [(b"first".as_slice(), [3; 32]), (b"second", [4; 32])] {
+            store
+                .append_group(
+                    &mut base,
+                    CommitInput {
+                        encoded_group: bytes,
+                        logical_event_digest: digest,
+                    },
+                )
+                .unwrap();
+        }
+        drop(store);
+        base.restart().unwrap();
+        let root = base.root();
+        let directory = base
+            .open_directory(&root, &entry("committed-byte-corruption"))
+            .unwrap();
+        let segment = base
+            .test_child_names(&directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("j-"))
+            .unwrap();
+        let second_record_offset = usize::try_from(2 * SMALL_ENVELOPE_BYTES).unwrap();
+        let encoded_record_bytes = usize::try_from(SMALL_ENVELOPE_BYTES).unwrap();
+
+        for (name, start) in [
+            (entry("CERTIFICATES"), second_record_offset),
+            (segment, second_record_offset),
+        ] {
+            for relative_offset in 0..encoded_record_bytes {
+                let mut filesystem = base.clone();
+                let root = filesystem.root();
+                let directory = filesystem
+                    .open_directory(&root, &entry("committed-byte-corruption"))
+                    .unwrap();
+                filesystem
+                    .test_mutate_file(&directory, &name, start + relative_offset)
+                    .unwrap();
+                let mut callbacks = 0_u64;
+                assert_eq!(
+                    JournalStore::open(
+                        &mut filesystem,
+                        &entry("committed-byte-corruption"),
+                        database,
+                        CounterEntropy::new(2_100),
+                        CounterEntropy::new(2_200),
+                        &mut TestKeyAdapter,
+                        |_group| {
+                            callbacks += 1;
+                            Ok(())
+                        },
+                    )
+                    .unwrap_err(),
+                    StorageError::IntegrityFailure,
+                    "name={} relative_offset={relative_offset}",
+                    name.as_str()
+                );
+                assert_eq!(callbacks, 0);
+            }
+        }
+    }
+
+    #[test]
     fn every_initial_creation_crash_boundary_has_one_permitted_name_outcome() {
         let boundaries = [
             (Operation::CreateDirectory, 1_u64),
@@ -1932,6 +2239,230 @@ mod tests {
                     assert!(replayed.is_empty());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn initial_publication_errors_never_create_a_durable_database() {
+        let boundaries = [
+            (Operation::CreateDirectory, 1_u64),
+            (Operation::CreateNew, 1),
+            (Operation::CreateNew, 2),
+            (Operation::CreateNew, 3),
+            (Operation::CreateNew, 4),
+            (Operation::CreateNew, 5),
+            (Operation::SyncAll, 1),
+            (Operation::SyncAll, 2),
+            (Operation::SyncAll, 3),
+            (Operation::SyncAll, 4),
+            (Operation::SyncAll, 5),
+            (Operation::TryLockExclusive, 1),
+            (Operation::WriteAt, 1),
+            (Operation::WriteAt, 2),
+            (Operation::WriteAt, 3),
+            (Operation::WriteAt, 4),
+            (Operation::SyncDirectory, 1),
+            (Operation::RenameNoReplace, 1),
+            (Operation::SyncDirectory, 2),
+        ];
+        for (case, (operation, occurrence)) in boundaries.into_iter().enumerate() {
+            let database = DatabaseId::from_bytes([0xa3; 16]);
+            let plan = FaultPlan::new([FaultPoint {
+                operation,
+                occurrence,
+                action: FaultAction::Error(AdapterErrorKind::Io),
+            }])
+            .unwrap();
+            let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+            assert_eq!(
+                JournalStore::create(
+                    &mut filesystem,
+                    options(database, "creation-error"),
+                    create_vault(database, 9_100 + u64::try_from(case).unwrap()),
+                    CounterEntropy::new(9_200 + u64::try_from(case).unwrap()),
+                )
+                .unwrap_err(),
+                StorageError::Adapter(AdapterErrorKind::Io),
+                "operation={operation:?} occurrence={occurrence}"
+            );
+            assert_eq!(filesystem.pending_faults(), 0);
+            filesystem.restart().unwrap();
+            let root = filesystem.root();
+            assert!(
+                filesystem
+                    .open_directory(&root, &entry("creation-error"))
+                    .is_err(),
+                "operation={operation:?} occurrence={occurrence}"
+            );
+        }
+    }
+
+    #[test]
+    fn initial_commit_errors_recover_only_the_previous_frontier() {
+        for (case, (operation, occurrence)) in [
+            (Operation::WriteAt, 5_u64),
+            (Operation::SyncData, 1),
+            (Operation::WriteAt, 6),
+            (Operation::SyncData, 2),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let database = DatabaseId::from_bytes([0xa4; 16]);
+            let plan = FaultPlan::new([FaultPoint {
+                operation,
+                occurrence,
+                action: FaultAction::Error(AdapterErrorKind::Io),
+            }])
+            .unwrap();
+            let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, "commit-error"),
+                create_vault(database, 9_300 + u64::try_from(case).unwrap()),
+                CounterEntropy::new(9_400 + u64::try_from(case).unwrap()),
+            )
+            .unwrap();
+            assert_eq!(
+                store
+                    .append_group(
+                        &mut filesystem,
+                        CommitInput {
+                            encoded_group: b"must remain uncommitted",
+                            logical_event_digest: [0xa5; 32],
+                        },
+                    )
+                    .unwrap_err(),
+                StorageError::Adapter(AdapterErrorKind::Io)
+            );
+            assert_eq!(
+                store
+                    .append_group(
+                        &mut filesystem,
+                        CommitInput {
+                            encoded_group: b"poisoned writer",
+                            logical_event_digest: [0xa6; 32],
+                        },
+                    )
+                    .unwrap_err(),
+                StorageError::NeedsRecovery
+            );
+            drop(store);
+            filesystem.restart().unwrap();
+            let mut callbacks = 0_u64;
+            let (_store, report) = JournalStore::open(
+                &mut filesystem,
+                &entry("commit-error"),
+                database,
+                CounterEntropy::new(9_500),
+                CounterEntropy::new(9_600),
+                &mut TestKeyAdapter,
+                |_group| {
+                    callbacks += 1;
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(report.frontier, None);
+            assert_eq!(callbacks, 0);
+        }
+    }
+
+    #[test]
+    fn journal_exact_io_retries_every_short_progress_position() {
+        let database = DatabaseId::from_bytes([0xa7; 16]);
+        for occurrence in 1..=6 {
+            let plan = FaultPlan::new([FaultPoint {
+                operation: Operation::WriteAt,
+                occurrence,
+                action: FaultAction::ShortWrite { maximum: 1 },
+            }])
+            .unwrap();
+            let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, "short-write"),
+                create_vault(database, 9_700 + occurrence),
+                CounterEntropy::new(9_800 + occurrence),
+            )
+            .unwrap();
+            store
+                .append_group(
+                    &mut filesystem,
+                    CommitInput {
+                        encoded_group: b"exact despite a short write",
+                        logical_event_digest: [0xa8; 32],
+                    },
+                )
+                .unwrap();
+            assert_eq!(filesystem.pending_faults(), 0);
+            drop(store);
+            filesystem.restart().unwrap();
+            let mut replayed = Vec::new();
+            let (_store, report) = JournalStore::open(
+                &mut filesystem,
+                &entry("short-write"),
+                database,
+                CounterEntropy::new(9_900),
+                CounterEntropy::new(10_000),
+                &mut TestKeyAdapter,
+                |group| {
+                    replayed.push(group.encoded_group.to_vec());
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(report.frontier, Some(CommitRevision::FIRST));
+            assert_eq!(replayed, vec![b"exact despite a short write".to_vec()]);
+        }
+
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, "short-read"),
+            create_vault(database, 10_100),
+            CounterEntropy::new(10_200),
+        )
+        .unwrap();
+        for group in [b"first".as_slice(), b"second"] {
+            store
+                .append_group(
+                    &mut base,
+                    CommitInput {
+                        encoded_group: group,
+                        logical_event_digest: [0xa9; 32],
+                    },
+                )
+                .unwrap();
+        }
+        drop(store);
+        base.restart().unwrap();
+        for occurrence in 1..=12 {
+            let plan = FaultPlan::new([FaultPoint {
+                operation: Operation::ReadAt,
+                occurrence,
+                action: FaultAction::ShortRead { maximum: 1 },
+            }])
+            .unwrap();
+            let mut filesystem = FaultFileSystem::new(base.clone(), plan);
+            let mut replayed = Vec::new();
+            let (store, report) = JournalStore::open(
+                &mut filesystem,
+                &entry("short-read"),
+                database,
+                CounterEntropy::new(10_300 + occurrence),
+                CounterEntropy::new(10_400 + occurrence),
+                &mut TestKeyAdapter,
+                |group| {
+                    replayed.push(group.encoded_group.to_vec());
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(report.frontier.map(CommitRevision::get), Some(2));
+            assert_eq!(replayed, vec![b"first".to_vec(), b"second".to_vec()]);
+            drop(store);
+            assert_eq!(filesystem.pending_faults(), 0, "occurrence={occurrence}");
         }
     }
 

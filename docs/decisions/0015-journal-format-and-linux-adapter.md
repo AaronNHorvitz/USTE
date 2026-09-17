@@ -140,8 +140,10 @@ admission remain T-35/T-36 lifecycle work rather than claims of this immutable c
 
 `acceptance/r1/journal-v1.tsv` pins the implemented layout and recovery invariants. Deterministic
 tests cover every initial creation/commit and rollover crash-before/crash-after operation boundary,
-exact replay, two-writer exclusion, failed and lost certificate-sync outcomes, poisoned writers,
-tail repair and complete certificate/group corruption. Linux tests cover modes, positional I/O,
-symlink/type rejection, no-replace behavior, lock lifetime and Btrfs subprocess SIGKILL after
-certificate sync. T-13 remains open until the remaining injected error/short-progress and
-hard-corruption matrix, real-process boundaries and ext4 trial are evidence-backed.
+every initial non-crash creation/commit error, every initial short-read/write position, exact
+replay, two-writer exclusion, failed and lost certificate-sync outcomes, poisoned writers, tail
+repair and byte-exhaustive bootstrap/late-commit corruption. Linux tests cover modes, positional
+I/O, symlink/type rejection, no-replace behavior and lock lifetime. Btrfs subprocess tests cover
+SIGKILL after group sync and after certificate sync, including live cross-process exclusion and
+lock release on death. T-13 remains open for real-process creation boundaries and the ext4
+mount/device trial.

@@ -15,8 +15,9 @@ use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_storage::{
-    EntryName,
-    journal::{CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore},
+    AdapterErrorKind, EntryName,
+    fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation},
+    journal::{CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, StorageError},
     linux::LinuxFileSystem,
 };
 use uste_types::DatabaseId;
@@ -85,6 +86,21 @@ fn committed_certificate_survives_writer_sigkill_and_replays_exact_bytes() {
             .expect("child journal readiness pipe closed"),
         [b'R']
     );
+    let mut competing_filesystem = open_filesystem(&directory);
+    assert_eq!(
+        JournalStore::open(
+            &mut competing_filesystem,
+            &name("world"),
+            database,
+            CounterEntropy::new(25),
+            CounterEntropy::new(250),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        )
+        .unwrap_err(),
+        StorageError::Adapter(AdapterErrorKind::OwnershipConflict)
+    );
+    drop(competing_filesystem);
     let status = child.kill_and_wait();
     assert_eq!(status.signal(), Some(9));
 
@@ -108,6 +124,90 @@ fn committed_certificate_survives_writer_sigkill_and_replays_exact_bytes() {
         replayed,
         vec![(1, b"durable before process death\0\xff".to_vec())]
     );
+    drop(directory_guard);
+}
+
+#[test]
+fn synced_group_without_certificate_is_removed_after_writer_sigkill() {
+    if std::env::var_os(CHILD_MARKER).is_some() {
+        child_group_only();
+        return;
+    }
+
+    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    fs::create_dir_all(&scratch).unwrap();
+    let discriminator = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = scratch.join(format!(
+        "uste-t13-uncertified-{}-{discriminator}",
+        std::process::id()
+    ));
+    fs::create_dir(&directory).unwrap();
+    let directory_guard = TestDirectory(directory.clone());
+    let database = DatabaseId::from_bytes([0xb1; 16]);
+
+    let mut filesystem = open_filesystem(&directory);
+    let store = JournalStore::create(
+        &mut filesystem,
+        CreationOptions {
+            database,
+            final_name: name("world"),
+        },
+        create_vault(database, 40),
+        CounterEntropy::new(400),
+    )
+    .unwrap();
+    drop(store);
+    drop(filesystem);
+
+    let executable = std::env::current_exe().unwrap();
+    let child = Command::new(executable)
+        .arg("--exact")
+        .arg("synced_group_without_certificate_is_removed_after_writer_sigkill")
+        .arg("--nocapture")
+        .env(CHILD_MARKER, "group-only")
+        .env(DIRECTORY_PATH, &directory)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut child = ChildGuard::new(child);
+    let mut readiness = child.stderr().take().unwrap();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let mut byte = [0_u8; 1];
+        let result = readiness.read_exact(&mut byte).map(|()| byte);
+        let _ = sender.send(result);
+    });
+    assert_eq!(
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("child uncertified-group readiness timed out")
+            .expect("child uncertified-group readiness pipe closed"),
+        [b'R']
+    );
+    assert_eq!(child.kill_and_wait().signal(), Some(9));
+
+    let mut filesystem = open_filesystem(&directory);
+    let mut callbacks = 0_u64;
+    let (_store, report) = JournalStore::open(
+        &mut filesystem,
+        &name("world"),
+        database,
+        CounterEntropy::new(60),
+        CounterEntropy::new(600),
+        &mut TestKeyAdapter,
+        |_group| {
+            callbacks += 1;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(report.frontier, None);
+    assert!(report.ignored_uncommitted_journal_bytes > 0);
+    assert_eq!(callbacks, 0);
     drop(directory_guard);
 }
 
@@ -136,6 +236,46 @@ fn child_writer() {
         )
         .unwrap();
 
+    std::io::stderr().write_all(b"R").unwrap();
+    std::io::stderr().flush().unwrap();
+    loop {
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn child_group_only() {
+    let directory = PathBuf::from(std::env::var_os(DIRECTORY_PATH).unwrap());
+    let database = DatabaseId::from_bytes([0xb1; 16]);
+    let plan = FaultPlan::new([FaultPoint {
+        operation: Operation::SyncData,
+        occurrence: 1,
+        action: FaultAction::CrashAfter,
+    }])
+    .unwrap();
+    let mut filesystem = FaultFileSystem::new(open_filesystem(&directory), plan);
+    let (mut store, report) = JournalStore::open(
+        &mut filesystem,
+        &name("world"),
+        database,
+        CounterEntropy::new(50),
+        CounterEntropy::new(500),
+        &mut TestKeyAdapter,
+        |_group| Ok(()),
+    )
+    .unwrap();
+    assert_eq!(report.frontier, None);
+    assert_eq!(
+        store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"synced but not certified",
+                    logical_event_digest: [0xb2; 32],
+                },
+            )
+            .unwrap_err(),
+        StorageError::Adapter(AdapterErrorKind::InjectedCrash)
+    );
     std::io::stderr().write_all(b"R").unwrap();
     std::io::stderr().flush().unwrap();
     loop {

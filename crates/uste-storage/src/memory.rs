@@ -71,6 +71,7 @@ struct MemoryDirectoryState {
 /// `restart` discards every unsynchronized byte and namespace mutation and invalidates all handles.
 /// It models the accepted ordering contract; it is not a substitute for supported-filesystem tests.
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub struct MemoryFileSystem {
     generation: u64,
     next_node: u64,
@@ -209,6 +210,38 @@ impl MemoryFileSystem {
         let file = self.file_mut(&file)?;
         file.volatile.extend_from_slice(bytes);
         file.durable.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_remove_entry(
+        &mut self,
+        directory: &MemoryDirectory,
+        name: &EntryName,
+    ) -> Result<(), AdapterError> {
+        let node = {
+            let directory = self.directory_mut(directory)?;
+            let volatile = directory
+                .volatile
+                .remove(name)
+                .ok_or_else(|| AdapterError::new(AdapterErrorKind::NotFound))?;
+            let durable = directory
+                .durable
+                .remove(name)
+                .ok_or_else(|| AdapterError::new(AdapterErrorKind::NotFound))?;
+            if volatile != durable {
+                return Err(AdapterErrorKind::AdapterContract.into());
+            }
+            volatile
+        };
+        match node {
+            Node::File(id) => {
+                self.files.remove(&id);
+            }
+            Node::Directory(id) => {
+                self.directories.remove(&id);
+            }
+        }
         Ok(())
     }
 }
