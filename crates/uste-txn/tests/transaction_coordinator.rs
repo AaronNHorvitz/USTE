@@ -1,10 +1,12 @@
+use sha2::{Digest, Sha256};
+use std::cell::Cell;
 use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_storage::{
     AdapterErrorKind, ClockObservation, EntryName,
     fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation, ScriptedClock},
-    journal::DurableKeyEnvelope,
+    journal::{CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore},
     memory::MemoryFileSystem,
 };
 use uste_txn::{
@@ -320,11 +322,227 @@ fn lost_response_is_outcome_unknown_then_durable_retry_after_restart() {
     assert_eq!(retry.revision.get(), 1);
 }
 
+#[test]
+fn every_initial_publication_fault_preserves_atomic_visibility() {
+    let boundaries = [
+        (Operation::WriteAt, 5_u64),
+        (Operation::SyncData, 1),
+        (Operation::WriteAt, 6),
+        (Operation::SyncData, 2),
+    ];
+    let actions = [
+        FaultAction::Error(AdapterErrorKind::Io),
+        FaultAction::CrashBefore,
+        FaultAction::CrashAfter,
+    ];
+    for (case, (operation, occurrence, action)) in boundaries
+        .into_iter()
+        .flat_map(|(operation, occurrence)| {
+            actions
+                .into_iter()
+                .map(move |action| (operation, occurrence, action))
+        })
+        .enumerate()
+    {
+        let plan = FaultPlan::new([FaultPoint {
+            operation,
+            occurrence,
+            action,
+        }])
+        .unwrap();
+        let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+        let mut coordinator = CommitCoordinator::create(
+            &mut filesystem,
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            EntryName::new("fault-matrix").unwrap(),
+            create_vault(scope().database(), 1_000 + u64::try_from(case).unwrap()),
+            CounterEntropy(2_000 + u64::try_from(case).unwrap()),
+            CounterState::default(),
+        )
+        .unwrap();
+        let bytes = mutation(0, 5);
+        assert_eq!(
+            coordinator
+                .commit(
+                    &mut filesystem,
+                    request(1, 2, &bytes),
+                    &mut clock(0),
+                    &NeverCancel,
+                )
+                .unwrap_err(),
+            TransactionError::OutcomeUnknown,
+            "operation={operation:?} occurrence={occurrence} action={action:?}"
+        );
+        assert_eq!(
+            coordinator.read_view().unwrap_err(),
+            TransactionError::OutcomeUnknown
+        );
+        drop(coordinator);
+        filesystem.restart().unwrap();
+
+        let (coordinator, report) = CommitCoordinator::open(
+            &mut filesystem,
+            &EntryName::new("fault-matrix").unwrap(),
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            CounterEntropy(3_000),
+            CounterEntropy(4_000),
+            &mut TestKeyAdapter,
+            CounterState::default(),
+        )
+        .unwrap();
+        let committed = operation == Operation::SyncData
+            && occurrence == 2
+            && action == FaultAction::CrashAfter;
+        assert_eq!(report.frontier.is_some(), committed);
+        assert_eq!(
+            coordinator.read_view().unwrap().state().0,
+            if committed { 5 } else { 0 }
+        );
+    }
+}
+
+#[test]
+fn exact_short_writes_and_both_cancellation_boundaries_are_safe() {
+    for occurrence in [5_u64, 6] {
+        let plan = FaultPlan::new([FaultPoint {
+            operation: Operation::WriteAt,
+            occurrence,
+            action: FaultAction::ShortWrite { maximum: 1 },
+        }])
+        .unwrap();
+        let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+        let mut coordinator = CommitCoordinator::create(
+            &mut filesystem,
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            EntryName::new("short-write").unwrap(),
+            create_vault(scope().database(), 5_000 + occurrence),
+            CounterEntropy(6_000 + occurrence),
+            CounterState::default(),
+        )
+        .unwrap();
+        coordinator
+            .commit(
+                &mut filesystem,
+                request(1, 2, &mutation(0, 5)),
+                &mut clock(0),
+                &NeverCancel,
+            )
+            .unwrap();
+        assert_eq!(filesystem.pending_faults(), 0);
+        assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(5));
+    }
+
+    for cancel_on_call in [1_u8, 2] {
+        let mut filesystem = MemoryFileSystem::default();
+        let mut coordinator = CommitCoordinator::create(
+            &mut filesystem,
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            EntryName::new("cancel-boundary").unwrap(),
+            create_vault(scope().database(), 7_000 + u64::from(cancel_on_call)),
+            CounterEntropy(8_000 + u64::from(cancel_on_call)),
+            CounterState::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            coordinator
+                .commit(
+                    &mut filesystem,
+                    request(1, 2, &mutation(0, 5)),
+                    &mut clock(0),
+                    &CancelOnCall::new(cancel_on_call),
+                )
+                .unwrap_err(),
+            TransactionError::Cancelled
+        );
+        assert_eq!(coordinator.read_view().unwrap().revision(), None);
+        assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(0));
+    }
+}
+
+#[test]
+fn authenticated_but_malformed_groups_are_rejected_during_recovery() {
+    let valid = decode_hex(include_str!("../../../acceptance/r1/txn-group-v1.hex"));
+    for (case, mut malformed) in [valid.clone(), valid].into_iter().enumerate() {
+        if case == 0 {
+            malformed[184] = 1;
+        } else {
+            malformed[152] ^= 1;
+        }
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            CreationOptions {
+                database: scope().database(),
+                final_name: EntryName::new("malformed").unwrap(),
+            },
+            create_vault(scope().database(), 9_000 + u64::try_from(case).unwrap()),
+            CounterEntropy(10_000 + u64::try_from(case).unwrap()),
+        )
+        .unwrap();
+        store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: &malformed,
+                    logical_event_digest: Sha256::digest(&malformed).into(),
+                },
+            )
+            .unwrap();
+        drop(store);
+        filesystem.restart().unwrap();
+        let result = CommitCoordinator::open(
+            &mut filesystem,
+            &EntryName::new("malformed").unwrap(),
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            CounterEntropy(11_000),
+            CounterEntropy(12_000),
+            &mut TestKeyAdapter,
+            CounterState::default(),
+        );
+        assert!(matches!(result, Err(TransactionError::IntegrityFailure)));
+    }
+}
+
+fn decode_hex(text: &str) -> Vec<u8> {
+    text.trim()
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(core::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
+
 struct AlwaysCancel;
 
 impl Cancellation for AlwaysCancel {
     fn is_cancelled(&self) -> bool {
         true
+    }
+}
+
+struct CancelOnCall {
+    calls: Cell<u8>,
+    cancel_on: u8,
+}
+
+impl CancelOnCall {
+    const fn new(cancel_on: u8) -> Self {
+        Self {
+            calls: Cell::new(0),
+            cancel_on,
+        }
+    }
+}
+
+impl Cancellation for CancelOnCall {
+    fn is_cancelled(&self) -> bool {
+        let calls = self.calls.get().saturating_add(1);
+        self.calls.set(calls);
+        calls == self.cancel_on
     }
 }
 
@@ -387,4 +605,150 @@ impl EntropySource for CounterEntropy {
 
 fn create_vault(database: DatabaseId, seed: u64) -> KeyVault<TestEnvelope, CounterEntropy> {
     KeyVault::create(database, &mut TestKeyAdapter, CounterEntropy(seed)).unwrap()
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod concurrent_linux {
+    use super::*;
+    use std::{
+        fs::{self, File},
+        path::PathBuf,
+        sync::{
+            Arc, Barrier, Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
+    };
+    use uste_storage::linux::{LinuxFileSystem, LinuxFilesystemProfile};
+
+    const TEST_ROOT: &str = "USTE_T13_TEST_ROOT";
+    const TEST_PROFILE: &str = "USTE_T13_TEST_PROFILE";
+
+    struct Harness {
+        filesystem: LinuxFileSystem,
+        coordinator: CommitCoordinator<
+            CounterState,
+            LinuxFileSystem,
+            TestEnvelope,
+            CounterEntropy,
+            CounterEntropy,
+        >,
+    }
+
+    #[test]
+    fn competing_callers_publish_exactly_one_stale_mutation_and_recover_it() {
+        const CALLERS: usize = 32;
+        let directory = test_directory();
+        let mut filesystem = open_filesystem(&directory);
+        let coordinator = CommitCoordinator::create(
+            &mut filesystem,
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            EntryName::new("concurrent").unwrap(),
+            create_vault(scope().database(), 13_000),
+            CounterEntropy(14_000),
+            CounterState::default(),
+        )
+        .unwrap();
+        let harness = Mutex::new(Harness {
+            filesystem,
+            coordinator,
+        });
+        let barrier = Arc::new(Barrier::new(CALLERS));
+        let committed = AtomicUsize::new(0);
+        let conflicted = AtomicUsize::new(0);
+
+        std::thread::scope(|scope_threads| {
+            for caller in 0..CALLERS {
+                let barrier = Arc::clone(&barrier);
+                let harness = &harness;
+                let committed = &committed;
+                let conflicted = &conflicted;
+                scope_threads.spawn(move || {
+                    let bytes = mutation(0, 1);
+                    barrier.wait();
+                    let mut guard = harness.lock().unwrap();
+                    let Harness {
+                        filesystem,
+                        coordinator,
+                    } = &mut *guard;
+                    let result = coordinator.commit(
+                        filesystem,
+                        request(
+                            u8::try_from(caller + 1).unwrap(),
+                            u8::try_from(caller + 65).unwrap(),
+                            &bytes,
+                        ),
+                        &mut clock(0),
+                        &NeverCancel,
+                    );
+                    match result {
+                        Ok(_) => {
+                            committed.fetch_add(1, Ordering::Relaxed);
+                        }
+                        Err(TransactionError::Conflict) => {
+                            conflicted.fetch_add(1, Ordering::Relaxed);
+                        }
+                        other => panic!("unexpected concurrent outcome: {other:?}"),
+                    }
+                });
+            }
+        });
+        assert_eq!(committed.load(Ordering::Relaxed), 1);
+        assert_eq!(conflicted.load(Ordering::Relaxed), CALLERS - 1);
+
+        let Harness {
+            mut filesystem,
+            coordinator,
+        } = harness.into_inner().unwrap();
+        assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(1));
+        drop(coordinator);
+        let (coordinator, report) = CommitCoordinator::open(
+            &mut filesystem,
+            &EntryName::new("concurrent").unwrap(),
+            scope(),
+            RetentionDays::new(30).unwrap(),
+            CounterEntropy(15_000),
+            CounterEntropy(16_000),
+            &mut TestKeyAdapter,
+            CounterState::default(),
+        )
+        .unwrap();
+        assert_eq!(report.frontier.unwrap().get(), 1);
+        assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(1));
+        drop(coordinator);
+        drop(filesystem);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn test_directory() -> PathBuf {
+        let root = std::env::var_os(TEST_ROOT)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")));
+        fs::create_dir_all(&root).unwrap();
+        let discriminator = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = root.join(format!(
+            "uste-txn-concurrent-{}-{discriminator}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        directory
+    }
+
+    fn open_filesystem(directory: &PathBuf) -> LinuxFileSystem {
+        let root: std::os::fd::OwnedFd = File::open(directory).unwrap().into();
+        match std::env::var(TEST_PROFILE).as_deref() {
+            Ok("ext4") => LinuxFileSystem::from_directory_for_profile(
+                root,
+                LinuxFilesystemProfile::Ext4Candidate,
+            )
+            .unwrap(),
+            Ok(profile) => panic!("unknown test filesystem profile: {profile}"),
+            Err(std::env::VarError::NotPresent) => LinuxFileSystem::from_directory(root).unwrap(),
+            Err(error) => panic!("invalid test filesystem profile: {error}"),
+        }
+    }
 }

@@ -1,6 +1,6 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-13 journal/recovery foundation implemented; qualification ongoing
+Draft contract · 2026-09-17 · T-13 journal/recovery and T-14 transaction coordination implemented
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 

@@ -439,6 +439,7 @@ fn replay_group<S: TransactionState>(
     Ok(())
 }
 
+#[derive(Debug)]
 struct DecodedGroup<'a> {
     retry_key: RetryKey,
     outcome: TransactionOutcome,
@@ -605,5 +606,104 @@ const fn map_open_error(error: StorageError) -> TransactionError {
     match error {
         StorageError::IntegrityFailure => TransactionError::IntegrityFailure,
         other => TransactionError::Storage(other),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uste_types::{DatabaseId, NamespaceId};
+
+    fn scope() -> NamespaceRef {
+        NamespaceRef::new(
+            DatabaseId::from_bytes([1; 16]),
+            NamespaceId::from_bytes([2; 16]),
+        )
+    }
+
+    fn golden_group() -> Vec<u8> {
+        include_str!("../../../acceptance/r1/txn-group-v1.hex")
+            .trim()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let text = core::str::from_utf8(pair).unwrap();
+                u8::from_str_radix(text, 16).unwrap()
+            })
+            .collect()
+    }
+
+    fn outcome() -> TransactionOutcome {
+        let mut result_digest = [0_u8; 32];
+        result_digest[..8].copy_from_slice(&5_i64.to_be_bytes());
+        TransactionOutcome {
+            transaction_id: TransactionId::from_bytes([5; 16]),
+            revision: CommitRevision::FIRST,
+            request_digest: sha256(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5]),
+            result_digest,
+            expires_at: UtcInstant::new(2_592_000, 123).unwrap(),
+        }
+    }
+
+    #[test]
+    fn literal_group_golden_and_decode_agree() {
+        let request_bytes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5];
+        let encoded = encode_group(
+            scope(),
+            TransactionRequest {
+                principal: PrincipalDigest::from_bytes([3; 32]),
+                idempotency_key: IdempotencyKey::from_bytes([4; 16]),
+                transaction_id: TransactionId::from_bytes([5; 16]),
+                canonical_request: &request_bytes,
+            },
+            UtcInstant::new(0, 123).unwrap(),
+            outcome(),
+        )
+        .unwrap();
+        assert_eq!(encoded, golden_group());
+
+        let decoded = decode_group(scope(), &encoded, CommitRevision::FIRST).unwrap();
+        assert_eq!(decoded.request, request_bytes);
+        assert_eq!(
+            decoded.retry_key.principal,
+            PrincipalDigest::from_bytes([3; 32])
+        );
+        assert_eq!(decoded.retry_key.key, IdempotencyKey::from_bytes([4; 16]));
+        assert_eq!(decoded.outcome, outcome());
+    }
+
+    #[test]
+    fn malformed_group_fields_fail_closed() {
+        let valid = golden_group();
+        let mut cases = Vec::new();
+        cases.push(valid[..GROUP_HEADER_BYTES - 1].to_vec());
+        for offset in [0, 4, 5, 6, 8, 96, 108, 112, 120, 184, 191] {
+            let mut bytes = valid.clone();
+            bytes[offset] ^= 0x80;
+            cases.push(bytes);
+        }
+        let mut zero_length = valid.clone();
+        zero_length[112..120].fill(0);
+        cases.push(zero_length);
+        let mut invalid_nanos = valid.clone();
+        invalid_nanos[96..100].copy_from_slice(&1_000_000_000_u32.to_be_bytes());
+        cases.push(invalid_nanos);
+        let mut non_day_retention = valid.clone();
+        non_day_retention[100..108].copy_from_slice(&2_592_001_i64.to_be_bytes());
+        cases.push(non_day_retention);
+        let mut short_retention = valid.clone();
+        short_retention[100..108].copy_from_slice(&2_505_600_i64.to_be_bytes());
+        cases.push(short_retention);
+        let mut long_retention = valid.clone();
+        long_retention[100..108].copy_from_slice(&31_622_400_i64.to_be_bytes());
+        cases.push(long_retention);
+
+        for (case, bytes) in cases.iter().enumerate() {
+            assert_eq!(
+                decode_group(scope(), bytes, CommitRevision::FIRST).unwrap_err(),
+                TransactionError::IntegrityFailure,
+                "malformed case {case} unexpectedly decoded"
+            );
+        }
     }
 }

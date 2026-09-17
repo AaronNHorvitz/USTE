@@ -2,7 +2,7 @@
 
 Date: 2026-09-17
 
-Status: accepted for the T-14 foundation. This refines Decisions 0003 and 0015 without defining
+Status: accepted and implemented for T-14. This refines Decisions 0003 and 0015 without defining
 graph mutations, authorization policy, blob inventory publication or compaction.
 
 ## Coordinator boundary
@@ -65,10 +65,13 @@ The complete group is limited to 16 MiB. Recovery first authenticates the journa
 group shape, scope, lengths, request digest, whole-day retention bounds, logical-event digest,
 duplicate retry/transaction identities and deterministic reducer result before publishing state.
 
-## Current qualification boundary
+## Qualification boundary
 
-The foundation tests exact retry, changed-payload and stale-state conflicts, pre-publication
-cancellation, pinned readers, restart reconstruction, expiry, transaction lookup, and a lost
-certificate-sync response that becomes a durable outcome after recovery. T-14 remains open for the
-complete injected commit/recovery matrix, concurrent caller stress, format goldens and cancellation
-boundary expansion.
+Qualification tests exact retry, changed-payload and stale-state conflicts, both pre-publication
+cancellation polls, pinned readers, restart reconstruction, expiry, transaction lookup, every
+initial journal publication error/crash boundary, short writes, authenticated malformed groups, a
+32-caller stale-mutation race and a lost certificate-sync response that becomes a durable outcome
+after recovery. The literal `txn-group-v1.hex` fixture fixes the complete format bytes. Later graph,
+blob, authorization, compaction and full mixed-load tasks extend this coordinator rather than
+weakening its publication contract. T-17 retains the phantom-sensitive predicate and reference-
+model integration needed for the complete VT-02 suite.

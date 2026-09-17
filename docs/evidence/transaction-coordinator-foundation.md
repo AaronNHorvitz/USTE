@@ -1,6 +1,6 @@
 # T-14 transaction-coordinator foundation evidence
 
-Date: 2026-09-17 · scope: partial T-14 evidence, not task completion or production qualification
+Date: 2026-09-17 · scope: completed local T-14 acceptance, not production qualification
 
 Reviewed implementation: commit `04751345b284901cf0a8943020b5ed4c3539c938` · tree
 `a0ad75c5aa8ec78af2c7971d88237b11a9ca6f4d`. A read-only Codex agent review checked reducer
@@ -22,19 +22,23 @@ not independent transaction or security assessment.
 - Pre-publication cancellation and fail-closed uncertain-outcome quarantine: after an ambiguous
   append, both reads and writes return `OutcomeUnknown` until recovery.
 
-## Focused verification
+## Verification
 
-`cargo test -p uste-txn --all-targets` passes exact retry without a second revision, changed-key and
-stale-state conflicts without mutation, cancellation, pinned-reader isolation across a later
-commit, restart equivalence, expiry, transaction-ID conflict, and lost-response recovery after a
-certificate-sync crash. `cargo clippy -p uste-txn --all-targets -- -D warnings` passes.
-The clock cases also reject adapter failure and demonstrate that wall-clock rollback does not
-control revision ordering.
+`cargo test -p uste-txn --all-targets` passes 8 tests covering the literal group golden and a
+malformed field matrix; exact retry without a second revision; changed-key and stale-state
+conflicts without mutation; both eligible cancellation polls; pinned-reader isolation; restart
+equivalence; expiry; transaction-ID conflict; every initial group/certificate write/sync error,
+crash-before and crash-after boundary; exact short writes; authenticated malformed recovery; and
+lost-response recovery after a certificate-sync crash. A 32-thread Linux test admits exactly one
+of 32 simultaneously submitted stale mutations and recovers that sole revision. The clock cases
+reject adapter failure and demonstrate that wall-clock rollback does not control revision order.
+`cargo clippy -p uste-txn --all-targets -- -D warnings` passes.
 
-## Remaining T-14 work
+## Deliberate later boundaries
 
-The full journal operation/error matrix, concurrent caller stress, literal group goldens,
-malformed-group recovery cases and cancellation at every eligible boundary remain. The owned
-snapshot profile is a correctness implementation and intentionally not a scalability claim.
-Authorization remains T-16; graph semantics remain T-17; compaction of retained outcome/tombstone
-indexes remains T-35.
+The owned snapshot profile is a correctness implementation and intentionally not a scalability
+claim. Blob inventory publication remains T-15, authorization remains T-16, graph semantics remain
+T-17, and scalable MVCC plus compaction of retained outcome/tombstone indexes remain T-29/T-35.
+In particular, T-17 must map the reference model's declared predicate tokens and
+`UnsupportedPredicate` outcomes onto this durable coordinator and exercise phantom-sensitive graph
+operations before the complete VT-02 suite can pass.

@@ -52,10 +52,11 @@ independent external security certification.
   frontier recovery after certificate-sync failure, incomplete-tail repair and hard failure for
   complete certificate/group corruption. A Btrfs child was SIGKILLed after certificate sync and
   the production adapter reopened the exact committed group.
-- Began T-14 with Decision 0016 and `uste-txn`: owned prepare/publish changes, encrypted canonical
+- Completed T-14 with Decision 0016 and `uste-txn`: owned prepare/publish changes, encrypted canonical
   transaction groups, coherent pinned readers, namespace/principal retry scope, durable outcome
-  reconstruction, expiry and uncertain-handle quarantine. Focused conflict/cancellation/restart and
-  lost-response retry tests pass; the task remains open for its full matrix.
+  reconstruction, expiry and uncertain-handle quarantine. Literal group/malformed recovery,
+  complete initial publication-fault, short-I/O, both cancellation-boundary, 32-caller conflict,
+  restart and lost-response retry tests pass.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -120,7 +121,7 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 83 workspace tests including 36 uste-storage and 2
+# workspace format/clippy/test/doc pass; 89 workspace tests including 36 uste-storage and 8
 # uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
@@ -160,6 +161,6 @@ policy checks; no benchmark measurement exists yet.
 
 ## Next dependency-permitted work
 
-Continue T-14 with its complete fault/concurrency/cancellation, format-golden and malformed-recovery
-matrix. T-62 remains independent and must not be represented as complete without owner-administered
-evidence.
+Implement T-15's streaming encrypted blob staging, publication, resume/cleanup and committed
+inventory verification. T-62 remains independent and must not be represented as complete without
+owner-administered evidence.
