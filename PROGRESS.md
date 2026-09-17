@@ -2,10 +2,12 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). The pushed
-`44b6e2f` increment adds T-20's encrypted disk-index foundation; T-20 remains open pending streaming
-larger-than-memory recovery and BM-01/BM-06 results. Review was performed by Codex agents and does
-not represent independent external security certification.
+Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Pushed commits
+through `776a2cf` add T-20's encrypted disk-index and authorized-read foundation. The current
+Decision 0026 increment adds bounded checkpoint publication and deterministic benchmark-fixture
+groundwork; T-20 remains open pending streaming larger-than-memory state/recovery and qualifying
+BM-01/BM-06 results. Review was performed by Codex agents and does not represent independent
+external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -184,6 +186,17 @@ unverified external distribution prerequisite.
   counters opaque, mixed-direction scans share global candidate/byte limits, and admitted view
   binding is constant-time. Authorized in-memory/disk results agree before and after an encrypted
   restart.
+- Added borrow-aware reducer checkpoint access so cold replay, checkpoint metadata and graph/spatial
+  state encoding do not clone retained snapshots solely for inspection. Graph canonical checkpoint
+  bytes now stream to a fallible sink and remain byte-identical to the format-1.0 collector.
+- Added declared-length checkpoint publication with a one-new-payload-chunk plaintext buffer and
+  terminal-manifest visibility only after exact production. Explicit producer failure, short and long
+  streams leave the earlier candidate usable. Index prefix scans now also expose a bounded visitor
+  path instead of requiring result collection.
+- Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
+  distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
+  independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
+  `engine_benchmark: false`; no BM-01 timing or T-20 closure is claimed.
 - Corrected review findings for normalizer-construction bypass, cap-before-copy behavior, malformed
   date-only inputs and open semantic reason combinations. Final review found no remaining high- or
   medium-severity T-45 finding; dependency unsafe remains explicitly inventoried.
@@ -293,8 +306,10 @@ remaining mixed workload have not passed.
 - The canonical kernel through T-49 plus T-20's encrypted current-graph disk projection is
   implemented, but there is no database executable or production qualification. Privileged raw
   disk APIs remain separate from the new authorization-preserving current-graph consumer path.
-  Checkpoint discovery and seeded open each authenticate the journal, while the 256 MiB checkpoint
-  and reducer still retain/clone full graph history in memory; BM-01/BM-06 have not run. Graph policy
+  Checkpoint discovery and seeded open each authenticate the journal, and publication can now stream
+  with a one-new-payload-chunk buffer, while candidate selection/recovery still materializes bounded
+  payloads and reducer writes retain/clone full graph history in memory; BM-01/BM-06 have not run.
+  Graph policy
   is durable; the trusted adapter must supply its exact current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
   compiler, both confined to development tooling.
@@ -316,8 +331,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with the streaming larger-than-memory checkpoint/state path and exact BM-01/BM-06
-harnesses. Then return to T-19's remaining VT gaps and
+Continue T-20 with new versioned disk-backed state profiles, delta validation and streaming
+larger-than-memory recovery, then connect the pinned fixture to exact BM-01 and define/run BM-06's
+10-million-event protocol. Then return to T-19's remaining VT gaps and
 BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

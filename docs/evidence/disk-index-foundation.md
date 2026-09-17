@@ -37,8 +37,8 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 235 workspace tests passed; format, clippy, rustdoc, docs/task graph, R0 vectors,
-# storage publication model and isolated dependency/fixture builds passed
+# 237 workspace tests and 10 isolated t20-bench tests passed; format, clippy, rustdoc,
+# docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
 
 The storage regressions cover large fragmented values, exact/prefix reads, cache eviction and
@@ -62,3 +62,26 @@ bounded cache, and per-read view binding is constant-time after full admission.
   authoritative baseline promotion, compaction and orphan reclamation.
 
 No benchmark or T-20 task completion is claimed by this increment.
+
+## Streaming and fixture groundwork
+
+Decision 0026 adds borrow-aware current-state checkpoint methods so graph/spatial replay metadata
+does not clone complete snapshots, and a regression reducer whose `snapshot()` panics proves cold
+replay and capture use that path. Graph checkpoint encoding emits canonical format-1.0 bytes to a
+fallible sink; the old collecting API returns identical bytes. Storage publication retains one
+1 MiB plaintext chunk of the new payload, hashes incrementally and withholds the terminal manifest on explicit
+producer error or declared-length mismatch. Candidate selection/recovery still materializes existing
+payloads and therefore does not yet provide BM-06's larger-than-memory property.
+
+Index prefix scans can now yield entries to a fallible visitor under the existing shared result
+limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
+stops after the first delivered entry in the regression.
+
+The isolated `experiments/t20-bench` crate pins the exact BM-01 seed, 100,000/1,000,000 fixture,
+80/10/10 uniform/hub/ring topology, typed identifiers, measured/warm-up query corpora and an
+independent adjacency-array BFS oracle. Its exact digests are recorded in
+`acceptance/r1/bm01-materialization-v1.tsv` and checked in the normal repository script. It neither
+opens USTE nor measures it and explicitly emits `engine_benchmark: false`; BM-01 remains unrun.
+
+The full `bash scripts/check.sh` gate passed after this extension: 237 workspace tests, all docs,
+strict clippy/rustdoc, the storage publication model, and 10 isolated T-20 fixture tests passed.

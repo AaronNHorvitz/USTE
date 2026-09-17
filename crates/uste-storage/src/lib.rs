@@ -27,8 +27,8 @@ pub use blob::{
     MAX_NAMESPACE_BLOB_BYTES,
 };
 pub use checkpoint::{
-    CHECKPOINT_CHUNK_BYTES, CheckpointInput, DurableCheckpoint, MAX_CHECKPOINT_BYTES,
-    RecoveredCheckpoint,
+    CHECKPOINT_CHUNK_BYTES, CheckpointInput, CheckpointStreamInput, DurableCheckpoint,
+    MAX_CHECKPOINT_BYTES, RecoveredCheckpoint,
 };
 pub use index::{
     DEFAULT_INDEX_CACHE_BYTES, DurableIndexRoot, INDEX_PAGE_BYTES, IndexEntry, IndexReadStats,

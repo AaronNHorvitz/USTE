@@ -20,10 +20,10 @@ use sha2::{Digest, Sha256};
 use uste_crypto::{EntropySource, KeyAdapter};
 pub use uste_policy::PrincipalDigest;
 use uste_storage::{
-    BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput, Clock,
-    DurableCheckpoint, DurableIndexRoot, EMPTY_BLOB_INVENTORY_DIGEST, IndexEntry, IndexReadStats,
-    IndexRootInput, IndexRunDescriptor, IndexScan, IndexScrubReport, OwnershipFileSystem,
-    PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
+    BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
+    CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot, EMPTY_BLOB_INVENTORY_DIGEST,
+    IndexEntry, IndexReadStats, IndexRootInput, IndexRunDescriptor, IndexScan, IndexScrubReport,
+    OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -135,11 +135,54 @@ pub trait CheckpointState: TransactionState + Sized {
 
     fn encode_checkpoint(snapshot: &Self::Snapshot) -> Result<Vec<u8>, CheckpointStateError>;
 
+    /// Emit canonical checkpoint bytes to a bounded fallible sink. The compatibility default
+    /// materializes the existing encoding; reducers should override it when their canonical
+    /// representation can be produced incrementally.
+    fn encode_checkpoint_into(
+        snapshot: &Self::Snapshot,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+    ) -> Result<(), CheckpointStateError> {
+        let encoded = Self::encode_checkpoint(snapshot)?;
+        sink(&encoded)
+    }
+
     fn decode_checkpoint(
         scope: NamespaceRef,
         revision: CommitRevision,
         encoded: &[u8],
     ) -> Result<Self, CheckpointStateError>;
+
+    /// Borrow-aware current-state scope access. Reducers with an internally retained snapshot
+    /// should override this to avoid cloning solely for checkpoint/replay metadata.
+    fn current_checkpoint_scope(&self) -> NamespaceRef {
+        Self::checkpoint_scope(&self.snapshot())
+    }
+
+    /// Borrow-aware current-state revision access. Replay calls this after every publication, so
+    /// reducers with nontrivial snapshots must override it with constant-time access.
+    fn current_checkpoint_revision(&self) -> Option<CommitRevision> {
+        Self::checkpoint_revision(&self.snapshot())
+    }
+
+    /// Borrow-aware digest of the current coherent state. Implementations may stream their
+    /// retained representation directly rather than constructing an owned snapshot first.
+    fn current_logical_state_digest(&self) -> Result<[u8; 32], CheckpointStateError> {
+        Self::logical_state_digest(&self.snapshot())
+    }
+
+    /// Borrow-aware encoding of the current coherent state. This is the allocating compatibility
+    /// wrapper; streaming publication should use `encode_current_checkpoint_into`.
+    fn encode_current_checkpoint(&self) -> Result<Vec<u8>, CheckpointStateError> {
+        Self::encode_checkpoint(&self.snapshot())
+    }
+
+    /// Borrow-aware streaming encoding of the current coherent state.
+    fn encode_current_checkpoint_into(
+        &self,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+    ) -> Result<(), CheckpointStateError> {
+        Self::encode_checkpoint_into(&self.snapshot(), sink)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -276,16 +319,18 @@ where
     ) -> Result<Self, TransactionError> {
         let scope = checkpoint.scope();
         let revision = checkpoint.revision();
-        let snapshot = state.snapshot();
-        if S::checkpoint_scope(&snapshot) != scope
-            || S::checkpoint_revision(&snapshot) != Some(revision)
+        if state.current_checkpoint_scope() != scope
+            || state.current_checkpoint_revision() != Some(revision)
             || checkpoint.reducer_profile() != &S::REDUCER_PROFILE
-            || S::logical_state_digest(&snapshot).map_err(|error| match error {
-                CheckpointStateError::ResourceLimit => TransactionError::ResourceLimit,
-                CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
-                    TransactionError::IntegrityFailure
-                }
-            })? != *checkpoint.logical_state_digest()
+            || state
+                .current_logical_state_digest()
+                .map_err(|error| match error {
+                    CheckpointStateError::ResourceLimit => TransactionError::ResourceLimit,
+                    CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
+                        TransactionError::IntegrityFailure
+                    }
+                })?
+                != *checkpoint.logical_state_digest()
         {
             return Err(TransactionError::IntegrityFailure);
         }
@@ -613,6 +658,27 @@ where
         }
         self.journal
             .publish_checkpoint(filesystem, input)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Publish declared-length checkpoint bytes without materializing the complete payload.
+    pub fn publish_checkpoint_stream<P>(
+        &mut self,
+        filesystem: &mut F,
+        input: CheckpointStreamInput,
+        producer: P,
+    ) -> Result<DurableCheckpoint, TransactionError>
+    where
+        P: FnOnce(&mut dyn FnMut(&[u8]) -> Result<(), StorageError>) -> Result<(), StorageError>,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_checkpoint_stream(filesystem, input, producer)
             .map_err(TransactionError::Storage)
     }
 

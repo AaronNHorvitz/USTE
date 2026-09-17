@@ -448,12 +448,42 @@ impl CheckpointState for GraphState {
         encode_graph_checkpoint(snapshot)
     }
 
+    fn encode_checkpoint_into(
+        snapshot: &Self::Snapshot,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+    ) -> Result<(), CheckpointStateError> {
+        encode_graph_checkpoint_into(snapshot, sink)
+    }
+
     fn decode_checkpoint(
         scope: NamespaceRef,
         revision: CommitRevision,
         encoded: &[u8],
     ) -> Result<Self, CheckpointStateError> {
         decode_graph_checkpoint(scope, revision, encoded)
+    }
+
+    fn current_checkpoint_scope(&self) -> NamespaceRef {
+        self.snapshot.scope
+    }
+
+    fn current_checkpoint_revision(&self) -> Option<CommitRevision> {
+        self.snapshot.revision
+    }
+
+    fn current_logical_state_digest(&self) -> Result<[u8; 32], CheckpointStateError> {
+        digest_graph_snapshot(&self.snapshot)
+    }
+
+    fn encode_current_checkpoint(&self) -> Result<Vec<u8>, CheckpointStateError> {
+        encode_graph_checkpoint(&self.snapshot)
+    }
+
+    fn encode_current_checkpoint_into(
+        &self,
+        sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+    ) -> Result<(), CheckpointStateError> {
+        encode_graph_checkpoint_into(&self.snapshot, sink)
     }
 }
 
@@ -529,6 +559,21 @@ fn digest_graph_frame(digest: &mut Sha256, value: &[u8]) -> Result<(), Checkpoin
 }
 
 fn encode_graph_checkpoint(snapshot: &GraphSnapshot) -> Result<Vec<u8>, CheckpointStateError> {
+    let mut output = Vec::new();
+    encode_graph_checkpoint_into(snapshot, &mut |bytes| {
+        output
+            .try_reserve(bytes.len())
+            .map_err(|_| CheckpointStateError::ResourceLimit)?;
+        output.extend_from_slice(bytes);
+        Ok(())
+    })?;
+    Ok(output)
+}
+
+fn encode_graph_checkpoint_into(
+    snapshot: &GraphSnapshot,
+    sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+) -> Result<(), CheckpointStateError> {
     let revision = snapshot.revision.ok_or(CheckpointStateError::Invalid)?;
     if snapshot.records.len() > MAX_GRAPH_CHECKPOINT_RECORDS
         || snapshot.history.len() > MAX_GRAPH_CHECKPOINT_RECORDS
@@ -545,43 +590,32 @@ fn encode_graph_checkpoint(snapshot: &GraphSnapshot) -> Result<Vec<u8>, Checkpoi
         return Err(CheckpointStateError::ResourceLimit);
     }
 
-    let mut output = Vec::new();
-    checkpoint_extend(&mut output, GRAPH_CHECKPOINT_MAGIC)?;
-    checkpoint_extend(&mut output, snapshot.scope.database().as_bytes())?;
-    checkpoint_extend(&mut output, snapshot.scope.namespace().as_bytes())?;
-    checkpoint_extend(&mut output, &revision.get().to_be_bytes())?;
-    checkpoint_u64(&mut output, snapshot.records.len())?;
+    let mut output = CheckpointOutput::new(sink);
+    output.extend(GRAPH_CHECKPOINT_MAGIC)?;
+    output.extend(snapshot.scope.database().as_bytes())?;
+    output.extend(snapshot.scope.namespace().as_bytes())?;
+    output.extend(&revision.get().to_be_bytes())?;
+    output.usize(snapshot.records.len())?;
     for (id, record) in &snapshot.records {
-        checkpoint_extend(&mut output, id.record().as_bytes())?;
-        checkpoint_frame(
-            &mut output,
-            &encode_result_record(record).map_err(checkpoint_codec_error)?,
-        )?;
+        output.extend(id.record().as_bytes())?;
+        output.frame(&encode_result_record(record).map_err(checkpoint_codec_error)?)?;
     }
-    checkpoint_u64(&mut output, snapshot.history.len())?;
+    output.usize(snapshot.history.len())?;
     for (id, versions) in &snapshot.history {
-        checkpoint_extend(&mut output, id.record().as_bytes())?;
-        checkpoint_u64(&mut output, versions.len())?;
+        output.extend(id.record().as_bytes())?;
+        output.usize(versions.len())?;
         for record in versions {
-            checkpoint_frame(
-                &mut output,
-                &encode_result_record(record).map_err(checkpoint_codec_error)?,
-            )?;
+            output.frame(&encode_result_record(record).map_err(checkpoint_codec_error)?)?;
         }
     }
-    checkpoint_frame(
-        &mut output,
-        &encode_result_policy(snapshot.policy.as_ref()).map_err(checkpoint_codec_error)?,
-    )?;
-    checkpoint_u64(&mut output, snapshot.policy_history.len())?;
+    output
+        .frame(&encode_result_policy(snapshot.policy.as_ref()).map_err(checkpoint_codec_error)?)?;
+    output.usize(snapshot.policy_history.len())?;
     for (policy_revision, policy) in &snapshot.policy_history {
-        checkpoint_extend(&mut output, &policy_revision.get().to_be_bytes())?;
-        checkpoint_frame(
-            &mut output,
-            &encode_result_policy(Some(policy)).map_err(checkpoint_codec_error)?,
-        )?;
+        output.extend(&policy_revision.get().to_be_bytes())?;
+        output.frame(&encode_result_policy(Some(policy)).map_err(checkpoint_codec_error)?)?;
     }
-    Ok(output)
+    Ok(())
 }
 
 fn decode_graph_checkpoint(
@@ -1052,29 +1086,38 @@ fn checkpoint_record(scope: NamespaceRef, record: [u8; 16]) -> RecordRef {
     )
 }
 
-fn checkpoint_u64(output: &mut Vec<u8>, value: usize) -> Result<(), CheckpointStateError> {
-    let value = u64::try_from(value).map_err(|_| CheckpointStateError::ResourceLimit)?;
-    checkpoint_extend(output, &value.to_be_bytes())
+struct CheckpointOutput<'a> {
+    sink: &'a mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+    written: usize,
 }
 
-fn checkpoint_frame(output: &mut Vec<u8>, value: &[u8]) -> Result<(), CheckpointStateError> {
-    checkpoint_u64(output, value.len())?;
-    checkpoint_extend(output, value)
-}
-
-fn checkpoint_extend(output: &mut Vec<u8>, value: &[u8]) -> Result<(), CheckpointStateError> {
-    let next = output
-        .len()
-        .checked_add(value.len())
-        .ok_or(CheckpointStateError::ResourceLimit)?;
-    if next > MAX_GRAPH_CHECKPOINT_BYTES {
-        return Err(CheckpointStateError::ResourceLimit);
+impl<'a> CheckpointOutput<'a> {
+    fn new(sink: &'a mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>) -> Self {
+        Self { sink, written: 0 }
     }
-    output
-        .try_reserve(value.len())
-        .map_err(|_| CheckpointStateError::ResourceLimit)?;
-    output.extend_from_slice(value);
-    Ok(())
+
+    fn usize(&mut self, value: usize) -> Result<(), CheckpointStateError> {
+        let value = u64::try_from(value).map_err(|_| CheckpointStateError::ResourceLimit)?;
+        self.extend(&value.to_be_bytes())
+    }
+
+    fn frame(&mut self, value: &[u8]) -> Result<(), CheckpointStateError> {
+        self.usize(value.len())?;
+        self.extend(value)
+    }
+
+    fn extend(&mut self, value: &[u8]) -> Result<(), CheckpointStateError> {
+        let next = self
+            .written
+            .checked_add(value.len())
+            .ok_or(CheckpointStateError::ResourceLimit)?;
+        if next > MAX_GRAPH_CHECKPOINT_BYTES {
+            return Err(CheckpointStateError::ResourceLimit);
+        }
+        (self.sink)(value)?;
+        self.written = next;
+        Ok(())
+    }
 }
 
 struct CheckpointCursor<'a> {

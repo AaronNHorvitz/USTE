@@ -237,6 +237,23 @@ impl CheckpointState for SpatialState {
     ) -> Result<Self, CheckpointStateError> {
         decode_checkpoint(scope, revision, encoded)
     }
+
+    fn current_checkpoint_scope(&self) -> NamespaceRef {
+        self.snapshot.scope
+    }
+
+    fn current_checkpoint_revision(&self) -> Option<CommitRevision> {
+        self.snapshot.revision
+    }
+
+    fn current_logical_state_digest(&self) -> Result<[u8; 32], CheckpointStateError> {
+        digest_snapshot(&self.snapshot, b"USTE-SPATIAL-LOGICAL-STATE-V1\0")
+            .map_err(map_checkpoint_error)
+    }
+
+    fn encode_current_checkpoint(&self) -> Result<Vec<u8>, CheckpointStateError> {
+        encode_checkpoint(&self.snapshot)
+    }
 }
 
 fn encode_checkpoint(snapshot: &SpatialSnapshot) -> Result<Vec<u8>, CheckpointStateError> {

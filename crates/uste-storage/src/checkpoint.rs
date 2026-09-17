@@ -34,6 +34,31 @@ pub struct CheckpointInput<'a> {
     pub payload: &'a [u8],
 }
 
+/// Metadata for a bounded checkpoint payload supplied incrementally.
+#[derive(Clone, Copy)]
+pub struct CheckpointStreamInput {
+    pub scope: NamespaceRef,
+    pub revision: CommitRevision,
+    pub certificate_digest: [u8; 32],
+    pub reducer_profile: [u8; 32],
+    pub logical_state_digest: [u8; 32],
+    pub payload_len: u64,
+}
+
+impl core::fmt::Debug for CheckpointStreamInput {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("CheckpointStreamInput")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("reducer_profile", &"[REDACTED]")
+            .field("logical_state_digest", &"[REDACTED]")
+            .field("payload_len", &self.payload_len)
+            .finish()
+    }
+}
+
 impl core::fmt::Debug for CheckpointInput<'_> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -151,9 +176,45 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    let payload_len =
+        u64::try_from(input.payload.len()).map_err(|_| StorageError::ResourceLimit)?;
+    publish_stream(
+        filesystem,
+        context,
+        vault,
+        identity_entropy,
+        CheckpointStreamInput {
+            scope: input.scope,
+            revision: input.revision,
+            certificate_digest: input.certificate_digest,
+            reducer_profile: input.reducer_profile,
+            logical_state_digest: input.logical_state_digest,
+            payload_len,
+        },
+        |sink| sink(input.payload),
+    )
+}
+
+pub(crate) fn publish_stream<F, W, E, I, P>(
+    filesystem: &mut F,
+    context: CheckpointContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    identity_entropy: &mut I,
+    input: CheckpointStreamInput,
+    producer: P,
+) -> Result<DurableCheckpoint, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+    P: FnOnce(&mut dyn FnMut(&[u8]) -> Result<(), StorageError>) -> Result<(), StorageError>,
+{
+    let payload_len =
+        usize::try_from(input.payload_len).map_err(|_| StorageError::ResourceLimit)?;
     if input.scope.database() != context.database
-        || input.payload.is_empty()
-        || input.payload.len() > MAX_CHECKPOINT_BYTES
+        || payload_len == 0
+        || payload_len > MAX_CHECKPOINT_BYTES
     {
         return Err(StorageError::InvalidState);
     }
@@ -177,42 +238,99 @@ where
     invalidate_slot(filesystem, context.directory, slot)?;
 
     let object_id = random_nonzero_id(identity_entropy)?;
-    let chunk_count = input.payload.len().div_ceil(CHECKPOINT_CHUNK_BYTES);
+    let chunk_count = payload_len.div_ceil(CHECKPOINT_CHUNK_BYTES);
     let chunk_count_u32 = u32::try_from(chunk_count).map_err(|_| StorageError::ResourceLimit)?;
     if chunk_count == 0 || chunk_count > MAX_CHECKPOINT_CHUNKS {
         return Err(StorageError::ResourceLimit);
     }
-    for (index, chunk) in input.payload.chunks(CHECKPOINT_CHUNK_BYTES).enumerate() {
-        let name = chunk_name(slot, index)?;
-        remove_if_present(filesystem, context.directory, &name)?;
-        let sequence = u64::try_from(index)
-            .map_err(|_| StorageError::ResourceLimit)?
+    let mut pending = Vec::new();
+    pending
+        .try_reserve_exact(CHECKPOINT_CHUNK_BYTES)
+        .map_err(|_| StorageError::ResourceLimit)?;
+    let mut payload_digest = Sha256::new();
+    let mut actual_len = 0_usize;
+    let mut written_chunks = 0_usize;
+    let mut sink_error = None;
+    let producer_result = {
+        let mut sink = |mut bytes: &[u8]| -> Result<(), StorageError> {
+            if let Some(error) = sink_error {
+                return Err(error);
+            }
+            let next = actual_len
+                .checked_add(bytes.len())
+                .ok_or(StorageError::ResourceLimit);
+            let next = match next {
+                Ok(next) => next,
+                Err(error) => {
+                    sink_error = Some(error);
+                    return Err(error);
+                }
+            };
+            if next > payload_len {
+                sink_error = Some(StorageError::InvalidState);
+                return Err(StorageError::InvalidState);
+            }
+            actual_len = next;
+            payload_digest.update(bytes);
+            while !bytes.is_empty() {
+                let count = (CHECKPOINT_CHUNK_BYTES - pending.len()).min(bytes.len());
+                pending.extend_from_slice(&bytes[..count]);
+                bytes = &bytes[count..];
+                if pending.len() == CHECKPOINT_CHUNK_BYTES {
+                    if let Err(error) = publish_chunk(
+                        filesystem,
+                        &context,
+                        vault,
+                        input.scope,
+                        slot,
+                        object_id,
+                        written_chunks,
+                        &pending,
+                    ) {
+                        sink_error = Some(error);
+                        return Err(error);
+                    }
+                    written_chunks = match written_chunks
+                        .checked_add(1)
+                        .ok_or(StorageError::ResourceLimit)
+                    {
+                        Ok(written_chunks) => written_chunks,
+                        Err(error) => {
+                            sink_error = Some(error);
+                            return Err(error);
+                        }
+                    };
+                    pending.clear();
+                }
+            }
+            Ok(())
+        };
+        producer(&mut sink)
+    };
+    if let Some(error) = sink_error {
+        return Err(error);
+    }
+    producer_result?;
+    if actual_len != payload_len {
+        return Err(StorageError::InvalidState);
+    }
+    if !pending.is_empty() {
+        publish_chunk(
+            filesystem,
+            &context,
+            vault,
+            input.scope,
+            slot,
+            object_id,
+            written_chunks,
+            &pending,
+        )?;
+        written_chunks = written_chunks
             .checked_add(1)
             .ok_or(StorageError::ResourceLimit)?;
-        let encoded = vault
-            .encrypt(
-                checkpoint_context(
-                    &context,
-                    input.scope.namespace(),
-                    object_id,
-                    sequence,
-                    FrameClass::Blob64KiB,
-                ),
-                chunk,
-            )?
-            .encode()?;
-        if u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?
-            > MAX_ENCODED_CHUNK_BYTES
-        {
-            return Err(StorageError::ResourceLimit);
-        }
-        let file = filesystem.create_new(context.directory, &name)?;
-        write_all_at(filesystem, &file, 0, &encoded)?;
-        filesystem.set_len(
-            &file,
-            u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?,
-        )?;
-        filesystem.sync_all(&file)?;
+    }
+    if written_chunks != chunk_count {
+        return Err(StorageError::IntegrityFailure);
     }
     // Chunk names and bytes precede the terminal manifest in the durable directory order.
     filesystem.sync_directory(context.directory)?;
@@ -224,8 +342,8 @@ where
         certificate_digest: input.certificate_digest,
         reducer_profile: input.reducer_profile,
         logical_state_digest: input.logical_state_digest,
-        payload_digest: Sha256::digest(input.payload).into(),
-        payload_len: u64::try_from(input.payload.len()).map_err(|_| StorageError::ResourceLimit)?,
+        payload_digest: payload_digest.finalize().into(),
+        payload_len: input.payload_len,
         chunk_count: chunk_count_u32,
         object_id,
     };
@@ -533,6 +651,58 @@ fn remove_if_present<F: FileSystem>(
         Err(error) if error.kind() == AdapterErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_chunk<F, W, E>(
+    filesystem: &mut F,
+    context: &CheckpointContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    scope: NamespaceRef,
+    slot: Slot,
+    object_id: [u8; 16],
+    index: usize,
+    chunk: &[u8],
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    if chunk.is_empty() || chunk.len() > CHECKPOINT_CHUNK_BYTES {
+        return Err(StorageError::InvalidState);
+    }
+    let name = chunk_name(slot, index)?;
+    remove_if_present(filesystem, context.directory, &name)?;
+    let sequence = u64::try_from(index)
+        .map_err(|_| StorageError::ResourceLimit)?
+        .checked_add(1)
+        .ok_or(StorageError::ResourceLimit)?;
+    let encoded = vault
+        .encrypt(
+            checkpoint_context(
+                context,
+                scope.namespace(),
+                object_id,
+                sequence,
+                FrameClass::Blob64KiB,
+            ),
+            chunk,
+        )?
+        .encode()?;
+    if u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?
+        > MAX_ENCODED_CHUNK_BYTES
+    {
+        return Err(StorageError::ResourceLimit);
+    }
+    let file = filesystem.create_new(context.directory, &name)?;
+    write_all_at(filesystem, &file, 0, &encoded)?;
+    filesystem.set_len(
+        &file,
+        u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?,
+    )?;
+    filesystem.sync_all(&file)?;
+    Ok(())
 }
 
 fn checkpoint_context<D>(

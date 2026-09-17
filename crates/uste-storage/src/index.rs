@@ -750,6 +750,46 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
+    let mut entries = Vec::new();
+    let stats = scan_prefix_visit(
+        filesystem,
+        context,
+        vault,
+        root,
+        family,
+        prefix,
+        maximum,
+        maximum_result_bytes,
+        cache,
+        &mut |entry| {
+            entries
+                .try_reserve(1)
+                .map_err(|_| StorageError::ResourceLimit)?;
+            entries.push(entry);
+            Ok(())
+        },
+    )?;
+    Ok(IndexScan { entries, stats })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn scan_prefix_visit<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    prefix: &[u8],
+    maximum: usize,
+    maximum_result_bytes: usize,
+    cache: &mut PageCache,
+    visitor: &mut dyn FnMut(IndexScanEntry) -> Result<(), StorageError>,
+) -> Result<IndexReadStats, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
     validate_read(root, context, prefix)?;
     if maximum > MAX_INDEX_SCAN_RESULTS || maximum_result_bytes > MAX_INDEX_RESULT_BYTES {
         return Err(StorageError::ResourceLimit);
@@ -760,12 +800,9 @@ where
         filesystem, context, vault, root, run, prefix, cache, &mut stats,
     )?
     else {
-        return Ok(IndexScan {
-            entries: Vec::new(),
-            stats,
-        });
+        return Ok(stats);
     };
-    let mut output = Vec::new();
+    let mut entry_count = 0_usize;
     let mut current_key = Vec::new();
     let mut current_value = Vec::new();
     let mut current_total = None;
@@ -803,7 +840,7 @@ where
             }
             current_value.extend_from_slice(fragment.value);
             if current_value.len() == fragment.total_len {
-                if output.len() == maximum {
+                if entry_count == maximum {
                     return Err(StorageError::ResourceLimit);
                 }
                 let next_bytes = current_key
@@ -820,10 +857,13 @@ where
                 }
                 stats.result_bytes =
                     u64::try_from(next_bytes).map_err(|_| StorageError::ResourceLimit)?;
-                output.push(IndexScanEntry {
+                visitor(IndexScanEntry {
                     key: core::mem::take(&mut current_key),
                     value: core::mem::take(&mut current_value),
-                });
+                })?;
+                entry_count = entry_count
+                    .checked_add(1)
+                    .ok_or(StorageError::ResourceLimit)?;
                 current_total = None;
             }
         }
@@ -834,10 +874,7 @@ where
     if current_total.is_some() {
         return Err(StorageError::IntegrityFailure);
     }
-    Ok(IndexScan {
-        entries: output,
-        stats,
-    })
+    Ok(stats)
 }
 
 struct RunWriter<'a, F, W, E>

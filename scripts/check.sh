@@ -15,6 +15,7 @@ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --lock
 cargo fmt --manifest-path experiments/dependency-audit/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/fixture-generator/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/content-fixtures/Cargo.toml -- --check
+cargo fmt --manifest-path experiments/t20-bench/Cargo.toml -- --check
 cargo fmt --manifest-path fuzz/Cargo.toml -- --check
 cargo metadata --manifest-path fuzz/Cargo.toml --locked --offline --format-version 1 \
   > /dev/null
@@ -35,3 +36,8 @@ CARGO_TARGET_DIR="$check_tmp/fixture-target" \
   cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
 CARGO_TARGET_DIR="$check_tmp/content-target" \
   cargo test --manifest-path experiments/content-fixtures/Cargo.toml --locked --offline
+CARGO_TARGET_DIR="$check_tmp/t20-bench-target" \
+  cargo test --manifest-path experiments/t20-bench/Cargo.toml --locked --offline
+CARGO_TARGET_DIR="$check_tmp/t20-bench-target" \
+  cargo clippy --manifest-path experiments/t20-bench/Cargo.toml \
+    --all-targets --locked --offline -- -D warnings

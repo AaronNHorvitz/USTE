@@ -23,11 +23,13 @@ use crate::{
         read_range, resume_upload, verify_reference, write_upload,
     },
     checkpoint::{
-        self, CheckpointContext, CheckpointInput, DurableCheckpoint, RecoveredCheckpoint,
+        self, CheckpointContext, CheckpointInput, CheckpointStreamInput, DurableCheckpoint,
+        RecoveredCheckpoint,
     },
     index::{
         self, DurableIndexRoot, IndexContext, IndexEntry, IndexReadStats, IndexRootInput,
-        IndexRunDescriptor, IndexScan, IndexScrubReport, PageCache, RecoveredIndexRoot,
+        IndexRunDescriptor, IndexScan, IndexScanEntry, IndexScrubReport, PageCache,
+        RecoveredIndexRoot,
     },
     read_exact_at, write_all_at,
 };
@@ -947,6 +949,41 @@ where
         )
     }
 
+    /// Publish a checkpoint from a declared-length fallible byte producer. At most one plaintext
+    /// chunk of the new payload is buffered; authenticated existing candidates are still loaded by
+    /// the format-1.0 slot selector. Producer failure or length mismatch leaves no terminal manifest
+    /// and therefore cannot publish a cache candidate.
+    pub fn publish_checkpoint_stream<P>(
+        &mut self,
+        filesystem: &mut F,
+        input: CheckpointStreamInput,
+        producer: P,
+    ) -> Result<DurableCheckpoint, StorageError>
+    where
+        P: FnOnce(&mut dyn FnMut(&[u8]) -> Result<(), StorageError>) -> Result<(), StorageError>,
+    {
+        if self.poisoned
+            || self.frontier != Some(input.revision)
+            || self.previous_certificate_digest != input.certificate_digest
+            || input.scope.database() != self.database
+        {
+            return Err(StorageError::InvalidState);
+        }
+        checkpoint::publish_stream(
+            filesystem,
+            CheckpointContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            input,
+            producer,
+        )
+    }
+
     /// Load up to two authenticated cache candidates, newest first. Invalid cache objects are
     /// omitted so callers can cold-replay the authoritative journal.
     #[must_use]
@@ -1159,6 +1196,43 @@ where
             maximum,
             maximum_result_bytes,
             cache,
+        )
+    }
+
+    /// Bounded ordered prefix scan that yields each decoded entry to a fallible visitor instead
+    /// of retaining the complete result set. Visitor failure stops immediately and cannot mutate
+    /// journal or index authority.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix_visit(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+        visitor: &mut dyn FnMut(IndexScanEntry) -> Result<(), StorageError>,
+    ) -> Result<IndexReadStats, StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::scan_prefix_visit(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            prefix,
+            maximum,
+            maximum_result_bytes,
+            cache,
+            visitor,
         )
     }
 
@@ -2266,19 +2340,55 @@ mod tests {
                 },
             )
             .unwrap();
-        let second_payload = b"newest complete cache";
+        let mut second_payload = first_payload.clone();
+        second_payload[0] ^= 0x5a;
+        let stream_input = CheckpointStreamInput {
+            scope,
+            revision: second_commit.revision,
+            certificate_digest: second_commit.certificate_digest,
+            reducer_profile: [0xc4; 32],
+            logical_state_digest: [0xc6; 32],
+            payload_len: u64::try_from(second_payload.len()).unwrap(),
+        };
+        assert_eq!(
+            store.publish_checkpoint_stream(&mut filesystem, stream_input, |sink| {
+                sink(&second_payload[..checkpoint::CHECKPOINT_CHUNK_BYTES])?;
+                Err(StorageError::InvalidState)
+            }),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(store.load_checkpoints(&mut filesystem, scope).len(), 1);
+        assert_eq!(
+            store.publish_checkpoint_stream(&mut filesystem, stream_input, |sink| {
+                sink(&second_payload[..second_payload.len() - 1])
+            }),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(store.load_checkpoints(&mut filesystem, scope).len(), 1);
+        assert_eq!(
+            store.publish_checkpoint_stream(&mut filesystem, stream_input, |sink| {
+                sink(&second_payload)?;
+                sink(&[0])
+            }),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(store.load_checkpoints(&mut filesystem, scope).len(), 1);
+        assert_eq!(
+            store.publish_checkpoint_stream(&mut filesystem, stream_input, |sink| {
+                sink(&second_payload)?;
+                let ignored = sink(&[0]);
+                assert_eq!(ignored, Err(StorageError::InvalidState));
+                Ok(())
+            }),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(store.load_checkpoints(&mut filesystem, scope).len(), 1);
         let second = store
-            .publish_checkpoint(
-                &mut filesystem,
-                CheckpointInput {
-                    scope,
-                    revision: second_commit.revision,
-                    certificate_digest: second_commit.certificate_digest,
-                    reducer_profile: [0xc4; 32],
-                    logical_state_digest: [0xc6; 32],
-                    payload: second_payload,
-                },
-            )
+            .publish_checkpoint_stream(&mut filesystem, stream_input, |sink| {
+                sink(&second_payload[..13])?;
+                sink(&second_payload[13..checkpoint::CHECKPOINT_CHUNK_BYTES + 3])?;
+                sink(&second_payload[checkpoint::CHECKPOINT_CHUNK_BYTES + 3..])
+            })
             .unwrap();
         assert_eq!(second.generation, 2);
         let loaded = store.load_checkpoints(&mut filesystem, scope);
@@ -2462,11 +2572,61 @@ mod tests {
             .unwrap();
         assert_eq!(
             scan.entries,
-            vec![index::IndexScanEntry {
+            vec![IndexScanEntry {
                 key: b"gamma".to_vec(),
                 value: b"tail".to_vec(),
             }]
         );
+        let mut collected = Vec::new();
+        let mut visit_cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        let visit_stats = store
+            .index_scan_prefix_visit(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"g",
+                1,
+                64,
+                &mut visit_cache,
+                &mut |entry| {
+                    collected.push(entry);
+                    Ok(())
+                },
+            )
+            .unwrap();
+        let mut comparison_cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        let comparison = store
+            .index_scan_prefix(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"g",
+                1,
+                64,
+                &mut comparison_cache,
+            )
+            .unwrap();
+        assert_eq!(collected, comparison.entries);
+        assert_eq!(visit_stats, comparison.stats);
+
+        let mut visits = 0_usize;
+        assert_eq!(
+            store.index_scan_prefix_visit(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"a",
+                1,
+                index::MAX_INDEX_RESULT_BYTES,
+                &mut cache,
+                &mut |_| {
+                    visits += 1;
+                    Err(StorageError::InvalidState)
+                },
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(visits, 1);
         assert_eq!(
             store.index_scan_prefix(
                 &mut filesystem,

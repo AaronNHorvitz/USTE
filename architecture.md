@@ -157,6 +157,14 @@ binding after admission and share global mixed-direction scan budgets. Streaming
 recovery and BM-01/BM-06 remain open T-20 work. T-35 still owns authoritative baseline switching,
 compaction and orphan reclamation.
 
+Decision 0026 adds borrow-aware reducer checkpoint access, incremental graph checkpoint encoding,
+declared-length one-new-payload-chunk checkpoint publication and visitor-based index scans without changing
+format-1.0 or `graph-current-v1`. The collecting APIs remain compatibility surfaces. Recovery still
+materializes the authenticated checkpoint and write preparation still clones/rebuilds complete
+graph/ingest state. The scalable design therefore uses new versioned state profiles backed by
+encrypted scratch runs, bounded overlays/tombstones and affected-closure validation; it does not
+silently reinterpret the frozen current-graph projection as authoritative mutable state.
+
 Decision 0021 adds the capability-free `uste-time` normalization kernel. `uste-types` retains the
 canonical instant pair without a timezone dependency. Strict explicit-offset and numeric-unit input
 can resolve directly; named local input uses only hash-verified embedded TZDB 2026c bytes. A bounded

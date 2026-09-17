@@ -4,6 +4,7 @@ exclude = [
     "experiments/content-fixtures",
     "experiments/dependency-audit",
     "experiments/fixture-generator",
+    "experiments/t20-bench",
     "fuzz",
 ]
 resolver = "3"

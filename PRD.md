@@ -108,6 +108,11 @@ authorization-preserving current graph projections. It does not close T-20 or sa
 streaming larger-than-memory recovery and BM-01/BM-06 evidence remain required, while compaction and
 authoritative baselines remain T-35/R3.
 
+Decision 0026 advances that foundation with borrow-aware replay state, bounded streaming checkpoint
+publication, visitor-based index reads and a pinned deterministic BM-01 materialization/query
+oracle. The fixture is not performance evidence. Full-payload recovery, clone-based reducer writes
+and both qualifying benchmarks remain open, so no release-gate status changes.
+
 ## Release gates
 
 | Gate | Required outcome |

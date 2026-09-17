@@ -201,6 +201,30 @@ fn graph_checkpoint_round_trip_preserves_history_policy_and_rebuilt_indexes() {
     );
 
     let checkpoint = capture_reducer_checkpoint(&state).unwrap();
+    let mut streamed = Vec::new();
+    let mut chunks = 0_usize;
+    state
+        .encode_current_checkpoint_into(&mut |bytes| {
+            chunks += 1;
+            streamed.extend_from_slice(bytes);
+            Ok(())
+        })
+        .unwrap();
+    assert!(chunks > 1);
+    assert_eq!(streamed, checkpoint.payload());
+    let mut accepted_chunks = 0_usize;
+    assert_eq!(
+        state.encode_current_checkpoint_into(&mut |_| {
+            accepted_chunks += 1;
+            if accepted_chunks == 2 {
+                Err(CheckpointStateError::Invalid)
+            } else {
+                Ok(())
+            }
+        }),
+        Err(CheckpointStateError::Invalid)
+    );
+    assert_eq!(accepted_chunks, 2);
     let restored = verify_reducer_checkpoint::<GraphState>(scope, &checkpoint).unwrap();
     assert_eq!(restored.snapshot(), state.snapshot());
     restored.snapshot().validate_derived_indexes().unwrap();

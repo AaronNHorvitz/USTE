@@ -1116,6 +1116,14 @@ impl CheckpointState for IngestState {
     ) -> Result<Self, CheckpointStateError> {
         decode_ingest_checkpoint(scope, revision, encoded)
     }
+
+    fn current_checkpoint_scope(&self) -> NamespaceRef {
+        self.scope
+    }
+
+    fn current_checkpoint_revision(&self) -> Option<CommitRevision> {
+        self.revision
+    }
 }
 
 fn encode_ingest_checkpoint(snapshot: &EngineSnapshot) -> Result<Vec<u8>, CheckpointStateError> {

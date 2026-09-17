@@ -57,6 +57,13 @@ checkpoint/state construction and qualifying BM-01/BM-06 runs are mandatory. T-3
 compaction, authoritative baselines and garbage
 collection, so an optional derived root never becomes a second commit authority.
 
+Decision 0026 adds borrow-aware replay/checkpoint access, one-new-payload-chunk checkpoint publication, visitor-
+based index scans and the exact `bm01-materialization-v1` fixture/oracle contract. Its content-free
+manifest explicitly is not engine benchmark evidence. Recovery still materializes the bounded
+checkpoint and graph/ingest writes still clone full candidates, so T-20 next requires new versioned
+state profiles, delta validation and a genuine state-larger-than-memory BM-06 path before running
+the qualifying BM-01/BM-06 protocols.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

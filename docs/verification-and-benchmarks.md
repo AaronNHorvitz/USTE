@@ -85,6 +85,13 @@ budgets and the named runner. They remain targets, not measured limits.
 | BM-12 | 100, 1,000 and 10,000 kinematic/contact bodies; sparse and deliberately dense contacts | simulated steps/second, contact pairs, durable event throughput, budget refusal, checkpoint/restart/cancel latency |
 | BM-13 | Unified world fixture with simultaneous ETL, movement updates, parsing, physics and compaction | per-class p50/p95/p99, fairness, sustained ingest, RSS, queue bounds and source/query correctness |
 
+Decision 0026 pins `bm01-materialization-v1` in
+`acceptance/r1/bm01-materialization-v1.tsv`: the exact accepted seed, 100k/1m topology split,
+typed IDs, stable depth-one-through-four query roots, independent BFS ordering and global limits.
+The standalone generator emits `engine_benchmark: false`; fixture dimensions and golden digests do
+not satisfy BM-01 until the production encrypted/authorized/durable engine runs the required cold
+and warm samples and reports latency, visits, result bytes, RSS and environment evidence.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

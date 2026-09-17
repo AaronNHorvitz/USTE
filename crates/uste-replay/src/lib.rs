@@ -69,6 +69,50 @@ pub struct ReducerCheckpoint {
     payload: Vec<u8>,
 }
 
+/// Metadata accompanying a reducer checkpoint stream. It is not a publication receipt and does
+/// not make emitted bytes authoritative.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct ReducerCheckpointMetadata {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    reducer_profile: [u8; 32],
+    logical_state_digest: [u8; 32],
+}
+
+impl core::fmt::Debug for ReducerCheckpointMetadata {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("ReducerCheckpointMetadata")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .field("reducer_profile", &"[REDACTED]")
+            .field("logical_state_digest", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl ReducerCheckpointMetadata {
+    #[must_use]
+    pub const fn scope(self) -> NamespaceRef {
+        self.scope
+    }
+
+    #[must_use]
+    pub const fn revision(self) -> CommitRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn reducer_profile(self) -> [u8; 32] {
+        self.reducer_profile
+    }
+
+    #[must_use]
+    pub const fn logical_state_digest(self) -> [u8; 32] {
+        self.logical_state_digest
+    }
+}
+
 impl core::fmt::Debug for ReducerCheckpoint {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -187,7 +231,7 @@ pub fn cold_replay<'a, S>(
 where
     S: CheckpointState,
 {
-    let mut frontier = S::checkpoint_revision(&state.snapshot());
+    let mut frontier = state.current_checkpoint_revision();
     let mut applied_events = 0_u64;
     for event in events {
         let expected = match frontier {
@@ -213,7 +257,7 @@ where
             return Err(ReplayError::ResultDigestMismatch(event.revision));
         }
         state.publish(prepared);
-        if S::checkpoint_revision(&state.snapshot()) != Some(event.revision) {
+        if state.current_checkpoint_revision() != Some(event.revision) {
             return Err(ReplayError::CheckpointRevisionMismatch);
         }
         frontier = Some(event.revision);
@@ -221,16 +265,16 @@ where
             .checked_add(1)
             .ok_or(ReplayError::EventCountExhausted)?;
     }
-    let snapshot = state.snapshot();
-    if S::checkpoint_revision(&snapshot) != frontier {
+    if state.current_checkpoint_revision() != frontier {
         return Err(ReplayError::CheckpointRevisionMismatch);
     }
+    let logical_state_digest = state.current_logical_state_digest()?;
     Ok((
         state,
         ReplayReport {
             frontier,
             applied_events,
-            logical_state_digest: S::logical_state_digest(&snapshot)?,
+            logical_state_digest,
         },
     ))
 }
@@ -240,15 +284,43 @@ pub fn capture_reducer_checkpoint<S>(state: &S) -> Result<ReducerCheckpoint, Rep
 where
     S: CheckpointState,
 {
-    let snapshot = state.snapshot();
-    let revision = S::checkpoint_revision(&snapshot).ok_or(ReplayError::EmptyCheckpointState)?;
+    let mut payload = Vec::new();
+    let metadata = stream_reducer_checkpoint(state, &mut |bytes| {
+        payload
+            .try_reserve(bytes.len())
+            .map_err(|_| CheckpointStateError::ResourceLimit)?;
+        payload.extend_from_slice(bytes);
+        Ok(())
+    })?;
     Ok(ReducerCheckpoint {
-        scope: S::checkpoint_scope(&snapshot),
+        scope: metadata.scope,
+        revision: metadata.revision,
+        reducer_profile: metadata.reducer_profile,
+        logical_state_digest: metadata.logical_state_digest,
+        payload,
+    })
+}
+
+/// Emit reducer-owned canonical checkpoint bytes without first constructing an owned snapshot or
+/// complete payload. The sink controls transport buffering; current format size limits still apply.
+pub fn stream_reducer_checkpoint<S>(
+    state: &S,
+    sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+) -> Result<ReducerCheckpointMetadata, ReplayError>
+where
+    S: CheckpointState,
+{
+    let revision = state
+        .current_checkpoint_revision()
+        .ok_or(ReplayError::EmptyCheckpointState)?;
+    let metadata = ReducerCheckpointMetadata {
+        scope: state.current_checkpoint_scope(),
         revision,
         reducer_profile: S::REDUCER_PROFILE,
-        logical_state_digest: S::logical_state_digest(&snapshot)?,
-        payload: S::encode_checkpoint(&snapshot)?,
-    })
+        logical_state_digest: state.current_logical_state_digest()?,
+    };
+    state.encode_current_checkpoint_into(sink)?;
+    Ok(metadata)
 }
 
 /// Decode, re-encode and compare a reducer cache with its declared metadata.
@@ -266,17 +338,16 @@ where
         return Err(ReplayError::CheckpointProfileMismatch);
     }
     let state = S::decode_checkpoint(checkpoint.scope, checkpoint.revision, &checkpoint.payload)?;
-    let snapshot = state.snapshot();
-    if S::checkpoint_scope(&snapshot) != checkpoint.scope {
+    if state.current_checkpoint_scope() != checkpoint.scope {
         return Err(ReplayError::CheckpointScopeMismatch);
     }
-    if S::checkpoint_revision(&snapshot) != Some(checkpoint.revision) {
+    if state.current_checkpoint_revision() != Some(checkpoint.revision) {
         return Err(ReplayError::CheckpointRevisionMismatch);
     }
-    if S::logical_state_digest(&snapshot)? != checkpoint.logical_state_digest {
+    if state.current_logical_state_digest()? != checkpoint.logical_state_digest {
         return Err(ReplayError::CheckpointStateMismatch);
     }
-    if S::encode_checkpoint(&snapshot)? != checkpoint.payload {
+    if state.encode_current_checkpoint()? != checkpoint.payload {
         return Err(ReplayError::NonCanonicalCheckpoint);
     }
     Ok(state)
@@ -705,6 +776,158 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug, Default)]
+    struct BorrowedCounter(Counter);
+
+    impl TransactionState for BorrowedCounter {
+        type Prepared = Self;
+        type Snapshot = Counter;
+
+        fn prepare(
+            &self,
+            canonical_request: &[u8],
+            blob_inventory: Option<&BlobInventory>,
+            revision: CommitRevision,
+        ) -> Result<Self::Prepared, ApplyError> {
+            self.0
+                .prepare(canonical_request, blob_inventory, revision)
+                .map(Self)
+        }
+
+        fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
+            Counter::result_digest(&prepared.0)
+        }
+
+        fn publish(&mut self, prepared: Self::Prepared) {
+            *self = prepared;
+        }
+
+        fn snapshot(&self) -> Self::Snapshot {
+            panic!("borrow-aware replay must not request an owned snapshot")
+        }
+    }
+
+    impl CheckpointState for BorrowedCounter {
+        const REDUCER_PROFILE: [u8; 32] = [0x44; 32];
+
+        fn checkpoint_scope(_snapshot: &Self::Snapshot) -> NamespaceRef {
+            scope()
+        }
+
+        fn checkpoint_revision(snapshot: &Self::Snapshot) -> Option<CommitRevision> {
+            snapshot.revision
+        }
+
+        fn logical_state_digest(
+            snapshot: &Self::Snapshot,
+        ) -> Result<[u8; 32], CheckpointStateError> {
+            Counter::logical_state_digest(snapshot)
+        }
+
+        fn encode_checkpoint(snapshot: &Self::Snapshot) -> Result<Vec<u8>, CheckpointStateError> {
+            Counter::encode_checkpoint(snapshot)
+        }
+
+        fn decode_checkpoint(
+            scope: NamespaceRef,
+            revision: CommitRevision,
+            encoded: &[u8],
+        ) -> Result<Self, CheckpointStateError> {
+            Counter::decode_checkpoint(scope, revision, encoded).map(Self)
+        }
+
+        fn current_checkpoint_scope(&self) -> NamespaceRef {
+            scope()
+        }
+
+        fn current_checkpoint_revision(&self) -> Option<CommitRevision> {
+            self.0.revision
+        }
+
+        fn current_logical_state_digest(&self) -> Result<[u8; 32], CheckpointStateError> {
+            Counter::logical_state_digest(&self.0)
+        }
+
+        fn encode_current_checkpoint(&self) -> Result<Vec<u8>, CheckpointStateError> {
+            Counter::encode_checkpoint(&self.0)
+        }
+
+        fn encode_current_checkpoint_into(
+            &self,
+            sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+        ) -> Result<(), CheckpointStateError> {
+            Counter::encode_checkpoint_into(&self.0, sink)
+        }
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct SnapshotStreamCounter(Counter);
+
+    impl TransactionState for SnapshotStreamCounter {
+        type Prepared = Self;
+        type Snapshot = Counter;
+
+        fn prepare(
+            &self,
+            canonical_request: &[u8],
+            blob_inventory: Option<&BlobInventory>,
+            revision: CommitRevision,
+        ) -> Result<Self::Prepared, ApplyError> {
+            self.0
+                .prepare(canonical_request, blob_inventory, revision)
+                .map(Self)
+        }
+
+        fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
+            Counter::result_digest(&prepared.0)
+        }
+
+        fn publish(&mut self, prepared: Self::Prepared) {
+            *self = prepared;
+        }
+
+        fn snapshot(&self) -> Self::Snapshot {
+            self.0.clone()
+        }
+    }
+
+    impl CheckpointState for SnapshotStreamCounter {
+        const REDUCER_PROFILE: [u8; 32] = [0x45; 32];
+
+        fn checkpoint_scope(_snapshot: &Self::Snapshot) -> NamespaceRef {
+            scope()
+        }
+
+        fn checkpoint_revision(snapshot: &Self::Snapshot) -> Option<CommitRevision> {
+            snapshot.revision
+        }
+
+        fn logical_state_digest(
+            snapshot: &Self::Snapshot,
+        ) -> Result<[u8; 32], CheckpointStateError> {
+            Counter::logical_state_digest(snapshot)
+        }
+
+        fn encode_checkpoint(_snapshot: &Self::Snapshot) -> Result<Vec<u8>, CheckpointStateError> {
+            panic!("current stream default must use the snapshot streaming hook")
+        }
+
+        fn encode_checkpoint_into(
+            snapshot: &Self::Snapshot,
+            sink: &mut dyn FnMut(&[u8]) -> Result<(), CheckpointStateError>,
+        ) -> Result<(), CheckpointStateError> {
+            sink(&snapshot.value.to_be_bytes())
+        }
+
+        fn decode_checkpoint(
+            _scope: NamespaceRef,
+            _revision: CommitRevision,
+            _encoded: &[u8],
+        ) -> Result<Self, CheckpointStateError> {
+            Err(CheckpointStateError::UnsupportedProfile)
+        }
+    }
+
     #[derive(Clone)]
     struct WrongScope(Counter);
 
@@ -808,6 +1031,60 @@ mod tests {
             verify_reducer_checkpoint::<Counter>(scope(), &checkpoint).unwrap(),
             state
         );
+    }
+
+    #[test]
+    fn replay_and_capture_use_borrowed_current_state_without_snapshot_clones() {
+        let bytes = 9_u64.to_be_bytes();
+        let prepared = BorrowedCounter(Counter {
+            revision: Some(CommitRevision::FIRST),
+            value: 9,
+        });
+        let event = ReplayEvent {
+            revision: CommitRevision::FIRST,
+            canonical_request: &bytes,
+            blob_inventory: None,
+            expected_result_digest: BorrowedCounter::result_digest(&prepared),
+        };
+        let (state, report) = cold_replay(BorrowedCounter::default(), [event]).unwrap();
+        assert_eq!(report.frontier, Some(CommitRevision::FIRST));
+        assert_eq!(report.applied_events, 1);
+        let checkpoint = capture_reducer_checkpoint(&state).unwrap();
+        assert_eq!(checkpoint.revision(), CommitRevision::FIRST);
+        assert_eq!(
+            checkpoint.payload(),
+            &Counter::encode_checkpoint(&state.0).unwrap()
+        );
+        let mut streamed = Vec::new();
+        let metadata = stream_reducer_checkpoint(&state, &mut |bytes| {
+            streamed.extend_from_slice(bytes);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(metadata.revision(), checkpoint.revision());
+        assert_eq!(metadata.scope(), checkpoint.scope());
+        assert_eq!(metadata.reducer_profile(), *checkpoint.reducer_profile());
+        assert_eq!(
+            metadata.logical_state_digest(),
+            *checkpoint.logical_state_digest()
+        );
+        assert_eq!(streamed, checkpoint.payload());
+    }
+
+    #[test]
+    fn current_stream_default_delegates_to_the_snapshot_streaming_hook() {
+        let state = SnapshotStreamCounter(Counter {
+            revision: Some(CommitRevision::FIRST),
+            value: 27,
+        });
+        let mut streamed = Vec::new();
+        let metadata = stream_reducer_checkpoint(&state, &mut |bytes| {
+            streamed.extend_from_slice(bytes);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(metadata.revision(), CommitRevision::FIRST);
+        assert_eq!(streamed, 27_u64.to_be_bytes());
     }
 
     #[test]
