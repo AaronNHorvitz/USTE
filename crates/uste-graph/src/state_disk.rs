@@ -8,19 +8,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_storage::{
-    DurableIndexRoot, IndexDelta, IndexEntry, IndexReadStats, IndexRootAnchor, IndexRootInput,
-    IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits,
-    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES,
-    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RESULT_BYTES,
-    MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_SCAN_RESULTS, OwnershipFileSystem, PageCache,
-    RecoveredIndexRoot,
+    Clock, DurableIndexRoot, IndexDelta, IndexEntry, IndexReadStats, IndexRootAnchor,
+    IndexRootInput, IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport,
+    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScrubReport,
+    MAX_INDEX_DELTA_LOGICAL_BYTES, MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN,
+    MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_SCAN_RESULTS,
+    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
 use uste_txn::{
-    AuthenticatedIndexRecovery, CheckpointState, CheckpointStateError, CommitCoordinator,
-    CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
-    CoordinatorRecoverySeed, TransactionError, TransactionOutcome,
-    reconstruct_coordinator_metadata_seed_for_recovery,
+    AuthenticatedIndexRecovery, Cancellation, CheckpointState, CheckpointStateError,
+    CommitCoordinator, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
+    CoordinatorMetadataLoadReport, CoordinatorRecoverySeed, TransactionError, TransactionOutcome,
+    TransactionRequest, reconstruct_coordinator_metadata_seed_for_recovery,
 };
 use uste_types::{CommitRevision, NamespaceRef, RecordId, RecordRef, Value};
 
@@ -1375,25 +1375,49 @@ where
         return Err(GraphDiskError::RootStateMismatch);
     }
     let prepared = state.prepare_transaction(transaction, revision)?;
-    build_graph_state_root_delta(snapshot, base.root.anchor(), prepared, limits)
+    build_graph_state_root_delta(snapshot, base.root.anchor(), &prepared, limits)
 }
 
 /// Derive exact bounded terminal-family changes from an authenticated disk preparation proof.
 ///
-/// This consumes the proof-backed reducer result and performs no filesystem, coordinator, cache,
-/// or key-vault access. The resulting plan remains subject to the same postcommit full-state
+/// This borrows the proof-backed reducer result and performs no filesystem, coordinator, cache, or
+/// key-vault access. The resulting plan remains subject to the same postcommit full-state
 /// validation as plans prepared from the live reducer.
 pub fn prepare_graph_state_root_delta_from_disk(
-    prepared: DiskPreparedGraph,
+    prepared: &DiskPreparedGraph,
     limits: GraphStateDeltaLimits,
 ) -> Result<GraphStateRootDelta, GraphDiskError> {
     build_graph_state_root_delta_from_base(
         prepared.base_anchor,
         prepared.base_counts,
         prepared.base_policy.as_ref(),
-        prepared.prepared,
+        &prepared.prepared,
         limits,
     )
+}
+
+/// Durably commit the exact graph request bound to a disk-prepared reducer change.
+///
+/// The coordinator preserves its normal retry, cancellation, journal, and publication ordering.
+/// Before durable I/O, `GraphState` verifies the request bytes, target revision, policy version,
+/// and every changed record's before-value against its current live base.
+pub fn commit_graph_disk_prepared<F, W, E, I>(
+    coordinator: &mut CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    request: TransactionRequest<'_>,
+    prepared: DiskPreparedGraph,
+    clock: &mut impl Clock,
+    cancellation: &impl Cancellation,
+) -> Result<TransactionOutcome, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    coordinator
+        .commit_prepared(filesystem, request, prepared.prepared, clock, cancellation)
+        .map_err(GraphDiskError::Transaction)
 }
 
 /// Merge a previously prepared graph-state plan after its transaction has durably committed.
@@ -1496,7 +1520,7 @@ struct DeltaBudget {
 fn build_graph_state_root_delta(
     snapshot: &GraphSnapshot,
     base_anchor: IndexRootAnchor,
-    prepared: PreparedGraph,
+    prepared: &PreparedGraph,
     limits: GraphStateDeltaLimits,
 ) -> Result<GraphStateRootDelta, GraphDiskError> {
     if prepared.scope != snapshot.scope() || prepared.base_revision != snapshot.revision() {
@@ -1522,7 +1546,7 @@ fn build_graph_state_root_delta_from_base(
     base_anchor: IndexRootAnchor,
     base_counts: [u64; 8],
     base_policy: Option<&uste_policy::NamespacePolicy>,
-    prepared: PreparedGraph,
+    prepared: &PreparedGraph,
     limits: GraphStateDeltaLimits,
 ) -> Result<GraphStateRootDelta, GraphDiskError> {
     let mandatory_deltas = count(prepared.changes.len())?

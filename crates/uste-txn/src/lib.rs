@@ -176,6 +176,22 @@ pub trait TransactionState {
     fn snapshot(&self) -> Self::Snapshot;
 }
 
+/// Reducer contract for accepting an already prepared change through the durable coordinator.
+///
+/// Implementations must bind the prepared value to the exact canonical request, optional blob
+/// inventory, target revision, and current live base. This is intentionally a separate opt-in
+/// contract: a coordinator must never journal one request while publishing an unrelated prepared
+/// mutation.
+pub trait ExternallyPreparedTransactionState: TransactionState {
+    fn validate_external_prepared(
+        &self,
+        canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
+        revision: CommitRevision,
+        prepared: &Self::Prepared,
+    ) -> Result<(), ApplyError>;
+}
+
 /// Canonical reducer state used by trusted replay/checkpoint maintenance.
 ///
 /// Derived indexes may be omitted only when decoding deterministically rebuilds and validates
@@ -1187,6 +1203,61 @@ where
         clock: &mut impl Clock,
         cancellation: &impl Cancellation,
     ) -> Result<TransactionOutcome, TransactionError> {
+        self.commit_with_preparation(
+            filesystem,
+            request,
+            clock,
+            cancellation,
+            |state, revision| {
+                state.prepare(request.canonical_request, request.blob_inventory, revision)
+            },
+        )
+    }
+
+    /// Commit a reducer change prepared by an explicit bounded phase outside the coordinator.
+    ///
+    /// Retry and cancellation ordering is identical to [`Self::commit`]. Before any durable write,
+    /// the reducer must verify that the opaque prepared change is bound to the exact request,
+    /// target revision, and current live base.
+    pub fn commit_prepared(
+        &mut self,
+        filesystem: &mut F,
+        request: TransactionRequest<'_>,
+        prepared: S::Prepared,
+        clock: &mut impl Clock,
+        cancellation: &impl Cancellation,
+    ) -> Result<TransactionOutcome, TransactionError>
+    where
+        S: ExternallyPreparedTransactionState,
+    {
+        self.commit_with_preparation(
+            filesystem,
+            request,
+            clock,
+            cancellation,
+            move |state, revision| {
+                state.validate_external_prepared(
+                    request.canonical_request,
+                    request.blob_inventory,
+                    revision,
+                    &prepared,
+                )?;
+                Ok(prepared)
+            },
+        )
+    }
+
+    fn commit_with_preparation<P>(
+        &mut self,
+        filesystem: &mut F,
+        request: TransactionRequest<'_>,
+        clock: &mut impl Clock,
+        cancellation: &impl Cancellation,
+        prepare: P,
+    ) -> Result<TransactionOutcome, TransactionError>
+    where
+        P: FnOnce(&S, CommitRevision) -> Result<S::Prepared, ApplyError>,
+    {
         if self.uncertain {
             return Err(TransactionError::OutcomeUnknown);
         }
@@ -1243,10 +1314,7 @@ where
             None => CommitRevision::FIRST,
         };
         let expires_at = expiration(accepted_at, self.retention)?;
-        let prepared = self
-            .state
-            .prepare(request.canonical_request, request.blob_inventory, revision)
-            .map_err(map_apply_error)?;
+        let prepared = prepare(&self.state, revision).map_err(map_apply_error)?;
         let result_digest = S::result_digest(&prepared);
         if cancellation.is_cancelled() {
             return Err(TransactionError::Cancelled);

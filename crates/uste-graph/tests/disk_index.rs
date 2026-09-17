@@ -6,13 +6,14 @@ use uste_graph::{
     GRAPH_STATE_PROFILE_V1, GraphDiskError, GraphDiskPreparationLimits, GraphError, GraphState,
     GraphStateDeltaLimits, GraphStateLoadLimits, GraphStateRootMergeLimits, GraphTransaction,
     NewAssertion, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, Predicate, Record,
-    ValidTime, disk_adjacent_ids, disk_record, disk_supported_ids, encode_stored_record,
-    encode_transaction, load_current_graph_index_roots, load_graph_disk_preparation_view,
-    load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
-    load_graph_state_roots, prepare_graph_state_root_delta,
-    prepare_graph_state_root_delta_from_disk, publish_current_graph_index,
-    publish_graph_state_root, publish_graph_state_root_delta, reconstruct_graph_recovery_seed,
-    reconstruct_graph_state_candidate, scrub_current_graph_index, scrub_graph_state_root,
+    ValidTime, commit_graph_disk_prepared, disk_adjacent_ids, disk_record, disk_supported_ids,
+    encode_stored_record, encode_transaction, load_current_graph_index_roots,
+    load_graph_disk_preparation_view, load_graph_state_root_candidates,
+    load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
+    prepare_graph_state_root_delta, prepare_graph_state_root_delta_from_disk,
+    publish_current_graph_index, publish_graph_state_root, publish_graph_state_root_delta,
+    reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate, scrub_current_graph_index,
+    scrub_graph_state_root,
 };
 use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
 use uste_storage::{
@@ -702,11 +703,12 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     let evidence = record(0x23);
     let assertion = record(0x24);
     let mut filesystem = MemoryFileSystem::new(16 * 1024 * 1024);
+    let name = EntryName::new("graph-disk-prepare").unwrap();
     let mut coordinator = CommitCoordinator::create(
         &mut filesystem,
         scope(),
         RetentionDays::new(30).unwrap(),
-        EntryName::new("graph-disk-prepare").unwrap(),
+        name.clone(),
         create_vault(scope().database(), 20_000),
         CounterEntropy(21_000),
         GraphState::new(scope()),
@@ -880,13 +882,132 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     )
     .unwrap();
     let disk_plan = prepare_graph_state_root_delta_from_disk(
-        prepared,
+        &prepared,
         GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
     )
     .unwrap();
     assert_eq!(disk_plan.delta_count(), memory_plan.delta_count());
     assert_eq!(disk_plan.logical_bytes(), memory_plan.logical_bytes());
-    let outcome = commit(&mut coordinator, &mut filesystem, 2, transaction.clone());
+    let mut stale_token_cache = PageCache::new(1024 * 1024).unwrap();
+    let stale_prepared = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &roots[0],
+        transaction.clone(),
+        limits,
+        &mut stale_token_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    let mut retry_token_cache = PageCache::new(1024 * 1024).unwrap();
+    let retry_prepared = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &roots[0],
+        transaction.clone(),
+        limits,
+        &mut retry_token_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    let mut mismatch_cache = PageCache::new(1024 * 1024).unwrap();
+    let mismatch_prepared = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &roots[0],
+        transaction.clone(),
+        limits,
+        &mut mismatch_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    let mismatched_transaction = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: left,
+            expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+            properties: Value::Bool(false),
+        }],
+    );
+    let mismatched_encoded = encode_transaction(&mismatched_transaction).unwrap();
+    assert!(matches!(
+        commit_graph_disk_prepared(
+            &mut coordinator,
+            &mut filesystem,
+            TransactionRequest {
+                principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+                idempotency_key: IdempotencyKey::from_bytes([0x72; 16]),
+                transaction_id: TransactionId::from_bytes([0x73; 16]),
+                canonical_request: &mismatched_encoded,
+                blob_inventory: None,
+            },
+            mismatch_prepared,
+            &mut clock(2),
+            &NeverCancel,
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::InvalidRequest
+        ))
+    ));
+    assert_eq!(
+        coordinator.read_view().unwrap().revision(),
+        Some(CommitRevision::FIRST)
+    );
+
+    let encoded = encode_transaction(&transaction).unwrap();
+    let outcome = commit_graph_disk_prepared(
+        &mut coordinator,
+        &mut filesystem,
+        TransactionRequest {
+            principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+            idempotency_key: IdempotencyKey::from_bytes([2; 16]),
+            transaction_id: TransactionId::from_bytes([34; 16]),
+            canonical_request: &encoded,
+            blob_inventory: None,
+        },
+        prepared,
+        &mut clock(2),
+        &NeverCancel,
+    )
+    .unwrap();
+    let retry_outcome = commit_graph_disk_prepared(
+        &mut coordinator,
+        &mut filesystem,
+        TransactionRequest {
+            principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+            idempotency_key: IdempotencyKey::from_bytes([2; 16]),
+            transaction_id: TransactionId::from_bytes([34; 16]),
+            canonical_request: &encoded,
+            blob_inventory: None,
+        },
+        retry_prepared,
+        &mut clock(2),
+        &NeverCancel,
+    )
+    .unwrap();
+    assert_eq!(retry_outcome, outcome);
+    assert!(matches!(
+        commit_graph_disk_prepared(
+            &mut coordinator,
+            &mut filesystem,
+            TransactionRequest {
+                principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+                idempotency_key: IdempotencyKey::from_bytes([0x74; 16]),
+                transaction_id: TransactionId::from_bytes([0x75; 16]),
+                canonical_request: &encoded,
+                blob_inventory: None,
+            },
+            stale_prepared,
+            &mut clock(3),
+            &NeverCancel,
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::Conflict
+        ))
+    ));
     let base_read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
     let merge = IndexRunMergeLimits::new(base_read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
     let (delta_root, _) = publish_graph_state_root_delta(
@@ -904,6 +1025,22 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
         load_graph_state_roots(&coordinator, &mut filesystem, &revision_two).unwrap();
     assert_eq!(revision_two_roots.len(), 1);
     assert_eq!(revision_two_roots[0].generation(), delta_root.generation);
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (reopened, recovery) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(22_000),
+        CounterEntropy(23_000),
+        &mut TestKeyAdapter,
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    assert_eq!(recovery.frontier, Some(CommitRevision::new(2).unwrap()));
+    assert_eq!(reopened.read_view().unwrap().state(), &revision_two);
+    coordinator = reopened;
     let transition = GraphTransaction::new(
         scope(),
         vec![Operation::ActOnAssertion {

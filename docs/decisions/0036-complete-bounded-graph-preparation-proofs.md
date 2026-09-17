@@ -42,3 +42,7 @@ bounded bucket rather than stream directly into reducer evaluation, logical proo
 RSS measurement, and the partial preparation result is not yet a coordinator commit capability or
 root-delta source. A live persistent base/overlay, recovery without a complete reducer and
 qualifying BM-01/BM-06 runs remain T-20 work.
+
+Decisions 0037 and 0038 subsequently use this proof for terminal-root derivation and an exact
+request-bound authoritative commit. Live publication and recovery remain complete-state
+operations.

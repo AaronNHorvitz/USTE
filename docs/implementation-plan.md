@@ -91,7 +91,9 @@ explicit-I/O current-record proof/preparation slice, including exact negative pr
 post-load phase. Decision 0036 adds complete bounded reverse/history proof buckets. Live persistent
 overlays and benchmarks remain. Decision 0037 authenticates the base metadata/counts in that proof
 and derives the existing bounded terminal-root plan from the partial result without complete-
-snapshot access. Authoritative commit, postcommit validation and recovery remain full-memory.
+snapshot access. Decision 0038 lets that proof-backed result enter the authoritative coordinator
+only after reducer verification binds exact request bytes, target revision and current base. Live
+publication, postcommit validation and recovery remain full-memory.
 
 ## Architectural decomposition
 

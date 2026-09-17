@@ -35,7 +35,7 @@ pub use state_disk::{
     GraphDiskPreparationReport, GraphDiskPreparationView, GraphRecoverySeedReport,
     GraphStateDeltaLimits, GraphStateLoadLimits, GraphStateLoadReport, GraphStateRootCandidate,
     GraphStateRootDelta, GraphStateRootMergeLimits, GraphStateRootMergeReport,
-    load_graph_disk_preparation_view, load_graph_state_root_candidates,
+    commit_graph_disk_prepared, load_graph_disk_preparation_view, load_graph_state_root_candidates,
     load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
     prepare_graph_state_root_delta, prepare_graph_state_root_delta_from_disk,
     publish_graph_state_root, publish_graph_state_root_delta, reconstruct_graph_recovery_seed,

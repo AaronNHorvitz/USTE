@@ -11,7 +11,7 @@ use uste_policy::{
 use uste_storage::BlobInventory;
 use uste_txn::{
     ApplyError, AuthorizedTransactionState, CheckpointState, CheckpointStateError,
-    DurablePolicyChange, TransactionState,
+    DurablePolicyChange, ExternallyPreparedTransactionState, TransactionState,
 };
 use uste_types::{
     CommitRevision, DatabaseId, NamespaceId, NamespaceRef, RecordId, RecordRef, Value,
@@ -24,7 +24,7 @@ use crate::{
     AssertionAction, AssertionRecord, AssertionStatus, DeletePolicy, DurablePolicyMutation,
     EntityLifecycle, EntityRecord, EvidenceRecord, Expected, GraphTransaction, NewAssertion,
     NewRecord, NewRelationship, Operation, Predicate, Record, RecordVersion, RelationshipRecord,
-    decode_transaction,
+    decode_transaction, encode_transaction,
 };
 
 pub const MAX_TRANSACTION_OPERATIONS: usize = 10_000;
@@ -318,6 +318,15 @@ impl GraphState {
         transaction: &GraphTransaction,
         revision: CommitRevision,
     ) -> Result<PreparedGraph, GraphError> {
+        self.prepare_transaction_with_digest(transaction, revision, None)
+    }
+
+    fn prepare_transaction_with_digest(
+        &self,
+        transaction: &GraphTransaction,
+        revision: CommitRevision,
+        request_digest: Option<[u8; 32]>,
+    ) -> Result<PreparedGraph, GraphError> {
         if transaction.scope() != self.scope() {
             return Err(GraphError::TransactionScopeMismatch);
         }
@@ -334,6 +343,8 @@ impl GraphState {
             });
         }
         validate_request_limits(transaction)?;
+        let request_digest =
+            request_digest.map_or_else(|| graph_request_digest(transaction), Ok)?;
         for operation in transaction.operations() {
             validate_scope(self.scope(), operation.target())?;
             validate_expected(&self.snapshot, operation.target(), operation.expected())?;
@@ -406,6 +417,7 @@ impl GraphState {
             revision,
             changes,
             policy_change,
+            request_digest,
             result_digest,
         })
     }
@@ -534,6 +546,7 @@ pub struct PreparedGraph {
     pub(crate) revision: CommitRevision,
     pub(crate) changes: Vec<RecordChange>,
     pub(crate) policy_change: Option<NamespacePolicy>,
+    request_digest: [u8; 32],
     pub(crate) result_digest: [u8; 32],
 }
 
@@ -597,8 +610,12 @@ impl TransactionState for GraphState {
         if transaction.scope() != self.scope() {
             return Err(ApplyError::InvalidRequest);
         }
-        self.prepare_transaction(&transaction, revision)
-            .map_err(GraphError::into_apply_error)
+        self.prepare_transaction_with_digest(
+            &transaction,
+            revision,
+            Some(Sha256::digest(canonical_request).into()),
+        )
+        .map_err(GraphError::into_apply_error)
     }
 
     fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
@@ -634,6 +651,30 @@ impl TransactionState for GraphState {
     fn snapshot(&self) -> Self::Snapshot {
         self.snapshot.clone()
     }
+}
+
+impl ExternallyPreparedTransactionState for GraphState {
+    fn validate_external_prepared(
+        &self,
+        canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
+        revision: CommitRevision,
+        prepared: &Self::Prepared,
+    ) -> Result<(), ApplyError> {
+        let request_digest: [u8; 32] = Sha256::digest(canonical_request).into();
+        if blob_inventory.is_some() || prepared.request_digest != request_digest {
+            return Err(ApplyError::InvalidRequest);
+        }
+        if prepared.revision != revision || !self.can_publish(prepared) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+fn graph_request_digest(transaction: &GraphTransaction) -> Result<[u8; 32], GraphError> {
+    let encoded = encode_transaction(transaction).map_err(|_| GraphError::ResourceLimit)?;
+    Ok(Sha256::digest(encoded).into())
 }
 
 impl CheckpointState for GraphState {

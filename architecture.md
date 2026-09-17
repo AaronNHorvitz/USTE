@@ -226,7 +226,11 @@ reducer with explicit aggregate entry/byte budgets and the frozen per-prefix res
 capability still does not commit or replace the coordinator's complete live state. Decision 0037
 adds an exact authenticated metadata/count proof and lets the capability derive the existing
 bounded eight-family terminal-root plan without complete-snapshot access. Publication keeps its
-complete postcommit reducer comparison as an independent validator.
+complete postcommit reducer comparison as an independent validator. Decision 0038 adds an opt-in
+coordinator seam: graph binds the opaque prepared change to the exact request digest, target
+revision and current base before the ordinary journal append/publish sequence. No other in-tree
+reducer currently opts into external preparation, and live publication/replay still use the
+complete graph state.
 
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver

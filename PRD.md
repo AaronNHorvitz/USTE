@@ -168,8 +168,10 @@ Decision 0036 completes that preparation proof vocabulary with bounded authentic
 prefixes for `ReadView` and reverse-owner buckets for deletion. All graph operation/precondition
 variants can now use the storage-free partial reducer phase. Decision 0037 authenticates the base
 metadata/counts in that proof and derives the bounded terminal-root plan directly from its result.
-The authoritative coordinator commit and independent postcommit validator still use the complete
-live reducer; larger-than-memory recovery and qualification remain open.
+Decision 0038 binds that opaque result to the exact canonical request and current live base so the
+authoritative coordinator can commit it without repeating complete-state preparation. Publication,
+independent postcommit validation and recovery still use the complete live reducer;
+larger-than-memory recovery and qualification remain open.
 
 ## Release gates
 

@@ -23,7 +23,7 @@ metadata key/value bytes and index read are included in the existing proof budge
 
 The storage-free preparation capability retains the admitted root anchor, the eight graph-state
 metadata counters (including separate policy-history/current-policy counters), and exact decoded
-current policy alongside the reducer result. Consuming that capability through
+current policy alongside the reducer result. Borrowing that capability through
 `prepare_graph_state_root_delta_from_disk` derives all eight bounded terminal family delta sets
 without a filesystem, coordinator, page cache or key-vault capability. The original full-snapshot
 entry point now shares the same derivation routine after independently checking every changed
@@ -44,3 +44,7 @@ The commit coordinator still prepares and publishes its authoritative transactio
 complete live reducer, while terminal publication still scans that reducer as an independent
 validator. Proof buckets are bounded collections rather than streaming reducer inputs. Recovery
 still constructs complete live state, and no allocator/RSS or BM-01/BM-06 claim is made.
+
+Decision 0038 subsequently removes the repeated complete-state preparation from the authoritative
+commit by adding an exact request/base binding. Live publication, postcommit validation and
+recovery remain complete-state operations.

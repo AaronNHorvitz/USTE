@@ -34,8 +34,8 @@ bash scripts/check.sh
 
 ## Deliberate boundary
 
-This is a precommit disk-proof-to-root-plan bridge, not yet a disk-backed transaction coordinator.
-The authoritative commit still uses the complete live reducer, and terminal publication deliberately
-retains its complete postcommit comparison. Recovered reducer state remains full-memory; proof
-buckets are collected within limits; allocator/RSS and BM-01/BM-06 are not qualified. T-20 remains
-open.
+This is a precommit disk-proof-to-root-plan bridge. Decision 0038 subsequently lets the same opaque
+result enter the authoritative coordinator without repeated complete-state preparation. The live
+publication target and terminal root's postcommit comparison remain complete-state operations.
+Recovered reducer state remains full-memory; proof buckets are collected within limits;
+allocator/RSS and BM-01/BM-06 are not qualified. T-20 remains open.

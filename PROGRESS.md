@@ -3,7 +3,7 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `ac4b6d5` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `de0fb76` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
@@ -12,9 +12,11 @@ bounded graph transaction to an independently validated terminal `graph-state-v1
 Decision 0034 makes ordinary graph/spatial/composite ingest preparation request-bounded.
 Decision 0035 adds a bounded explicit-I/O current-record proof phase followed by storage-free graph
 preparation. Decision 0036 adds complete bounded history/reverse proof buckets so every graph
-operation and precondition variant can use that phase. The current Decision 0037 increment carries
-authenticated metadata/counts into a proof-derived terminal-root plan. T-20 remains open
-pending live disk-backed coordinator integration, larger-than-memory recovery and qualifying
+operation and precondition variant can use that phase. Decision 0037 carries authenticated
+metadata/counts into a proof-derived terminal-root plan. The current Decision 0038 increment binds
+that proof result into the authoritative coordinator commit without repeating full-state
+preparation. T-20 remains open pending a disk-backed live publication target, larger-than-memory
+recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
@@ -317,18 +319,25 @@ unverified external distribution prerequisite.
   match their actual durable commit digests. Zero entry budgets reject each one-entry proof, so no
   partial bucket is admitted as complete.
 - All graph operation and precondition variants are now representable by the preparation proof.
-  The result still is not wired into coordinator commit, and the live/recovered reducers remain
-  full-memory; T-20 stays open.
+  The live/recovered reducers remain full-memory; T-20 stays open.
 - Added Decision 0037 and an exact authenticated family-1 metadata proof. The proof budget/report
   now covers its key/value and index lookup, and decoded revision, policy invariants and all family
   counts are checked against the admitted root descriptors.
 - The pure proof result retains the exact root anchor, base metadata counters and current policy,
   then derives all eight bounded terminal-family delta sets without filesystem, coordinator, cache
   or key-vault access. Its record-plus-policy fixture matches the full-snapshot plan's delta
-  count/bytes, commits
-  normally, publishes the proof-derived root through bounded merge, and admits it against the live
-  reducer. Authoritative commit, independent postcommit validation and recovery are still
-  full-memory; no T-20 or benchmark completion is claimed.
+  count/bytes, publishes the proof-derived root through bounded merge, and admits it against the
+  live reducer.
+- Added Decision 0038 and the opt-in `ExternallyPreparedTransactionState` coordinator contract.
+  Graph privately binds every prepared delta to its exact canonical request digest, then validates
+  request bytes, absent blob inventory, next revision, scope, policy version and touched
+  before-values before the ordinary durable journal append and live publication sequence.
+- The end-to-end fixture rejects request/prepared substitution without revision advancement,
+  durably commits the exact proof-prepared record-plus-policy transaction, returns its exact prior
+  outcome for an idempotent retry, rejects a new-identity stale token, publishes the derived root,
+  and reconstructs the same graph through ordinary journal replay after storage restart.
+  Live publication, independent postcommit validation and recovery are still full-memory; no T-20
+  or benchmark completion is claimed.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -403,12 +412,14 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (95 links, 92 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# docs=ok (97 links, 94 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
 # and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
-# 1 passed; proof-derived policy-plus-record plan matches full preparation and publishes a root
+# 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
 # 4 passed; 0 failed
+cargo test -p uste-txn --all-targets
+# 27 passed; 0 failed
 cargo test -p uste-graph --all-targets --locked --offline
 # 40 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
@@ -461,8 +472,9 @@ remaining mixed workload have not passed.
   families for one revision without collecting base runs, but the live base/overlay lifecycle and
   semantic validator remain fully memory-resident. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
-  feeds a separately published terminal-root plan. It does not feed the authoritative coordinator
-  commit/live-state path, and publication's semantic validator remains fully memory-resident.
+  feeds both the authoritative coordinator commit and a separately published terminal-root plan.
+  The coordinator's live publication target, root semantic validator and recovery remain fully
+  memory-resident.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
@@ -487,9 +499,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by connecting the complete explicit-I/O preparation proof and terminal-root plan to a
-live disk-backed base/overlay coordinator, then remove the full-memory recovery boundary. Connect
-the pinned fixture to exact BM-01 and
+Continue T-20 by replacing the complete live graph publication target with a disk-backed
+base/overlay state, then remove the full-memory recovery boundary. Connect the pinned fixture to
+exact BM-01 and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

@@ -232,7 +232,10 @@ limits. They make `ReadView` and deletion safe in the pure partial reducer. Coor
 publication and recovered live state remain full-memory boundaries. Decision 0037 authenticates
 the admitted root's canonical metadata entry in the same proof, retains its graph-state counters
 and policy, and derives the bounded terminal-root delta plan from the storage-free result. The
-authoritative coordinator commit and publication's independent validator remain full-memory.
+authoritative coordinator commit originally still repeated full-state preparation. Decision 0038
+adds a reducer-verified external-preparation seam: graph checks exact request bytes, revision,
+policy version and touched before-values before the normal journal append/publish sequence. The
+live publication target, independent root validator and recovery remain full-memory.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
