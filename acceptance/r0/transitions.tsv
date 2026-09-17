@@ -1,0 +1,11 @@
+case	from	operation	to	expected
+accept	proposed	accept	accepted	ok
+reject	proposed	reject	rejected	ok
+dispute	accepted	dispute	disputed	ok
+supersede	accepted	supersede	superseded	ok
+retract	accepted	retract	retracted	ok
+expire	accepted	expire	expired	ok
+accept_twice	accepted	accept	accepted	InvalidTransition
+revive_rejected	rejected	accept	accepted	InvalidTransition
+correct	accepted	correct	new-proposed-linked	ok
+purge_is_not_state	accepted	purge	purged	InvalidTransition

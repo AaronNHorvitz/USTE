@@ -35,6 +35,22 @@ appended spatial/physics tasks appear at their dependency gate rather than numer
 | [ ] T-47 | Close D-09: kinematics/contact scope, arithmetic, replay, UTC mapping and Rust dependency feasibility; FR-31/32 | T-01, T-03, T-46 | Physics ADR, numerical profile, analytic/contact fixtures | Exact baseline implementable; deterministic ordering, overflow, collision limits and profile compatibility defined |
 | [ ] T-07 | Review R0 contracts together | T-01, T-02, T-03, T-04, T-05, T-06, T-46, T-47 | R0 decision/evidence record | No conflicting authority/durability/deletion/parser/spatial/physics contracts; all D decisions resolved for initial profile |
 
+### R0 implementation progress (2026-09-16)
+
+- T-01/T-02/T-03/T-46/T-47 have proposed closed v1 profiles in Decisions 0003–0005 and
+  0009–0010, literal vectors under `acceptance/r0`, and nine passing standalone Rust vector
+  tests. They remain unchecked until the aggregate review accepts the contracts.
+- T-04 has an exact adapter candidate registry in Decision 0006. It remains unchecked until
+  resolved Cargo features/transitives, source/unsafe inventory and all family fixtures exist.
+- T-05 has a named measured runner, hard limits and initial generator/budget registry in
+  Decision 0007. It remains unchecked until every BM-01…13 manifest row and fixture generator
+  is complete and reviewed.
+- T-06/D-07 is blocked on repository-owner enablement and a harmless end-to-end test of GitHub
+  private vulnerability reporting. The local GitHub CLI credential is invalid; no repository
+  security setting was changed. Decision 0008 records the selected policy and exact unblock.
+- T-07 and every dependent R1 task remain open. Pre-gate code is limited to design experiments
+  and must not be described as a production disk format or alpha release.
+
 ## R1 — Correctness kernel
 
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
