@@ -18,7 +18,7 @@ graph, journal, checkpoint or index formats.
 ## Verification
 
 ~~~text
-cargo test -p uste-graph --test disk_index bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_bases -- --exact
+cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed
 cargo clippy -p uste-graph --all-targets -- -D warnings
 # passed
@@ -37,7 +37,8 @@ holes were corrected before this evidence was accepted.
 ## Deliberate boundary
 
 This is a privileged preparation foundation, not a consumer API, live disk-backed reducer,
-publication path or benchmark result. Deletion and historical preconditions remain unsupported;
-the coordinator still owns a complete in-memory reducer; partial proof preparation does not yet
+publication path or benchmark result. Decision 0036 subsequently adds bounded complete deletion
+and historical-precondition proofs. The coordinator still owns a complete in-memory reducer;
+partial proof preparation does not yet
 produce a `GraphStateRootDelta`; index exact-lookups have format bounds but no new caller-selected
 per-lookup page limit; logical proof bytes are not RSS. T-20 and BM-01/BM-06 remain open.

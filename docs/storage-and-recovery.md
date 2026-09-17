@@ -226,6 +226,11 @@ no filesystem or coordinator capability, so its consuming reducer preparation is
 Deletion and `ReadView` predicates are rejected before storage access pending bounded complete
 reverse/history proof APIs. The live reducer and root-delta metadata remain full-memory.
 
+Decision 0036 supplies those proof APIs by collecting complete authenticated family-3 history
+prefixes and family-7 reverse buckets under aggregate entry/logical-byte and per-prefix result
+limits. They make `ReadView` and deletion safe in the pure partial reducer. Coordinator commit/root
+publication and recovered live state remain full-memory boundaries.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

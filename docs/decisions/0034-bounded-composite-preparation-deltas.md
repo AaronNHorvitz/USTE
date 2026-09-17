@@ -69,6 +69,6 @@ preparation. It does not make the reducers larger-than-memory: current maps, com
 scans, canonical current-policy result encoding, explicit snapshots, checkpoint codecs and recovery
 reconstruction remain materialized.
 Decision 0035 subsequently supplies explicit-I/O proof loading and storage-free preparation for a
-bounded current-state graph subset. Complete reverse/history proofs, live persistent base/overlay
-lifecycle and qualifying BM-01/BM-06 runs remain T-20 work. Native spatial query indexes and BM-10
-remain T-59.
+bounded current-state graph subset, and Decision 0036 adds complete reverse/history proof buckets.
+Live persistent base/overlay lifecycle and qualifying BM-01/BM-06 runs remain T-20 work. Native
+spatial query indexes and BM-10 remain T-59.

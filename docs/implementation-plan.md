@@ -88,7 +88,8 @@ the full in-memory reducer. Decision 0034 bounds ordinary composite write prepar
 changing that live-state boundary. T-20 next needs a live disk-backed base/overlay state, explicit-
 I/O streaming semantic validation and qualifying scale evidence. Decision 0035 supplies the first
 explicit-I/O current-record proof/preparation slice, including exact negative proofs and a pure
-post-load phase. Complete reverse/history proofs, live persistent overlays and benchmarks remain.
+post-load phase. Decision 0036 adds complete bounded reverse/history proof buckets. Live persistent
+overlays, partial-view root deltas and benchmarks remain.
 
 ## Architectural decomposition
 

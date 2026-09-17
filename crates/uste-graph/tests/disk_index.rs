@@ -695,7 +695,7 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
 }
 
 #[test]
-fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_bases() {
+fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     let left = record(0x21);
     let right = record(0x22);
     let evidence = record(0x23);
@@ -771,7 +771,7 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
             }),
         }],
     );
-    let limits = GraphDiskPreparationLimits::new(8, 8, 1024 * 1024).unwrap();
+    let limits = GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap();
     let mut cache = PageCache::new(1024 * 1024).unwrap();
     let view = load_graph_disk_preparation_view(
         &coordinator,
@@ -791,6 +791,8 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
     let exact = GraphDiskPreparationLimits::new(
         view.report().record_proofs,
         view.report().reference_visits,
+        view.report().history_versions,
+        view.report().reverse_references,
         view.report().proof_logical_bytes,
     )
     .unwrap();
@@ -807,6 +809,8 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
     let too_few_bytes = GraphDiskPreparationLimits::new(
         view.report().record_proofs,
         view.report().reference_visits,
+        8,
+        8,
         view.report().proof_logical_bytes - 1,
     )
     .unwrap();
@@ -824,7 +828,7 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
             uste_storage::journal::StorageError::ResourceLimit
         ))
     ));
-    let too_few_proofs = GraphDiskPreparationLimits::new(3, 8, 1024 * 1024).unwrap();
+    let too_few_proofs = GraphDiskPreparationLimits::new(3, 8, 8, 8, 1024 * 1024).unwrap();
     let mut proof_cache = PageCache::new(1024 * 1024).unwrap();
     assert!(matches!(
         load_graph_disk_preparation_view(
@@ -839,7 +843,7 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
             uste_storage::journal::StorageError::ResourceLimit
         ))
     ));
-    let too_few_references = GraphDiskPreparationLimits::new(8, 3, 1024 * 1024).unwrap();
+    let too_few_references = GraphDiskPreparationLimits::new(8, 3, 8, 8, 1024 * 1024).unwrap();
     let mut rejected_cache = PageCache::new(1024 * 1024).unwrap();
     assert!(matches!(
         load_graph_disk_preparation_view(
@@ -882,7 +886,7 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
             &mut filesystem,
             &revision_two_roots[0],
             transition.clone(),
-            GraphDiskPreparationLimits::new(3, 8, 1024 * 1024).unwrap(),
+            GraphDiskPreparationLimits::new(3, 8, 8, 8, 1024 * 1024).unwrap(),
             &mut transition_limit_cache,
         ),
         Err(GraphDiskError::Storage(
@@ -946,6 +950,131 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
         Err(GraphDiskError::Graph(GraphError::PreconditionFailed(id))) if id == right
     ));
 
+    let overlay_delete = GraphTransaction::new(
+        scope(),
+        vec![
+            Operation::ActOnAssertion {
+                target: assertion,
+                expected: Expected::Version(uste_graph::RecordVersion::new(2).unwrap()),
+                action: AssertionAction::Retract,
+                correction: None,
+                correction_expected: None,
+            },
+            Operation::DeleteEntity {
+                target: right,
+                expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+                policy: DeletePolicy::Reject,
+                affected: Vec::new(),
+            },
+        ],
+    );
+    let mut reverse_limit_cache = PageCache::new(1024 * 1024).unwrap();
+    assert!(matches!(
+        load_graph_disk_preparation_view(
+            &coordinator,
+            &mut filesystem,
+            &revision_three_roots[0],
+            overlay_delete.clone(),
+            GraphDiskPreparationLimits::new(8, 8, 8, 0, 1024 * 1024).unwrap(),
+            &mut reverse_limit_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let mut overlay_delete_cache = PageCache::new(1024 * 1024).unwrap();
+    let overlay_delete_view = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &revision_three_roots[0],
+        overlay_delete.clone(),
+        limits,
+        &mut overlay_delete_cache,
+    )
+    .unwrap();
+    assert_eq!(overlay_delete_view.report().reverse_references, 1);
+    let overlay_delete_prepared = overlay_delete_view.prepare().unwrap();
+    let overlay_delete_outcome = commit(&mut coordinator, &mut filesystem, 4, overlay_delete);
+    assert_eq!(overlay_delete_prepared.change_count(), 2);
+    assert_eq!(
+        overlay_delete_prepared.result_digest(),
+        overlay_delete_outcome.result_digest
+    );
+
+    let revision_four = coordinator.read_view().unwrap().state().clone();
+    publish_graph_state_root(&mut coordinator, &mut filesystem, &revision_four).unwrap();
+    let revision_four_roots =
+        load_graph_state_roots(&coordinator, &mut filesystem, &revision_four).unwrap();
+    let changed_predicate = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: left,
+            expected: Expected::ReadView {
+                revision: CommitRevision::FIRST,
+                predicate: Predicate::RecordVisible(right),
+            },
+            properties: Value::Bool(false),
+        }],
+    );
+    let mut changed_predicate_cache = PageCache::new(1024 * 1024).unwrap();
+    let changed_predicate_view = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &revision_four_roots[0],
+        changed_predicate,
+        limits,
+        &mut changed_predicate_cache,
+    )
+    .unwrap();
+    assert_eq!(changed_predicate_view.report().history_versions, 2);
+    assert!(matches!(
+        changed_predicate_view.prepare(),
+        Err(GraphDiskError::Graph(GraphError::PredicateChanged(revision)))
+            if revision == CommitRevision::FIRST
+    ));
+    let read_view = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: left,
+            expected: Expected::ReadView {
+                revision: CommitRevision::FIRST,
+                predicate: Predicate::RecordVisible(left),
+            },
+            properties: Value::Bool(true),
+        }],
+    );
+    let mut history_limit_cache = PageCache::new(1024 * 1024).unwrap();
+    assert!(matches!(
+        load_graph_disk_preparation_view(
+            &coordinator,
+            &mut filesystem,
+            &revision_four_roots[0],
+            read_view.clone(),
+            GraphDiskPreparationLimits::new(8, 8, 0, 8, 1024 * 1024).unwrap(),
+            &mut history_limit_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let mut read_view_cache = PageCache::new(1024 * 1024).unwrap();
+    let historical_view = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        &revision_four_roots[0],
+        read_view.clone(),
+        limits,
+        &mut read_view_cache,
+    )
+    .unwrap();
+    assert_eq!(historical_view.report().history_versions, 1);
+    let historical_prepared = historical_view.prepare().unwrap();
+    let historical_outcome = commit(&mut coordinator, &mut filesystem, 5, read_view);
+    assert_eq!(
+        historical_prepared.result_digest(),
+        historical_outcome.result_digest
+    );
+
     let mut stale_cache = PageCache::new(1024 * 1024).unwrap();
     assert!(matches!(
         load_graph_disk_preparation_view(
@@ -957,48 +1086,6 @@ fn bounded_disk_preparation_matches_commit_and_rejects_unsupported_or_stale_base
             &mut stale_cache,
         ),
         Err(GraphDiskError::RootStateMismatch)
-    ));
-    let unsupported = GraphTransaction::new(
-        scope(),
-        vec![Operation::DeleteEntity {
-            target: left,
-            expected: Expected::Version(uste_graph::RecordVersion::FIRST),
-            policy: DeletePolicy::Reject,
-            affected: Vec::new(),
-        }],
-    );
-    assert!(matches!(
-        load_graph_disk_preparation_view(
-            &coordinator,
-            &mut filesystem,
-            &roots[0],
-            unsupported,
-            limits,
-            &mut stale_cache,
-        ),
-        Err(GraphDiskError::UnsupportedRequest)
-    ));
-    let read_view = GraphTransaction::new(
-        scope(),
-        vec![Operation::ReplaceEntity {
-            target: left,
-            expected: Expected::ReadView {
-                revision: CommitRevision::FIRST,
-                predicate: Predicate::RecordVisible(left),
-            },
-            properties: Value::Null,
-        }],
-    );
-    assert!(matches!(
-        load_graph_disk_preparation_view(
-            &coordinator,
-            &mut filesystem,
-            &roots[0],
-            read_view,
-            limits,
-            &mut stale_cache,
-        ),
-        Err(GraphDiskError::UnsupportedRequest)
     ));
 }
 

@@ -2761,14 +2761,13 @@ pub(crate) fn try_visit_record_references<E>(
     Ok(())
 }
 
-/// Prepare against a complete proof of the current records needed by the supported disk subset.
-///
-/// History and reverse families are deliberately absent: the caller must reject operations that
-/// depend on them before constructing this narrow reducer base.
-pub(crate) fn prepare_from_complete_current_subset(
+/// Prepare against complete current, history and reverse proofs needed by one disk transaction.
+pub(crate) fn prepare_from_complete_disk_proofs(
     scope: NamespaceRef,
     base_revision: CommitRevision,
     records: BTreeMap<RecordRef, Record>,
+    history: BTreeMap<RecordRef, Vec<Record>>,
+    reverse: BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
     policy: Option<NamespacePolicy>,
     transaction: &GraphTransaction,
 ) -> Result<PreparedGraph, GraphError> {
@@ -2777,11 +2776,11 @@ pub(crate) fn prepare_from_complete_current_subset(
             scope,
             revision: Some(base_revision),
             records,
-            history: BTreeMap::new(),
+            history,
             outgoing: BTreeMap::new(),
             incoming: BTreeMap::new(),
             provenance: BTreeMap::new(),
-            reverse: BTreeMap::new(),
+            reverse,
             policy,
             policy_history: BTreeMap::new(),
         },

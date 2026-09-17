@@ -164,6 +164,12 @@ the admitted disk root, then prepare without an I/O capability. Deletion and his
 remain explicitly unsupported pending complete reverse/history proofs; the live coordinator,
 root-delta metadata and recovery state remain full-memory. T-20 and BM-01/BM-06 remain open.
 
+Decision 0036 completes that preparation proof vocabulary with bounded authenticated history
+prefixes for `ReadView` and reverse-owner buckets for deletion. All graph operation/precondition
+variants can now use the storage-free partial reducer phase. Live coordinator integration,
+terminal-root derivation from the partial view, larger-than-memory recovery and qualification
+remain open.
+
 ## Release gates
 
 | Gate | Required outcome |

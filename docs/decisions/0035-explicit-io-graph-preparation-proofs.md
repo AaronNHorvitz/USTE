@@ -6,6 +6,9 @@ Status: accepted as bounded current-state T-20 groundwork. T-20 remains open; de
 historical predicates, persistent overlays, disk-backed coordinator publication and BM-01/BM-06
 qualification are not implemented by this increment.
 
+Decision 0036 subsequently adds the missing complete bounded reverse/history proof buckets and
+supports deletion and historical predicates; the other limitations remain.
+
 ## Context
 
 The pure `TransactionState::prepare` contract cannot safely hide filesystem access. Decision 0034
