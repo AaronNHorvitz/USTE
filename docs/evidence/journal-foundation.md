@@ -1,6 +1,6 @@
-# T-13 journal/recovery foundation evidence
+# T-13 journal/recovery evidence
 
-Date: 2026-09-17 · scope: partial T-13 evidence, not task completion or production qualification
+Date: 2026-09-17 · scope: completed local T-13 acceptance, not production qualification
 
 Reviewed implementation: commit `65b0ed023799585de0c52f09c8b8aa5e7fb7d4f5` · tree
 `456e7cb632a62d3f0dada1ca61dcab476b2efb4b`. Two read-only Codex agent audits compared the
@@ -74,12 +74,24 @@ recovery wrapper.
 62-task dependency-graph check also pass. Full-workspace and supply-chain results are recorded in
 `PROGRESS.md` after the coherent increment gate.
 
-## Honest limits and remaining T-13 work
+The explicit ext4 qualification command is reproducible on a caller-verified writable ext4 mount:
 
-T-13 stays open. Real-process creation publication boundaries and the ext4 mount/device trial are
-not yet complete. The current SIGKILL cases demonstrate process loss after group/certificate
-sync, not controller cache loss or power-cut behavior. `fstatfs` cannot itself establish ext4,
-local-device or hardware semantics.
+```sh
+findmnt -rn -T /var/mnt/archive_vault -o TARGET,FSTYPE,SOURCE,OPTIONS
+USTE_T13_TEST_ROOT=/var/mnt/archive_vault USTE_T13_TEST_PROFILE=ext4 \
+  cargo test -p uste-storage --test linux_adapter --test journal_process_restart -- --nocapture
+```
+
+It reported `/var/mnt/archive_vault ext4 /dev/sda1 rw,relatime,seclabel`; all five adapter/process
+tests passed. The ordinary no-environment form ran the same five tests on the Btrfs Cargo scratch.
+
+## Honest limits after T-13
+
+The Btrfs and ext4 runs include real-process creation loss after temporary-directory sync and after
+parent-directory sync, with only absent or complete outcomes. The ext4 trial used the independently
+identified writable mount `/var/mnt/archive_vault` on `/dev/sda1`; `fstatfs` alone is not treated as
+proof that an arbitrary ext-family mount is ext4. The SIGKILL cases demonstrate process loss, not
+controller cache loss or power-cut behavior.
 Failed creation and rollover may leave hidden siblings or unreferenced segments; they are never
 committed, but enumeration and bounded reclamation are explicitly assigned to T-35. The 1 GiB
 certificate log fails closed after 258,047 commits; T-35 owns its rollover.

@@ -5,7 +5,7 @@ Date: 2026-09-17
 Status: accepted for storage format 1.0 and the T-13 implementation. This refines
 [Decisions 0004](0004-storage-publication-and-recovery.md),
 [0013](0013-crypto-envelope-and-key-interface.md) and
-[0014](0014-io-capability-and-fault-profile.md). It does not qualify ext4, controller power loss,
+[0014](0014-io-capability-and-fault-profile.md). It does not qualify controller power loss,
 nonempty blob inventories or whole-state rollback detection.
 
 ## Linux capability boundary
@@ -30,8 +30,8 @@ The default constructor admits only the currently evidenced Btrfs magic. A separ
 constructor requires the ext-family magic and an explicit caller profile. That magic cannot
 distinguish ext2, ext3 and ext4, so the caller must independently establish the mount type and a
 recorded mount/device trial remains required before claiming ext4 support. The supplied root is
-duplicated with close-on-exec before use. Current evidence exercises only the Btrfs reference
-runner; full qualification is still pending.
+duplicated with close-on-exec before use. Current evidence exercises the Btrfs reference runner and
+an independently identified ext4 mount.
 
 ## Format 1.0 layout and contexts
 
@@ -145,5 +145,6 @@ replay, two-writer exclusion, failed and lost certificate-sync outcomes, poisone
 repair and byte-exhaustive bootstrap/late-commit corruption. Linux tests cover modes, positional
 I/O, symlink/type rejection, no-replace behavior and lock lifetime. Btrfs subprocess tests cover
 SIGKILL after group sync and after certificate sync, including live cross-process exclusion and
-lock release on death. T-13 remains open for real-process creation boundaries and the ext4
-mount/device trial.
+lock release on death. Real-process creation loss after temporary-directory sync and after
+parent-directory sync produces only absent or complete outcomes on both Btrfs and ext4. This closes
+T-13's local acceptance scope without making a controller-cache or power-cut claim.

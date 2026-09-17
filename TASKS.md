@@ -62,7 +62,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-10 | Independent in-memory reference model; FR-01/04/05/06 | T-09 | [uste-testkit model and generated histories](crates/uste-testkit), with [evidence](docs/evidence/reference-model.md) | VT-01 exposes both valid and invalid transitions independently of storage code |
 | [x] T-11 | Encryption/key-adapter boundary; FR-10 | T-09 | [Reviewed crypto envelopes and key interfaces](docs/evidence/crypto-boundary.md) | T-11 slice of VT-07 covers wrong context/key, tampering, nonce lifecycle, lock/unlock and redaction; rotation/clone/restore remain later tasks |
 | [x] T-12 | Filesystem/clock/random adapters and fault harness; FR-03, NFR-03 | T-09 | [Narrow I/O interfaces and deterministic failure injection](docs/evidence/io-fault-harness.md) | Reproducible short-write/read, file/directory-sync, rename, disk-full and SIGKILL/reopen scenarios; production Linux adapter remains T-13 |
-| [ ] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | [uste-storage journal/recovery foundation](docs/evidence/journal-foundation.md) | VT-03/04 pass every initial publication boundary and hard-corruption case |
+| [x] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | [uste-storage journal/recovery evidence](docs/evidence/journal-foundation.md) | VT-03/04 pass every initial publication boundary and hard-corruption case |
 | [ ] T-14 | Commit coordinator, readers, conflict checks, idempotency; FR-02 | T-13 | uste-txn and durable outcome lookup | VT-02 includes lost response, competing mutations, cancellation and restart |
 | [ ] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | Staging/finalization/resume/cleanup and inventory | VT-08 plus blob-specific VT-03: exact unknown-binary round-trip, bounded RSS, no committed dangling object |
 | [ ] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | uste-policy and trusted adapter checks | VT-06 proves no cross-scope graph/blob/existence leakage; quotas enforced on actual bytes |
@@ -78,8 +78,8 @@ manifest/log/segment headers, opaque transaction groups, fixed commit certificat
 recovery are implemented. Deterministic every-operation creation/commit/rollover crash tests,
 byte-exhaustive corruption, real portable-key wiring, injected error/short-progress matrices and
 Btrfs SIGKILL after group/certificate sync pass. Live cross-process exclusion and lock release on
-death also pass. The task remains open for real-process creation boundaries and ext4 qualification;
-no partial evidence is represented as task completion.
+death also pass. Real-process creation outcomes pass on Btrfs and the separately verified ext4
+mount; T-13's local acceptance scope is complete without claiming power-cut behavior.
 
 ## R2 — Developer alpha
 

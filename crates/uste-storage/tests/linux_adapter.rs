@@ -8,16 +8,22 @@ use std::{
 };
 
 use uste_storage::{
-    AdapterErrorKind, EntryName, FileSystem, OwnershipFileSystem, linux::LinuxFileSystem,
+    AdapterErrorKind, EntryName, FileSystem, OwnershipFileSystem,
+    linux::{LinuxFileSystem, LinuxFilesystemProfile},
     read_exact_at, write_all_at,
 };
+
+const TEST_ROOT: &str = "USTE_T13_TEST_ROOT";
+const TEST_PROFILE: &str = "USTE_T13_TEST_PROFILE";
 
 fn name(value: &str) -> EntryName {
     EntryName::new(value).unwrap()
 }
 
 fn filesystem() -> (TestDirectory, LinuxFileSystem) {
-    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let scratch = std::env::var_os(TEST_ROOT)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")));
     fs::create_dir_all(&scratch).unwrap();
     let discriminator = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -29,7 +35,15 @@ fn filesystem() -> (TestDirectory, LinuxFileSystem) {
     ));
     fs::create_dir(&directory).unwrap();
     let root: std::os::fd::OwnedFd = File::open(&directory).unwrap().into();
-    let filesystem = LinuxFileSystem::from_directory(root).unwrap();
+    let filesystem = match std::env::var(TEST_PROFILE).as_deref() {
+        Ok("ext4") => {
+            LinuxFileSystem::from_directory_for_profile(root, LinuxFilesystemProfile::Ext4Candidate)
+                .unwrap()
+        }
+        Ok(profile) => panic!("unknown test filesystem profile: {profile}"),
+        Err(std::env::VarError::NotPresent) => LinuxFileSystem::from_directory(root).unwrap(),
+        Err(error) => panic!("invalid test filesystem profile: {error}"),
+    };
     (TestDirectory(directory), filesystem)
 }
 

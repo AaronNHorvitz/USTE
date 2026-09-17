@@ -36,7 +36,8 @@ two owners. Network filesystems are unsupported initially.
 Decisions 0014/0015 implement the handle-relative interface, deterministic volatile/durable fault
 model and x86_64 Linux adapter. The adapter uses descriptor-rooted `openat2`, no-replace rename,
 explicit file/directory syncs and a unique-descriptor nonblocking ownership lock. Current host
-evidence covers Btrfs; ext4 remains an unperformed qualification trial.
+evidence covers Btrfs and a separately identified local ext4 mount; the ext-family magic alone is
+not accepted as proof that an arbitrary caller-supplied mount is ext4.
 
 ## Transaction lifecycle
 

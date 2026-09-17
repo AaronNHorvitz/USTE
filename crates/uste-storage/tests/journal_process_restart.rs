@@ -18,12 +18,15 @@ use uste_storage::{
     AdapterErrorKind, EntryName,
     fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation},
     journal::{CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, StorageError},
-    linux::LinuxFileSystem,
+    linux::{LinuxFileSystem, LinuxFilesystemProfile},
 };
 use uste_types::DatabaseId;
 
 const CHILD_MARKER: &str = "USTE_T13_JOURNAL_CHILD";
 const DIRECTORY_PATH: &str = "USTE_T13_JOURNAL_DIRECTORY";
+const CREATE_BOUNDARY: &str = "USTE_T13_CREATE_BOUNDARY";
+const TEST_ROOT: &str = "USTE_T13_TEST_ROOT";
+const TEST_PROFILE: &str = "USTE_T13_TEST_PROFILE";
 
 #[test]
 fn committed_certificate_survives_writer_sigkill_and_replays_exact_bytes() {
@@ -32,7 +35,7 @@ fn committed_certificate_survives_writer_sigkill_and_replays_exact_bytes() {
         return;
     }
 
-    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let scratch = test_root();
     fs::create_dir_all(&scratch).unwrap();
     let discriminator = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -134,7 +137,7 @@ fn synced_group_without_certificate_is_removed_after_writer_sigkill() {
         return;
     }
 
-    let scratch = PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    let scratch = test_root();
     fs::create_dir_all(&scratch).unwrap();
     let discriminator = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -211,6 +214,74 @@ fn synced_group_without_certificate_is_removed_after_writer_sigkill() {
     drop(directory_guard);
 }
 
+#[test]
+fn creation_publication_process_loss_has_only_absent_or_complete_outcomes() {
+    if std::env::var_os(CHILD_MARKER).is_some() {
+        child_creation_boundary();
+        return;
+    }
+
+    for (boundary, expected_published) in [("temporary-synced", false), ("parent-synced", true)] {
+        let scratch = test_root();
+        fs::create_dir_all(&scratch).unwrap();
+        let discriminator = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = scratch.join(format!(
+            "uste-t13-create-{boundary}-{}-{discriminator}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let directory_guard = TestDirectory(directory.clone());
+        let database = DatabaseId::from_bytes([0xc1; 16]);
+        let executable = std::env::current_exe().unwrap();
+        let child = Command::new(executable)
+            .arg("--exact")
+            .arg("creation_publication_process_loss_has_only_absent_or_complete_outcomes")
+            .arg("--nocapture")
+            .env(CHILD_MARKER, "creation")
+            .env(CREATE_BOUNDARY, boundary)
+            .env(DIRECTORY_PATH, &directory)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut child = ChildGuard::new(child);
+        let mut readiness = child.stderr().take().unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        thread::spawn(move || {
+            let mut byte = [0_u8; 1];
+            let result = readiness.read_exact(&mut byte).map(|()| byte);
+            let _ = sender.send(result);
+        });
+        assert_eq!(
+            receiver
+                .recv_timeout(Duration::from_secs(5))
+                .expect("child creation-boundary readiness timed out")
+                .expect("child creation-boundary readiness pipe closed"),
+            [b'R']
+        );
+        assert_eq!(child.kill_and_wait().signal(), Some(9));
+
+        let mut filesystem = open_filesystem(&directory);
+        let opened = JournalStore::open(
+            &mut filesystem,
+            &name("world"),
+            database,
+            CounterEntropy::new(80),
+            CounterEntropy::new(800),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        );
+        assert_eq!(opened.is_ok(), expected_published, "boundary={boundary}");
+        if let Ok((_store, report)) = opened {
+            assert_eq!(report.frontier, None);
+        }
+        drop(directory_guard);
+    }
+}
+
 fn child_writer() {
     let directory = PathBuf::from(std::env::var_os(DIRECTORY_PATH).unwrap());
     let database = DatabaseId::from_bytes([0xa1; 16]);
@@ -283,9 +354,59 @@ fn child_group_only() {
     }
 }
 
+fn child_creation_boundary() {
+    let directory = PathBuf::from(std::env::var_os(DIRECTORY_PATH).unwrap());
+    let boundary = std::env::var(CREATE_BOUNDARY).unwrap();
+    let database = DatabaseId::from_bytes([0xc1; 16]);
+    let occurrence = match boundary.as_str() {
+        "temporary-synced" => 1,
+        "parent-synced" => 2,
+        _ => panic!("unknown creation boundary"),
+    };
+    let plan = FaultPlan::new([FaultPoint {
+        operation: Operation::SyncDirectory,
+        occurrence,
+        action: FaultAction::CrashAfter,
+    }])
+    .unwrap();
+    let mut filesystem = FaultFileSystem::new(open_filesystem(&directory), plan);
+    assert_eq!(
+        JournalStore::create(
+            &mut filesystem,
+            CreationOptions {
+                database,
+                final_name: name("world"),
+            },
+            create_vault(database, 70),
+            CounterEntropy::new(700),
+        )
+        .unwrap_err(),
+        StorageError::Adapter(AdapterErrorKind::InjectedCrash)
+    );
+    std::io::stderr().write_all(b"R").unwrap();
+    std::io::stderr().flush().unwrap();
+    loop {
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 fn open_filesystem(directory: &PathBuf) -> LinuxFileSystem {
     let root: std::os::fd::OwnedFd = File::open(directory).unwrap().into();
-    LinuxFileSystem::from_directory(root).unwrap()
+    match std::env::var(TEST_PROFILE).as_deref() {
+        Ok("ext4") => {
+            LinuxFileSystem::from_directory_for_profile(root, LinuxFilesystemProfile::Ext4Candidate)
+                .unwrap()
+        }
+        Ok(profile) => panic!("unknown test filesystem profile: {profile}"),
+        Err(std::env::VarError::NotPresent) => LinuxFileSystem::from_directory(root).unwrap(),
+        Err(error) => panic!("invalid test filesystem profile: {error}"),
+    }
+}
+
+fn test_root() -> PathBuf {
+    std::env::var_os(TEST_ROOT)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")))
 }
 
 fn name(value: &str) -> EntryName {

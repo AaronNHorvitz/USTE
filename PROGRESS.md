@@ -2,8 +2,8 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `6b0b89d` (partial T-13 encrypted journal/recovery foundation and
-qualification; T-13 remains open). Review was performed by Codex agents and does not represent
+Latest reviewed implementation: `6b0b89d` (T-13 encrypted journal/recovery qualification before
+the final filesystem-profile delta). Review was performed by Codex agents and does not represent
 independent external security certification.
 
 ## Completed this increment
@@ -116,7 +116,7 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 80 workspace tests including 35 uste-storage tests;
+# workspace format/clippy/test/doc pass; 81 workspace tests including 36 uste-storage tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
@@ -148,13 +148,13 @@ policy checks; no benchmark measurement exists yet.
   oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
-- T-13 remains open for real-process creation publication boundaries and the ext4 trial. Current
-  Btrfs SIGKILL tests cover group/certificate sync and lock death, but do not simulate controller
+- T-13 local acceptance is complete on the reference Btrfs runner and the independently identified
+  ext4 mount `/var/mnt/archive_vault` (`/dev/sda1`). These SIGKILL tests do not simulate controller
   cache loss or actual power loss. The certificate log fails closed at 1 GiB pending later
-  maintenance/rollover design.
+  T-35 maintenance/rollover design.
 
 ## Next dependency-permitted work
 
-Continue T-13 with real-process creation publication boundaries, then run the available filesystem
-qualification matrix. T-62 remains independent and must not be represented as complete without
-owner-administered evidence.
+Implement T-14's commit coordinator, retained readers, conflict checks, cancellation semantics and
+durable idempotency/outcome lookup. T-62 remains independent and must not be represented as complete
+without owner-administered evidence.

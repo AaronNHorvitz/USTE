@@ -66,9 +66,9 @@ pub struct LinuxFileSystem {
 /// Explicit local-filesystem admission profile.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LinuxFilesystemProfile {
-    /// Exercised on the current reference runner; full qualification remains open.
+    /// Qualified by the T-13 adapter and process-loss matrix on the reference runner.
     Btrfs,
-    /// Candidate path for the still-required recorded ext4 trial.
+    /// Ext-family admission path; the caller must separately verify that the mount is ext4.
     Ext4Candidate,
 }
 

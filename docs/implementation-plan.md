@@ -58,7 +58,8 @@ remain lifecycle operations rather than crypto-library side effects.
 The memory durability model keeps file bytes and directory names independently synchronized and
 invalidates handles on restart. Decision 0015's T-13 slice adds the reviewed Linux implementation,
 exclusive ownership, encrypted opaque groups, fixed commit certificates and streaming fail-closed
-recovery. Btrfs process-loss evidence does not establish power-loss behavior or ext4 qualification.
+recovery. Btrfs and ext4 process-loss evidence does not establish controller-cache or power-loss
+behavior.
 
 ## R0 design deliverables
 

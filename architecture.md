@@ -116,7 +116,7 @@ ownership locks. Storage paths are
 single validated names relative to opaque directory handles; positional I/O exposes short progress,
 and file/directory flushes and no-replace rename remain separate observable operations. The T-12
 memory/fault adapter remains a correctness harness; the Linux implementation is exercised on the
-Btrfs reference runner, while full qualification and the ext4 trial remain open.
+Btrfs reference runner and an independently identified local ext4 mount.
 
 ## Security scope
 
