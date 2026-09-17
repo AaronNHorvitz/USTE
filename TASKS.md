@@ -1,6 +1,6 @@
 # USTE — Product development tasks
 
-Database design draft 1.2 · 2026-09-16
+Database design draft 1.3 · 2026-09-17
 
 **All implementation tasks are open.** This document is a plan, not evidence of a working
 database. No release gate has passed. The current documentation update does not close R0.
@@ -20,6 +20,12 @@ Proposed output paths below do not currently exist and are not instructions to f
 Every code task also inherits NFR-01, NFR-03, NFR-04 and NFR-05.
 The [implementation plan](docs/implementation-plan.md) explains increments. IDs are stable;
 appended spatial/physics tasks appear at their dependency gate rather than numeric order.
+
+Application scope includes future game-world consumers and item tracking linked to imported
+asset-price records, alongside agent memory. T-28/T-54/T-56 own the offline examples in
+[application use cases](docs/application-use-cases.md). No native price-feed API, external
+account, provider password/token or trading implementation is required by these tasks.
+This clarification preserves task IDs, dependencies, completed R0 evidence and open gates.
 
 ## R0 — Foundational decisions
 
@@ -79,15 +85,15 @@ appended spatial/physics tasks appear at their dependency gate rather than numer
 | [ ] T-25 | Lexical retrieval, source reads and explanations; FR-13/20 | T-21, T-24 | uste-query chunk search/range reads/citation API | VT-06/11 with bounded output, partial coverage, authorization-before-expansion and stale results |
 | [ ] T-26 | Deterministic branch kernel and dependency-delay model; FR-08/24 | T-18, T-21, T-22 | uste-sim, branch compare and promotion proposals | VT-12 proves repeatability, isolation, conflict checks and no ambient effects |
 | [ ] T-27 | Rust API, operator CLI and authenticated local IPC; FR-14 | T-25, T-26 | uste-api/cli/service and error reference | Tests cover structured errors, OutcomeUnknown, streaming, IPC identity and locked state |
-| [ ] T-28 | Generic derived/authoritative consumer adapters; FR-15 | T-27 | Project-notebook fixtures and migration/cutover contract | VT-15 passes import/approve/restart/correct/cite/branch paths with foreign namespace denied |
+| [ ] T-28 | Generic derived/authoritative consumer adapters; FR-15 | T-27 | Project-notebook, headless-world and item/price mappings plus migration/cutover contract | VT-15 passes import/approve/restart/correct/cite/branch paths with foreign namespace denied; local examples need no provider credentials |
 | [ ] T-50 | Local/geographic frame transforms and geometry reference implementation; FR-27 | T-19 | uste-spatial types, transforms and geometry predicates | VT-18 verifies axis/units, frames, transforms, antimeridian/poles and declared accuracy |
 | [ ] T-51 | Observation histories, explicit estimates and state-at-time; FR-28 | T-20, T-21, T-50 | uste-motion with source/correction dependencies | VT-19 proves late/conflicting observations, bounded gaps, no future-data interpolation and unchanged identity |
 | [ ] T-52 | Bounded point/box/radius/nearest queries and candidate planning; FR-29 | T-51 | Authorized spatial query operators | VT-18/19 match reference scan under limits; BM-10 preliminary results are labeled, not release capacity |
 | [ ] T-53 | Unified graph/content/space/time query plans and object/source projections; FR-33 | T-25, T-52 | Typed query composition, read handles and explanations | VT-22 proves coherent revision, source-byte retrieval, exact predicates, partial coverage and stale-handle denial |
-| [ ] T-54 | CSV/JSON ETL mapping, preview, streaming batches and resume CLI; FR-34 | T-24, T-49 | uste-ingest tooling and synthetic import fixtures | VT-23 covers bad rows, units/time/frame errors, changed input, quotas, cancellation, lost responses and restart |
+| [ ] T-54 | CSV/JSON ETL mapping, preview, streaming batches and resume CLI; FR-34 | T-24, T-49 | uste-ingest tooling and synthetic imports including item-linked price records | VT-23 covers bad rows, exact amounts/quote units, time/frame errors, changed input, quotas, cancellation, retry and restart; no provider calls |
 | [ ] T-55 | Supplied-graph navigation with constraints and stable path ordering; FR-30 | T-52, T-53 | Bounded path operator and route provenance | VT-18/22 checks directed/disconnected graphs, costs, hidden routes, equal-cost ties and resource exhaustion |
 | [ ] T-57 | Deterministic 2D/3D kinematics and branch checkpoint/resume; FR-31 | T-26, T-50, T-51 | uste-physics baseline and virtual-time mappings | VT-20 matches independent analytic cases, pins profile and preserves observed/simulated separation after restart |
-| [ ] T-56 | Synthetic world end-to-end CLI/read fixture and consumer example; FR-27/28/29/30/31/33/34 | T-27, T-53, T-54, T-55, T-57 | Moving objects, attached documents, query/navigation/branch example | VT-15/17/18/19/20/22/23 R2 scope passes with UTC/local display, permissions, corrections and byte retrieval |
+| [ ] T-56 | Synthetic world end-to-end CLI/read fixture and consumer examples; FR-27/28/29/30/31/33/34 | T-27, T-53, T-54, T-55, T-57 | Headless game-world state and tracked items linked to locally imported prices/documents | VT-15/17/18/19/20/22/23 R2 scope passes offline: UTC/local display, permissions, corrections, price provenance and byte retrieval; no provider accounts/secrets |
 | [ ] T-29 | R2 acceptance and developer documentation | T-20, T-21, T-24, T-25, T-26, T-27, T-28, T-56 | Alpha evidence and examples | R2 suites pass; unsupported formats explicitly visible; no R3 capabilities implied |
 
 ## R3 — Hardened beta

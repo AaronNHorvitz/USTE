@@ -1,12 +1,17 @@
 # USTE — Universal Spatial-Temporal Engine
 
 A local-first, Rust-native spatial-temporal graph and content database with a deterministic
-simulation kernel for agent systems and queryable world models.
+physics/simulation kernel for queryable world models, agent systems and future game development.
 
 USTE is being designed to store connected knowledge, arbitrary file bytes, source evidence,
 and durable event history, including objects with geographic/local positions and movement.
 Agents would use a bounded API to retrieve actual items and authorized content, navigate
 relationships and locations, trace answers to sources, and explore hypothetical motion.
+
+USTE is a natively built database system, not a hosted data service. Applications can use it
+to persist game-world items, track real-world objects, or link items to imported asset-price
+observations. These are uses of the same storage, graph, space, time and physics capabilities.
+An item can link to a price record without USTE fetching that price from an external provider.
 
 **Status: design draft; implementation has not started.** There is no database executable,
 supported parser, benchmark result, security certification, or production release yet.
@@ -26,6 +31,15 @@ movement history, bounded navigation and a constrained physics baseline. Celesti
 and rendering do not gate the database release; spatial indexing is now required by R3.
 
 ## Planned capabilities
+
+Intended applications include future game development, item/asset tracking linked to supplied
+price observations, and agent memory. A renderer or complete game engine is not required now.
+The core does not implement exchange/broker/market-data API clients, collect provider
+passwords/API keys, or place trades. Local CSV/JSON, synthetic fixtures and caller-supplied
+records are sufficient. Native Rust/local IPC APIs are database interfaces, not outbound
+price-feed calls. No cloud account or external-provider credentials are required for these
+local workflows; local encryption keys and authorization remain necessary security controls.
+See [application use cases](docs/application-use-cases.md) for mappings and acceptance scope.
 
 - Persistent entities, typed relationships, assertions, evidence, and artifacts.
 - Valid-time and recorded-time history, corrections, contradictions, and provenance.
@@ -78,6 +92,8 @@ guarantee is made.
 | [Physics and motion](docs/physics-and-motion.md) | Kinematics, constrained contacts, numerical profiles and branch durability |
 | [Ingestion and unified retrieval](docs/ingestion-and-unified-retrieval.md) | ETL batches and combined object/content/graph/space/time queries |
 | [Implementation plan](docs/implementation-plan.md) | Incremental delivery, dependencies, integration readiness and scope boundaries |
+| [Application use cases](docs/application-use-cases.md) | Future games, item tracking, imported prices and external-service boundaries |
+| [Development session prompt](docs/development-autonomy-prompt.md) | Owner-supplied implementation instructions, gate correction and completion criteria |
 | [Storage and recovery](docs/storage-and-recovery.md) | Transactions, disk artifacts, recovery, and compaction |
 | [Security and privacy](docs/security-and-privacy.md) | Threats, authorization, encryption, and deletion |
 | [Content ingestion and parsing](docs/content-ingestion-and-parsing.md) | Files, workers, extraction, and citations |

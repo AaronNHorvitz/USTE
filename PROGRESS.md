@@ -66,6 +66,13 @@ policy checks; no benchmark measurement exists yet.
 
 ## Next dependency-permitted work
 
+Owner clarification on 2026-09-17: product documentation now explicitly includes a native
+database/physics kernel for future game development and item tracking linked to imported
+asset-price observations. Existing open T-28/T-54/T-56 acceptance scope includes offline
+synthetic examples. No feed API, provider account/secret, runtime network dependency or new
+codec was added. Task checkboxes, technical R0 evidence and governance dependencies are
+unchanged; this documentation edit does not implement the separately discussed gate correction.
+
 Once the owner verifies the private disclosure route, close T-06, finalize the already prepared
 cross-decision T-07 review, scaffold T-08 and begin the production `uste-types` implementation
 against the frozen vectors.

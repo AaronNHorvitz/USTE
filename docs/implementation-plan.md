@@ -1,11 +1,22 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.2 · 2026-09-16 · All implementation remains open
+Design draft 1.3 · 2026-09-17 · Production implementation remains open
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
 or measured capacity is implied. Decisions 0001 and [0002](decisions/0002-spatial-world-model.md)
 replace the archived simulation-first delivery assumptions.
+
+## Product objective and application boundary
+
+Build a native Rust database and physics kernel for queryable worlds and future game
+development, agent memory, and other applications such as tracking items linked to asset
+prices. The price observations are supplied records, not data the engine must acquire.
+T-28/T-54/T-56 deliver headless world and local-file item/price examples under
+[application use cases](application-use-cases.md), using existing types and query operators.
+No native feed/broker/exchange API client, credential onboarding or live account is required.
+Keep local encryption/authentication while demonstrating offline operation without provider
+secrets. This is an application-scope clarification, not a change to recorded governance gates.
 
 ## Implementation increments
 
@@ -84,3 +95,5 @@ An interactive 3D renderer, infinite procedural universe, global GIS projection 
 general 3D physics, robotics, trading execution, distributed consensus, textual query language,
 automatic web/exchange connectors and Python SDK require separate scope decisions. They are
 not substitutes for the explicit spatial/physics/ingest baseline required above.
+Imported asset-price storage and item linkage are not deferred with those connectors: they
+are generic records handled by the planned local ingestion and retrieval paths.

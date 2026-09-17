@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.2 · 2026-09-16 · Not implemented
+Database design draft 1.3 · 2026-09-17 · Production engine not implemented
 
 ## Component boundaries
 
@@ -25,6 +25,14 @@ Validated derived artifacts and provenance transactions
 Workers cannot write directly to storage or grant permissions. Source bytes, derived content,
 and graph state share transaction visibility but may use different physical layouts.
 The content pipeline is specified in [content ingestion](docs/content-ingestion-and-parsing.md).
+
+The database and physics kernel are native local components usable by future games, agent
+systems and tracking applications. Asset-price observations use ordinary typed records and
+relationships, not a dedicated network subsystem. Data acquisition, provider authentication
+and any trading logic belong to a separate consumer/ETL outside the engine. No such connector
+is required by the implementation plan. Database API calls remain distinct from outbound
+provider API calls; local encryption/IPC authorization are not provider credentials.
+See [application use cases](docs/application-use-cases.md).
 
 ## Proposed Rust workspace
 

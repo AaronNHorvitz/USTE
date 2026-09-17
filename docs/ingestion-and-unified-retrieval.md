@@ -14,6 +14,12 @@ authenticated IPC/CLI operations. A separate ETL can read CSV/JSON, another data
 output or an external service; the core does not fetch these sources automatically.
 The importer receives only explicitly granted source and destination capabilities.
 
+Item-to-asset relationships and price observations are ordinary caller-supplied data under
+[application use cases](application-use-cases.md). The local batch importer does not become
+a market-data client: no native feed/exchange/broker calls, provider logins or API keys are
+part of this requirement. Preserve exact scaled amounts, quote units/currencies, asset IDs,
+source timestamps and correction history using the admitted v1 value types.
+
 Baseline R2 batch tooling reads JSON records and CSV with an explicit mapping manifest:
 schema/version, identity keys, relationship endpoints, source-event IDs, timestamp roles and
 units, timezone assumptions, coordinate frames/axis order, numeric units, sensitivity and
@@ -69,6 +75,13 @@ interpolated state; late correction at a later knowledge revision; branch predic
 UTC/local display; and an explicitly unreachable route. Return source-backed objects, not
 only prose. Hide a second namespace's closer object and shorter route without leaking either.
 Restart, cancel/resume an import, rebuild indexes, purge a source and test stale handles.
+
+Extend the fixture with local CSV/JSON price observations linked to tracked items and a
+headless game-world consumer. Query an item's location, linked price and source at one
+knowledge view; expose missing/stale prices and reject incompatible quote/unit comparisons.
+Later corrections must not enter earlier views. Run without outbound network or provider
+credentials, while retaining local database keys and authorization. No live-data or trading
+performance claim is part of this example.
 
 VT-22 compares composed queries with a simple authorized reference scan; VT-23 proves privacy,
 import idempotency and lifecycle behavior. BM-13 measures p50/p95/p99, peak memory, ingest rate

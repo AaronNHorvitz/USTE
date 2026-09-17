@@ -1,15 +1,17 @@
 # USTE — Product requirements
 
-Version: database design draft 1.2 · Date: 2026-09-16
+Version: database design draft 1.3 · Date: 2026-09-17
 
 Status: documentation only; implementation not started. Requirement and test identifiers
 below belong to this database design, not the archived simulation PRD.
 
 ## Purpose and users
 
-Provide an independent Rust-native local database for agent builders who need connected,
-source-backed knowledge, temporal history, arbitrary content, spatial world models and
-reproducible motion simulation. Items can have optional locations, movement and attached files.
+Provide an independent, natively built Rust database with a physics/simulation kernel for
+application and agent builders who need connected knowledge, temporal history, arbitrary
+content, spatial world models and reproducible motion simulation. Intended applications
+include future game development and item tracking linked to imported asset-price observations.
+Items can have optional locations, movement, attached files and explicit asset/price relationships.
 Primary consumers are Rust applications, restricted local clients, and human operators.
 No specific consuming application is part of the product identity.
 
@@ -23,6 +25,21 @@ Initial operation is single-machine/single-owner-process. Distributed consensus,
 Cypher/AQL compatibility, rendering, general-purpose 3D/fluids/celestial physics, automatic
 real-world actions, universal file interpretation and arbitrary native plugins are outside R4.
 Spatial indexes, bounded navigation and the constrained physics baseline are explicitly in scope.
+
+Asset prices are caller-supplied data, not a promise of native market-data acquisition.
+Support local-file/ETL ingestion and retrieval through existing graph, temporal and content
+contracts. Exchange/broker/feed API clients, provider credential collection, account linking,
+automatic refresh and order execution are excluded from the current scope. A separate caller
+may obtain data elsewhere and submit ordinary records; no connector is required to test or
+use local tracking, pricing links, game-world storage or physics.
+
+No external-service account, password or API token is a core runtime prerequisite. Local
+database key management and authorization remain required. Repository administration and
+release credentials are separate development/distribution concerns, not runtime dependencies.
+This clarification does not change the currently recorded governance gate.
+
+See [application use cases](docs/application-use-cases.md) for R2 synthetic acceptance examples
+under FR-15/27/28/31/33/34. Game rendering and broader physics remain future consumer work.
 
 ## Requirements
 
@@ -86,7 +103,8 @@ bounded import transaction contracts; R2 includes frames, movement, point spatia
 navigation, unified retrieval, batch tooling and kinematics; R3 includes historical region
 queries/native spatial indexes, constrained contact physics and cross-feature privacy/load tests.
 
-R0 readiness is not currently claimed. Rows in [TASKS.md](TASKS.md) are all open. Parser
+R0 readiness is not currently claimed. [TASKS.md](TASKS.md) distinguishes completed technical
+R0 decisions from open governance and production implementation work. Parser
 capabilities cannot be silently dropped to pass a gate; unsupported cases within a declared
 supported family require a documented coverage boundary and tests. Any material release
 scope change requires a decision and PRD revision.
@@ -105,6 +123,9 @@ document, malformed parser input, and a failed upload that never becomes an acce
 The [synthetic world scenario](docs/ingestion-and-unified-retrieval.md) additionally proves
 moving objects, attached documents, combined spatial/content/graph queries, navigation,
 UTC/local display, physics branches and correction-aware historical answers after restart.
+Extend the R2 fixture with a headless game-world consumer and an item linked to a synthetic
+asset-price history imported from local CSV/JSON. Verify exact scaled values, source/quote
+units, corrections and knowledge cutoffs with network access disabled and no provider secrets.
 
 ## Risks and non-claims
 

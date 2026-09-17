@@ -78,6 +78,13 @@ approval rules, what to propose as memory, prompt construction, model/tool execu
 real-world actions. No model inference is required for storage or recovery.
 Retrieved content remains untrusted input to any external model.
 
+Consumers may be future games, tracking applications or agent systems. Asset prices are
+records supplied through local import or transactions; a separate caller/ETL owns any
+external acquisition. The native database API is not an exchange/broker/feed API client.
+Provider accounts, credential collection, live-price refresh and trade execution are out
+of scope. See [application use cases](application-use-cases.md). Local key management and
+authenticated IPC remain required and are distinct from external-provider credentials.
+
 ## Integration modes
 
 ### Derived-index mode

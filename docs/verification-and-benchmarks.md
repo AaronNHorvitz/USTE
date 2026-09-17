@@ -52,6 +52,16 @@ real process-kill tests alongside deterministic fault simulation.
 Sandbox failure and unauthorized data disclosure are correctness failures, not acceptable
 performance tradeoffs.
 
+## Offline application acceptance
+
+The R2 consumer matrix also covers [application use cases](application-use-cases.md): a
+headless game-world client and an item linked to synthetic asset-price observations loaded
+from local CSV/JSON. Extend VT-15/20/22/23 with exact scaled amounts, declared quote/unit
+identity, missing/stale/conflicting prices, late corrections and foreign-namespace denial.
+Execute with outbound networking disabled and no provider credential variables, retaining
+normal local encryption and authorization. No live service, token or market-data mock is
+needed. These cases add no claim of a general game engine or supported trading throughput.
+
 ## Benchmark workloads
 
 These are initial workload proposals for D-03, not measured limits. R0 must freeze exact
