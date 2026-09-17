@@ -76,8 +76,9 @@ root recovery reader exists yet.
 
 Decision 0030 supplies that bounded root reader and semantic reconstruction candidate. It removes
 the contiguous checkpoint payload from this path but still constructs a complete in-memory
-`GraphState`, reads candidates twice, and lacks coordinator metadata/seed integration. T-20 next
-needs disk-backed base/overlay state, scratch merge and authenticated coordinator pairing.
+`GraphState` and reads candidates twice. Decision 0031 pairs it with a versioned coordinator
+metadata root through a temporary authenticated recovery owner; seeded open rechecks the prefix and
+replays the suffix. T-20 next needs disk-backed base/overlay state, scratch merge and ingest deltas.
 
 ## Architectural decomposition
 

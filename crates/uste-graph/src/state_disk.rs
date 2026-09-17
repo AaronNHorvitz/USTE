@@ -1,20 +1,24 @@
 //! Certificate-anchored complete graph-state derived cache.
 //!
 //! This profile remains optional and read-only. The authenticated journal is the only commit
-//! authority, and this module does not construct reducer state during recovery.
+//! authority; reconstructed state becomes usable only through exact-paired seeded recovery.
 
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_storage::{
-    DurableIndexRoot, IndexEntry, IndexRootInput, IndexRunDescriptor, IndexRunReadLimits,
-    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_ENTRIES_PER_RUN,
-    MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES, OwnershipFileSystem, PageCache,
-    RecoveredIndexRoot,
+    DurableIndexRoot, IndexEntry, IndexRootAnchor, IndexRootInput, IndexRunDescriptor,
+    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScrubReport,
+    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RUN_LOGICAL_BYTES,
+    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
-use uste_txn::{CheckpointState, CheckpointStateError, CommitCoordinator, TransactionError};
+use uste_txn::{
+    AuthenticatedIndexRecovery, CheckpointState, CheckpointStateError, CommitCoordinator,
+    CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
+    CoordinatorRecoverySeed, TransactionError, reconstruct_coordinator_metadata_seed_for_recovery,
+};
 use uste_types::{CommitRevision, RecordId, RecordRef};
 
 use crate::codec::{decode_result_policy, encode_result_policy};
@@ -61,6 +65,11 @@ impl core::fmt::Debug for GraphStateRootCandidate {
 }
 
 impl GraphStateRootCandidate {
+    #[must_use]
+    pub const fn anchor(&self) -> IndexRootAnchor {
+        self.root.anchor()
+    }
+
     #[must_use]
     pub const fn revision(&self) -> CommitRevision {
         self.root.revision()
@@ -122,6 +131,96 @@ pub struct GraphStateLoadReport {
     pub entries: u64,
     pub logical_bytes: u64,
     pub pages_read: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphRecoverySeedReport {
+    pub graph_state: GraphStateLoadReport,
+    pub coordinator_metadata: CoordinatorMetadataLoadReport,
+}
+
+trait GraphStateIndexReader<F>
+where
+    F: OwnershipFileSystem,
+{
+    fn reader_scope(&self) -> uste_types::NamespaceRef;
+
+    fn reader_load_roots(
+        &self,
+        filesystem: &mut F,
+        profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError>;
+
+    fn reader_visit_run(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<IndexRunReadReport, TransactionError>;
+}
+
+impl<F, W, E, I> GraphStateIndexReader<F> for CommitCoordinator<GraphState, F, W, E, I>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    fn reader_scope(&self) -> uste_types::NamespaceRef {
+        self.scope()
+    }
+
+    fn reader_load_roots(
+        &self,
+        filesystem: &mut F,
+        profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        self.load_index_roots(filesystem, profile)
+    }
+
+    fn reader_visit_run(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.visit_index_run(filesystem, root, family, limits, visitor)
+    }
+}
+
+impl<F, W, E, I> GraphStateIndexReader<F> for AuthenticatedIndexRecovery<F, W, E, I>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    fn reader_scope(&self) -> uste_types::NamespaceRef {
+        self.scope()
+    }
+
+    fn reader_load_roots(
+        &self,
+        filesystem: &mut F,
+        profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        self.load_index_roots(filesystem, profile)
+    }
+
+    fn reader_visit_run(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.visit_index_run(filesystem, root, family, limits, visitor)
+    }
 }
 
 impl core::fmt::Debug for DerivedGraphStateRoot {
@@ -255,8 +354,32 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    Ok(coordinator
-        .load_index_roots(filesystem, GRAPH_STATE_PROFILE_V1)?
+    load_candidates(coordinator, filesystem)
+}
+
+pub fn load_graph_state_root_candidates_for_recovery<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+) -> Result<Vec<GraphStateRootCandidate>, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    load_candidates(recovery, filesystem)
+}
+
+fn load_candidates<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+) -> Result<Vec<GraphStateRootCandidate>, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    Ok(reader
+        .reader_load_roots(filesystem, GRAPH_STATE_PROFILE_V1)?
         .into_iter()
         .filter(|root| root.reducer_profile() == &GraphState::REDUCER_PROFILE)
         .map(|root| GraphStateRootCandidate { root })
@@ -280,9 +403,76 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    reconstruct_with_reader(coordinator, filesystem, candidate, limits)
+}
+
+pub fn reconstruct_graph_state_candidate_for_recovery<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphStateLoadLimits,
+) -> Result<(GraphState, GraphStateLoadReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    reconstruct_with_reader(recovery, filesystem, candidate, limits)
+}
+
+/// Reconstruct a graph reducer and its exact certificate-paired coordinator metadata while one
+/// authenticated recovery owner is held. Drop the owner before passing the returned seed to
+/// `CommitCoordinator::open_seeded`, which reopens and verifies the journal prefix independently.
+#[allow(clippy::too_many_arguments)]
+pub fn reconstruct_graph_recovery_seed<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    graph_candidate: &GraphStateRootCandidate,
+    graph_limits: GraphStateLoadLimits,
+    metadata_candidate: &CoordinatorMetadataCandidate,
+    metadata_limits: CoordinatorMetadataLoadLimits,
+) -> Result<(CoordinatorRecoverySeed<GraphState>, GraphRecoverySeedReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if graph_candidate.anchor() != metadata_candidate.anchor() {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let (state, graph_state) =
+        reconstruct_with_reader(recovery, filesystem, graph_candidate, graph_limits)?;
+    let (seed, coordinator_metadata) = reconstruct_coordinator_metadata_seed_for_recovery(
+        recovery,
+        filesystem,
+        metadata_candidate,
+        state,
+        metadata_limits,
+    )?;
+    Ok((
+        seed,
+        GraphRecoverySeedReport {
+            graph_state,
+            coordinator_metadata,
+        },
+    ))
+}
+
+fn reconstruct_with_reader<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphStateLoadLimits,
+) -> Result<(GraphState, GraphStateLoadReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
     if candidate.root.reducer_profile() != &GraphState::REDUCER_PROFILE
         || candidate.root.index_profile() != &GRAPH_STATE_PROFILE_V1
-        || candidate.root.scope() != coordinator.scope()
+        || candidate.root.scope() != reader.reader_scope()
     {
         return Err(GraphDiskError::RootStateMismatch);
     }
@@ -298,7 +488,7 @@ where
     let mut budget = LoadBudget::new(limits);
     let mut metadata = None;
     visit_candidate_family(
-        coordinator,
+        reader,
         filesystem,
         candidate,
         FAMILY_METADATA,
@@ -321,7 +511,7 @@ where
     let mut records = BTreeMap::new();
     if family_counts[usize::from(FAMILY_CURRENT_RECORD - 1)] != 0 {
         visit_candidate_family(
-            coordinator,
+            reader,
             filesystem,
             candidate,
             FAMILY_CURRENT_RECORD,
@@ -344,7 +534,7 @@ where
     let mut history: BTreeMap<RecordRef, Vec<Record>> = BTreeMap::new();
     if family_counts[usize::from(FAMILY_RECORD_HISTORY - 1)] != 0 {
         visit_candidate_family(
-            coordinator,
+            reader,
             filesystem,
             candidate,
             FAMILY_RECORD_HISTORY,
@@ -371,7 +561,7 @@ where
     let policy_entries = family_counts[usize::from(FAMILY_POLICY - 1)];
     if policy_entries != 0 {
         visit_candidate_family(
-            coordinator,
+            reader,
             filesystem,
             candidate,
             FAMILY_POLICY,
@@ -433,7 +623,7 @@ where
             continue;
         }
         visit_candidate_family(
-            coordinator,
+            reader,
             filesystem,
             candidate,
             family,
@@ -575,9 +765,8 @@ impl LoadBudget {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn visit_candidate_family<F, W, E, I>(
-    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+fn visit_candidate_family<F, R>(
+    reader: &R,
     filesystem: &mut F,
     candidate: &GraphStateRootCandidate,
     family: u8,
@@ -587,9 +776,7 @@ fn visit_candidate_family<F, W, E, I>(
 ) -> Result<(), GraphDiskError>
 where
     F: OwnershipFileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
-    I: EntropySource,
+    R: GraphStateIndexReader<F>,
 {
     let remaining = budget.remaining_logical_bytes()?;
     let remaining_pages = budget.remaining_pages()?;
@@ -598,8 +785,7 @@ where
         expected_entries,
         remaining.min(MAX_INDEX_RUN_LOGICAL_BYTES),
     )?;
-    let report =
-        coordinator.visit_index_run(filesystem, &candidate.root, family, limits, visitor)?;
+    let report = reader.reader_visit_run(filesystem, &candidate.root, family, limits, visitor)?;
     if report.entries != expected_entries {
         return Err(GraphDiskError::IndexCorrupt);
     }

@@ -3,13 +3,15 @@ use uste_crypto::{
 };
 use uste_replay::{ReplayError, capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
-    BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName,
+    BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName, IndexEntry, IndexRootInput,
     journal::DurableKeyEnvelope, memory::MemoryFileSystem,
 };
 use uste_txn::{
-    ApplyError, CheckpointState, CheckpointStateError, CommitCoordinator, NeverCancel,
-    PrincipalDigest, RetentionDays, TransactionRequest, TransactionState,
-    load_verified_checkpoint_candidates, stream_verified_checkpoint_candidate,
+    ApplyError, COORDINATOR_METADATA_PROFILE_V1, CheckpointState, CheckpointStateError,
+    CommitCoordinator, CoordinatorMetadataLoadLimits, NeverCancel, PrincipalDigest, RetentionDays,
+    TransactionError, TransactionRequest, TransactionState, load_coordinator_metadata_candidates,
+    load_verified_checkpoint_candidates, publish_coordinator_metadata_root,
+    reconstruct_coordinator_metadata_seed, stream_verified_checkpoint_candidate,
 };
 use uste_types::{
     CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, TransactionId,
@@ -42,10 +44,10 @@ impl TransactionState for CounterState {
     fn prepare(
         &self,
         canonical_request: &[u8],
-        blob_inventory: Option<&BlobInventory>,
+        _blob_inventory: Option<&BlobInventory>,
         revision: CommitRevision,
     ) -> Result<Self::Prepared, ApplyError> {
-        if blob_inventory.is_some() || canonical_request.len() != 8 {
+        if canonical_request.len() != 8 {
             return Err(ApplyError::InvalidRequest);
         }
         Ok(Self {
@@ -374,6 +376,204 @@ fn authenticated_malformed_coordinator_payloads_fail_closed_with_older_fallback(
     assert_authenticated_malformed_candidate_rejected("trailing-byte", |payload| {
         payload.push(0);
     });
+}
+
+#[test]
+fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
+    let scope = scope();
+    let name = EntryName::new("coordinator-metadata-root").unwrap();
+    let mut filesystem = MemoryFileSystem::default();
+    let vault = KeyVault::create(
+        scope.database(),
+        &mut TestKeyAdapter,
+        CounterEntropy::new(20_000),
+    )
+    .unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        vault,
+        CounterEntropy::new(21_000),
+        CounterState::new(scope),
+    )
+    .unwrap();
+    let mut clock = TestClock(20);
+    let mut upload = coordinator.start_blob_upload(scope).unwrap();
+    coordinator
+        .write_blob_upload(
+            &mut filesystem,
+            &mut upload,
+            b"coordinator metadata preserves first-commit blob ownership",
+        )
+        .unwrap();
+    let reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut upload)
+        .unwrap();
+    let inventory = BlobInventory::new(scope, [reference]).unwrap();
+    let first_bytes = 5_u64.to_be_bytes();
+    coordinator
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(1, &first_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+        )
+        .unwrap();
+    let checkpoint_state = coordinator.read_view().unwrap().state().clone();
+    let publication = publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    let candidates = load_coordinator_metadata_candidates(&coordinator, &mut filesystem).unwrap();
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.generation() == publication.generation)
+        .unwrap();
+    let limits = CoordinatorMetadataLoadLimits::new(4, 4, 9, 16, 1024 * 1024).unwrap();
+    let (seed, report) = reconstruct_coordinator_metadata_seed(
+        &coordinator,
+        &mut filesystem,
+        candidate,
+        checkpoint_state.clone(),
+        limits,
+    )
+    .unwrap();
+    assert_eq!(report.runs, 3);
+    assert_eq!(report.entries, 3);
+    assert!(report.logical_bytes > 0);
+    assert!(report.pages_read >= report.runs);
+    assert!(matches!(
+        reconstruct_coordinator_metadata_seed(
+            &coordinator,
+            &mut filesystem,
+            candidate,
+            checkpoint_state.clone(),
+            CoordinatorMetadataLoadLimits::new(0, 4, 9, 16, 1024 * 1024).unwrap(),
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    assert!(matches!(
+        reconstruct_coordinator_metadata_seed(
+            &coordinator,
+            &mut filesystem,
+            candidate,
+            checkpoint_state.clone(),
+            CoordinatorMetadataLoadLimits::new(4, 0, 9, 16, 1024 * 1024).unwrap(),
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    let mut wrong_state = checkpoint_state.clone();
+    wrong_state.value = 999;
+    assert!(matches!(
+        reconstruct_coordinator_metadata_seed(
+            &coordinator,
+            &mut filesystem,
+            candidate,
+            wrong_state,
+            limits,
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
+
+    // The carrier run and descriptor are self-consistent and authenticated, but the frozen
+    // outcome value has nonzero reserved bytes. Semantic reconstruction must still reject it.
+    let canonical_root = coordinator
+        .load_index_roots(&mut filesystem, COORDINATOR_METADATA_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|root| root.generation() == publication.generation)
+        .unwrap();
+    let mut runs = canonical_root.runs().copied().collect::<Vec<_>>();
+    let (principal, idempotency_key, outcome) = coordinator.checkpoint_outcomes().next().unwrap();
+    let mut outcome_key = Vec::with_capacity(48);
+    outcome_key.extend_from_slice(&principal.as_bytes());
+    outcome_key.extend_from_slice(idempotency_key.as_bytes());
+    let mut outcome_value = Vec::with_capacity(104);
+    outcome_value.extend_from_slice(outcome.transaction_id.as_bytes());
+    outcome_value.extend_from_slice(&outcome.revision.get().to_be_bytes());
+    outcome_value.extend_from_slice(&outcome.request_digest);
+    outcome_value.extend_from_slice(&outcome.result_digest);
+    outcome_value.extend_from_slice(&outcome.expires_at.seconds().to_be_bytes());
+    outcome_value.extend_from_slice(&outcome.expires_at.nanoseconds().to_be_bytes());
+    outcome_value.extend_from_slice(&[1, 0, 0, 0]);
+    let malformed_run = coordinator
+        .publish_index_run(
+            &mut filesystem,
+            publication.revision,
+            COORDINATOR_METADATA_PROFILE_V1,
+            2,
+            [IndexEntry {
+                key: outcome_key,
+                value: outcome_value,
+            }],
+        )
+        .unwrap();
+    *runs.iter_mut().find(|run| run.family() == 2).unwrap() = malformed_run;
+    let (revision, certificate_digest) = coordinator.checkpoint_anchor().unwrap().unwrap();
+    let malformed_root = coordinator
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope,
+                revision,
+                certificate_digest,
+                reducer_profile: CounterState::REDUCER_PROFILE,
+                logical_state_digest: CounterState::logical_state_digest(&checkpoint_state)
+                    .unwrap(),
+                index_profile: COORDINATOR_METADATA_PROFILE_V1,
+            },
+            &runs,
+        )
+        .unwrap();
+    let malformed_candidates =
+        load_coordinator_metadata_candidates(&coordinator, &mut filesystem).unwrap();
+    let malformed_candidate = malformed_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == malformed_root.generation)
+        .unwrap();
+    assert!(matches!(
+        reconstruct_coordinator_metadata_seed(
+            &coordinator,
+            &mut filesystem,
+            malformed_candidate,
+            checkpoint_state,
+            limits,
+        ),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::IntegrityFailure
+        ))
+    ));
+
+    let second_bytes = 7_u64.to_be_bytes();
+    coordinator
+        .commit(
+            &mut filesystem,
+            request(2, &second_bytes),
+            &mut clock,
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (recovered, recovery) = CommitCoordinator::open_seeded(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy::new(22_000),
+        CounterEntropy::new(23_000),
+        &mut TestKeyAdapter,
+        seed,
+    )
+    .unwrap();
+    assert_eq!(recovery.frontier.unwrap().get(), 2);
+    let state = recovered.read_view().unwrap().state().clone();
+    assert_eq!(state.value, 12);
+    assert_eq!(state.prepare_calls_since_decode, 2);
+    assert_eq!(recovered.checkpoint_outcomes().len(), 2);
+    assert_eq!(recovered.committed_blob_owners().count(), 1);
 }
 
 #[test]

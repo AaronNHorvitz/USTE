@@ -189,6 +189,13 @@ absolute carrier maxima; caller `GraphStateLoadLimits` apply only to the subsequ
 pass. Ordinary `GraphState` remains full-memory, and coordinator metadata is not present in the
 root.
 
+Decision 0031 adds a separate `coordinator-meta-v1` root for ordered retry outcomes and first-blob
+owners. Recovery requires its complete certificate/state anchor to equal the selected graph root;
+a temporary authenticated owner streams both, is dropped, and seeded coordinator open then
+reauthenticates and compares the transaction prefix before suffix replay. Prefix verification moves
+entries from expected to verified maps instead of duplicating complete maps. Graph/coordinator
+state and root discovery remain memory-resident, so this is not the BM-06 endpoint.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

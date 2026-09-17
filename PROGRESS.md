@@ -3,12 +3,13 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `6dc502f` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through `5563a01` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
-complete certificate-anchored `graph-state-v1` root. The current Decision 0030 increment adds
-bounded full-run reading and semantic graph-state reconstruction. T-20 remains open pending a
-disk-backed larger-than-memory reducer path and qualifying BM-01/BM-06 results. Review was performed
-by Codex agents and does not represent independent external security certification.
+complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
+current Decision 0031 increment adds certificate-paired coordinator metadata and an executable cold
+root-to-seeded-open path. T-20 remains open pending a disk-backed larger-than-memory reducer path
+and qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
+independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -239,6 +240,15 @@ unverified external distribution prerequisite.
   transaction/blob-owner metadata, so no coordinator seed, larger-than-memory recovery or
   benchmark pass is claimed. Focused final agent review found no remaining high- or medium-severity
   issue; this is not independent external security certification.
+- Added Decision 0031 and the frozen `coordinator-meta-v1` profile with mandatory metadata plus
+  optional ordered outcome and first-blob-owner families. Counts, fixed logical bytes, reserved
+  fields, transaction uniqueness, blob shape and descriptor families are checked before seed use.
+- Added a temporary authenticated recovery owner and complete cross-profile anchor identity. Cold
+  recovery now rejects an unpaired newer metadata root, reconstructs a historical graph/metadata
+  pair, drops the reader, and lets seeded open reauthenticate the prefix and replay the suffix.
+- Seeded prefix verification now moves entries from expected maps to verified maps while decoding,
+  avoiding an additional complete prefix-map copy. Graph and coordinator maps remain full-memory;
+  caller reconstruction limits do not bound discovery or allocator RSS.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -310,12 +320,12 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 246 workspace tests including 74 uste-storage, 13
-# uste-crypto, 37 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
-# 10 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
+# workspace format/clippy/test/doc pass; 249 workspace tests including 74 uste-storage, 13
+# uste-crypto, 38 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 37 passed; 0 failed
+# 38 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -383,9 +393,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with authenticated coordinator-metadata pairing, disk-backed base/overlay state,
-scratch merge, ingest deltas and larger-than-memory reducer recovery, then connect the pinned
-fixture to exact BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's
+Continue T-20 with disk-backed base/overlay state, scratch merge, ingest deltas and
+larger-than-memory reducer recovery, then connect the pinned fixture to exact BM-01 and define/run
+BM-06's 10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

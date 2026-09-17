@@ -136,6 +136,11 @@ reconstruction of all `graph-state-v1` families without a monolithic checkpoint 
 ordinary reconstructed reducer still retains full state in memory and lacks coordinator retry/blob
 metadata, so it is an intermediate candidate rather than larger-than-memory recovery or authority.
 
+Decision 0031 adds the separate `coordinator-meta-v1` root and a temporary authenticated recovery
+owner. An exact certificate/state pair can now form a graph coordinator seed before normal open;
+seeded open independently verifies all prefix transaction metadata and replays the suffix. The
+result remains full-memory recovery and does not close T-20 or qualify BM-01/BM-06.
+
 ## Release gates
 
 | Gate | Required outcome |

@@ -129,6 +129,30 @@ pub struct DurableIndexRoot {
     pub generation: u64,
 }
 
+/// Cross-profile identity for pairing optional roots at one exact journal certificate and reducer
+/// state. Local root generations and index profiles are intentionally excluded.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct IndexRootAnchor {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    certificate_digest: [u8; 32],
+    reducer_profile: [u8; 32],
+    logical_state_digest: [u8; 32],
+}
+
+impl core::fmt::Debug for IndexRootAnchor {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("IndexRootAnchor")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("reducer_profile", &"[REDACTED]")
+            .field("logical_state_digest", &"[REDACTED]")
+            .finish()
+    }
+}
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct RecoveredIndexRoot {
     scope: NamespaceRef,
@@ -158,6 +182,17 @@ impl core::fmt::Debug for RecoveredIndexRoot {
 }
 
 impl RecoveredIndexRoot {
+    #[must_use]
+    pub const fn anchor(&self) -> IndexRootAnchor {
+        IndexRootAnchor {
+            scope: self.scope,
+            revision: self.revision,
+            certificate_digest: self.certificate_digest,
+            reducer_profile: self.reducer_profile,
+            logical_state_digest: self.logical_state_digest,
+        }
+    }
+
     #[must_use]
     pub const fn scope(&self) -> NamespaceRef {
         self.scope

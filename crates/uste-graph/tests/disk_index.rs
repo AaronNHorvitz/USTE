@@ -6,8 +6,9 @@ use uste_graph::{
     GraphDiskError, GraphState, GraphStateLoadLimits, GraphTransaction, NewEntity, NewEvidence,
     NewRecord, NewRelationship, Operation, Record, ValidTime, disk_adjacent_ids, disk_record,
     disk_supported_ids, encode_stored_record, encode_transaction, load_current_graph_index_roots,
-    load_graph_state_root_candidates, load_graph_state_roots, publish_current_graph_index,
-    publish_graph_state_root, reconstruct_graph_state_candidate, scrub_current_graph_index,
+    load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
+    load_graph_state_roots, publish_current_graph_index, publish_graph_state_root,
+    reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate, scrub_current_graph_index,
     scrub_graph_state_root,
 };
 use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
@@ -16,7 +17,9 @@ use uste_storage::{
     fault::ScriptedClock, journal::DurableKeyEnvelope, memory::MemoryFileSystem,
 };
 use uste_txn::{
-    CheckpointState, CommitCoordinator, NeverCancel, RetentionDays, TransactionRequest,
+    AuthenticatedIndexRecovery, CheckpointState, CommitCoordinator, CoordinatorMetadataLoadLimits,
+    NeverCancel, RetentionDays, TransactionRequest,
+    load_coordinator_metadata_candidates_for_recovery, publish_coordinator_metadata_root,
 };
 use uste_types::{
     BoundedString, CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, RecordId,
@@ -686,6 +689,145 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         snapshot.record(relationship),
         Some(Record::Relationship(_))
     ));
+}
+
+#[test]
+fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
+    let entity = record(0x21);
+    let mut filesystem = MemoryFileSystem::new(16 * 1024 * 1024);
+    let name = EntryName::new("cold-root-pair").unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        create_vault(scope().database(), 30_000),
+        CounterEntropy(31_000),
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        1,
+        GraphTransaction::with_policy_mutation(
+            scope(),
+            vec![Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Entity(NewEntity {
+                    id: entity,
+                    entity_type: text("tracked-item"),
+                    schema_version: 1,
+                    properties: Value::Null,
+                }),
+            }],
+            DurablePolicyMutation::Install {
+                policy: NamespacePolicy::new(
+                    scope(),
+                    PolicyVersion::new(1).unwrap(),
+                    QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
+                ),
+            },
+        ),
+    );
+    let checkpoint_snapshot = coordinator.read_view().unwrap().state().clone();
+    let graph_publication =
+        publish_graph_state_root(&mut coordinator, &mut filesystem, &checkpoint_snapshot).unwrap();
+    let metadata_publication =
+        publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    assert_eq!(graph_publication.revision, metadata_publication.revision);
+
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        2,
+        GraphTransaction::new(
+            scope(),
+            vec![Operation::ReplaceEntity {
+                target: entity,
+                expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+                properties: Value::Bool(true),
+            }],
+        ),
+    );
+    let expected = coordinator.read_view().unwrap().state().clone();
+    let newer_metadata_publication =
+        publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (recovery, storage_report) = AuthenticatedIndexRecovery::open(
+        &mut filesystem,
+        &name,
+        scope(),
+        CounterEntropy(32_000),
+        CounterEntropy(33_000),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    assert_eq!(storage_report.frontier.unwrap().get(), 2);
+    let graph_candidates =
+        load_graph_state_root_candidates_for_recovery(&recovery, &mut filesystem).unwrap();
+    let graph_candidate = graph_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == graph_publication.generation)
+        .unwrap();
+    let metadata_candidates =
+        load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
+            &recovery,
+            &mut filesystem,
+        )
+        .unwrap();
+    let newer_metadata_candidate = metadata_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == newer_metadata_publication.generation)
+        .unwrap();
+    assert!(matches!(
+        reconstruct_graph_recovery_seed(
+            &recovery,
+            &mut filesystem,
+            graph_candidate,
+            GraphStateLoadLimits::new(10, 20, 10, 100, 100, 1024 * 1024).unwrap(),
+            newer_metadata_candidate,
+            CoordinatorMetadataLoadLimits::new(10, 10, 21, 20, 1024 * 1024).unwrap(),
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
+    let metadata_candidate = metadata_candidates
+        .iter()
+        .find(|candidate| {
+            candidate.generation() == metadata_publication.generation
+                && candidate.anchor() == graph_candidate.anchor()
+        })
+        .unwrap();
+    let (seed, recovery_report) = reconstruct_graph_recovery_seed(
+        &recovery,
+        &mut filesystem,
+        graph_candidate,
+        GraphStateLoadLimits::new(10, 20, 10, 100, 100, 1024 * 1024).unwrap(),
+        metadata_candidate,
+        CoordinatorMetadataLoadLimits::new(10, 10, 21, 20, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert!(recovery_report.graph_state.runs >= 4);
+    assert_eq!(recovery_report.coordinator_metadata.runs, 2);
+    assert_eq!(recovery_report.coordinator_metadata.entries, 2);
+    drop(recovery);
+
+    let (recovered, seeded_report) = CommitCoordinator::open_seeded(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(34_000),
+        CounterEntropy(35_000),
+        &mut TestKeyAdapter,
+        seed,
+    )
+    .unwrap();
+    assert_eq!(seeded_report.frontier.unwrap().get(), 2);
+    assert_eq!(recovered.read_view().unwrap().state(), &expected);
+    assert_eq!(recovered.checkpoint_outcomes().len(), 2);
 }
 
 #[derive(Debug)]

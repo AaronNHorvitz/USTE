@@ -182,6 +182,12 @@ semantic validator, rebuilds and compares derived families, and releases the can
 terminal run and logical-state digests pass. It remains outside consumer APIs and cannot create a
 coordinator recovery seed without separately authenticated retry/outcome/blob-owner metadata.
 
+Decision 0031 supplies that metadata in a separate certificate-bound root. A temporary recovery
+owner authenticates the storage journal and streams an exact graph/metadata anchor pair; it is
+dropped before seeded coordinator open reauthenticates the journal, verifies prefix retry,
+transaction and first-blob-owner state, then applies the reducer suffix. Neither root advances the
+journal. State/maps remain memory-resident pending the disk-backed base/overlay path.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

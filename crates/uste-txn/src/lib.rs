@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 mod authorized;
+mod disk_metadata;
+mod index_recovery;
 
 pub use authorized::{
     AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedError, AuthorizedIndexedReadState,
@@ -13,6 +15,13 @@ pub use authorized::{
     AuthorizedTransactionState, DurablePolicyChange, MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage,
     open_authorized,
 };
+pub use disk_metadata::{
+    COORDINATOR_METADATA_PROFILE_V1, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
+    CoordinatorMetadataLoadReport, load_coordinator_metadata_candidates,
+    load_coordinator_metadata_candidates_for_recovery, publish_coordinator_metadata_root,
+    reconstruct_coordinator_metadata_seed, reconstruct_coordinator_metadata_seed_for_recovery,
+};
+pub use index_recovery::AuthenticatedIndexRecovery;
 
 use std::collections::BTreeMap;
 
@@ -422,6 +431,52 @@ where
             committed_blob_owners: owners,
         })
     }
+
+    fn from_authenticated_index_root_parts(
+        root: &RecoveredIndexRoot,
+        state: S,
+        outcomes: BTreeMap<RetryKey, TransactionOutcome>,
+        transactions: BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+        committed_blob_owners: BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    ) -> Result<Self, TransactionError> {
+        let scope = root.scope();
+        let revision = root.revision();
+        if root.index_profile() != &COORDINATOR_METADATA_PROFILE_V1
+            || state.current_checkpoint_scope() != scope
+            || state.current_checkpoint_revision() != Some(revision)
+            || root.reducer_profile() != &S::REDUCER_PROFILE
+            || state
+                .current_logical_state_digest()
+                .map_err(|error| match error {
+                    CheckpointStateError::ResourceLimit => TransactionError::ResourceLimit,
+                    CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
+                        TransactionError::IntegrityFailure
+                    }
+                })?
+                != *root.logical_state_digest()
+            || outcomes.len() != transactions.len()
+            || outcomes.iter().any(|(key, outcome)| {
+                outcome.revision > revision
+                    || transactions.get(&outcome.transaction_id) != Some(&(key.principal, *outcome))
+            })
+            || committed_blob_owners
+                .iter()
+                .any(|((owner_scope, id), (reference, _))| {
+                    *owner_scope != scope || reference.scope() != scope || *id != reference.id()
+                })
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok(Self {
+            scope,
+            revision,
+            certificate_digest: *root.certificate_digest(),
+            state,
+            outcomes,
+            transactions,
+            committed_blob_owners,
+        })
+    }
 }
 
 /// One serialized commit coordinator and its fully recovered logical state.
@@ -577,8 +632,11 @@ where
             key_adapter,
             |group| {
                 if group.revision <= checkpoint_revision {
-                    replay_group_metadata(
+                    replay_group_metadata_against_seed(
                         scope,
+                        &mut outcomes,
+                        &mut transactions,
+                        &mut committed_blob_owners,
                         &mut verified_outcomes,
                         &mut verified_transactions,
                         &mut verified_blob_owners,
@@ -586,12 +644,15 @@ where
                     )?;
                     if group.revision == checkpoint_revision {
                         if group.certificate_digest != checkpoint_certificate_digest
-                            || verified_outcomes != outcomes
-                            || verified_transactions != transactions
-                            || verified_blob_owners != committed_blob_owners
+                            || !outcomes.is_empty()
+                            || !transactions.is_empty()
+                            || !committed_blob_owners.is_empty()
                         {
                             return Err(StorageError::IntegrityFailure);
                         }
+                        outcomes = core::mem::take(&mut verified_outcomes);
+                        transactions = core::mem::take(&mut verified_transactions);
+                        committed_blob_owners = core::mem::take(&mut verified_blob_owners);
                         anchor_verified = true;
                     }
                     Ok(())
@@ -1247,11 +1308,15 @@ fn replay_group<S: TransactionState>(
     Ok(())
 }
 
-fn replay_group_metadata(
+#[allow(clippy::too_many_arguments)]
+fn replay_group_metadata_against_seed(
     scope: NamespaceRef,
-    outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
-    transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
-    committed_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    expected_outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
+    expected_transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    expected_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    verified_outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
+    verified_transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    verified_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
     group: RecoveredGroup<'_>,
 ) -> Result<(), StorageError> {
     if sha256(group.encoded_group) != group.logical_event_digest {
@@ -1265,11 +1330,13 @@ fn replay_group_metadata(
         group.blob_inventory,
     )
     .map_err(|_| StorageError::IntegrityFailure)?;
-    if outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE
-        || outcomes
+    if expected_outcomes.remove(&decoded.retry_key) != Some(decoded.outcome)
+        || expected_transactions.remove(&decoded.outcome.transaction_id)
+            != Some((decoded.retry_key.principal, decoded.outcome))
+        || verified_outcomes
             .insert(decoded.retry_key, decoded.outcome)
             .is_some()
-        || transactions
+        || verified_transactions
             .insert(
                 decoded.outcome.transaction_id,
                 (decoded.retry_key.principal, decoded.outcome),
@@ -1280,9 +1347,22 @@ fn replay_group_metadata(
     }
     if let Some(inventory) = decoded.blob_inventory {
         for reference in inventory.references() {
-            committed_blob_owners
-                .entry((reference.scope(), reference.id()))
-                .or_insert((*reference, decoded.retry_key.principal));
+            let key = (reference.scope(), reference.id());
+            if let Some((committed, _)) = verified_blob_owners.get(&key) {
+                if committed != reference {
+                    return Err(StorageError::IntegrityFailure);
+                }
+            } else {
+                let owner = expected_blob_owners
+                    .remove(&key)
+                    .filter(|(committed, principal)| {
+                        committed == reference && *principal == decoded.retry_key.principal
+                    })
+                    .ok_or(StorageError::IntegrityFailure)?;
+                if verified_blob_owners.insert(key, owner).is_some() {
+                    return Err(StorageError::IntegrityFailure);
+                }
+            }
         }
     }
     Ok(())
