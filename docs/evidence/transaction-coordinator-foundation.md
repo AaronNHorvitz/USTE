@@ -44,8 +44,9 @@ reject adapter failure and demonstrate that wall-clock rollback does not control
 ## Deliberate later boundaries
 
 The owned snapshot profile is a correctness implementation and intentionally not a scalability
-claim. Blob inventory publication remains T-15, authorization remains T-16, graph semantics remain
-T-17, and scalable MVCC plus compaction of retained outcome/tombstone indexes remain T-29/T-35.
+claim. Blob inventory publication is now completed by T-15; authorization remains T-16, graph
+semantics remain T-17, and scalable MVCC plus compaction of retained outcome/tombstone indexes
+remain T-29/T-35.
 In particular, T-17 must map the reference model's declared predicate tokens and
 `UnsupportedPredicate` outcomes onto this durable coordinator and exercise phantom-sensitive graph
 operations before the complete VT-02 suite can pass.

@@ -2,8 +2,9 @@
 
 Draft acceptance specification · 2026-09-16
 
-R0 vectors and synthetic fixtures exist; production suites, benchmark measurements and CI gates
-remain unimplemented unless a later evidence record says otherwise.
+R0 vectors and synthetic fixtures exist. T-15 records one local BM-04 large-object measurement;
+the remaining production suites, benchmark workloads and CI gates remain unimplemented unless a
+later evidence record says otherwise.
 Owns NFR-02, NFR-03 and the evidence required by [PRD release gates](../PRD.md).
 
 ## Evidence format and independence

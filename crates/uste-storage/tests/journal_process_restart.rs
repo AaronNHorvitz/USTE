@@ -2,7 +2,7 @@
 
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::{self, Read, Write},
     os::unix::process::ExitStatusExt,
     path::PathBuf,
     process::{Child, Command, ExitStatus, Stdio},
@@ -75,11 +75,10 @@ fn committed_certificate_survives_writer_sigkill_and_replays_exact_bytes() {
         .spawn()
         .unwrap();
     let mut child = ChildGuard::new(child);
-    let mut readiness = child.stderr().take().unwrap();
+    let readiness = child.stderr().take().unwrap();
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
-        let mut byte = [0_u8; 1];
-        let result = readiness.read_exact(&mut byte).map(|()| byte);
+        let result = read_ready(readiness);
         let _ = sender.send(result);
     });
     assert_eq!(
@@ -177,11 +176,10 @@ fn synced_group_without_certificate_is_removed_after_writer_sigkill() {
         .spawn()
         .unwrap();
     let mut child = ChildGuard::new(child);
-    let mut readiness = child.stderr().take().unwrap();
+    let readiness = child.stderr().take().unwrap();
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
-        let mut byte = [0_u8; 1];
-        let result = readiness.read_exact(&mut byte).map(|()| byte);
+        let result = read_ready(readiness);
         let _ = sender.send(result);
     });
     assert_eq!(
@@ -248,11 +246,10 @@ fn creation_publication_process_loss_has_only_absent_or_complete_outcomes() {
             .spawn()
             .unwrap();
         let mut child = ChildGuard::new(child);
-        let mut readiness = child.stderr().take().unwrap();
+        let readiness = child.stderr().take().unwrap();
         let (sender, receiver) = mpsc::sync_channel(1);
         thread::spawn(move || {
-            let mut byte = [0_u8; 1];
-            let result = readiness.read_exact(&mut byte).map(|()| byte);
+            let result = read_ready(readiness);
             let _ = sender.send(result);
         });
         assert_eq!(
@@ -307,8 +304,8 @@ fn child_writer() {
         )
         .unwrap();
 
-    std::io::stderr().write_all(b"R").unwrap();
-    std::io::stderr().flush().unwrap();
+    io::stderr().write_all(b"R").unwrap();
+    io::stderr().flush().unwrap();
     loop {
         thread::sleep(Duration::from_millis(50));
     }
@@ -319,7 +316,9 @@ fn child_group_only() {
     let database = DatabaseId::from_bytes([0xb1; 16]);
     let plan = FaultPlan::new([FaultPoint {
         operation: Operation::SyncData,
-        occurrence: 1,
+        // Recovery re-synchronizes the authenticated certificate frontier first; the second
+        // data sync is the deliberately uncertified group publication boundary.
+        occurrence: 2,
         action: FaultAction::CrashAfter,
     }])
     .unwrap();
@@ -347,8 +346,8 @@ fn child_group_only() {
             .unwrap_err(),
         StorageError::Adapter(AdapterErrorKind::InjectedCrash)
     );
-    std::io::stderr().write_all(b"R").unwrap();
-    std::io::stderr().flush().unwrap();
+    io::stderr().write_all(b"R").unwrap();
+    io::stderr().flush().unwrap();
     loop {
         thread::sleep(Duration::from_millis(50));
     }
@@ -383,8 +382,8 @@ fn child_creation_boundary() {
         .unwrap_err(),
         StorageError::Adapter(AdapterErrorKind::InjectedCrash)
     );
-    std::io::stderr().write_all(b"R").unwrap();
-    std::io::stderr().flush().unwrap();
+    io::stderr().write_all(b"R").unwrap();
+    io::stderr().flush().unwrap();
     loop {
         thread::sleep(Duration::from_millis(50));
     }
@@ -478,6 +477,22 @@ impl EntropySource for CounterEntropy {
 
 fn create_vault(database: DatabaseId, seed: u64) -> KeyVault<TestEnvelope, CounterEntropy> {
     KeyVault::create(database, &mut TestKeyAdapter, CounterEntropy::new(seed)).unwrap()
+}
+
+fn read_ready(mut input: impl Read) -> io::Result<[u8; 1]> {
+    loop {
+        let mut byte = [0_u8; 1];
+        input.read_exact(&mut byte)?;
+        if byte == [b'R'] {
+            return Ok(byte);
+        }
+        if !byte[0].is_ascii_whitespace() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "child emitted diagnostics before readiness",
+            ));
+        }
+    }
 }
 
 struct ChildGuard(Option<Child>);

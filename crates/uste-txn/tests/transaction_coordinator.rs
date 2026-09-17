@@ -273,11 +273,23 @@ fn lost_response_is_outcome_unknown_then_durable_retry_after_restart() {
     )
     .unwrap();
     let bytes = mutation(0, 7);
+    let blob_bytes = b"lost response keeps the exact committed blob inventory";
+    let mut upload = coordinator.start_blob_upload(scope).unwrap();
+    coordinator
+        .write_blob_upload(&mut filesystem, &mut upload, blob_bytes)
+        .unwrap();
+    let reference = coordinator
+        .finish_blob_upload(&mut filesystem, &mut upload)
+        .unwrap();
+    let inventory = BlobInventory::new(scope, [reference]).unwrap();
     assert_eq!(
         coordinator
             .commit(
                 &mut filesystem,
-                request(11, 12, &bytes),
+                TransactionRequest {
+                    blob_inventory: Some(&inventory),
+                    ..request(11, 12, &bytes)
+                },
                 &mut clock(0),
                 &NeverCancel,
             )
@@ -313,10 +325,14 @@ fn lost_response_is_outcome_unknown_then_durable_retry_after_restart() {
     .unwrap();
     assert_eq!(report.frontier.unwrap().get(), 1);
     assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(7));
+    assert_blob_equals(&coordinator, &mut filesystem, reference, blob_bytes);
     let retry = coordinator
         .commit(
             &mut filesystem,
-            request(11, 12, &bytes),
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(11, 12, &bytes)
+            },
             &mut clock(1),
             &NeverCancel,
         )
@@ -568,6 +584,46 @@ fn arbitrary_blob_round_trip_is_commit_gated_and_survives_restart() {
         .commit(&mut filesystem, transaction, &mut clock(0), &NeverCancel)
         .unwrap();
     assert_blob_equals(&coordinator, &mut filesystem, reference, &bytes);
+    let cross_offset = u64::try_from(BLOB_CHUNK_BYTES - 9).unwrap();
+    let mut cross = [0_u8; 37];
+    assert_eq!(
+        coordinator
+            .read_blob_range(&mut filesystem, reference, cross_offset, &mut cross)
+            .unwrap(),
+        cross.len()
+    );
+    assert_eq!(
+        cross.as_slice(),
+        &bytes[BLOB_CHUNK_BYTES - 9..BLOB_CHUNK_BYTES - 9 + cross.len()]
+    );
+    assert_eq!(
+        coordinator
+            .read_blob_range(&mut filesystem, reference, reference.byte_len(), &mut [],)
+            .unwrap(),
+        0
+    );
+    assert!(matches!(
+        coordinator.read_blob_range(
+            &mut filesystem,
+            reference,
+            reference.byte_len() + 1,
+            &mut [],
+        ),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    assert!(matches!(
+        coordinator.read_blob_range(
+            &mut filesystem,
+            reference,
+            0,
+            &mut vec![0_u8; BLOB_CHUNK_BYTES + 1],
+        ),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
     drop(coordinator);
     filesystem.restart().unwrap();
 

@@ -1,11 +1,17 @@
 //! Bounded encrypted blob uploads and canonical committed inventories.
 
+use std::{
+    collections::BTreeMap,
+    sync::{LazyLock, Mutex},
+};
+
 use sha2::{Digest, Sha256};
 use uste_crypto::{
     CryptoContext, CryptoObjectId, EncryptedEnvelope, EntropySource, FrameClass, KeyEpoch,
     KeyVault, OBJECT_ENVELOPE_HEADER_BYTES, ObjectRole, Scope, WriterIncarnationId,
 };
-use uste_types::NamespaceRef;
+use uste_types::{DatabaseId, NamespaceRef};
+use zeroize::Zeroize;
 
 use crate::{
     AdapterErrorKind, EntryName, FileSystem, journal::StorageError, read_exact_at, write_all_at,
@@ -17,14 +23,19 @@ pub const MAX_BLOBS_PER_INVENTORY: usize = 100_000;
 pub const MAX_COMMITTED_BLOBS_PER_JOURNAL: usize = 1_000_000;
 pub const MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL: u64 = 10_000_000;
 pub const MAX_NAMESPACE_BLOB_BYTES: u64 = 1024 * 1024 * 1024 * 1024;
+pub const MAX_CONCURRENT_UPLOADS: usize = 32;
+static ACTIVE_UPLOADS: LazyLock<Mutex<BTreeMap<DatabaseId, usize>>> =
+    LazyLock::new(|| Mutex::new(BTreeMap::new()));
 const INVENTORY_HEADER_BYTES: usize = 32;
 const INVENTORY_ENTRY_BYTES: usize = 64;
 const BLOB_FORMAT_MAJOR: u8 = 1;
 const BLOB_FORMAT_MINOR: u8 = 0;
 const BLOB_MANIFEST_BYTES: usize = 128;
+const BLOB_PROGRESS_BYTES: usize = 128;
 const SMALL_ENCRYPTED_OBJECT_BYTES: u64 = 4_161;
-const MANIFEST_FINAL: u8 = 1;
-const MANIFEST_ABORTED: u8 = 2;
+pub(crate) const MANIFEST_FINAL: u8 = 1;
+pub(crate) const MANIFEST_ABORTED: u8 = 2;
+const PROGRESS_SEQUENCE_BASE: u64 = 3;
 const MAX_ENCODED_CHUNK_BYTES: u64 =
     (BLOB_CHUNK_BYTES + 64 * 1024 + OBJECT_ENVELOPE_HEADER_BYTES + 16) as u64;
 
@@ -97,10 +108,17 @@ impl BlobInventory {
         scope: NamespaceRef,
         references: impl IntoIterator<Item = BlobReference>,
     ) -> Result<Self, StorageError> {
-        let mut references: Vec<_> = references.into_iter().collect();
-        if references.len() > MAX_BLOBS_PER_INVENTORY {
-            return Err(StorageError::ResourceLimit);
+        let mut bounded = Vec::new();
+        for reference in references {
+            if bounded.len() == MAX_BLOBS_PER_INVENTORY {
+                return Err(StorageError::ResourceLimit);
+            }
+            bounded
+                .try_reserve(1)
+                .map_err(|_| StorageError::ResourceLimit)?;
+            bounded.push(reference);
         }
+        let mut references = bounded;
         if references
             .iter()
             .any(|reference| reference.scope != scope || !valid_reference_shape(*reference))
@@ -145,10 +163,7 @@ impl BlobInventory {
         self.digest
     }
 
-    pub(crate) fn decode(
-        database: uste_types::DatabaseId,
-        bytes: &[u8],
-    ) -> Result<Self, StorageError> {
+    pub(crate) fn decode(database: DatabaseId, bytes: &[u8]) -> Result<Self, StorageError> {
         if bytes.len() < INVENTORY_HEADER_BYTES
             || &bytes[..4] != b"UBIN"
             || bytes[4] != BLOB_FORMAT_MAJOR
@@ -263,6 +278,44 @@ pub struct BlobUpload {
     aborted: bool,
     requires_resume: bool,
     finalized: Option<BlobReference>,
+    lease: Option<UploadLease>,
+    owner_epoch: KeyEpoch,
+    owner_writer: WriterIncarnationId,
+}
+
+struct UploadLease(DatabaseId);
+
+impl UploadLease {
+    fn acquire(database: DatabaseId) -> Result<Self, StorageError> {
+        let mut active = ACTIVE_UPLOADS
+            .lock()
+            .map_err(|_| StorageError::InvalidState)?;
+        let count = active.entry(database).or_default();
+        if *count >= MAX_CONCURRENT_UPLOADS {
+            return Err(StorageError::ResourceLimit);
+        }
+        *count += 1;
+        Ok(Self(database))
+    }
+}
+
+impl Drop for UploadLease {
+    fn drop(&mut self) {
+        let mut active = ACTIVE_UPLOADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let remove = if let Some(count) = active.get_mut(&self.0) {
+            debug_assert!(*count > 0);
+            *count -= 1;
+            *count == 0
+        } else {
+            debug_assert!(false, "upload lease database is registered");
+            false
+        };
+        if remove {
+            active.remove(&self.0);
+        }
+    }
 }
 
 impl core::fmt::Debug for BlobUpload {
@@ -279,8 +332,19 @@ impl core::fmt::Debug for BlobUpload {
     }
 }
 
+impl Drop for BlobUpload {
+    fn drop(&mut self) {
+        self.buffer.zeroize();
+    }
+}
+
 impl BlobUpload {
-    pub(crate) fn new(token: BlobUploadToken) -> Result<Self, StorageError> {
+    pub(crate) fn new(
+        token: BlobUploadToken,
+        owner_epoch: KeyEpoch,
+        owner_writer: WriterIncarnationId,
+    ) -> Result<Self, StorageError> {
+        let lease = UploadLease::acquire(token.scope.database())?;
         let mut buffer = Vec::new();
         buffer
             .try_reserve_exact(BLOB_CHUNK_BYTES)
@@ -295,6 +359,9 @@ impl BlobUpload {
             aborted: false,
             requires_resume: false,
             finalized: None,
+            lease: Some(lease),
+            owner_epoch,
+            owner_writer,
         })
     }
 
@@ -312,6 +379,33 @@ impl BlobUpload {
     pub const fn durable_bytes(&self) -> u64 {
         self.durable_bytes
     }
+
+    fn release_lease(&mut self) {
+        let mut buffer = core::mem::take(&mut self.buffer);
+        buffer.zeroize();
+        drop(buffer);
+        self.lease = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn buffered_capacity(&self) -> usize {
+        self.buffer.capacity()
+    }
+
+    fn validate_owner(
+        &self,
+        database: DatabaseId,
+        epoch: KeyEpoch,
+        writer: WriterIncarnationId,
+    ) -> Result<(), StorageError> {
+        if self.token.scope.database() != database
+            || self.owner_epoch != epoch
+            || self.owner_writer != writer
+        {
+            return Err(StorageError::InvalidState);
+        }
+        Ok(())
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -319,7 +413,7 @@ pub(crate) fn write_upload<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &mut KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     upload: &mut BlobUpload,
@@ -329,8 +423,25 @@ where
     F: FileSystem,
     E: EntropySource,
 {
+    upload.validate_owner(database, epoch, writer)?;
     if upload.requires_resume {
         return Err(StorageError::NeedsRecovery);
+    }
+    match recover_terminal_state(filesystem, directory, vault, epoch, writer, upload.token)? {
+        TerminalState::Aborted => {
+            upload.aborted = true;
+            upload.release_lease();
+            return Err(StorageError::InvalidState);
+        }
+        TerminalState::Final(reference) => {
+            upload.durable_chunks = reference.chunk_count;
+            upload.durable_bytes = reference.byte_len;
+            upload.sealed = true;
+            upload.finalized = Some(reference);
+            upload.release_lease();
+            return Err(StorageError::InvalidState);
+        }
+        TerminalState::None => {}
     }
     if upload.sealed || upload.aborted {
         return Err(StorageError::InvalidState);
@@ -365,7 +476,7 @@ pub(crate) fn finish_upload<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &mut KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     upload: &mut BlobUpload,
@@ -374,8 +485,28 @@ where
     F: FileSystem,
     E: EntropySource,
 {
+    upload.validate_owner(database, epoch, writer)?;
     if upload.requires_resume {
         return Err(StorageError::NeedsRecovery);
+    }
+    match recover_terminal_state(filesystem, directory, vault, epoch, writer, upload.token)? {
+        TerminalState::Aborted => {
+            upload.aborted = true;
+            upload.release_lease();
+            return Err(StorageError::InvalidState);
+        }
+        TerminalState::Final(reference) => {
+            verify_reference(
+                filesystem, directory, vault, database, epoch, writer, reference,
+            )?;
+            upload.durable_chunks = reference.chunk_count;
+            upload.durable_bytes = reference.byte_len;
+            upload.sealed = true;
+            upload.finalized = Some(reference);
+            upload.release_lease();
+            return Ok(reference);
+        }
+        TerminalState::None => {}
     }
     if upload.aborted {
         return Err(StorageError::InvalidState);
@@ -444,6 +575,7 @@ where
         Some(reference),
     )?;
     upload.finalized = Some(reference);
+    upload.release_lease();
     Ok(reference)
 }
 
@@ -451,8 +583,8 @@ where
 pub(crate) fn resume_upload<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
-    vault: &KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    vault: &mut KeyVault<W, E>,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     token: BlobUploadToken,
@@ -464,51 +596,47 @@ where
     if token.scope.database() != database {
         return Err(StorageError::InvalidState);
     }
-    if recover_manifest(
-        filesystem,
-        directory,
-        vault,
-        epoch,
-        writer,
-        token,
-        MANIFEST_ABORTED,
-    )?
-    .is_some()
-    {
-        return Err(StorageError::InvalidState);
+    match recover_terminal_state(filesystem, directory, vault, epoch, writer, token)? {
+        TerminalState::Aborted => return Err(StorageError::InvalidState),
+        TerminalState::Final(reference) => {
+            verify_reference(
+                filesystem, directory, vault, database, epoch, writer, reference,
+            )?;
+            let mut upload = BlobUpload::new(token, epoch, writer)?;
+            upload.durable_chunks = reference.chunk_count;
+            upload.durable_bytes = reference.byte_len;
+            upload.sealed = true;
+            upload.finalized = Some(reference);
+            upload.release_lease();
+            return Ok(upload);
+        }
+        TerminalState::None => {}
     }
-    if let Some(reference) = recover_manifest(
-        filesystem,
-        directory,
-        vault,
-        epoch,
-        writer,
-        token,
-        MANIFEST_FINAL,
-    )? {
-        verify_reference(
-            filesystem, directory, vault, database, epoch, writer, reference,
-        )?;
-        let mut upload = BlobUpload::new(token)?;
-        upload.durable_chunks = reference.chunk_count;
-        upload.durable_bytes = reference.byte_len;
-        upload.sealed = true;
-        upload.finalized = Some(reference);
-        return Ok(upload);
-    }
-    let mut upload = BlobUpload::new(token)?;
+    let mut upload = BlobUpload::new(token, epoch, writer)?;
     loop {
         let chunk = upload.durable_chunks;
         let final_file =
             open_optional(filesystem, directory, &final_chunk_name(token.blob, chunk)?)?;
         let staging_name = staging_chunk_name(token.upload, chunk)?;
         let staging_file = open_optional(filesystem, directory, &staging_name)?;
+        let temporary_name = temporary_chunk_name(token.upload, chunk)?;
+        if open_optional(filesystem, directory, &temporary_name)?.is_some() {
+            filesystem.remove_file(directory, &temporary_name)?;
+            filesystem.sync_directory(directory)?;
+        }
+        let temporary_progress = temporary_progress_name(token, chunk)?;
+        if open_optional(filesystem, directory, &temporary_progress)?.is_some() {
+            filesystem.remove_file(directory, &temporary_progress)?;
+            filesystem.sync_directory(directory)?;
+        }
+        let progress = load_progress(filesystem, directory, vault, epoch, writer, token, chunk)?;
         if final_file.is_some() && staging_file.is_some() {
             return Err(StorageError::IntegrityFailure);
         }
         let (file, is_final) = match (final_file, staging_file) {
             (Some(file), None) => (file, true),
             (None, Some(file)) => (file, false),
+            (None, None) if progress.is_some() => return Err(StorageError::IntegrityFailure),
             (None, None) => break,
             (Some(_), Some(_)) => unreachable!(),
         };
@@ -536,6 +664,9 @@ where
         {
             return Err(StorageError::IntegrityFailure);
         }
+        publish_progress(
+            filesystem, directory, vault, database, epoch, writer, token, chunk, &plaintext,
+        )?;
         upload.hasher.update(&plaintext);
         upload.durable_bytes +=
             u64::try_from(plaintext.len()).map_err(|_| StorageError::ResourceLimit)?;
@@ -559,7 +690,7 @@ pub(crate) fn abort_upload<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &mut KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     upload: &mut BlobUpload,
@@ -568,14 +699,56 @@ where
     F: FileSystem,
     E: EntropySource,
 {
+    upload.validate_owner(database, epoch, writer)?;
     if upload.requires_resume {
         return Err(StorageError::NeedsRecovery);
     }
-    if upload.sealed || upload.aborted {
+    match recover_terminal_state(filesystem, directory, vault, epoch, writer, upload.token)? {
+        TerminalState::Final(reference) => {
+            upload.durable_chunks = reference.chunk_count;
+            upload.durable_bytes = reference.byte_len;
+            upload.sealed = true;
+            upload.finalized = Some(reference);
+            upload.release_lease();
+            return Err(StorageError::InvalidState);
+        }
+        TerminalState::Aborted => {
+            upload.aborted = true;
+            upload.hasher = Sha256::new();
+            upload.release_lease();
+        }
+        TerminalState::None => {}
+    }
+    if upload.sealed {
         return Err(StorageError::InvalidState);
     }
-    for chunk in 0..upload.durable_chunks {
+    if !upload.aborted {
+        if let Err(error) = publish_manifest(
+            filesystem,
+            directory,
+            vault,
+            database,
+            epoch,
+            writer,
+            upload.token,
+            None,
+        ) {
+            upload.requires_resume = true;
+            return Err(error);
+        }
+        upload.aborted = true;
+        upload.hasher = Sha256::new();
+        upload.release_lease();
+    }
+    let durable_chunks = upload.durable_chunks;
+    for chunk in 0..durable_chunks {
         let name = staging_chunk_name(upload.token.upload, chunk)?;
+        match filesystem.remove_file(directory, &name) {
+            Ok(()) => {}
+            Err(error) if error.kind() == AdapterErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let name = progress_name(upload.token, chunk)?;
         match filesystem.remove_file(directory, &name) {
             Ok(()) => {}
             Err(error) if error.kind() == AdapterErrorKind::NotFound => {}
@@ -583,21 +756,8 @@ where
         }
     }
     filesystem.sync_directory(directory)?;
-    publish_manifest(
-        filesystem,
-        directory,
-        vault,
-        database,
-        epoch,
-        writer,
-        upload.token,
-        None,
-    )?;
-    upload.aborted = true;
-    upload.buffer.clear();
     upload.durable_chunks = 0;
     upload.durable_bytes = 0;
-    upload.hasher = Sha256::new();
     Ok(())
 }
 
@@ -606,7 +766,7 @@ pub(crate) fn verify_reference<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     reference: BlobReference,
@@ -708,7 +868,7 @@ where
 }
 
 pub(crate) fn inventory_context(
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     digest: [u8; 32],
@@ -731,7 +891,7 @@ pub(crate) fn inventory_context(
 
 pub(crate) fn inventory_name<W, E: EntropySource>(
     vault: &KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     digest: [u8; 32],
@@ -757,7 +917,7 @@ fn publish_manifest<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &mut KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     token: BlobUploadToken,
@@ -772,19 +932,70 @@ where
     } else {
         MANIFEST_ABORTED
     };
-    let name = manifest_name(token, state)?;
-    match load_manifest(filesystem, directory, vault, epoch, writer, token, state) {
+    publish_manifest_copy(
+        filesystem,
+        directory,
+        vault,
+        database,
+        epoch,
+        writer,
+        token,
+        state,
+        reference,
+        &manifest_name(token, state)?,
+        &temporary_manifest_name(token, state)?,
+    )?;
+    publish_manifest_copy(
+        filesystem,
+        directory,
+        vault,
+        database,
+        epoch,
+        writer,
+        token,
+        state,
+        reference,
+        &manifest_witness_name(token, state)?,
+        &temporary_manifest_witness_name(token, state)?,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_manifest_copy<F, W, E>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &mut KeyVault<W, E>,
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    token: BlobUploadToken,
+    state: u8,
+    reference: Option<BlobReference>,
+    name: &EntryName,
+    temporary_name: &EntryName,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
+    match load_manifest(
+        filesystem, directory, vault, epoch, writer, token, state, name,
+    ) {
         Ok(Some(existing)) => {
             if state != MANIFEST_ABORTED && reference != Some(existing) {
                 return Err(StorageError::IntegrityFailure);
             }
-            let file = filesystem.open_existing(directory, &name)?;
+            let file = filesystem.open_existing(directory, name)?;
             filesystem.sync_all(&file)?;
             filesystem.sync_directory(directory)?;
             return Ok(());
         }
-        Ok(None) | Err(StorageError::NeedsRecovery) => {}
+        Ok(None) => {}
         Err(error) => return Err(error),
+    }
+    if open_optional(filesystem, directory, temporary_name)?.is_some() {
+        filesystem.remove_file(directory, temporary_name)?;
+        filesystem.sync_directory(directory)?;
     }
     let plaintext = encode_manifest(token, reference);
     let encoded = vault
@@ -793,15 +1004,7 @@ where
             &plaintext,
         )?
         .encode()?;
-    let file = match filesystem.create_new(directory, &name) {
-        Ok(file) => file,
-        Err(error) if error.kind() == AdapterErrorKind::AlreadyExists => {
-            let file = filesystem.open_existing(directory, &name)?;
-            filesystem.set_len(&file, 0)?;
-            file
-        }
-        Err(error) => return Err(error.into()),
-    };
+    let file = filesystem.create_new(directory, temporary_name)?;
     write_all_at(filesystem, &file, 0, &encoded)?;
     filesystem.set_len(
         &file,
@@ -809,9 +1012,12 @@ where
     )?;
     filesystem.sync_all(&file)?;
     filesystem.sync_directory(directory)?;
+    filesystem.rename_no_replace(directory, temporary_name, directory, name)?;
+    filesystem.sync_directory(directory)?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_manifest<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
@@ -820,21 +1026,18 @@ fn load_manifest<F, W, E>(
     writer: WriterIncarnationId,
     token: BlobUploadToken,
     state: u8,
+    name: &EntryName,
 ) -> Result<Option<BlobReference>, StorageError>
 where
     F: FileSystem,
     E: EntropySource,
 {
-    let name = manifest_name(token, state)?;
-    let file = match filesystem.open_existing(directory, &name) {
+    let file = match filesystem.open_existing(directory, name) {
         Ok(file) => file,
         Err(error) if error.kind() == AdapterErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
     let len = filesystem.metadata(&file)?.len;
-    if len < SMALL_ENCRYPTED_OBJECT_BYTES {
-        return Err(StorageError::NeedsRecovery);
-    }
     if len != SMALL_ENCRYPTED_OBJECT_BYTES {
         return Err(StorageError::IntegrityFailure);
     }
@@ -854,7 +1057,7 @@ where
 fn recover_manifest<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
-    vault: &KeyVault<W, E>,
+    vault: &mut KeyVault<W, E>,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     token: BlobUploadToken,
@@ -864,17 +1067,112 @@ where
     F: FileSystem,
     E: EntropySource,
 {
-    match load_manifest(filesystem, directory, vault, epoch, writer, token, state) {
-        Err(StorageError::NeedsRecovery) => {
-            filesystem.remove_file(directory, &manifest_name(token, state)?)?;
+    let primary_name = manifest_name(token, state)?;
+    let witness_name = manifest_witness_name(token, state)?;
+    let primary_temporary = temporary_manifest_name(token, state)?;
+    let witness_temporary = temporary_manifest_witness_name(token, state)?;
+    for temporary_name in [&primary_temporary, &witness_temporary] {
+        if open_optional(filesystem, directory, temporary_name)?.is_some() {
+            filesystem.remove_file(directory, temporary_name)?;
             filesystem.sync_directory(directory)?;
-            Ok(None)
         }
-        other => other,
+    }
+    let primary = load_manifest(
+        filesystem,
+        directory,
+        vault,
+        epoch,
+        writer,
+        token,
+        state,
+        &primary_name,
+    )?;
+    let witness = load_manifest(
+        filesystem,
+        directory,
+        vault,
+        epoch,
+        writer,
+        token,
+        state,
+        &witness_name,
+    )?;
+    let reference = match (primary, witness) {
+        (None, None) => return Ok(None),
+        (Some(primary), Some(witness)) if primary == witness => Some(primary),
+        (Some(reference), None) | (None, Some(reference)) => Some(reference),
+        (Some(_), Some(_)) => return Err(StorageError::IntegrityFailure),
+    };
+    publish_manifest(
+        filesystem,
+        directory,
+        vault,
+        token.scope.database(),
+        epoch,
+        writer,
+        token,
+        if state == MANIFEST_FINAL {
+            reference
+        } else {
+            None
+        },
+    )?;
+    for name in [&primary_name, &witness_name] {
+        let file = filesystem.open_existing(directory, name)?;
+        filesystem.sync_all(&file)?;
+        filesystem.sync_directory(directory)?;
+    }
+    Ok(reference)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerminalState {
+    None,
+    Final(BlobReference),
+    Aborted,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn recover_terminal_state<F, W, E>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &mut KeyVault<W, E>,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    token: BlobUploadToken,
+) -> Result<TerminalState, StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
+    let aborted = recover_manifest(
+        filesystem,
+        directory,
+        vault,
+        epoch,
+        writer,
+        token,
+        MANIFEST_ABORTED,
+    )?
+    .is_some();
+    let finalized = recover_manifest(
+        filesystem,
+        directory,
+        vault,
+        epoch,
+        writer,
+        token,
+        MANIFEST_FINAL,
+    )?;
+    match (aborted, finalized) {
+        (false, None) => Ok(TerminalState::None),
+        (true, None) => Ok(TerminalState::Aborted),
+        (false, Some(reference)) => Ok(TerminalState::Final(reference)),
+        (true, Some(_)) => Err(StorageError::IntegrityFailure),
     }
 }
 
-fn encode_manifest(
+pub(crate) fn encode_manifest(
     token: BlobUploadToken,
     reference: Option<BlobReference>,
 ) -> [u8; BLOB_MANIFEST_BYTES] {
@@ -896,6 +1194,193 @@ fn encode_manifest(
         bytes[72..104].copy_from_slice(&reference.content_digest);
     }
     bytes
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BlobProgress {
+    chunk: u32,
+    plaintext_len: u32,
+    plaintext_digest: [u8; 32],
+}
+
+fn progress_for(chunk: u32, plaintext: &[u8]) -> Result<BlobProgress, StorageError> {
+    Ok(BlobProgress {
+        chunk,
+        plaintext_len: u32::try_from(plaintext.len()).map_err(|_| StorageError::ResourceLimit)?,
+        plaintext_digest: Sha256::digest(plaintext).into(),
+    })
+}
+
+pub(crate) fn encode_progress_plaintext(
+    token: BlobUploadToken,
+    chunk: u32,
+    plaintext: &[u8],
+) -> Result<[u8; BLOB_PROGRESS_BYTES], StorageError> {
+    Ok(encode_progress(token, progress_for(chunk, plaintext)?))
+}
+
+fn encode_progress(token: BlobUploadToken, progress: BlobProgress) -> [u8; BLOB_PROGRESS_BYTES] {
+    let mut bytes = [0_u8; BLOB_PROGRESS_BYTES];
+    bytes[..4].copy_from_slice(b"UBPG");
+    bytes[4] = BLOB_FORMAT_MAJOR;
+    bytes[5] = BLOB_FORMAT_MINOR;
+    bytes[8..24].copy_from_slice(token.scope.namespace().as_bytes());
+    bytes[24..40].copy_from_slice(&token.upload);
+    bytes[40..56].copy_from_slice(&token.blob.0);
+    bytes[56..60].copy_from_slice(&progress.chunk.to_be_bytes());
+    bytes[60..64].copy_from_slice(&progress.plaintext_len.to_be_bytes());
+    bytes[64..96].copy_from_slice(&progress.plaintext_digest);
+    bytes
+}
+
+fn decode_progress(
+    token: BlobUploadToken,
+    chunk: u32,
+    bytes: &[u8],
+) -> Result<BlobProgress, StorageError> {
+    if bytes.len() != BLOB_PROGRESS_BYTES
+        || &bytes[..4] != b"UBPG"
+        || bytes[4] != BLOB_FORMAT_MAJOR
+        || bytes[5] != BLOB_FORMAT_MINOR
+        || bytes[6..8] != [0, 0]
+        || bytes[8..24] != *token.scope.namespace().as_bytes()
+        || bytes[24..40] != token.upload
+        || bytes[40..56] != token.blob.0
+        || bytes[56..60] != chunk.to_be_bytes()
+        || bytes[96..].iter().any(|byte| *byte != 0)
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let progress = BlobProgress {
+        chunk,
+        plaintext_len: u32::from_be_bytes(read_array(bytes, 60)?),
+        plaintext_digest: read_array(bytes, 64)?,
+    };
+    if progress.plaintext_len == 0
+        || usize::try_from(progress.plaintext_len)
+            .ok()
+            .is_none_or(|len| len > BLOB_CHUNK_BYTES)
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
+    Ok(progress)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn publish_progress<F, W, E>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &mut KeyVault<W, E>,
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    token: BlobUploadToken,
+    chunk: u32,
+    plaintext: &[u8],
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
+    let expected = progress_for(chunk, plaintext)?;
+    if let Some(existing) =
+        load_progress(filesystem, directory, vault, epoch, writer, token, chunk)?
+    {
+        if existing != expected {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let file = filesystem.open_existing(directory, &progress_name(token, chunk)?)?;
+        filesystem.sync_all(&file)?;
+        filesystem.sync_directory(directory)?;
+        return Ok(());
+    }
+    let temporary_name = temporary_progress_name(token, chunk)?;
+    if open_optional(filesystem, directory, &temporary_name)?.is_some() {
+        filesystem.remove_file(directory, &temporary_name)?;
+        filesystem.sync_directory(directory)?;
+    }
+    let encoded = vault
+        .encrypt(
+            progress_context(database, epoch, writer, token, chunk)?,
+            &encode_progress_plaintext(token, chunk, plaintext)?,
+        )?
+        .encode()?;
+    let file = filesystem.create_new(directory, &temporary_name)?;
+    write_all_at(filesystem, &file, 0, &encoded)?;
+    filesystem.set_len(
+        &file,
+        u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?,
+    )?;
+    filesystem.sync_all(&file)?;
+    filesystem.sync_directory(directory)?;
+    filesystem.rename_no_replace(
+        directory,
+        &temporary_name,
+        directory,
+        &progress_name(token, chunk)?,
+    )?;
+    filesystem.sync_directory(directory)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_progress<F, W, E>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    token: BlobUploadToken,
+    chunk: u32,
+) -> Result<Option<BlobProgress>, StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
+    let file = match filesystem.open_existing(directory, &progress_name(token, chunk)?) {
+        Ok(file) => file,
+        Err(error) if error.kind() == AdapterErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let len = filesystem.metadata(&file)?.len;
+    if len != SMALL_ENCRYPTED_OBJECT_BYTES {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let mut encoded = vec![0_u8; usize::try_from(len).map_err(|_| StorageError::ResourceLimit)?];
+    read_exact_at(filesystem, &file, 0, &mut encoded)?;
+    let envelope =
+        EncryptedEnvelope::decode(&encoded).map_err(|_| StorageError::IntegrityFailure)?;
+    let plaintext = vault
+        .decrypt(
+            progress_context(token.scope.database(), epoch, writer, token, chunk)?,
+            &envelope,
+        )
+        .map_err(|_| StorageError::IntegrityFailure)?;
+    decode_progress(token, chunk, plaintext.as_slice()).map(Some)
+}
+
+pub(crate) fn progress_context(
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    token: BlobUploadToken,
+    chunk: u32,
+) -> Result<CryptoContext, StorageError> {
+    let sequence = PROGRESS_SEQUENCE_BASE
+        .checked_add(u64::from(chunk))
+        .ok_or(StorageError::ResourceLimit)?;
+    Ok(CryptoContext::new(
+        database,
+        Scope::Namespace(token.scope.namespace()),
+        epoch,
+        ObjectRole::BlobManifest,
+        CryptoObjectId::from_bytes(token.upload),
+        sequence,
+        writer,
+        BLOB_FORMAT_MAJOR,
+        BLOB_FORMAT_MINOR,
+        FrameClass::Small4KiB,
+    ))
 }
 
 fn decode_manifest(
@@ -937,8 +1422,8 @@ fn decode_manifest(
     Ok(reference)
 }
 
-fn manifest_context(
-    database: uste_types::DatabaseId,
+pub(crate) fn manifest_context(
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     token: BlobUploadToken,
@@ -963,11 +1448,50 @@ fn manifest_context(
     )
 }
 
-fn manifest_name(token: BlobUploadToken, state: u8) -> Result<EntryName, StorageError> {
+pub(crate) fn manifest_name(token: BlobUploadToken, state: u8) -> Result<EntryName, StorageError> {
     let (prefix, id) = if state == MANIFEST_FINAL {
         ("m", token.blob.0)
     } else if state == MANIFEST_ABORTED {
         ("a", token.upload)
+    } else {
+        return Err(StorageError::IntegrityFailure);
+    };
+    EntryName::new(format!("{prefix}-{}", hex(&id))).map_err(|_| StorageError::IntegrityFailure)
+}
+
+fn temporary_manifest_name(token: BlobUploadToken, state: u8) -> Result<EntryName, StorageError> {
+    let (prefix, id) = if state == MANIFEST_FINAL {
+        ("tm", token.blob.0)
+    } else if state == MANIFEST_ABORTED {
+        ("ta", token.upload)
+    } else {
+        return Err(StorageError::IntegrityFailure);
+    };
+    EntryName::new(format!("{prefix}-{}", hex(&id))).map_err(|_| StorageError::IntegrityFailure)
+}
+
+pub(crate) fn manifest_witness_name(
+    token: BlobUploadToken,
+    state: u8,
+) -> Result<EntryName, StorageError> {
+    let (prefix, id) = if state == MANIFEST_FINAL {
+        ("wm", token.blob.0)
+    } else if state == MANIFEST_ABORTED {
+        ("wa", token.upload)
+    } else {
+        return Err(StorageError::IntegrityFailure);
+    };
+    EntryName::new(format!("{prefix}-{}", hex(&id))).map_err(|_| StorageError::IntegrityFailure)
+}
+
+fn temporary_manifest_witness_name(
+    token: BlobUploadToken,
+    state: u8,
+) -> Result<EntryName, StorageError> {
+    let (prefix, id) = if state == MANIFEST_FINAL {
+        ("twm", token.blob.0)
+    } else if state == MANIFEST_ABORTED {
+        ("twa", token.upload)
     } else {
         return Err(StorageError::IntegrityFailure);
     };
@@ -979,7 +1503,7 @@ fn flush_buffer<F, W, E>(
     filesystem: &mut F,
     directory: &F::Directory,
     vault: &mut KeyVault<W, E>,
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
     upload: &mut BlobUpload,
@@ -989,8 +1513,8 @@ where
     E: EntropySource,
 {
     let chunk = upload.durable_chunks;
-    let name = staging_chunk_name(upload.token.upload, chunk)?;
-    match filesystem.open_existing(directory, &name) {
+    let staging_name = staging_chunk_name(upload.token.upload, chunk)?;
+    match filesystem.open_existing(directory, &staging_name) {
         Ok(file) => {
             let existing = decrypt_chunk(
                 filesystem,
@@ -1009,6 +1533,12 @@ where
             filesystem.sync_directory(directory)?;
         }
         Err(error) if error.kind() == AdapterErrorKind::NotFound => {
+            let temporary_name = temporary_chunk_name(upload.token.upload, chunk)?;
+            match filesystem.remove_file(directory, &temporary_name) {
+                Ok(()) => filesystem.sync_directory(directory)?,
+                Err(error) if error.kind() == AdapterErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
             let encoded = vault
                 .encrypt(
                     chunk_context(
@@ -1022,30 +1552,7 @@ where
                     &upload.buffer,
                 )?
                 .encode()?;
-            let file = match filesystem.create_new(directory, &name) {
-                Ok(file) => file,
-                Err(error) if error.kind() == AdapterErrorKind::AlreadyExists => {
-                    let file = filesystem.open_existing(directory, &name)?;
-                    let existing = decrypt_chunk(
-                        filesystem,
-                        &file,
-                        vault,
-                        upload.token.scope,
-                        epoch,
-                        writer,
-                        upload.token.blob,
-                        chunk,
-                    )?;
-                    if existing != upload.buffer {
-                        return Err(StorageError::IntegrityFailure);
-                    }
-                    filesystem.sync_all(&file)?;
-                    filesystem.sync_directory(directory)?;
-                    update_upload_after_flush(upload)?;
-                    return Ok(());
-                }
-                Err(error) => return Err(error.into()),
-            };
+            let file = filesystem.create_new(directory, &temporary_name)?;
             write_all_at(filesystem, &file, 0, &encoded)?;
             filesystem.set_len(
                 &file,
@@ -1053,9 +1560,22 @@ where
             )?;
             filesystem.sync_all(&file)?;
             filesystem.sync_directory(directory)?;
+            filesystem.rename_no_replace(directory, &temporary_name, directory, &staging_name)?;
+            filesystem.sync_directory(directory)?;
         }
         Err(error) => return Err(error.into()),
     }
+    publish_progress(
+        filesystem,
+        directory,
+        vault,
+        database,
+        epoch,
+        writer,
+        upload.token,
+        chunk,
+        &upload.buffer,
+    )?;
     update_upload_after_flush(upload)
 }
 
@@ -1119,7 +1639,7 @@ where
 }
 
 fn chunk_context(
-    database: uste_types::DatabaseId,
+    database: DatabaseId,
     scope: NamespaceRef,
     epoch: KeyEpoch,
     writer: WriterIncarnationId,
@@ -1195,12 +1715,27 @@ fn encode_inventory(
     Ok(bytes)
 }
 
-fn staging_chunk_name(upload: [u8; 16], chunk: u32) -> Result<EntryName, StorageError> {
+pub(crate) fn staging_chunk_name(upload: [u8; 16], chunk: u32) -> Result<EntryName, StorageError> {
     EntryName::new(format!("u-{}-{chunk:08x}", hex(&upload)))
         .map_err(|_| StorageError::IntegrityFailure)
 }
 
-fn final_chunk_name(blob: BlobId, chunk: u32) -> Result<EntryName, StorageError> {
+fn temporary_chunk_name(upload: [u8; 16], chunk: u32) -> Result<EntryName, StorageError> {
+    EntryName::new(format!("t-{}-{chunk:08x}", hex(&upload)))
+        .map_err(|_| StorageError::IntegrityFailure)
+}
+
+pub(crate) fn progress_name(token: BlobUploadToken, chunk: u32) -> Result<EntryName, StorageError> {
+    EntryName::new(format!("p-{}-{chunk:08x}", hex(&token.upload)))
+        .map_err(|_| StorageError::IntegrityFailure)
+}
+
+fn temporary_progress_name(token: BlobUploadToken, chunk: u32) -> Result<EntryName, StorageError> {
+    EntryName::new(format!("q-{}-{chunk:08x}", hex(&token.upload)))
+        .map_err(|_| StorageError::IntegrityFailure)
+}
+
+pub(crate) fn final_chunk_name(blob: BlobId, chunk: u32) -> Result<EntryName, StorageError> {
     EntryName::new(format!("b-{}-{chunk:08x}", hex(&blob.0)))
         .map_err(|_| StorageError::IntegrityFailure)
 }
@@ -1237,8 +1772,20 @@ fn hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+
     use super::*;
+    use crate::memory::MemoryFileSystem;
     use uste_types::{DatabaseId, NamespaceId};
+
+    #[derive(Debug)]
+    struct NoEntropy;
+
+    impl EntropySource for NoEntropy {
+        fn fill(&mut self, _output: &mut [u8]) -> Result<(), uste_crypto::EntropyFailure> {
+            Err(uste_crypto::EntropyFailure)
+        }
+    }
 
     fn scope() -> NamespaceRef {
         NamespaceRef::new(
@@ -1275,6 +1822,18 @@ mod tests {
             .collect()
     }
 
+    fn progress_golden() -> Vec<u8> {
+        include_str!("../../../acceptance/r1/blob-progress-v1.hex")
+            .trim()
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let text = core::str::from_utf8(pair).unwrap();
+                u8::from_str_radix(text, 16).unwrap()
+            })
+            .collect()
+    }
+
     #[test]
     fn literal_manifest_golden_and_assigned_roles_are_exact() {
         assert_eq!(ObjectRole::BlobInventory as u8, 0x0a);
@@ -1306,6 +1865,78 @@ mod tests {
         assert_eq!(
             decode_manifest(token, MANIFEST_FINAL, &manifest_golden()).unwrap(),
             reference
+        );
+        let progress = progress_for(0, b"hello").unwrap();
+        assert_eq!(
+            encode_progress(token, progress).as_slice(),
+            progress_golden()
+        );
+        assert_eq!(
+            decode_progress(token, 0, &progress_golden()).unwrap(),
+            progress
+        );
+        let other_scope = NamespaceRef::new(
+            DatabaseId::from_bytes([0x11; 16]),
+            NamespaceId::from_bytes([0x23; 16]),
+        );
+        assert_ne!(
+            token.blob_id(),
+            BlobUploadToken::from_upload_id(other_scope, [0x33; 16]).blob_id()
+        );
+    }
+
+    #[test]
+    fn inventory_iterator_stops_at_cap_plus_one_without_unbounded_collection() {
+        let pulls = Cell::new(0_usize);
+        let iterator = core::iter::from_fn(|| {
+            pulls.set(pulls.get() + 1);
+            Some(reference())
+        });
+        assert_eq!(
+            BlobInventory::new(scope(), iterator).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        assert_eq!(pulls.get(), MAX_BLOBS_PER_INVENTORY + 1);
+    }
+
+    #[test]
+    fn single_blob_cap_is_inclusive_and_rejects_one_more_byte_before_io() {
+        let token = BlobUploadToken::from_upload_id(scope(), [0x55; 16]);
+        let mut upload = BlobUpload::new(
+            token,
+            KeyEpoch::FIRST,
+            WriterIncarnationId::from_bytes([0x56; 16]),
+        )
+        .unwrap();
+        upload.durable_bytes = MAX_BLOB_BYTES - 1;
+        let mut filesystem = MemoryFileSystem::default();
+        let directory = filesystem.root();
+        let mut vault = KeyVault::from_locked(scope().database(), (), NoEntropy);
+        write_upload(
+            &mut filesystem,
+            &directory,
+            &mut vault,
+            scope().database(),
+            KeyEpoch::FIRST,
+            WriterIncarnationId::from_bytes([0x56; 16]),
+            &mut upload,
+            b"x",
+        )
+        .unwrap();
+        assert_eq!(upload.accepted_bytes(), MAX_BLOB_BYTES);
+        assert_eq!(
+            write_upload(
+                &mut filesystem,
+                &directory,
+                &mut vault,
+                scope().database(),
+                KeyEpoch::FIRST,
+                WriterIncarnationId::from_bytes([0x56; 16]),
+                &mut upload,
+                b"y",
+            )
+            .unwrap_err(),
+            StorageError::ResourceLimit
         );
     }
 

@@ -298,7 +298,7 @@ where
     }
 
     pub fn resume_blob_upload(
-        &self,
+        &mut self,
         filesystem: &mut F,
         token: BlobUploadToken,
     ) -> Result<BlobUpload, TransactionError> {

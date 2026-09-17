@@ -317,6 +317,7 @@ dependencies = [
  "sha2",
  "uste-crypto",
  "uste-types",
+ "zeroize",
 ]
 
 [[package]]

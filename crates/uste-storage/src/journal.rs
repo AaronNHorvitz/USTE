@@ -440,8 +440,11 @@ where
                 &certificate_file,
                 SMALL_ENVELOPE_BYTES + complete_certificate_bytes,
             )?;
-            filesystem.sync_data(&certificate_file)?;
         }
+        // A previous certificate sync may have returned an ambiguous error while leaving a
+        // complete authenticated certificate visible. Recovery adopts that exact frontier only
+        // after re-synchronizing it, so a successful reopen cannot acknowledge volatile state.
+        filesystem.sync_data(&certificate_file)?;
 
         let mut ignored_uncommitted_journal_bytes = 0_u64;
         for tail in &validated.uncommitted_tails {
@@ -520,19 +523,23 @@ where
             return Err(StorageError::InvalidState);
         }
         let upload = random_nonzero_id(&mut self.identity_entropy)?;
-        BlobUpload::new(BlobUploadToken::from_upload_id(scope, upload))
+        BlobUpload::new(
+            BlobUploadToken::from_upload_id(scope, upload),
+            self.epoch,
+            self.writer,
+        )
     }
 
     /// Rebuild a resumable upload from authenticated durable chunks after interruption.
     pub fn resume_blob_upload(
-        &self,
+        &mut self,
         filesystem: &mut F,
         token: BlobUploadToken,
     ) -> Result<BlobUpload, StorageError> {
         resume_upload(
             filesystem,
             &self.database_directory,
-            &self.vault,
+            &mut self.vault,
             self.database,
             self.epoch,
             self.writer,
@@ -662,9 +669,7 @@ where
             .committed_blob_reference_bindings
             .checked_add(added_bindings)
             .ok_or(StorageError::ResourceLimit)?;
-        if projected_bindings > MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL {
-            return Err(StorageError::ResourceLimit);
-        }
+        check_blob_reference_binding_limit(projected_bindings)?;
         self.publish_blob_inventory(filesystem, inventory)?;
         let durable = self.append_group_internal(filesystem, input, inventory.digest())?;
         for reference in inventory.references() {
@@ -875,6 +880,10 @@ where
                     .encode()?;
                 let file = filesystem.create_new(&self.database_directory, &name)?;
                 write_all_at(filesystem, &file, 0, &encoded)?;
+                filesystem.set_len(
+                    &file,
+                    u64::try_from(encoded.len()).map_err(|_| StorageError::ResourceLimit)?,
+                )?;
                 filesystem.sync_all(&file)?;
             }
             Err(error) => return Err(error.into()),
@@ -1114,6 +1123,27 @@ struct SegmentTail {
     extra_bytes: u64,
 }
 
+fn check_unique_blob_limit(count: usize) -> Result<(), StorageError> {
+    if count > MAX_COMMITTED_BLOBS_PER_JOURNAL {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
+}
+
+fn check_blob_reference_binding_limit(count: u64) -> Result<(), StorageError> {
+    if count > MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
+}
+
+fn check_namespace_blob_byte_limit(bytes: u64) -> Result<(), StorageError> {
+    if bytes > MAX_NAMESPACE_BLOB_BYTES {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
+}
+
 fn check_blob_capacity(
     committed_blobs: &BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
     committed_blob_bytes: &BTreeMap<NamespaceRef, u64>,
@@ -1136,9 +1166,7 @@ fn check_blob_capacity(
         projected_count = projected_count
             .checked_add(1)
             .ok_or(StorageError::ResourceLimit)?;
-        if projected_count > MAX_COMMITTED_BLOBS_PER_JOURNAL {
-            return Err(StorageError::ResourceLimit);
-        }
+        check_unique_blob_limit(projected_count)?;
         let namespace_addition = additions.entry(reference.scope()).or_default();
         *namespace_addition = namespace_addition
             .checked_add(reference.byte_len())
@@ -1151,9 +1179,7 @@ fn check_blob_capacity(
             .unwrap_or_default()
             .checked_add(addition)
             .ok_or(StorageError::ResourceLimit)?;
-        if projected > MAX_NAMESPACE_BLOB_BYTES {
-            return Err(StorageError::ResourceLimit);
-        }
+        check_namespace_blob_byte_limit(projected)?;
     }
     Ok(())
 }
@@ -1171,9 +1197,12 @@ fn register_committed_blob(
             Err(StorageError::IntegrityFailure)
         };
     }
-    if committed_blobs.len() >= MAX_COMMITTED_BLOBS_PER_JOURNAL {
-        return Err(StorageError::ResourceLimit);
-    }
+    check_unique_blob_limit(
+        committed_blobs
+            .len()
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?,
+    )?;
     let current_bytes = committed_blob_bytes
         .get(&reference.scope())
         .copied()
@@ -1181,9 +1210,7 @@ fn register_committed_blob(
     let projected_bytes = current_bytes
         .checked_add(reference.byte_len())
         .ok_or(StorageError::ResourceLimit)?;
-    if projected_bytes > MAX_NAMESPACE_BLOB_BYTES {
-        return Err(StorageError::ResourceLimit);
-    }
+    check_namespace_blob_byte_limit(projected_bytes)?;
     committed_blobs.insert(key, reference);
     committed_blob_bytes.insert(reference.scope(), projected_bytes);
     Ok(())
@@ -1428,9 +1455,7 @@ where
                 committed_blob_reference_bindings = committed_blob_reference_bindings
                     .checked_add(reference_count)
                     .ok_or(StorageError::ResourceLimit)?;
-                if committed_blob_reference_bindings > MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL {
-                    return Err(StorageError::ResourceLimit);
-                }
+                check_blob_reference_binding_limit(committed_blob_reference_bindings)?;
                 if let Some(inventory) = inventory.as_ref() {
                     for reference in inventory.references() {
                         register_committed_blob(
@@ -1892,6 +1917,64 @@ mod tests {
             database,
             final_name: EntryName::new(name).unwrap(),
         }
+    }
+
+    type FaultStore = JournalStore<
+        FaultFileSystem<MemoryFileSystem>,
+        TestEnvelope,
+        CounterEntropy,
+        CounterEntropy,
+    >;
+
+    fn reopen_fault_store(
+        filesystem: &mut FaultFileSystem<MemoryFileSystem>,
+        database: DatabaseId,
+        name: &str,
+        seed: u64,
+    ) -> FaultStore {
+        JournalStore::open(
+            filesystem,
+            &entry(name),
+            database,
+            CounterEntropy::new(seed),
+            CounterEntropy::new(seed + 1),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        )
+        .unwrap()
+        .0
+    }
+
+    fn commit_and_assert_blob(
+        store: &mut FaultStore,
+        filesystem: &mut FaultFileSystem<MemoryFileSystem>,
+        scope: NamespaceRef,
+        reference: BlobReference,
+        expected: &[u8],
+    ) {
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        store
+            .append_group_with_inventory(
+                filesystem,
+                CommitInput {
+                    encoded_group: b"fault-qualified blob",
+                    logical_event_digest: [0xac; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let mut output = Vec::with_capacity(expected.len());
+        let mut scratch = vec![0_u8; crate::blob::BLOB_CHUNK_BYTES];
+        let mut offset = 0_u64;
+        while output.len() < expected.len() {
+            let count = store
+                .read_blob_range(filesystem, reference, offset, &mut scratch)
+                .unwrap();
+            assert_ne!(count, 0);
+            output.extend_from_slice(&scratch[..count]);
+            offset += u64::try_from(count).unwrap();
+        }
+        assert_eq!(output, expected);
     }
 
     #[test]
@@ -2587,6 +2670,1377 @@ mod tests {
     }
 
     #[test]
+    fn every_streaming_chunk_boundary_resumes_at_an_exact_durable_offset() {
+        let boundaries = [
+            (Operation::OpenExisting, 1_u64),
+            (Operation::OpenExisting, 2),
+            (Operation::OpenExisting, 3),
+            (Operation::OpenExisting, 4),
+            (Operation::OpenExisting, 5),
+            (Operation::OpenExisting, 6),
+            (Operation::OpenExisting, 7),
+            (Operation::OpenExisting, 8),
+            (Operation::OpenExisting, 9),
+            (Operation::OpenExisting, 10),
+            (Operation::OpenExisting, 11),
+            (Operation::CreateNew, 1),
+            (Operation::WriteAt, 1),
+            (Operation::SetLen, 1),
+            (Operation::SyncAll, 1),
+            (Operation::SyncDirectory, 1),
+            (Operation::RenameNoReplace, 1),
+            (Operation::SyncDirectory, 2),
+            (Operation::CreateNew, 2),
+            (Operation::WriteAt, 2),
+            (Operation::SetLen, 2),
+            (Operation::SyncAll, 2),
+            (Operation::SyncDirectory, 3),
+            (Operation::RenameNoReplace, 2),
+            (Operation::SyncDirectory, 4),
+        ];
+        let actions = [
+            FaultAction::Error(AdapterErrorKind::Io),
+            FaultAction::Error(AdapterErrorKind::NoSpace),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ];
+        for (case, (operation, occurrence)) in boundaries.into_iter().enumerate() {
+            for action in actions {
+                if operation == Operation::OpenExisting && action == FaultAction::CrashAfter {
+                    continue;
+                }
+                let database = DatabaseId::from_bytes([0xb3; 16]);
+                let scope =
+                    NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xb4; 16]));
+                let mut filesystem =
+                    FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+                let mut store = JournalStore::create(
+                    &mut filesystem,
+                    options(database, "stream-boundary"),
+                    create_vault(database, 50_000 + u64::try_from(case).unwrap()),
+                    CounterEntropy::new(51_000 + u64::try_from(case).unwrap()),
+                )
+                .unwrap();
+                let bytes = vec![0x5d; crate::blob::BLOB_CHUNK_BYTES];
+                let mut upload = store.start_blob_upload(scope).unwrap();
+                let token = upload.token();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+                        .is_err(),
+                    "operation={operation:?} occurrence={occurrence} action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(upload);
+                drop(store);
+                if !matches!(action, FaultAction::Error(_)) {
+                    filesystem.restart().unwrap();
+                }
+                let mut store =
+                    reopen_fault_store(&mut filesystem, database, "stream-boundary", 52_000);
+                let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+                match resumed.durable_bytes() {
+                    0 => store
+                        .write_blob_upload(&mut filesystem, &mut resumed, &bytes)
+                        .unwrap(),
+                    durable if durable == u64::try_from(bytes.len()).unwrap() => {}
+                    durable => panic!("non-exact durable offset {durable}"),
+                }
+                let reference = store
+                    .finish_blob_upload(&mut filesystem, &mut resumed)
+                    .unwrap();
+                commit_and_assert_blob(&mut store, &mut filesystem, scope, reference, &bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn blob_chunk_short_write_retries_and_zero_progress_resumes_cleanly() {
+        for (case, action) in [
+            FaultAction::ShortWrite { maximum: 1 },
+            FaultAction::ZeroProgress,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let database = DatabaseId::from_bytes([0xb2; 16]);
+            let scope =
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xb1; 16]));
+            let mut filesystem =
+                FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, "chunk-progress"),
+                create_vault(database, 49_000 + u64::try_from(case).unwrap()),
+                CounterEntropy::new(49_100 + u64::try_from(case).unwrap()),
+            )
+            .unwrap();
+            let bytes = vec![0x4c; crate::blob::BLOB_CHUNK_BYTES];
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            let token = upload.token();
+            filesystem
+                .arm(
+                    FaultPlan::new([FaultPoint {
+                        operation: Operation::WriteAt,
+                        occurrence: 1,
+                        action,
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+            let result = store.write_blob_upload(&mut filesystem, &mut upload, &bytes);
+            if action == FaultAction::ZeroProgress {
+                assert_eq!(
+                    result.unwrap_err(),
+                    StorageError::Adapter(AdapterErrorKind::ZeroProgress)
+                );
+                drop(upload);
+                drop(store);
+                let mut reopened =
+                    reopen_fault_store(&mut filesystem, database, "chunk-progress", 49_200);
+                upload = reopened.resume_blob_upload(&mut filesystem, token).unwrap();
+                assert_eq!(upload.durable_bytes(), 0);
+                reopened
+                    .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+                    .unwrap();
+                store = reopened;
+            } else {
+                result.unwrap();
+            }
+            let reference = store
+                .finish_blob_upload(&mut filesystem, &mut upload)
+                .unwrap();
+            commit_and_assert_blob(&mut store, &mut filesystem, scope, reference, &bytes);
+        }
+    }
+
+    #[test]
+    fn every_single_chunk_finish_boundary_is_exactly_resumable() {
+        let mut boundaries = Vec::new();
+        boundaries.extend((1..=16).map(|occurrence| (Operation::OpenExisting, occurrence)));
+        boundaries.extend((1..=4).map(|occurrence| (Operation::CreateNew, occurrence)));
+        boundaries.extend((1..=4).map(|occurrence| (Operation::WriteAt, occurrence)));
+        boundaries.extend((1..=4).map(|occurrence| (Operation::SetLen, occurrence)));
+        boundaries.extend((1..=4).map(|occurrence| (Operation::SyncAll, occurrence)));
+        boundaries.extend((1..=9).map(|occurrence| (Operation::SyncDirectory, occurrence)));
+        boundaries.extend((1..=5).map(|occurrence| (Operation::RenameNoReplace, occurrence)));
+        let actions = [
+            FaultAction::Error(AdapterErrorKind::Io),
+            FaultAction::Error(AdapterErrorKind::NoSpace),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ];
+        for (case, (operation, occurrence)) in boundaries.into_iter().enumerate() {
+            for action in actions {
+                if operation == Operation::OpenExisting && action == FaultAction::CrashAfter {
+                    continue;
+                }
+                let database = DatabaseId::from_bytes([0xb5; 16]);
+                let scope =
+                    NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xb6; 16]));
+                let mut filesystem =
+                    FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+                let mut store = JournalStore::create(
+                    &mut filesystem,
+                    options(database, "finish-boundary"),
+                    create_vault(database, 53_000 + u64::try_from(case).unwrap()),
+                    CounterEntropy::new(54_000 + u64::try_from(case).unwrap()),
+                )
+                .unwrap();
+                let bytes = b"terminal chunk fault matrix";
+                let mut upload = store.start_blob_upload(scope).unwrap();
+                let token = upload.token();
+                store
+                    .write_blob_upload(&mut filesystem, &mut upload, bytes)
+                    .unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .finish_blob_upload(&mut filesystem, &mut upload)
+                        .is_err(),
+                    "operation={operation:?} occurrence={occurrence} action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(upload);
+                drop(store);
+                if !matches!(action, FaultAction::Error(_)) {
+                    filesystem.restart().unwrap();
+                }
+                let mut store =
+                    reopen_fault_store(&mut filesystem, database, "finish-boundary", 55_000);
+                let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+                match resumed.durable_bytes() {
+                    0 => store
+                        .write_blob_upload(&mut filesystem, &mut resumed, bytes)
+                        .unwrap(),
+                    durable if durable == u64::try_from(bytes.len()).unwrap() => {}
+                    durable => panic!("non-exact terminal offset {durable}"),
+                }
+                let reference = store
+                    .finish_blob_upload(&mut filesystem, &mut resumed)
+                    .unwrap();
+                commit_and_assert_blob(&mut store, &mut filesystem, scope, reference, bytes);
+            }
+        }
+    }
+
+    #[test]
+    fn interrupted_multi_chunk_finish_recovers_mixed_final_and_staging_state() {
+        for (case, action) in [
+            FaultAction::Error(AdapterErrorKind::Io),
+            FaultAction::Error(AdapterErrorKind::NoSpace),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let database = DatabaseId::from_bytes([0xcc; 16]);
+            let scope =
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xcd; 16]));
+            let mut filesystem =
+                FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, "multi-finish"),
+                create_vault(database, 55_100 + u64::try_from(case).unwrap()),
+                CounterEntropy::new(55_200 + u64::try_from(case).unwrap()),
+            )
+            .unwrap();
+            let bytes = vec![0x6d; crate::blob::BLOB_CHUNK_BYTES * 3];
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            let token = upload.token();
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+                .unwrap();
+            filesystem
+                .arm(
+                    FaultPlan::new([FaultPoint {
+                        operation: Operation::RenameNoReplace,
+                        occurrence: 2,
+                        action,
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(
+                store
+                    .finish_blob_upload(&mut filesystem, &mut upload)
+                    .is_err()
+            );
+            drop(upload);
+            drop(store);
+            if !matches!(action, FaultAction::Error(_)) {
+                filesystem.restart().unwrap();
+            }
+            let mut store = reopen_fault_store(&mut filesystem, database, "multi-finish", 55_300);
+            let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+            assert_eq!(resumed.durable_bytes(), u64::try_from(bytes.len()).unwrap());
+            let reference = store
+                .finish_blob_upload(&mut filesystem, &mut resumed)
+                .unwrap();
+            commit_and_assert_blob(&mut store, &mut filesystem, scope, reference, &bytes);
+        }
+    }
+
+    #[test]
+    fn equal_bytes_remain_isolated_by_upload_and_namespace() {
+        let database = DatabaseId::from_bytes([0xce; 16]);
+        let first_scope =
+            NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xcf; 16]));
+        let second_scope =
+            NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd0; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "isolation"),
+            create_vault(database, 55_400),
+            CounterEntropy::new(55_500),
+        )
+        .unwrap();
+        let bytes = b"identical source bytes remain namespace isolated";
+        let mut references = Vec::new();
+        for scope in [first_scope, first_scope, second_scope] {
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, bytes)
+                .unwrap();
+            references.push(
+                store
+                    .finish_blob_upload(&mut filesystem, &mut upload)
+                    .unwrap(),
+            );
+        }
+        assert_ne!(references[0].id(), references[1].id());
+        assert_ne!(references[0].id(), references[2].id());
+        assert_eq!(
+            references[0].content_digest(),
+            references[1].content_digest()
+        );
+        assert_eq!(
+            references[0].content_digest(),
+            references[2].content_digest()
+        );
+        assert_eq!(references[0].scope(), first_scope);
+        assert_eq!(references[2].scope(), second_scope);
+    }
+
+    #[test]
+    fn database_upload_cap_survives_reopen_and_releases_on_terminal_state() {
+        let database = DatabaseId::from_bytes([0xb7; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xb8; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "upload-cap"),
+            create_vault(database, 56_000),
+            CounterEntropy::new(57_000),
+        )
+        .unwrap();
+        let mut uploads = Vec::new();
+        for _ in 0..crate::blob::MAX_CONCURRENT_UPLOADS {
+            uploads.push(store.start_blob_upload(scope).unwrap());
+        }
+        assert_eq!(
+            store.start_blob_upload(scope).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        drop(store);
+        let (mut store, _) = JournalStore::open(
+            &mut filesystem,
+            &entry("upload-cap"),
+            database,
+            CounterEntropy::new(58_000),
+            CounterEntropy::new(59_000),
+            &mut TestKeyAdapter,
+            |_group| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            store.start_blob_upload(scope).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        uploads.pop();
+        let mut replacement = store.start_blob_upload(scope).unwrap();
+        store
+            .finish_blob_upload(&mut filesystem, &mut replacement)
+            .unwrap();
+        let after_finish = store.start_blob_upload(scope).unwrap();
+        drop(after_finish);
+        drop(uploads);
+
+        let mut finalized = store
+            .resume_blob_upload(&mut filesystem, replacement.token())
+            .unwrap();
+        let mut uploads = Vec::new();
+        for _ in 0..crate::blob::MAX_CONCURRENT_UPLOADS {
+            uploads.push(store.start_blob_upload(scope).unwrap());
+        }
+        assert_eq!(
+            store.start_blob_upload(scope).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        assert_eq!(
+            store
+                .finish_blob_upload(&mut filesystem, &mut finalized)
+                .unwrap()
+                .byte_len(),
+            0
+        );
+        // Resumed-final handles do not retain a live-upload lease.
+        uploads.pop();
+        let extra = store.start_blob_upload(scope).unwrap();
+        drop(extra);
+    }
+
+    #[test]
+    fn every_abort_boundary_preserves_terminal_intent_or_exact_resumability() {
+        let mut boundaries = Vec::new();
+        boundaries.extend((1..=12).map(|occurrence| (Operation::OpenExisting, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::CreateNew, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::WriteAt, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::SetLen, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::SyncAll, occurrence)));
+        boundaries.extend((1..=5).map(|occurrence| (Operation::SyncDirectory, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::RenameNoReplace, occurrence)));
+        boundaries.extend((1..=2).map(|occurrence| (Operation::RemoveFile, occurrence)));
+        let actions = [
+            FaultAction::Error(AdapterErrorKind::Io),
+            FaultAction::Error(AdapterErrorKind::NoSpace),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ];
+        for (case, (operation, occurrence)) in boundaries.into_iter().enumerate() {
+            for action in actions {
+                if operation == Operation::OpenExisting && action == FaultAction::CrashAfter {
+                    continue;
+                }
+                let database = DatabaseId::from_bytes([0xb9; 16]);
+                let scope =
+                    NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xba; 16]));
+                let mut filesystem =
+                    FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+                let mut store = JournalStore::create(
+                    &mut filesystem,
+                    options(database, "abort-boundary"),
+                    create_vault(database, 60_000 + u64::try_from(case).unwrap()),
+                    CounterEntropy::new(61_000 + u64::try_from(case).unwrap()),
+                )
+                .unwrap();
+                let mut upload = store.start_blob_upload(scope).unwrap();
+                let token = upload.token();
+                store
+                    .write_blob_upload(
+                        &mut filesystem,
+                        &mut upload,
+                        &vec![0x6a; crate::blob::BLOB_CHUNK_BYTES],
+                    )
+                    .unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .abort_blob_upload(&mut filesystem, &mut upload)
+                        .is_err(),
+                    "operation={operation:?} occurrence={occurrence} action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(upload);
+                drop(store);
+                if !matches!(action, FaultAction::Error(_)) {
+                    filesystem.restart().unwrap();
+                }
+                let mut store =
+                    reopen_fault_store(&mut filesystem, database, "abort-boundary", 62_000);
+                match store.resume_blob_upload(&mut filesystem, token) {
+                    Ok(mut resumed) => {
+                        assert_eq!(
+                            resumed.durable_bytes(),
+                            u64::try_from(crate::blob::BLOB_CHUNK_BYTES).unwrap()
+                        );
+                        store
+                            .abort_blob_upload(&mut filesystem, &mut resumed)
+                            .unwrap();
+                    }
+                    Err(StorageError::InvalidState) => {}
+                    Err(error) => panic!("unexpected abort recovery error {error:?}"),
+                }
+                drop(store);
+                filesystem.restart().unwrap();
+                let mut store =
+                    reopen_fault_store(&mut filesystem, database, "abort-boundary", 63_000);
+                assert_eq!(
+                    store
+                        .resume_blob_upload(&mut filesystem, token)
+                        .unwrap_err(),
+                    StorageError::InvalidState
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn abort_cleanup_error_leaves_terminal_handle_and_is_idempotently_retryable() {
+        let database = DatabaseId::from_bytes([0xaa; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xab; 16]));
+        let mut filesystem =
+            FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "abort-retry"),
+            create_vault(database, 63_100),
+            CounterEntropy::new(63_200),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .write_blob_upload(
+                &mut filesystem,
+                &mut upload,
+                &vec![0x3a; crate::blob::BLOB_CHUNK_BYTES],
+            )
+            .unwrap();
+        filesystem
+            .arm(
+                FaultPlan::new([FaultPoint {
+                    operation: Operation::RemoveFile,
+                    occurrence: 1,
+                    action: FaultAction::Error(AdapterErrorKind::Io),
+                }])
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .abort_blob_upload(&mut filesystem, &mut upload)
+                .unwrap_err(),
+            StorageError::Adapter(AdapterErrorKind::Io)
+        );
+        assert_eq!(
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, b"resurrection")
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        store
+            .abort_blob_upload(&mut filesystem, &mut upload)
+            .unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+    }
+
+    #[test]
+    fn every_inventory_and_commit_boundary_has_no_dangling_committed_reference() {
+        let boundaries = [
+            (Operation::CreateNew, 1_u64),
+            (Operation::WriteAt, 1),
+            (Operation::SetLen, 1),
+            (Operation::SyncAll, 1),
+            (Operation::SyncDirectory, 1),
+            (Operation::WriteAt, 2),
+            (Operation::SyncData, 1),
+            (Operation::WriteAt, 3),
+            (Operation::SyncData, 2),
+        ];
+        let actions = [
+            FaultAction::Error(AdapterErrorKind::Io),
+            FaultAction::Error(AdapterErrorKind::NoSpace),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ];
+        for (case, (operation, occurrence)) in boundaries.into_iter().enumerate() {
+            for action in actions {
+                let database = DatabaseId::from_bytes([0xbb; 16]);
+                let scope =
+                    NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xbc; 16]));
+                let mut filesystem =
+                    FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+                let mut store = JournalStore::create(
+                    &mut filesystem,
+                    options(database, "inventory-boundary"),
+                    create_vault(database, 64_000 + u64::try_from(case).unwrap()),
+                    CounterEntropy::new(65_000 + u64::try_from(case).unwrap()),
+                )
+                .unwrap();
+                let bytes = b"inventory publication bytes";
+                let mut upload = store.start_blob_upload(scope).unwrap();
+                store
+                    .write_blob_upload(&mut filesystem, &mut upload, bytes)
+                    .unwrap();
+                let reference = store
+                    .finish_blob_upload(&mut filesystem, &mut upload)
+                    .unwrap();
+                let inventory = BlobInventory::new(scope, [reference]).unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    store
+                        .append_group_with_inventory(
+                            &mut filesystem,
+                            CommitInput {
+                                encoded_group: b"inventory fault matrix",
+                                logical_event_digest: [0xbd; 32],
+                            },
+                            &inventory,
+                        )
+                        .is_err(),
+                    "operation={operation:?} occurrence={occurrence} action={action:?}"
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(store);
+                if !matches!(action, FaultAction::Error(_)) {
+                    filesystem.restart().unwrap();
+                }
+                let mut store =
+                    reopen_fault_store(&mut filesystem, database, "inventory-boundary", 66_000);
+                let expected_commit = operation == Operation::SyncData
+                    && occurrence == 2
+                    && matches!(action, FaultAction::Error(_) | FaultAction::CrashAfter);
+                assert_eq!(
+                    store.frontier().is_some(),
+                    expected_commit,
+                    "operation={operation:?} occurrence={occurrence} action={action:?}"
+                );
+                let mut output = [0_u8; 64];
+                if expected_commit {
+                    let count = store
+                        .read_blob_range(&mut filesystem, reference, 0, &mut output)
+                        .unwrap();
+                    assert_eq!(&output[..count], bytes);
+                } else {
+                    assert_eq!(
+                        store
+                            .read_blob_range(&mut filesystem, reference, 0, &mut output)
+                            .unwrap_err(),
+                        StorageError::InvalidState
+                    );
+                    store
+                        .append_group_with_inventory(
+                            &mut filesystem,
+                            CommitInput {
+                                encoded_group: b"inventory retry after publication fault",
+                                logical_event_digest: [0xbe; 32],
+                            },
+                            &inventory,
+                        )
+                        .unwrap();
+                    let count = store
+                        .read_blob_range(&mut filesystem, reference, 0, &mut output)
+                        .unwrap();
+                    assert_eq!(&output[..count], bytes);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn existing_inventory_retry_resynchronizes_before_new_certificate() {
+        for (case, operation) in [Operation::SyncAll, Operation::SyncDirectory]
+            .into_iter()
+            .enumerate()
+        {
+            let database = DatabaseId::from_bytes([0xad; 16]);
+            let scope =
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xae; 16]));
+            let mut filesystem =
+                FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, "inventory-resync"),
+                create_vault(database, 66_100 + u64::try_from(case).unwrap()),
+                CounterEntropy::new(66_200 + u64::try_from(case).unwrap()),
+            )
+            .unwrap();
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, b"shared inventory")
+                .unwrap();
+            let reference = store
+                .finish_blob_upload(&mut filesystem, &mut upload)
+                .unwrap();
+            let inventory = BlobInventory::new(scope, [reference]).unwrap();
+            store
+                .append_group_with_inventory(
+                    &mut filesystem,
+                    CommitInput {
+                        encoded_group: b"first binding",
+                        logical_event_digest: [0xaf; 32],
+                    },
+                    &inventory,
+                )
+                .unwrap();
+            filesystem
+                .arm(
+                    FaultPlan::new([FaultPoint {
+                        operation,
+                        occurrence: 1,
+                        action: FaultAction::Error(AdapterErrorKind::Io),
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                store
+                    .append_group_with_inventory(
+                        &mut filesystem,
+                        CommitInput {
+                            encoded_group: b"second binding",
+                            logical_event_digest: [0xb0; 32],
+                        },
+                        &inventory,
+                    )
+                    .unwrap_err(),
+                StorageError::Adapter(AdapterErrorKind::Io)
+            );
+            assert_eq!(store.frontier().map(CommitRevision::get), Some(1));
+            store
+                .append_group_with_inventory(
+                    &mut filesystem,
+                    CommitInput {
+                        encoded_group: b"second binding",
+                        logical_event_digest: [0xb0; 32],
+                    },
+                    &inventory,
+                )
+                .unwrap();
+            assert_eq!(store.frontier().map(CommitRevision::get), Some(2));
+        }
+    }
+
+    #[test]
+    fn corrupt_acknowledged_staging_is_never_discarded_or_replaced() {
+        let database = DatabaseId::from_bytes([0xbe; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xbf; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "staging-corruption"),
+            create_vault(database, 67_000),
+            CounterEntropy::new(68_000),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .write_blob_upload(
+                &mut filesystem,
+                &mut upload,
+                &vec![0x7a; crate::blob::BLOB_CHUNK_BYTES],
+            )
+            .unwrap();
+        drop(upload);
+        let directory = store.database_directory;
+        let staging = filesystem
+            .test_child_names(&directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("u-"))
+            .unwrap();
+        filesystem
+            .test_mutate_file(&directory, &staging, 100)
+            .unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        assert!(
+            filesystem
+                .test_child_names(&directory)
+                .unwrap()
+                .contains(&staging)
+        );
+    }
+
+    #[test]
+    fn missing_acknowledged_chunk_or_progress_cannot_shorten_an_upload() {
+        for missing_chunk in 0..3_u32 {
+            let database = DatabaseId::from_bytes([0xc3; 16]);
+            let scope =
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc4; 16]));
+            let mut filesystem = MemoryFileSystem::default();
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, &format!("missing-chunk-{missing_chunk}")),
+                create_vault(database, 68_100 + u64::from(missing_chunk)),
+                CounterEntropy::new(68_200 + u64::from(missing_chunk)),
+            )
+            .unwrap();
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            let token = upload.token();
+            store
+                .write_blob_upload(
+                    &mut filesystem,
+                    &mut upload,
+                    &vec![0x7b; crate::blob::BLOB_CHUNK_BYTES * 3],
+                )
+                .unwrap();
+            drop(upload);
+            let directory = store.database_directory;
+            filesystem
+                .remove_file(
+                    &directory,
+                    &crate::blob::staging_chunk_name(token.upload_id(), missing_chunk).unwrap(),
+                )
+                .unwrap();
+            filesystem.sync_directory(&directory).unwrap();
+            assert_eq!(
+                store
+                    .resume_blob_upload(&mut filesystem, token)
+                    .unwrap_err(),
+                StorageError::IntegrityFailure
+            );
+        }
+
+        let database = DatabaseId::from_bytes([0xc5; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc6; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "missing-progress"),
+            create_vault(database, 68_300),
+            CounterEntropy::new(68_400),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .write_blob_upload(
+                &mut filesystem,
+                &mut upload,
+                &vec![0x7c; crate::blob::BLOB_CHUNK_BYTES],
+            )
+            .unwrap();
+        drop(upload);
+        let directory = store.database_directory;
+        let progress = crate::blob::progress_name(token, 0).unwrap();
+        filesystem.remove_file(&directory, &progress).unwrap();
+        filesystem.sync_directory(&directory).unwrap();
+        let resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        assert_eq!(
+            resumed.durable_bytes(),
+            u64::try_from(crate::blob::BLOB_CHUNK_BYTES).unwrap()
+        );
+        assert!(
+            filesystem
+                .test_child_names(&directory)
+                .unwrap()
+                .contains(&progress)
+        );
+    }
+
+    #[test]
+    fn terminal_manifest_witness_prevents_single_object_resurrection() {
+        let database = DatabaseId::from_bytes([0xc7; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc8; 16]));
+
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "terminal-final-witness"),
+            create_vault(database, 68_500),
+            CounterEntropy::new(68_600),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        let expected = store
+            .finish_blob_upload(&mut filesystem, &mut upload)
+            .unwrap();
+        let directory = store.database_directory;
+        let primary = crate::blob::manifest_name(token, crate::blob::MANIFEST_FINAL).unwrap();
+        let witness =
+            crate::blob::manifest_witness_name(token, crate::blob::MANIFEST_FINAL).unwrap();
+        filesystem.remove_file(&directory, &primary).unwrap();
+        filesystem.sync_directory(&directory).unwrap();
+        let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
+        assert_eq!(
+            store
+                .finish_blob_upload(&mut filesystem, &mut resumed)
+                .unwrap(),
+            expected
+        );
+        filesystem.remove_file(&directory, &witness).unwrap();
+        filesystem.sync_directory(&directory).unwrap();
+        assert!(store.resume_blob_upload(&mut filesystem, token).is_ok());
+        let primary_file = filesystem.open_existing(&directory, &primary).unwrap();
+        filesystem.set_len(&primary_file, 1).unwrap();
+        filesystem.sync_all(&primary_file).unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "terminal-abort-witness"),
+            create_vault(database, 68_700),
+            CounterEntropy::new(68_800),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .abort_blob_upload(&mut filesystem, &mut upload)
+            .unwrap();
+        let directory = store.database_directory;
+        let primary = crate::blob::manifest_name(token, crate::blob::MANIFEST_ABORTED).unwrap();
+        let witness =
+            crate::blob::manifest_witness_name(token, crate::blob::MANIFEST_ABORTED).unwrap();
+        filesystem.remove_file(&directory, &primary).unwrap();
+        filesystem.sync_directory(&directory).unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        filesystem.remove_file(&directory, &witness).unwrap();
+        filesystem.sync_directory(&directory).unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        let primary_file = filesystem.open_existing(&directory, &primary).unwrap();
+        filesystem.set_len(&primary_file, 1).unwrap();
+        filesystem.sync_all(&primary_file).unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+    }
+
+    #[test]
+    fn foreign_upload_handles_are_rejected_before_io() {
+        let database_a = DatabaseId::from_bytes([0xc9; 16]);
+        let database_b = DatabaseId::from_bytes([0xca; 16]);
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store_a = JournalStore::create(
+            &mut filesystem,
+            options(database_a, "owner-a"),
+            create_vault(database_a, 68_900),
+            CounterEntropy::new(69_000),
+        )
+        .unwrap();
+        let mut store_b = JournalStore::create(
+            &mut filesystem,
+            options(database_b, "owner-b"),
+            create_vault(database_b, 69_100),
+            CounterEntropy::new(69_200),
+        )
+        .unwrap();
+        let scope_b =
+            NamespaceRef::new(database_b, uste_types::NamespaceId::from_bytes([0xcb; 16]));
+        let mut upload = store_b.start_blob_upload(scope_b).unwrap();
+        let before = filesystem
+            .test_child_names(&store_a.database_directory)
+            .unwrap();
+        assert_eq!(
+            store_a
+                .write_blob_upload(&mut filesystem, &mut upload, b"foreign")
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        assert_eq!(
+            store_a
+                .finish_blob_upload(&mut filesystem, &mut upload)
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        assert_eq!(
+            store_a
+                .abort_blob_upload(&mut filesystem, &mut upload)
+                .unwrap_err(),
+            StorageError::InvalidState
+        );
+        assert_eq!(
+            filesystem
+                .test_child_names(&store_a.database_directory)
+                .unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn profile_limits_are_inclusive_and_reject_one_more() {
+        assert!(check_unique_blob_limit(MAX_COMMITTED_BLOBS_PER_JOURNAL).is_ok());
+        assert_eq!(
+            check_unique_blob_limit(MAX_COMMITTED_BLOBS_PER_JOURNAL + 1).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        assert!(
+            check_blob_reference_binding_limit(MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL).is_ok()
+        );
+        assert_eq!(
+            check_blob_reference_binding_limit(MAX_BLOB_REFERENCE_BINDINGS_PER_JOURNAL + 1)
+                .unwrap_err(),
+            StorageError::ResourceLimit
+        );
+        assert!(check_namespace_blob_byte_limit(MAX_NAMESPACE_BLOB_BYTES).is_ok());
+        assert_eq!(
+            check_namespace_blob_byte_limit(MAX_NAMESPACE_BLOB_BYTES + 1).unwrap_err(),
+            StorageError::ResourceLimit
+        );
+    }
+
+    #[test]
+    fn authenticated_malformed_manifest_and_inventory_fail_closed() {
+        let database = DatabaseId::from_bytes([0xc0; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc1; 16]));
+
+        let mut marker_filesystem = MemoryFileSystem::default();
+        let mut marker_store = JournalStore::create(
+            &mut marker_filesystem,
+            options(database, "malformed-marker"),
+            create_vault(database, 69_000),
+            CounterEntropy::new(70_000),
+        )
+        .unwrap();
+        let mut upload = marker_store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        let reference = marker_store
+            .finish_blob_upload(&mut marker_filesystem, &mut upload)
+            .unwrap();
+        let mut malformed = crate::blob::encode_manifest(token, Some(reference));
+        malformed[104] = 1;
+        let encoded = marker_store
+            .vault
+            .encrypt(
+                crate::blob::manifest_context(
+                    database,
+                    marker_store.epoch,
+                    marker_store.writer,
+                    token,
+                    crate::blob::MANIFEST_FINAL,
+                ),
+                &malformed,
+            )
+            .unwrap()
+            .encode()
+            .unwrap();
+        let marker_file = marker_filesystem
+            .open_existing(
+                &marker_store.database_directory,
+                &crate::blob::manifest_name(token, crate::blob::MANIFEST_FINAL).unwrap(),
+            )
+            .unwrap();
+        marker_filesystem.set_len(&marker_file, 0).unwrap();
+        write_all_at(&mut marker_filesystem, &marker_file, 0, &encoded).unwrap();
+        marker_filesystem
+            .set_len(&marker_file, u64::try_from(encoded.len()).unwrap())
+            .unwrap();
+        marker_filesystem.sync_all(&marker_file).unwrap();
+        assert_eq!(
+            marker_store
+                .resume_blob_upload(&mut marker_filesystem, token)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+
+        let mut inventory_filesystem = MemoryFileSystem::default();
+        let mut inventory_store = JournalStore::create(
+            &mut inventory_filesystem,
+            options(database, "malformed-inventory"),
+            create_vault(database, 71_000),
+            CounterEntropy::new(72_000),
+        )
+        .unwrap();
+        let mut upload = inventory_store.start_blob_upload(scope).unwrap();
+        inventory_store
+            .write_blob_upload(&mut inventory_filesystem, &mut upload, b"inventory bytes")
+            .unwrap();
+        let reference = inventory_store
+            .finish_blob_upload(&mut inventory_filesystem, &mut upload)
+            .unwrap();
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        inventory_store
+            .append_group_with_inventory(
+                &mut inventory_filesystem,
+                CommitInput {
+                    encoded_group: b"committed malformed inventory target",
+                    logical_event_digest: [0xc2; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let mut malformed = inventory.encoded().to_vec();
+        malformed[28] = 1;
+        let encoded = inventory_store
+            .vault
+            .encrypt(
+                inventory_context(
+                    database,
+                    inventory_store.epoch,
+                    inventory_store.writer,
+                    inventory.digest(),
+                ),
+                &malformed,
+            )
+            .unwrap()
+            .encode()
+            .unwrap();
+        let inventory_file = inventory_filesystem
+            .open_existing(
+                &inventory_store.database_directory,
+                &inventory_name(
+                    &inventory_store.vault,
+                    database,
+                    inventory_store.epoch,
+                    inventory_store.writer,
+                    inventory.digest(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        inventory_filesystem.set_len(&inventory_file, 0).unwrap();
+        write_all_at(&mut inventory_filesystem, &inventory_file, 0, &encoded).unwrap();
+        inventory_filesystem
+            .set_len(&inventory_file, u64::try_from(encoded.len()).unwrap())
+            .unwrap();
+        inventory_filesystem.sync_all(&inventory_file).unwrap();
+        drop(inventory_store);
+        let mut callbacks = 0_u64;
+        assert_eq!(
+            JournalStore::open(
+                &mut inventory_filesystem,
+                &entry("malformed-inventory"),
+                database,
+                CounterEntropy::new(73_000),
+                CounterEntropy::new(74_000),
+                &mut TestKeyAdapter,
+                |_group| {
+                    callbacks += 1;
+                    Ok(())
+                },
+            )
+            .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn authenticated_progress_digest_mismatch_fails_closed() {
+        let database = DatabaseId::from_bytes([0xd7; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd8; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "malformed-progress"),
+            create_vault(database, 69_300),
+            CounterEntropy::new(69_400),
+        )
+        .unwrap();
+        let bytes = vec![0x7d; crate::blob::BLOB_CHUNK_BYTES];
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        let token = upload.token();
+        store
+            .write_blob_upload(&mut filesystem, &mut upload, &bytes)
+            .unwrap();
+        drop(upload);
+        let mut malformed = crate::blob::encode_progress_plaintext(token, 0, &bytes).unwrap();
+        malformed[64] ^= 1;
+        let encoded = store
+            .vault
+            .encrypt(
+                crate::blob::progress_context(database, store.epoch, store.writer, token, 0)
+                    .unwrap(),
+                &malformed,
+            )
+            .unwrap()
+            .encode()
+            .unwrap();
+        let progress_file = filesystem
+            .open_existing(
+                &store.database_directory,
+                &crate::blob::progress_name(token, 0).unwrap(),
+            )
+            .unwrap();
+        filesystem.set_len(&progress_file, 0).unwrap();
+        write_all_at(&mut filesystem, &progress_file, 0, &encoded).unwrap();
+        filesystem
+            .set_len(&progress_file, u64::try_from(encoded.len()).unwrap())
+            .unwrap();
+        filesystem.sync_all(&progress_file).unwrap();
+        assert_eq!(
+            store
+                .resume_blob_upload(&mut filesystem, token)
+                .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+    }
+
+    #[test]
+    fn committed_chunk_and_inventory_mutation_truncation_and_append_fail_before_replay() {
+        let database = DatabaseId::from_bytes([0xc3; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc4; 16]));
+        let mut base = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut base,
+            options(database, "blob-corruption"),
+            create_vault(database, 75_000),
+            CounterEntropy::new(76_000),
+        )
+        .unwrap();
+        let mut upload = store.start_blob_upload(scope).unwrap();
+        store
+            .write_blob_upload(&mut base, &mut upload, b"authenticated committed bytes")
+            .unwrap();
+        let reference = store.finish_blob_upload(&mut base, &mut upload).unwrap();
+        let inventory = BlobInventory::new(scope, [reference]).unwrap();
+        store
+            .append_group_with_inventory(
+                &mut base,
+                CommitInput {
+                    encoded_group: b"corruption target",
+                    logical_event_digest: [0xc5; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        drop(store);
+        base.restart().unwrap();
+
+        for case in 0..7 {
+            let mut filesystem = base.clone();
+            let root = filesystem.root();
+            let directory = filesystem
+                .open_directory(&root, &entry("blob-corruption"))
+                .unwrap();
+            let names = filesystem.test_child_names(&directory).unwrap();
+            let chunk = names
+                .iter()
+                .find(|name| name.as_str().starts_with("b-"))
+                .unwrap()
+                .clone();
+            let inventory = names
+                .iter()
+                .find(|name| name.as_str().starts_with("i-"))
+                .unwrap()
+                .clone();
+            let target = if case < 4 { &chunk } else { &inventory };
+            match case {
+                0 | 4 => filesystem.test_mutate_file(&directory, target, 0).unwrap(),
+                1 => {
+                    let file = filesystem.open_existing(&directory, target).unwrap();
+                    let len = filesystem.metadata(&file).unwrap().len;
+                    filesystem
+                        .test_mutate_file(&directory, target, usize::try_from(len - 1).unwrap())
+                        .unwrap();
+                }
+                2 | 5 => {
+                    let file = filesystem.open_existing(&directory, target).unwrap();
+                    let len = filesystem.metadata(&file).unwrap().len;
+                    filesystem.set_len(&file, len - 1).unwrap();
+                    filesystem.sync_data(&file).unwrap();
+                }
+                3 | 6 => filesystem
+                    .test_append_file(&directory, target, &[0])
+                    .unwrap(),
+                _ => unreachable!(),
+            }
+            let mut callbacks = 0_u64;
+            assert_eq!(
+                JournalStore::open(
+                    &mut filesystem,
+                    &entry("blob-corruption"),
+                    database,
+                    CounterEntropy::new(77_000 + case),
+                    CounterEntropy::new(78_000 + case),
+                    &mut TestKeyAdapter,
+                    |_group| {
+                        callbacks += 1;
+                        Ok(())
+                    },
+                )
+                .unwrap_err(),
+                StorageError::IntegrityFailure,
+                "case={case}"
+            );
+            assert_eq!(callbacks, 0);
+        }
+    }
+
+    #[test]
+    fn valid_ciphertext_replayed_under_another_blob_context_fails_closed() {
+        let database = DatabaseId::from_bytes([0xc6; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xc7; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "blob-context-replay"),
+            create_vault(database, 79_000),
+            CounterEntropy::new(80_000),
+        )
+        .unwrap();
+        let mut references = Vec::new();
+        for byte in [0x11, 0x22] {
+            let mut upload = store.start_blob_upload(scope).unwrap();
+            store
+                .write_blob_upload(&mut filesystem, &mut upload, &[byte; 32])
+                .unwrap();
+            references.push(
+                store
+                    .finish_blob_upload(&mut filesystem, &mut upload)
+                    .unwrap(),
+            );
+        }
+        let inventory = BlobInventory::new(scope, references.iter().copied()).unwrap();
+        store
+            .append_group_with_inventory(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"context replay",
+                    logical_event_digest: [0xc8; 32],
+                },
+                &inventory,
+            )
+            .unwrap();
+        let source_name = crate::blob::final_chunk_name(references[1].id(), 0).unwrap();
+        let target_name = crate::blob::final_chunk_name(references[0].id(), 0).unwrap();
+        let source = filesystem
+            .open_existing(&store.database_directory, &source_name)
+            .unwrap();
+        let source_len = filesystem.metadata(&source).unwrap().len;
+        let mut encoded = vec![0_u8; usize::try_from(source_len).unwrap()];
+        read_exact_at(&mut filesystem, &source, 0, &mut encoded).unwrap();
+        let target = filesystem
+            .open_existing(&store.database_directory, &target_name)
+            .unwrap();
+        filesystem.set_len(&target, 0).unwrap();
+        write_all_at(&mut filesystem, &target, 0, &encoded).unwrap();
+        filesystem.set_len(&target, source_len).unwrap();
+        filesystem.sync_all(&target).unwrap();
+        drop(store);
+        let mut callbacks = 0_u64;
+        assert_eq!(
+            JournalStore::open(
+                &mut filesystem,
+                &entry("blob-context-replay"),
+                database,
+                CounterEntropy::new(81_000),
+                CounterEntropy::new(82_000),
+                &mut TestKeyAdapter,
+                |_group| {
+                    callbacks += 1;
+                    Ok(())
+                },
+            )
+            .unwrap_err(),
+            StorageError::IntegrityFailure
+        );
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
     fn duplicate_upload_handles_cannot_replace_a_staged_chunk() {
         let database = DatabaseId::from_bytes([0x90; 16]);
         let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x91; 16]));
@@ -2644,6 +4098,98 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_handles_cannot_publish_conflicting_terminal_states() {
+        for finish_first in [true, false] {
+            let database = DatabaseId::from_bytes([0xd4; 16]);
+            let scope =
+                NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd5; 16]));
+            let name = if finish_first {
+                "terminal-finish-first"
+            } else {
+                "terminal-abort-first"
+            };
+            let mut filesystem = MemoryFileSystem::default();
+            let mut store = JournalStore::create(
+                &mut filesystem,
+                options(database, name),
+                create_vault(database, if finish_first { 75_000 } else { 76_000 }),
+                CounterEntropy::new(if finish_first { 75_100 } else { 76_100 }),
+            )
+            .unwrap();
+            let mut first = store.start_blob_upload(scope).unwrap();
+            let token = first.token();
+            let mut duplicate = store.resume_blob_upload(&mut filesystem, token).unwrap();
+            if finish_first {
+                let reference = store
+                    .finish_blob_upload(&mut filesystem, &mut first)
+                    .unwrap();
+                assert_eq!(first.buffered_capacity(), 0);
+                assert_eq!(
+                    store
+                        .write_blob_upload(&mut filesystem, &mut duplicate, b"stale write")
+                        .unwrap_err(),
+                    StorageError::InvalidState
+                );
+                assert_eq!(
+                    store
+                        .abort_blob_upload(&mut filesystem, &mut duplicate)
+                        .unwrap_err(),
+                    StorageError::InvalidState
+                );
+                let inventory = BlobInventory::new(scope, [reference]).unwrap();
+                store
+                    .append_group_with_inventory(
+                        &mut filesystem,
+                        CommitInput {
+                            encoded_group: b"duplicate terminal exclusion",
+                            logical_event_digest: [0xd6; 32],
+                        },
+                        &inventory,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    store
+                        .read_blob_range(&mut filesystem, reference, 0, &mut [])
+                        .unwrap(),
+                    0
+                );
+            } else {
+                store
+                    .abort_blob_upload(&mut filesystem, &mut first)
+                    .unwrap();
+                assert_eq!(first.buffered_capacity(), 0);
+                assert_eq!(
+                    store
+                        .write_blob_upload(&mut filesystem, &mut duplicate, b"stale write")
+                        .unwrap_err(),
+                    StorageError::InvalidState
+                );
+                assert_eq!(
+                    store
+                        .finish_blob_upload(&mut filesystem, &mut duplicate)
+                        .unwrap_err(),
+                    StorageError::InvalidState
+                );
+            }
+            let names = filesystem
+                .test_child_names(&store.database_directory)
+                .unwrap();
+            let final_primary =
+                crate::blob::manifest_name(token, crate::blob::MANIFEST_FINAL).unwrap();
+            let final_witness =
+                crate::blob::manifest_witness_name(token, crate::blob::MANIFEST_FINAL).unwrap();
+            let abort_primary =
+                crate::blob::manifest_name(token, crate::blob::MANIFEST_ABORTED).unwrap();
+            let abort_witness =
+                crate::blob::manifest_witness_name(token, crate::blob::MANIFEST_ABORTED).unwrap();
+            assert_eq!(names.contains(&final_primary), finish_first);
+            assert_eq!(names.contains(&final_witness), finish_first);
+            assert_eq!(names.contains(&abort_primary), !finish_first);
+            assert_eq!(names.contains(&abort_witness), !finish_first);
+        }
+    }
+
+    #[test]
     fn failed_chunk_flush_requires_resume_without_duplicate_input() {
         let database = DatabaseId::from_bytes([0x93; 16]);
         let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x94; 16]));
@@ -2677,10 +4223,10 @@ mod tests {
             StorageError::NeedsRecovery
         );
         let mut resumed = store.resume_blob_upload(&mut filesystem, token).unwrap();
-        assert_eq!(
-            resumed.durable_bytes(),
-            u64::try_from(crate::blob::BLOB_CHUNK_BYTES).unwrap()
-        );
+        assert_eq!(resumed.durable_bytes(), 0);
+        store
+            .write_blob_upload(&mut filesystem, &mut resumed, &bytes)
+            .unwrap();
         let reference = store
             .finish_blob_upload(&mut filesystem, &mut resumed)
             .unwrap();
@@ -2706,13 +4252,8 @@ mod tests {
     fn partial_terminal_chunk_survives_repeated_resume_before_finish() {
         let database = DatabaseId::from_bytes([0x96; 16]);
         let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0x97; 16]));
-        let plan = FaultPlan::new([FaultPoint {
-            operation: Operation::RenameNoReplace,
-            occurrence: 2,
-            action: FaultAction::CrashBefore,
-        }])
-        .unwrap();
-        let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), plan);
+        let mut filesystem =
+            FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
         let mut store = JournalStore::create(
             &mut filesystem,
             options(database, "partial-resume"),
@@ -2726,6 +4267,16 @@ mod tests {
         store
             .write_blob_upload(&mut filesystem, &mut upload, bytes)
             .unwrap();
+        filesystem
+            .arm(
+                FaultPlan::new([FaultPoint {
+                    operation: Operation::RenameNoReplace,
+                    occurrence: 2,
+                    action: FaultAction::CrashBefore,
+                }])
+                .unwrap(),
+            )
+            .unwrap();
         assert_eq!(
             store
                 .finish_blob_upload(&mut filesystem, &mut upload)
@@ -2735,7 +4286,7 @@ mod tests {
         drop(store);
         filesystem.restart().unwrap();
 
-        let (store, _) = JournalStore::open(
+        let (mut store, _) = JournalStore::open(
             &mut filesystem,
             &entry("partial-resume"),
             database,

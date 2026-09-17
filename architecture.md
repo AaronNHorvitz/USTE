@@ -112,7 +112,10 @@ inventory under a key-derived opaque disk name and verified before its digest en
 certificate. Recovery verifies all certificate-named chunks before logical replay; only exact
 committed inventory references are readable. The profile bounds unique committed blobs, per-
 namespace logical bytes and total certificate-to-blob bindings so recovery state and work cannot
-grow outside recorded limits.
+grow outside recorded limits. A database-scoped process-local lease also caps live upload buffers
+at 32 under the exclusive owner; canonical staging publication uses synchronized temporary files,
+no-replace rename and authenticated progress witnesses. Paired terminal witnesses preserve final/
+abort intent after one missing copy, and accepted abort intent is durable before cleanup begins.
 
 Begin with an append journal and rebuildable reference indexes. The release engine adds
 immutable disk-index runs with bounded caches, versioned roots, and atomic compaction.

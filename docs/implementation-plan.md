@@ -66,6 +66,9 @@ produce an owned prepared change and result digest without mutating live state; 
 durably binds request, principal-scoped idempotency and transaction outcomes before publication.
 Decision 0017 adds bounded encrypted blob chunks and canonical inventories under the same owner;
 blob bytes and inventory are durable and verified before their transaction certificate publishes.
+Its T-15 qualification injects every modeled publication failure class, rejects authenticated
+malformed/replayed objects, caps live upload buffers per database and measures a 12 GiB encrypted
+restart/round-trip at bounded RSS.
 
 ## R0 design deliverables
 

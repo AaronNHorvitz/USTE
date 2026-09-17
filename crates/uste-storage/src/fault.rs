@@ -123,6 +123,19 @@ impl<F> FaultFileSystem<F> {
         self.plan.points.len()
     }
 
+    /// Install a fresh one-shot plan after setup and restart operation counters at zero.
+    ///
+    /// A pending plan or crashed adapter must be consumed/restarted first so tests cannot silently
+    /// discard an expected boundary.
+    pub fn arm(&mut self, plan: FaultPlan) -> Result<(), AdapterError> {
+        if self.crashed || !self.plan.is_empty() {
+            return Err(AdapterErrorKind::AdapterContract.into());
+        }
+        self.plan = plan;
+        self.occurrences.clear();
+        Ok(())
+    }
+
     fn next_action(&mut self, operation: Operation) -> Result<Option<FaultAction>, AdapterError> {
         if self.crashed {
             return Err(AdapterErrorKind::InjectedCrash.into());

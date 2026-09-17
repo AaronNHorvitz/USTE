@@ -1,7 +1,7 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-13/T-14 journal and transactions implemented; T-15 blob
-qualification in progress
+Draft contract · 2026-09-17 · T-13/T-14 journal and transactions plus the locally qualified T-15
+blob foundation are implemented
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 
@@ -78,8 +78,9 @@ certificate chain distinguishes an incomplete final unacknowledged tail under it
 failure model; complete-certificate damage or missing referenced data fails closed.
 
 Decision 0015 fixes the format-1.0 manifest, authenticated log/segment headers, exact opaque group
-envelopes and fixed 4,161-byte encrypted certificates. T-13 currently accepts only the canonical
-empty blob inventory; T-15 adds nonempty inventory publication and verification.
+envelopes and fixed 4,161-byte encrypted certificates. Decision 0017 extends this with canonical
+nonempty encrypted inventories and authenticates and rehashes their exact committed chunks before
+logical replay.
 
 Crash safety assumes correctly implemented supported filesystem flush/rename semantics and
 storage honoring durability requests. Arbitrary media destruction is not survivable without
@@ -125,7 +126,15 @@ and late events invalidate affected summaries; stale results are labeled or excl
 ## Blob publication and garbage collection
 
 Blob inventory participates in transaction visibility. A committed version cannot reference
-an incomplete upload. Orphan durable blobs after a failed metadata commit are collected only
+an incomplete upload. One owner process admits at most 32 live upload buffers per database.
+Each encrypted chunk is synchronized under an upload-private temporary name and renamed without
+replacement to immutable staging before its durable offset advances. Resume discards temporary
+objects but authenticates canonical staging and its per-chunk progress witness, and never silently
+replaces malformed acknowledged state. Paired terminal witnesses can repair one missing final/abort
+copy while malformed canonical state fails closed. Abort synchronizes both terminal copies before
+best-effort staging cleanup, so an accepted
+abort remains terminal even if cleanup must be retried or deferred to orphan collection.
+Orphan durable blobs after a failed metadata commit are collected only
 after checking committed roots, readers, branches, derivations, retention policies, and
 active uploads. Quota reservations are released on bounded cleanup paths.
 Physical deduplication cannot cross namespaces by default or reveal another namespace's data.

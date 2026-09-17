@@ -2,7 +2,7 @@
 
 Date: 2026-09-17
 
-Status: accepted for the T-15 foundation. This refines Decisions 0004, 0005, 0007, 0015 and
+Status: accepted and locally qualified for the T-15 foundation. This refines Decisions 0004, 0005, 0007, 0015 and
 0016 without defining artifact graph records, authorization policy, quota accounting or orphan
 collection.
 
@@ -17,18 +17,32 @@ valid ciphertext under an existing blob/chunk context. A token is an unforgeabil
 authorization; T-16 must authorize every upload, resume, finish and read.
 
 Input is accumulated in at most one 1 MiB plaintext buffer. Complete chunks are encrypted with the
-namespace, blob identity and zero-based chunk number in `crypto-v1` context, written to a private
-staging name, data-synced and directory-synced. A staging name is immutable: an existing object is
-accepted only after authentication and exact plaintext comparison. An uncertain flush quarantines
+namespace, blob identity and zero-based chunk number in `crypto-v1` context, written to an
+upload-private temporary name, data-synced and directory-synced, renamed without replacement to an
+immutable private staging name, and directory-synced again. Recovery may discard only temporary
+names. An existing canonical staging object is accepted only after authentication and exact
+plaintext comparison; malformed or different content fails closed. Before advancing the durable
+offset, the owner also publishes an authenticated immutable `UBPG` progress witness through its
+own temp/sync/no-replace-rename/sync path. An intact chunk can reconstruct one missing witness; an
+intact witness with a missing first, middle or last acknowledged chunk is a hard integrity error.
+An uncertain flush quarantines
 that live handle; the caller must resume from its durable byte offset rather than resend against
 the old handle. The 16 GiB single-blob cap therefore admits at most 16,384 chunks. Zero-byte blobs
 have zero chunks and the SHA-256 digest of empty input.
 
 Finish flushes a final partial chunk, changes every staging name to an immutable random-blob name
-without replacement, then syncs the database directory. It then publishes an authenticated,
-data/directory-synced final marker binding the upload, blob, scope, byte length, chunk count and
-content digest. Abort similarly publishes an authenticated terminal marker after staging removal.
-These markers make zero-byte finalization and acknowledged abort durable across restart. A failed
+without replacement, then syncs the database directory. It then publishes two independently
+encrypted, temp-to-canonical, data/directory-synced copies of the authenticated final marker binding
+the upload, blob, scope, byte length, chunk count and content digest. Abort first publishes and
+synchronizes both copies of its authenticated terminal marker, makes the
+handle terminal and releases its active-upload lease, and only then removes staging objects. This
+ordering prevents cleanup failure from losing an accepted abort; an in-process retry completes
+cleanup idempotently, while restart rejects the terminal token and leaves remnants for T-35 orphan
+collection. Either valid terminal copy repairs one missing copy; any present malformed copy or
+conflicting pair fails closed. Finish, abort and resume reconcile both terminal states before
+publishing or returning; serialized duplicate handles cannot publish final and abort concurrently,
+and any pre-existing coexistence is an integrity failure. These markers make zero-byte finalization and acknowledged abort
+durable across restart and detect a single marker loss. A failed
 or interrupted finish is resumable: authenticated staging and final chunks are scanned in sequence,
 and a partial staging chunk that preceded finalization remains durable and is treated as the sealed
 terminal chunk. Repeated resume without finish therefore cannot shorten accepted input. Once any
@@ -62,6 +76,25 @@ The authenticated `UBMF` 1.0 marker plaintext is exactly 128 bytes:
 | 68 | 4 | reserved zeros |
 | 72 | 32 | original-byte SHA-256; zeros for abort |
 | 104 | 24 | reserved zeros |
+
+The authenticated `UBPG` 1.0 progress plaintext is also exactly 128 bytes. It uses
+`BlobManifest` context with the upload ID as object and sequence `3 + chunk number`:
+
+| Offset | Bytes | Meaning |
+|---:|---:|---|
+| 0 | 4 | `UBPG` |
+| 4 | 4 | major/minor `01 00`, two reserved zeros |
+| 8 | 16 | namespace ID |
+| 24 | 16 | upload ID |
+| 40 | 16 | derived blob ID |
+| 56 | 4 | zero-based chunk number |
+| 60 | 4 | exact plaintext chunk length |
+| 64 | 32 | plaintext chunk SHA-256 |
+| 96 | 32 | reserved zeros |
+
+The literal `blob-progress-v1.hex` vector pins this encoding. Progress witnesses are upload
+recovery authority until a terminal marker exists; terminal finalization makes them bounded orphan
+metadata for T-35 reclamation.
 
 ## Canonical inventory and commit binding
 
@@ -102,18 +135,29 @@ same limits. Recovery retains only the bounded unique-reference index and a dige
 the validation pass authenticates and rehashes each distinct inventory/blob set once, while replay
 decodes one inventory at a time and does not retain all inventory bodies.
 
+At most 32 live upload handles may hold plaintext buffers for one database in one owner process.
+The process-local database-scoped lease survives dropping/reopening a `JournalStore` while a handle
+remains live, and releases on finish, accepted abort or handle drop. Lease release zeroizes and
+deallocates the reserved plaintext buffer, so retained terminal handles cannot evade the cap.
+Exclusive database ownership
+keeps this admission scope aligned with the single-writer engine; T-16 adds principal quota policy.
+
 For transactions with blobs, the idempotency request digest is SHA-256 over the literal domain
 `USTE transaction request+blob inventory v1`, the big-endian request length, exact canonical
 request bytes and inventory digest. Empty-inventory transactions retain the format-1.0 digest of
 the exact request alone. The reducer receives the verified inventory together with request bytes;
 later domain reducers must ensure their semantic blob references match it.
 
-## Current qualification boundary
+## Local qualification boundary
 
-The foundation covers arbitrary multi-chunk and zero-byte round trips, irregular input slices,
-commit-gated reads, restart/replay verification, exact retry, interrupted upload resume, uncertain
-flush quarantine, immutable duplicate-handle behavior, repeated resume of a durable terminal chunk,
-durable zero-byte final/abort markers and hard recovery failure for a missing committed chunk. The
-literal `blob-inventory-v1.hex` file fixes the canonical inventory format. T-15 remains open for its
-full chunk/finalization/inventory fault matrix, malformed committed inventory cases, retry-binding
-negative cases and measured bounded-memory evidence.
+T-15's local foundation covers arbitrary multi-chunk and zero-byte round trips, irregular input
+slices, commit-gated range reads, restart/replay verification, exact retry, interrupted upload
+resume, uncertain flush quarantine, immutable duplicate-handle behavior, repeated resume of a
+durable terminal chunk, terminal-marker-first abort and hard recovery failure for missing or corrupt
+committed data. Deterministic tests inject error, no-space, short/zero progress and crash-before/
+after behavior across chunk, finish, abort, inventory and commit publication. Authenticated malformed
+manifests/progress/inventories and cross-context ciphertext replay fail closed. Literal vectors fix
+the canonical inventory, manifest and progress formats. A release-built 12 GiB encrypted round
+trip measured 267,636 KiB peak RSS on the reference Btrfs runner; see the T-15 evidence record.
+Its 95.923 MiB/s ingest result misses BM-04's 250 MiB/s target, so BM-04 remains unpassed. This does
+not qualify power-loss behavior, orphan collection, authorization or production release.
