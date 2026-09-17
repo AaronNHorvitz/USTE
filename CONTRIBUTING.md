@@ -1,12 +1,14 @@
 # Contributing
 
-The current repository contains design documents and pre-gate R0 experiments, not a database
-executable. Reproduce them using [the Fedora Kinoite setup](docs/development-setup.md).
+The repository contains accepted R0 design evidence and development experiments, not a released
+or supported database executable. Reproduce them using
+[the Fedora Kinoite setup](docs/development-setup.md).
 
 ## Work sequence and completion
 
 Read [Decision 0001](docs/decisions/0001-product-direction.md),
-[Decision 0002](docs/decisions/0002-spatial-world-model.md), [PRD](PRD.md),
+[Decision 0002](docs/decisions/0002-spatial-world-model.md),
+[Decision 0011](docs/decisions/0011-development-and-distribution-readiness.md), [PRD](PRD.md),
 [architecture](architecture.md), and the relevant domain specification before work.
 Follow [TASKS.md](TASKS.md) dependencies. Resolve contradictory contracts before implementing.
 Design experiments may inform R0; production-format implementation follows its decision gate.
@@ -15,6 +17,7 @@ Every change should identify requirements/tasks, tests or documentation checks p
 results, unresolved limitations and compatibility implications. Check a task only when its
 specified artifacts and acceptance evidence exist. Preserve user changes and unrelated work.
 Do not push, publish, alter project permissions, or create external accounts without authority.
+Local build and release-artifact preparation do not authorize executable distribution.
 
 ## Implementation principles
 
@@ -50,4 +53,4 @@ when changing contracts rather than rewriting history.
 Task T-08 establishes formatting/lint/tests, documentation links, requirement/task references
 and dependency/license checks. Later work adds fuzz, concurrency, crash and benchmark jobs.
 Release jobs must not imply independent security review when only automated checks ran.
-See [SECURITY.md](SECURITY.md) for the current disclosure-readiness gap.
+See [SECURITY.md](SECURITY.md) for the current distribution-only disclosure-readiness gap.

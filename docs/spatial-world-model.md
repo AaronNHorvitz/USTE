@@ -2,8 +2,8 @@
 
 Draft contract · 2026-09-16 · Not implemented
 
-Owns FR-27 through FR-30. D-08 freezes numeric representations, reference frames, exact
-geometry predicates, error tolerances, index layout and limits. All operations inherit
+Owns FR-27 through FR-30. Decision 0009 freezes v1 numeric representations, reference frames,
+exact geometry predicates, error tolerances, index layout and limits. All operations inherit
 namespace authorization, current permissions, retention and bounded-query rules.
 
 ## Records and identity
@@ -30,7 +30,7 @@ R2 baseline: named local Cartesian 2D/3D frames in meters; WGS84 geographic poin
 latitude/longitude boxes; bounded-radius and nearest-neighbor queries over supported points.
 Geographic axes are explicitly named longitude/latitude in degrees; height, when present,
 declares its vertical reference and units. Degrees are not Euclidean meters.
-D-08 freezes the actual reference definition, distance algorithm and accuracy envelope.
+Decision 0009 freezes the actual reference definition, distance algorithm and accuracy envelope.
 Missing height is unknown, not zero. Local and geographic frames are never implicitly mixed.
 
 Frame graphs are acyclic. Transforms have versions and time applicability; moving parent
@@ -40,8 +40,8 @@ grid download or timezone lookup is implicit. Named transforms requiring absent 
 fail explicitly. Transform provenance travels with the result.
 
 R3 adds supported 2D polygons/regions, trajectory-region intersection and native disk spatial
-indexes. Define boundary inclusion, longitude wrap/antimeridian handling, poles, degenerate
-geometry and numeric tolerance in D-08. Never claim arbitrary GIS projection or mesh support.
+indexes. Decision 0009 defines boundary inclusion, longitude wrap/antimeridian handling, poles,
+degenerate geometry and numeric tolerance. Never claim arbitrary GIS projection or mesh support.
 Index candidate filtering may over-select; exact predicates under the declared tolerance
 determine final matches. Completeness and error bounds must be tested, not assumed.
 
@@ -73,7 +73,7 @@ payloads under the same key conflict. Inferred velocity is a derivation, not a m
   membership where uncertainty prevents a definite conclusion.
 
 Graph navigation computes a bounded path over explicitly traversable edges under a named
-cost metric. D-08 selects a reference shortest-path method with nonnegative costs, stable
+cost metric. Decision 0009 selects a reference shortest-path method with nonnegative costs, stable
 tie-breaking, time semantics, visit/memory limits and unreachable/budget-exhausted outcomes.
 Baseline paths use one coherent time slice, not a promise of optimal time-dependent routing.
 Graph connectivity alone does not imply walkability or a safe route. Free-space pathfinding,

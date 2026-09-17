@@ -4,7 +4,7 @@ Draft contract · 2026-09-16 · Not implemented
 
 Owns FR-31/32. Recording motion is database work; calculating hypothetical motion is model
 work. The simulation kernel is part of the planned product but not a mandatory process on
-ordinary ingest/read paths. D-09 freezes physical scope and the numerical execution profile.
+ordinary ingest/read paths. Decision 0010 freezes physical scope and the numerical execution profile.
 
 ## Required baseline and non-goals
 
@@ -12,7 +12,7 @@ R2 implements fixed-step local Cartesian 2D/3D kinematics: stationary, constant 
 constant acceleration under bounded inputs. R3 adds a constrained 2D rigid-body demonstration:
 finite positive-mass discs, static plane/box boundaries, gravity, bounded restitution,
 frictionless contacts and deterministic contact ordering. Unsupported shapes/forces return
-typed errors, not plausible-looking approximations. D-09 must define overlap resolution,
+typed errors, not plausible-looking approximations. Decision 0010 defines overlap resolution,
 collision/tunneling limits, substep policy, tolerances and maximum supported velocities.
 
 This is not a full game engine: general 3D contacts, joints, friction, deformables, fluids,
@@ -27,8 +27,8 @@ overflow, nonfinite values, unsupported scales and invalid mass fail before stat
 
 Every run pins model/version, algorithm/integrator, tick quantum, step size, arithmetic and
 rounding policy, tolerances, contact ordering, seed/stream identities, schema, build/toolchain,
-dependency lock and supported hardware profile. D-09 chooses fixed-point or constrained
-floating-point deliberately. The baseline promises repeatability only within its tested
+dependency lock and supported hardware profile. Decision 0010 deliberately chooses fixed-point
+arithmetic. The baseline promises repeatability only within its tested
 execution profile; cross-platform bit equality is a separate capability requiring evidence.
 Changing worker count or iteration order must not silently change the named profile's result.
 

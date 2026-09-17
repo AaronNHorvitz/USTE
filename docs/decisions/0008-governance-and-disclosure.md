@@ -2,8 +2,8 @@
 
 Date: 2026-09-16
 
-Status: blocked on repository-owner verification; selected policy is complete but the private
-route has not been enabled/tested.
+Status: development-governance policy accepted. The private route remains unverified and is
+tracked as distribution-readiness task T-62 under [Decision 0011](0011-development-and-distribution-readiness.md).
 
 Addresses D-07 and T-06 without fabricating external evidence.
 
@@ -21,14 +21,18 @@ dependencies and model weights require exact immutable revision/hash and separat
 Contributions retain DCO requirements; automation never invents a sign-off or reviewer.
 
 The selected private route is GitHub private vulnerability reporting for
-`AaronNHorvitz/USTE`, linked from `SECURITY.md`. Before T-06 can close, an authenticated
-repository owner must enable the feature and perform a harmless end-to-end draft report,
-confirming only maintainers can read/respond and recording the date/reviewer in the R0 report.
-The current `gh` credential is invalid, and changing repository security settings is outside
-the implementation authority. Public issues remain limited to non-sensitive concerns.
+`AaronNHorvitz/USTE`, linked from `SECURITY.md`. Before an executable is distributed, an
+authenticated repository owner or administrator must enable the feature and perform a harmless
+end-to-end draft report. The test must cover the reporter's access and participation plus the
+authorized repository administrators, security managers or explicitly added collaborators who
+triage/respond; the earlier phrase "only maintainers can read/respond" was inaccurate. Record the
+date and tester without fabricating an address or SLA. The observed `gh` credential was invalid,
+and Git-over-SSH access is not repository-administration authority. Public issues remain limited
+to non-sensitive concerns.
 
 ## Blocker and consequence
 
-This is a genuine external-authority blocker, not an unresolved technical choice. T-06 and
-therefore the aggregate T-07 R0 gate remain open. Design experiments and all other R0 evidence
-may continue, but the branch must not claim R0 accepted or distribute an executable alpha.
+The external operation remains a genuine distribution blocker, not an unresolved technical
+choice. Decision 0011 separates it from the locally reviewable part of D-07/T-06. T-06 may close
+on the governance policy above; T-62 remains open until the route is actually enabled and tested.
+No executable alpha, beta, candidate or release may be distributed while T-62 is open.

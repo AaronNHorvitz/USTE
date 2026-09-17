@@ -48,8 +48,8 @@ Batch commits may share flushes but preserve complete groups and ordered receipt
 There is no acknowledged non-durable write mode in the initial product.
 An in-process failure after step 6 is recovered as committed, not reported as rolled back.
 An uncertain client outcome returns OutcomeUnknown with a transaction lookup/retry path.
-Persisted idempotency keys prevent duplicate effects after lost responses; their retention
-period and maximum retry horizon are decided in D-06.
+Persisted idempotency keys prevent duplicate effects after lost responses; Decision 0003 fixes
+their retention period and maximum retry horizon.
 
 Commit revisions remain authoritative when wall clocks repeat, jump or move backward.
 The commit wall observation is sampled at a profile-defined boundary before journal encoding
@@ -63,11 +63,12 @@ publishes no partial revision. Bounded queues apply backpressure instead of drop
 
 ## Commit metadata and corruption
 
-Redundant commit-root records are a candidate, not a proven recovery algorithm. A simple
+Decision 0004 selects an append-only authenticated commit-certificate log rather than redundant
+mutable commit-root slots. A simple
 “highest valid slot wins” rule may silently select an older frontier after corruption of a
-previously acknowledged newer slot. D-01 must define the evidence that distinguishes an
-interrupted publication from acknowledged-history corruption, with an explicit failure model.
-Where that distinction cannot be established, fail closed and require recovery assistance.
+previously acknowledged newer slot and is therefore not the v1 recovery rule. The selected
+certificate chain distinguishes an incomplete final unacknowledged tail under its declared
+failure model; complete-certificate damage or missing referenced data fails closed.
 
 Crash safety assumes correctly implemented supported filesystem flush/rename semantics and
 storage honoring durability requests. Arbitrary media destruction is not survivable without

@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.3 · 2026-09-17 · Production engine not implemented
+Database design draft 1.4 · 2026-09-17 · R0 design ready; production engine not implemented
 
 ## Component boundaries
 
@@ -123,7 +123,7 @@ An optional external worker profile requires explicit operator activation and mu
 represented as meeting a stricter dependency profile. Engine authenticity and privacy do not
 imply immunity to a compromised host or correctness of the underlying evidence.
 
-## Open decisions — R0 blockers
+## R0 decisions and development gate
 
 | ID | Required decision and evidence | Owner of contract |
 |---|---|---|
@@ -133,14 +133,15 @@ imply immunity to a compromised host or correctness of the underlying evidence.
 | D-04 | Retention epochs, purge/backup interaction, holds, deduplication boundary, branch pins, historical availability | Security + storage |
 | D-05 | Required parser/model/decoder candidates by format, licenses, native dependencies, sandbox controls, coverage and strict-profile feasibility | Content |
 | D-06 | Commit/serialization/schema version compatibility, idempotency lifetime, baseline migration, read/write preconditions, and time codec/ranges/calendar/precision/leap handling with pinned local timezone profiles | Data + storage + [time](docs/time-and-ordering.md) |
-| D-07 | Private disclosure route, maintainer/reviewer responsibilities, release signing, dependency admission and support policy | Contributing + security policy |
+| D-07 | Development governance: disclosure-route selection, maintainer/reviewer responsibilities, release signing, dependency admission and support policy; operational route verification is distribution task T-62 | Contributing + security policy |
 | D-08 | Spatial types, geographic/local frame definitions, transforms, numeric tolerances, predicates/boundaries, disk index design, navigation costs and reference vectors | [Space](docs/spatial-world-model.md) |
 | D-09 | Rust physics dependency feasibility, arithmetic/integrator/contact profile, supported shapes/forces, simulation-to-UTC mapping, budgets and deterministic restart vectors | [Physics](docs/physics-and-motion.md) |
 
-Resolve these in follow-on decision records. A choice may be established for a constrained
-release profile and revisited with migration tests; marking it “TBD” does not close R0.
-Design experiments and test harnesses are allowed before R0, but no production-format claim
-or irreversible implementation commitment is.
+Decisions 0003–0010 close the technical profiles, and Decision 0011 closes the development
+governance split while retaining operational disclosure verification as open T-62. A choice may
+be revisited only through a versioned decision and applicable compatibility/migration tests.
+R0 permits implementation to begin; it does not establish a working production format,
+measured capacity, distribution readiness or release qualification.
 
 ## References and authority
 

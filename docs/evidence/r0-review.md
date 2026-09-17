@@ -1,21 +1,21 @@
 # R0 decision review and handoff
 
-Date: 2026-09-16
+Date: 2026-09-17
 
-R0 is **not complete**. T-01–T-05 and T-46–T-47 are closed at their decision/evidence scope;
-Decisions D-01 through D-06, D-08 and D-09 have constrained v1 profiles and literal acceptance
-vectors in Decisions 0003–0010. D-07 has a selected policy,
-but T-06 is blocked on repository-owner enablement and end-to-end testing of GitHub private
-vulnerability reporting; the local `gh` credential is invalid and this work is not authorized
-to change repository security settings. Consequently T-07 remains open and R1 implementation
-tasks are not checked.
+R0 is **complete at its development decision/evidence scope**. T-01–T-07 and T-46–T-47 are
+closed. Decisions D-01 through D-09 have constrained v1 profiles, governance and literal
+acceptance vectors in Decisions 0003–0011. Decision 0011 separates local development governance
+from external distribution readiness. GitHub private vulnerability reporting is still not
+enabled/tested and T-62 remains open; no executable may be distributed until it is verified.
+No repository setting was changed and the unchanged invalid `gh` credential was not retried.
 
 ## Completed technical evidence
 
 - Reference runner inspected: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, i9-13900KF,
   64 GiB RAM, Rust/Cargo 1.95.0.
-- Exact current crate metadata queried from crates.io for cryptography and parser candidates;
-  no dependency is yet admitted without a resolved lockfile/source/unsafe audit.
+- Exact cryptography/parser candidate graphs are captured in resolved experiment lockfiles and
+  pass the recorded source/license/advisory policy. Final engine/worker admission still requires
+  its own resolved feature graph and unsafe review.
 - Canonical time/state, crash, lifecycle, parser, benchmark, spatial and physics profiles are
   closed for v1 in the ADRs; alternatives, limitations and acceptance criteria are explicit.
 - Literal TSV vectors and a standalone safe-Rust test execute without external crates.
@@ -54,15 +54,26 @@ $ cargo-deny ... --frozen check all --show-stats
 
 $ bash experiments/worker-sandbox.sh
 sandbox_probe=ok input_bytes=2725
+
+$ python3 scripts/check_task_graph.py
+task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 ~~~
 
 Crates.io metadata was inspected with `cargo search`/`cargo info`; this selected candidates,
 not a transitive dependency admission. No release, performance, independent review or
 production-readiness claim follows from R0 design evidence.
 
-## Exact next action
+## Remaining external distribution action
 
-The repository owner enables GitHub private vulnerability reporting, submits a harmless draft
-report, confirms maintainer-only visibility/response, and records reviewer/date here. Then
-review the ADRs and vector test together, close T-01–07/T-46/T-47 only if accepted, and begin
-T-08. Experimental code before that point must not establish a production disk format.
+For T-62, a repository owner or administrator enables GitHub private vulnerability reporting,
+submits a harmless report, confirms participation by the reporter and authorized repository
+security/triage participants, confirms non-public handling, and records tester/date here. That
+operation does not block T-08 or later local implementation. It blocks every external executable
+alpha, beta, candidate and release distribution, and it is a direct prerequisite of T-44.
+
+## R0 conclusion and next local action
+
+The cross-decision review, literal vectors, dependency-policy results and task-graph check pass
+for the accepted design profiles. This is sufficient to close T-06/T-07 and begin T-08. It is
+not implementation correctness, achieved performance, independent assessment, distribution
+readiness or production qualification.

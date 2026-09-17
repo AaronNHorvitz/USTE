@@ -1,9 +1,10 @@
 # USTE — Product requirements
 
-Version: database design draft 1.3 · Date: 2026-09-17
+Version: database design draft 1.4 · Date: 2026-09-17
 
-Status: documentation only; implementation not started. Requirement and test identifiers
-below belong to this database design, not the archived simulation PRD.
+Status: R0 design ready; implementation not started. Requirement and test identifiers below
+belong to this database design, not the archived simulation PRD. External executable
+distribution remains blocked by unverified private vulnerability reporting (T-62).
 
 ## Purpose and users
 
@@ -36,7 +37,9 @@ use local tracking, pricing links, game-world storage or physics.
 No external-service account, password or API token is a core runtime prerequisite. Local
 database key management and authorization remain required. Repository administration and
 release credentials are separate development/distribution concerns, not runtime dependencies.
-This clarification does not change the currently recorded governance gate.
+Decision 0011 separates local development governance from external distribution readiness.
+No external-service credential is needed for implementation; repository-owner verification of
+the selected security-reporting route remains mandatory before distributing an executable.
 
 See [application use cases](docs/application-use-cases.md) for R2 synthetic acceptance examples
 under FR-15/27/28/31/33/34. Game rendering and broader physics remain future consumer work.
@@ -86,28 +89,30 @@ required release and its detailed contract.
 | NFR-02 | Repeatable performance and recovery budgets on named hardware with encryption/security enabled | R0 onward | [Verification](docs/verification-and-benchmarks.md) |
 | NFR-03 | Reference-model, fuzz, fault-injection, concurrency, and long-run evidence tied to the tested build | R1 onward | [Verification](docs/verification-and-benchmarks.md) |
 | NFR-04 | Offline core, explicit network permissions, no required telemetry, and bounded parsing/query resource use | R1 onward | [Security](docs/security-and-privacy.md) |
-| NFR-05 | Reviewable licenses/provenance, reproducible release process, vulnerability reporting, and honest support claims | R0 onward | [Contributing](CONTRIBUTING.md) |
+| NFR-05 | Reviewable licenses/provenance, reproducible release process, documented vulnerability-reporting policy, verified reporting before executable distribution, and honest support claims | R0 governance; distribution and R4 verification | [Contributing](CONTRIBUTING.md) |
 
 ## Release gates
 
 | Gate | Required outcome |
 |---|---|
-| R0 — design ready | D-01 through D-09 closed with recorded decisions; threat model and limits approved; versioned acceptance vectors and benchmark budgets specified; documentation consistent |
+| R0 — design ready | D-01 through D-09 closed for development with recorded decisions; threat model and limits approved; versioned acceptance vectors and benchmark budgets specified; documentation consistent |
 | R1 — correctness kernel | Reference model plus encrypted durable transactions, graph integrity, raw blob round-trip, evidence, authorization, idempotency, replay, and crash tests pass; not production-ready |
-| R2 — developer alpha | R1 maintained; temporal queries, snapshots, disk-index foundation, lexical retrieval, initial parser matrix, local API/CLI, generic adapter fixture, and isolated branch example pass |
-| R3 — hardened beta | R2 maintained; rich-format matrix, optional embedding path with an exact baseline, bounded-memory scale tests, deletion/retention, backup/restore, migrations, subscriptions, and adversarial suites pass |
-| R4 — production candidate | All requirements demonstrated at declared limits; independent security review completed and release-blocking findings resolved; repeatable install/upgrade/restore trials, support policy, and signed release evidence available |
+| R2 — local developer alpha | R1 maintained; temporal queries, snapshots, disk-index foundation, lexical retrieval, initial parser matrix, local API/CLI, generic adapter fixture, and isolated branch example pass; this is not distribution authorization |
+| R3 — local hardened beta | R2 maintained; rich-format matrix, optional embedding path with an exact baseline, bounded-memory scale tests, deletion/retention, backup/restore, migrations, subscriptions, and adversarial suites pass; this is not distribution authorization |
+| R4 — production candidate | All requirements demonstrated at declared limits; independent security review completed and release-blocking findings resolved; private vulnerability reporting verified; repeatable install/upgrade/restore trials, support policy, and signed release evidence available |
 
 Additional mandatory gate scope under Decision 0002: R1 includes spatial/world types and
 bounded import transaction contracts; R2 includes frames, movement, point spatial lookup,
 navigation, unified retrieval, batch tooling and kinematics; R3 includes historical region
 queries/native spatial indexes, constrained contact physics and cross-feature privacy/load tests.
 
-R0 readiness is not currently claimed. [TASKS.md](TASKS.md) distinguishes completed technical
-R0 decisions from open governance and production implementation work. Parser
-capabilities cannot be silently dropped to pass a gate; unsupported cases within a declared
-supported family require a documented coverage boundary and tests. Any material release
-scope change requires a decision and PRD revision.
+R0 design readiness is recorded by T-01–T-07/T-46–T-47. This closes decisions, not
+implementation, benchmark performance, security certification or production qualification.
+Operational disclosure verification remains open as T-62 and blocks every external executable
+alpha/beta/candidate/release distribution, while local R1–R3 work proceeds. Parser capabilities
+cannot be silently dropped to pass a gate; unsupported cases within a declared supported family
+require a documented coverage boundary and tests. Any material release scope change requires a
+decision and PRD revision.
 
 ## Product-level acceptance scenario
 

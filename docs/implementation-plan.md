@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.3 · 2026-09-17 · Production implementation remains open
+Design draft 1.4 · 2026-09-17 · R0 design ready; production implementation remains open
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -16,21 +16,22 @@ T-28/T-54/T-56 deliver headless world and local-file item/price examples under
 [application use cases](application-use-cases.md), using existing types and query operators.
 No native feed/broker/exchange API client, credential onboarding or live account is required.
 Keep local encryption/authentication while demonstrating offline operation without provider
-secrets. This is an application-scope clarification, not a change to recorded governance gates.
+secrets. Decision 0011 separately governs the external executable-distribution gate.
 
 ## Implementation increments
 
 | Increment | Tasks | Deliverable and exit demonstration |
 |---|---|---|
-| R0: freeze contracts | T-01–07, T-46–47 | Resolve D-01–09; record schemas, disk protocol, Rust dependency feasibility, coordinate/time/numeric profiles, threat model, limits and literal test vectors |
+| R0: freeze development contracts | T-01–07, T-46–47 | Resolve D-01–09 for implementation; record schemas, disk protocol, Rust dependency feasibility, coordinate/time/numeric profiles, threat model, limits, governance and literal test vectors |
 | R1: durable foundation | T-08–19, T-45, T-48–49 | Rust workspace, encrypted atomic storage, graph/evidence/raw blobs, UTC types, world/observation schemas and bounded import transactions; crash/replay/reference tests |
 | R2a: spatial and temporal reads | T-20–22, T-50–52 | Frame conversions, movement history, geographic/local predicates and coherent state-at-time results with explicit uncertainty |
 | R2b: content and query composition | T-23–25, T-53–54 | Isolated baseline parsing, unified typed query operators, byte retrieval, source-linked CSV/JSON batch import with preview/resume |
 | R2c: navigation and simulation | T-26–28, T-55–57 | Supplied-graph paths, kinematic branches, local API/CLI, generic adapter and synthetic world demonstration |
-| R2 acceptance | T-29 | Complete alpha tests including late evidence, query budgets, restart, no-egress and source citations; non-production limitations visible |
+| R2 local acceptance | T-29 | Complete local alpha tests including late evidence, query budgets, restart, no-egress and source citations; non-production and non-distribution limitations visible |
 | R3: complete baseline and harden | T-30–39, T-58–61 | Rich content, vectors, lifecycle, disk spatial/history indexes, region crossings, bounded 2D contacts, mixed-load and hostile-input evidence |
-| R3 acceptance | T-40 | Full beta matrix, migrations, backup/restore, deletion and cross-feature correctness at declared bounds |
-| R4: production decision | T-41–44 | Independent security/recovery assessment, signed packages, dependency/license review, supported-platform trials and honest published limits |
+| R3 local acceptance | T-40 | Full local beta matrix, migrations, backup/restore, deletion and cross-feature correctness at declared bounds; no distribution authorization |
+| Distribution readiness | T-62 | Owner/admin enables and harmlessly verifies private vulnerability reporting with reporter and authorized security-triage participation before any executable leaves the authorized development group |
+| R4: production decision | T-41–44, T-62 | Independent security/recovery assessment, verified disclosure route, signed packages, dependency/license review, supported-platform trials and honest published limits |
 
 Task IDs are stable, not execution order. New tasks inserted in earlier gates must complete
 before those gates close. No green documentation check marks an implementation row complete.
@@ -54,7 +55,9 @@ Hot object lookup, temporal history, blob reads and graph traversal need distinc
 - D-03: named Fedora Kinoite runner, target hardware, exact dataset sizes and numeric budgets
   for p99, memory, sustained ingest, recovery, spatial candidates and simulation contention.
 - D-05/07: actual dependency/license/unsafe inventory, parser coverage feasibility, release
-  provenance and private vulnerability reporting. No C/C++ engine/spatial/physics substitute.
+  provenance, governance and the selected private-vulnerability-reporting procedure. Operational
+  route verification is T-62, not an R0 development prerequisite. No C/C++
+  engine/spatial/physics substitute.
 - D-06: timestamp codec and source envelopes, schema/migration compatibility and batch retry keys.
 - D-08: geographic/local geometry matrix, frames, transforms, numeric error bounds, boundary
   semantics, index candidates, time-slice path cost rules and versioned reference vectors.
@@ -63,6 +66,10 @@ Hot object lookup, temporal history, blob reads and graph traversal need distinc
 
 Each decision records alternatives, chosen profile, owner, security implications and measurable
 acceptance evidence. Experimental spikes may inform a decision; they do not waive it.
+
+R0 is complete at the decision/evidence scope. This authorizes dependency-ordered local
+implementation only. Decision 0011 and T-62 prohibit external executable alpha/beta/candidate/
+release distribution until the private reporting route is genuinely enabled and tested.
 
 ## Test-first work packages
 

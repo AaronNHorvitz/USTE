@@ -3,8 +3,8 @@
 Draft contract · 2026-09-16 · Not implemented
 
 Owns FR-26 and the time semantics shared by FR-05/07/20/24. This contract defines
-requirements; D-06 must approve the exact codec, supported ranges, dependencies and literal
-acceptance vectors before implementation. UTC is a shared time reference, not the absence
+requirements. Decision 0003 approves the exact v1 codec, supported ranges, pinned local-zone
+profile and literal acceptance vectors. UTC is a shared time reference, not the absence
 of a time standard and not proof that source clocks are correct.
 
 ## One timeline, preserved source meaning
@@ -38,11 +38,11 @@ The proposed initial profile, `posix-utc-v1`, uses signed 64-bit epoch seconds p
 unsigned nanosecond fraction in `0..999999999`. Fractional negative instants use floor
 seconds: half a second before the epoch is seconds `-1`, fraction `500000000`.
 Do not use floating-point timestamps or an unchecked signed 64-bit total-nanoseconds field.
-Ordering compares the numeric pair, not arbitrary source strings. The exact supported
-calendar range and binary encoding remain D-06 decisions; overflow fails explicitly.
+Ordering compares the numeric pair, not arbitrary source strings. Decision 0003 fixes the
+supported calendar range and canonical binary profile; overflow fails explicitly.
 
 External resolved instants use the supported RFC 3339 UTC `Z` form, with canonical fractional
-formatting fixed by D-06. Padding a fraction does not imply greater source accuracy.
+formatting fixed by Decision 0003. Padding a fraction does not imply greater source accuracy.
 Numeric epochs require explicit units; do not guess seconds versus milliseconds by magnitude.
 
 POSIX time does not uniquely represent leap seconds. Initial normalization must explicitly

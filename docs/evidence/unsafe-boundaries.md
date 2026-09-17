@@ -50,6 +50,6 @@ boundaries. “No C/C++ engine” is therefore maintained without claiming an al
 - ZIP/TAR write APIs are fixture-only. Production workers expose bounded readers and validated
   outputs, not archive filesystem extraction.
 
-This closes the R0 identification/classification portion of the unsafe inventory. T-04 remains
-open until actual worker binaries prove their resolved feature graphs, sandbox controls and
-hostile fixtures; NFR-01 remains continuous through every release.
+This closes T-04's R0 identification/classification portion of the unsafe inventory. Actual
+worker binaries must still prove resolved feature graphs, sandbox controls and hostile fixtures
+under T-23/T-24 and later adapter tasks; NFR-01 remains continuous through every release.

@@ -2,7 +2,8 @@
 
 Draft acceptance specification · 2026-09-16
 
-**No tests, fixtures, measurements, or CI gates described here exist yet.**
+R0 vectors and synthetic fixtures exist; production suites, benchmark measurements and CI gates
+remain unimplemented unless a later evidence record says otherwise.
 Owns NFR-02, NFR-03 and the evidence required by [PRD release gates](../PRD.md).
 
 ## Evidence format and independence
@@ -64,8 +65,8 @@ needed. These cases add no claim of a general game engine or supported trading t
 
 ## Benchmark workloads
 
-These are initial workload proposals for D-03, not measured limits. R0 must freeze exact
-fixtures, durations, result-size bounds, numeric budgets and a named runner before any gate.
+Decision 0007 freezes these exact workload manifests, durations, result-size bounds, numeric
+budgets and the named runner. They remain targets, not measured limits.
 
 | ID | Proposed workload | Required measurements |
 |---|---|---|
@@ -88,9 +89,9 @@ to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.
 Report vector recall/quality alongside speed; faster incorrect or unauthorized answers fail.
 
-## Budget registry required at R0
+## R0 budget registry
 
-D-03 records hard caps for transaction/request/file/object sizes, streaming buffers, namespace
+Decision 0007 records hard caps for transaction/request/file/object sizes, streaming buffers, namespace
 quotas, graph expansion, reader lifetimes, query scratch, worker RSS/CPU/time/output, archive
 depth/ratio/entries, media dimensions/duration, branches, and queues. It also records target
 query/commit/recovery latencies, sustained rates, and acceptable background-work impact.

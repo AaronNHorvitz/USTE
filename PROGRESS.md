@@ -1,9 +1,18 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-16 · Branch: `codex/uste-implementation`
+Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 ## Completed this increment
 
+- Recorded owner-authorized Decision 0011, separating local development governance (T-06)
+  from operational private-reporting verification (new T-62) without claiming verification.
+- Corrected reporting participation to include the reporter and authorized repository security/
+  triage participants, rather than the inaccurate maintainer-only description.
+- Closed T-06/T-07 and R0 at the development decision/evidence scope after aligning stale
+  pre-decision specification text and rerunning its actual prerequisites.
+- Added a task-graph check proving the 62-task graph is acyclic, T-08 does not inherit T-62,
+  and R4 decision T-44 does inherit T-62. R2/R3 are explicitly local readiness gates and no
+  executable distribution is allowed while T-62 is open.
 - Read the complete current requirement set, both accepted product decisions and every
   current domain specification. No applicable USTE `AGENTS.md` exists.
 - Preserved the clean starting worktree and created the requested branch from `be5f7a4`.
@@ -27,7 +36,8 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
   CPU-time and descriptor limits on the reference runner; recorded cgroup/seccomp gaps.
 - Completed the R0 cross-decision audit, corrected BM-04 from an inadmissible 20 GiB blob to
   a 12 GiB within-cap stream, and checked T-01–T-05/T-46–T-47 with linked evidence.
-- Recorded the exact external governance blocker; did not claim R0 or any release gate.
+- Recorded the exact external distribution blocker without claiming disclosure verification or
+  any implementation/release gate.
 
 ## Verification run
 
@@ -48,17 +58,20 @@ cargo-deny ... --frozen check all --show-stats
 # both lockfiles: 0 errors; parser graph: one documented duplicate warning
 cargo fmt ... -- --check; rustfmt --check ...
 # success
+python3 scripts/check_task_graph.py
+# task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
 64 GiB RAM, Rust/Cargo 1.95.0. Pinned lockfiles now pass cargo-deny advisory/license/source
 policy checks; no benchmark measurement exists yet.
 
-## Limitations and blockers
+## Limitations and external prerequisites
 
-- D-07/T-06 requires the repository owner to enable and test GitHub private vulnerability
-  reporting. The configured GitHub CLI token is invalid; changing repository security settings
-  is outside this task's authority. T-07 and dependent R1 tasks remain open.
+- T-62 requires the repository owner/administrator to enable and harmlessly test GitHub private
+  vulnerability reporting. The previously observed GitHub CLI token is invalid and was not
+  retried; SSH Git access is not administrative access. This blocks executable distribution and
+  T-44, but it does not block local implementation, integration or artifact preparation.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
@@ -66,13 +79,7 @@ policy checks; no benchmark measurement exists yet.
 
 ## Next dependency-permitted work
 
-Owner clarification on 2026-09-17: product documentation now explicitly includes a native
-database/physics kernel for future game development and item tracking linked to imported
-asset-price observations. Existing open T-28/T-54/T-56 acceptance scope includes offline
-synthetic examples. No feed API, provider account/secret, runtime network dependency or new
-codec was added. Task checkboxes, technical R0 evidence and governance dependencies are
-unchanged; this documentation edit does not implement the separately discussed gate correction.
-
-Once the owner verifies the private disclosure route, close T-06, finalize the already prepared
-cross-decision T-07 review, scaffold T-08 and begin the production `uste-types` implementation
-against the frozen vectors.
+T-08 is unblocked: scaffold the root Rust workspace and quality automation, then implement T-09
+bounded canonical types/encoding against the frozen vectors. T-10 reference model, T-11 crypto
+boundary and T-12 I/O fault adapters follow T-09 in dependency order. T-62 remains independent
+and must not be represented as complete without owner-administered evidence.

@@ -1,9 +1,9 @@
 # USTE — Product development tasks
 
-Database design draft 1.3 · 2026-09-17
+Database design draft 1.4 · 2026-09-17
 
-**All implementation tasks are open.** This document is a plan, not evidence of a working
-database. No release gate has passed. The current documentation update does not close R0.
+**R0 design readiness is complete; implementation tasks remain open.** This document is not
+evidence of a working database. Passing a local gate does not authorize executable distribution.
 
 ## How to use this file
 
@@ -25,7 +25,7 @@ Application scope includes future game-world consumers and item tracking linked 
 asset-price records, alongside agent memory. T-28/T-54/T-56 own the offline examples in
 [application use cases](docs/application-use-cases.md). No native price-feed API, external
 account, provider password/token or trading implementation is required by these tasks.
-This clarification preserves task IDs, dependencies, completed R0 evidence and open gates.
+This clarification preserves task IDs, dependencies and completed R0 evidence.
 
 ## R0 — Foundational decisions
 
@@ -36,22 +36,22 @@ This clarification preserves task IDs, dependencies, completed R0 evidence and o
 | [x] T-03 | Close D-02/D-04: encryption, keys, retention epochs, deletion and backups; FR-09/10/11/12 | T-01, T-02 | Security/privacy ADRs and key/retention lifecycle diagrams | Exact crypto dependencies, nonce strategy, trust boundaries and purge/restore rules reviewed |
 | [x] T-04 | Close D-05: parser/decoder/model matrix and sandbox feasibility; FR-17/19/20/21/22 | T-01, T-03 | Versioned adapter registry and dependency/license inventory | Every baseline family has exact candidate, limits, profile and acceptance fixtures; unresolved native dependency is explicit |
 | [x] T-05 | Close D-03: target workloads, budgets and runner; NFR-02 | T-01, T-02, T-04, T-46, T-47 | Versioned synthetic fixture/benchmark manifests | Numeric limits include space, motion, physics and mixed load; hardware/corpus recorded; no unmeasured speed claim |
-| [ ] T-06 | Close D-07: maintainership, provenance and disclosure readiness; NFR-05 | None | Contribution/release policy and verified private reporting instructions | Maintainer-controlled reporting route tested; no fabricated address/SLA |
+| [x] T-06 | Close development-governance portion of D-07: maintainership, provenance, dependency/release policy and selected disclosure procedure; NFR-05 | None | Contribution/release/security policy and Decisions 0008/0011 | Roles, admission/signing/support policy and honest unverified-channel status reviewed; no fabricated address/SLA |
 | [x] T-46 | Close D-08: frames, geometry, units, spatial indexes, trajectory interpretation and navigation; FR-27/28/29/30/33 | T-01, T-03 | Spatial ADR, supported matrix, reference predicates and literal boundary vectors | Rust-only algorithmic dependency feasibility, tolerances, antimeridian/poles, transforms and path limits reviewed |
 | [x] T-47 | Close D-09: kinematics/contact scope, arithmetic, replay, UTC mapping and Rust dependency feasibility; FR-31/32 | T-01, T-03, T-46 | Physics ADR, numerical profile, analytic/contact fixtures | Exact baseline implementable; deterministic ordering, overflow, collision limits and profile compatibility defined |
-| [ ] T-07 | Review R0 contracts together | T-01, T-02, T-03, T-04, T-05, T-06, T-46, T-47 | R0 decision/evidence record | No conflicting authority/durability/deletion/parser/spatial/physics contracts; all D decisions resolved for initial profile |
+| [x] T-07 | Review R0 contracts together | T-01, T-02, T-03, T-04, T-05, T-06, T-46, T-47 | R0 decision/evidence record | No conflicting authority/durability/deletion/parser/spatial/physics contracts; all D decisions resolved for initial profile |
 
-### R0 implementation progress (2026-09-16)
+### R0 decision progress (2026-09-17)
 
 - T-01–T-05 and T-46–T-47 are closed at their R0 decision/evidence scope. This does not mark
   their later implementation requirements complete: unsafe review continues, T-23 owns the
   production worker supervisor, and benchmark targets are explicitly unmeasured.
-- T-06/D-07 is blocked on repository-owner enablement and a harmless end-to-end test of GitHub
-  private vulnerability reporting. The local GitHub CLI credential is invalid; no repository
-  security setting was changed. Decision 0008 records the selected policy and exact unblock.
+- T-06/D-07's development-governance scope is closed by Decisions 0008/0011 and the reviewed
+  contribution, dependency, signing, support and disclosure policies. Operational GitHub private
+  vulnerability reporting remains unverified under open distribution-only task T-62.
 - The cross-decision review found and corrected BM-04's blob-size/cap mismatch. T-07 and every
-  dependent R1 task remain open solely because T-06 is unresolved. Pre-gate code is limited to
-  design experiments and must not be described as a production disk format or alpha release.
+  prerequisite are now closed. T-08 is unblocked. R0 evidence remains design evidence and must
+  not be described as a working database, production disk format or distributable alpha.
 
 ## R1 — Correctness kernel
 
@@ -94,7 +94,7 @@ This clarification preserves task IDs, dependencies, completed R0 evidence and o
 | [ ] T-55 | Supplied-graph navigation with constraints and stable path ordering; FR-30 | T-52, T-53 | Bounded path operator and route provenance | VT-18/22 checks directed/disconnected graphs, costs, hidden routes, equal-cost ties and resource exhaustion |
 | [ ] T-57 | Deterministic 2D/3D kinematics and branch checkpoint/resume; FR-31 | T-26, T-50, T-51 | uste-physics baseline and virtual-time mappings | VT-20 matches independent analytic cases, pins profile and preserves observed/simulated separation after restart |
 | [ ] T-56 | Synthetic world end-to-end CLI/read fixture and consumer examples; FR-27/28/29/30/31/33/34 | T-27, T-53, T-54, T-55, T-57 | Headless game-world state and tracked items linked to locally imported prices/documents | VT-15/17/18/19/20/22/23 R2 scope passes offline: UTC/local display, permissions, corrections, price provenance and byte retrieval; no provider accounts/secrets |
-| [ ] T-29 | R2 acceptance and developer documentation | T-20, T-21, T-24, T-25, T-26, T-27, T-28, T-56 | Alpha evidence and examples | R2 suites pass; unsupported formats explicitly visible; no R3 capabilities implied |
+| [ ] T-29 | R2 local developer-alpha acceptance and documentation | T-20, T-21, T-24, T-25, T-26, T-27, T-28, T-56 | Local alpha evidence and examples | R2 suites pass; unsupported formats explicitly visible; no R3 capabilities or distribution readiness implied |
 
 ## R3 — Hardened beta
 
@@ -114,7 +114,17 @@ This clarification preserves task IDs, dependencies, completed R0 evidence and o
 | [ ] T-59 | Native disk spatial indexes, polygons/regions and trajectory crossings; FR-29 | T-37, T-52 | Correction-aware encrypted spatial/history indexes | VT-18/19/22 match reference; BM-10/11 include larger-than-RAM, degenerate geometry, late corrections and rebuild |
 | [ ] T-60 | Spatial/physics/content lifecycle and privacy hardening; FR-09/11/23/28/29/32/33 | T-34, T-35, T-58, T-59 | Dependency invalidation, spatial threat fixtures and purge receipts | VT-23 denies hidden proximity/routes, stale source handles, revoked branches and restored deleted locations |
 | [ ] T-61 | Full world-model mixed-load/fault campaign; NFR-02/03/04 | T-39, T-56, T-58, T-59, T-60 | VT-01…23 and BM-01…13 pinned reports | No correctness/privacy regressions under movement ingest, parsing, physics, compaction and bounded query load |
-| [ ] T-40 | R3 acceptance and complete integration lifecycle | T-39, T-61 | Beta evidence and updated generic integration fixtures | Purge/restart/rebuild/stale-restore paths pass; entire R3 content/spatial/physics matrix documented and tested |
+| [ ] T-40 | R3 local beta acceptance and complete integration lifecycle | T-39, T-61 | Local beta evidence and updated generic integration fixtures | Purge/restart/rebuild/stale-restore paths pass; entire R3 content/spatial/physics matrix documented and tested; distribution remains separate |
+
+## External executable distribution prerequisite
+
+T-62 does not block local implementation, tests, integration acceptance or preparation of release
+artifacts. It is mandatory before any executable alpha, beta, release candidate or release is
+provided outside the authorized development participants.
+
+| Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
+|---|---|---|---|---|
+| [ ] T-62 | Enable and verify the selected private vulnerability-reporting route; NFR-05 | T-06 | Dated owner/admin test record and current reporting instructions | Harmless report proves reporter participation, authorized security-triage receipt/response and non-public handling; no fabricated address/SLA |
 
 ## R4 — Production candidate
 
@@ -123,7 +133,7 @@ This clarification preserves task IDs, dependencies, completed R0 evidence and o
 | [ ] T-41 | Independent security/recovery review and remediation; NFR-01/03/05 | T-40 | Reviewer scope, findings and regression evidence | External assessment is real; release-blocking findings resolved or release held |
 | [ ] T-42 | Packaging, signing, provenance and supported platform trials; FR-14, NFR-05 | T-40 | Release pipeline, SBOM/notices, install/upgrade/uninstall guides | VT-16 repeats clean installation and recovery on each claimed platform/profile |
 | [ ] T-43 | Operator/support documentation and commercial-distribution review; FR-12/15, NFR-05 | T-41, T-42 | Support matrix, security policy, limits, parser/model licenses and integration guide | Claims match evidence; exact shipped dependencies and model terms reviewed; no unsupported certification |
-| [ ] T-44 | R4 release decision | T-41, T-42, T-43 | Versioned release checklist and evidence manifest | Every required task/requirement traced; all release gates pass; no hidden blocked work |
+| [ ] T-44 | R4 release decision | T-41, T-42, T-43, T-62 | Versioned release checklist and evidence manifest | Every required task/requirement traced; private reporting verified; all release gates pass; no hidden blocked work |
 
 ## Completion evidence template
 

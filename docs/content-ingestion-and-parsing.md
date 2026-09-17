@@ -25,8 +25,9 @@ Separate contracts:
 
 ## Format matrix and release obligations
 
-Every row is planned, not an availability claim. D-05 selects exact adapters, dependencies,
-supported variants, and fixtures. R0 cannot close by writing “all formats supported.”
+Every row is planned, not an availability claim. Decision 0006 selects exact v1 adapter
+candidates, dependencies, supported variants and fixtures. R0 selection does not make an
+adapter available; its implementation and gate-specific isolation/fixture evidence remain due.
 
 | Family | Required baseline behavior | Earliest parsing gate |
 |---|---|---|
@@ -36,7 +37,7 @@ supported variants, and fixtures. R0 cannot close by writing “all formats supp
 | PDF including scanned pages | Page-aware text; OCR only through an approved worker; report partial extraction, encryption, layout loss, or unsupported features | R3 |
 | OOXML documents, spreadsheets, presentations | Text/table/sheet/cell/slide extraction; do not execute macros, formulas, external links, or embedded objects | R3 |
 | Images (initially PNG/JPEG) | Bounded decode, dimensions/metadata, optional local OCR with region locators | R3 |
-| Audio/video | Declare exact baseline codecs/containers in D-05; bounded local metadata, optional transcription and sampled-frame extraction with time locators | R3 |
+| Audio/video | Decision 0006 selects WAV PCM and Y4M baselines; bounded local metadata, optional transcription and sampled-frame extraction with time locators | R3 |
 | Archives (initially ZIP/TAR) | List entries first; opt-in bounded expansion, per-entry provenance and independent admission | R3 |
 | Legacy office files, other image/media codecs, CAD/scientific/proprietary formats | Opaque storage and explicit unsupported parsing until an adapter passes its gate | Later adapters |
 

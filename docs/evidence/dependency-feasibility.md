@@ -58,8 +58,9 @@ content materializer initially failed policy on an unnecessary IJG-licensed JPEG
 encoder was removed and the byte fixture pinned directly. Its final graph passes with only the
 same recorded `miniz_oxide` duplication.
 
-## Remaining T-04 evidence
+## Remaining implementation admission evidence
 
-Run every adapter under the supervisor limits and validate the remaining reachable transitive
-unsafe blocks on the supported target. The policy tool must be rerun against final split worker
-lockfiles. Until then T-04 remains unchecked.
+T-04's R0 selection/feasibility scope is closed. T-23/T-24 and later format tasks must run every
+implemented adapter under supervisor limits and validate reachable transitive unsafe blocks on
+the supported target. Rerun the policy tool against final split worker lockfiles before admitting
+them; no adapter availability follows from the R0 candidate audit.

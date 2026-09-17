@@ -34,8 +34,9 @@ No “government approved,” “CISA certified,” “unhackable,” or all-Rus
   pure-Rust source is not proof that every instruction below it is Rust.
 - Parser/model workers have separate inventories. Native dependencies require an explicitly
   approved optional profile, never silent inclusion in the strict profile.
-- No crypto implementation written from scratch. Exact library/suite and platform key store
-  selection are D-02; parser candidates and strict-profile feasibility are D-05.
+- No crypto implementation written from scratch. Decision 0005 selects the exact v1
+  library/suite and key-adapter boundary; Decision 0006 selects parser candidates and
+  strict-profile feasibility.
 
 ## Authorization
 
@@ -61,9 +62,9 @@ snapshots, worker outputs, backups, and temporary spill. Bind database/namespace
 format, object role, epoch and record identifiers as appropriate authenticated context.
 Public framing and size/timing leakage must be documented; encryption does not hide everything.
 
-D-02 must specify nonce uniqueness across process restarts, partial writes, backup restores,
-database clones, key rotation, and object rewriting. Use distinct key/nonce domains and tested
-key derivation, not a resettable counter with the same reused key.
+Decision 0005 specifies random XChaCha nonces, distinct derivation contexts and restore/clone/
+rotation rules across process restarts, partial writes, backups and object rewriting. Tests must
+exercise those rules rather than substitute a resettable counter under a reused key.
 Define unlock/lock, OS-keystore integration, recovery credentials, key loss, export keys,
 zeroization limits, swap/core-dump behavior, and operator-controlled rotation.
 Never log raw keys, credentials, extracted sensitive text, or raw low-entropy content hashes.
@@ -122,4 +123,5 @@ Required: threat-model review, exact dependency inventory, unsafe review, negati
 authorization tests, parser escape/exfiltration tests, corrupt-input fuzzing, deletion/restore
 tests, reproducible build evidence and independent assessment before production.
 No private reporting address or response SLA exists yet; [SECURITY.md](../SECURITY.md) makes
-that readiness gap explicit.
+that distribution-readiness gap explicit. Decision 0011 permits local implementation while
+T-62 remains open, but no executable may be externally distributed before verification.
