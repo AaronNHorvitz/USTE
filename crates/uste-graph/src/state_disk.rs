@@ -437,7 +437,9 @@ enum CurrentRecordProof {
 /// pure `prepare` phase cannot perform hidden I/O.
 pub struct GraphDiskPreparationView {
     scope: NamespaceRef,
+    base_anchor: IndexRootAnchor,
     base_revision: CommitRevision,
+    base_counts: [u64; 8],
     transaction: GraphTransaction,
     current: BTreeMap<RecordRef, CurrentRecordProof>,
     history: BTreeMap<RecordRef, Vec<Record>>,
@@ -492,7 +494,7 @@ impl GraphDiskPreparationView {
                 CurrentRecordProof::Present(record) => Some((id, *record)),
             })
             .collect();
-        let prepared = prepare_from_complete_disk_proofs(
+        let (prepared, base_policy) = prepare_from_complete_disk_proofs(
             self.scope,
             self.base_revision,
             records,
@@ -501,13 +503,21 @@ impl GraphDiskPreparationView {
             self.current_policy,
             &self.transaction,
         )?;
-        Ok(DiskPreparedGraph { prepared })
+        Ok(DiskPreparedGraph {
+            prepared,
+            base_anchor: self.base_anchor,
+            base_counts: self.base_counts,
+            base_policy,
+        })
     }
 }
 
 /// Opaque reducer result produced from a disk preparation proof.
 pub struct DiskPreparedGraph {
     prepared: PreparedGraph,
+    base_anchor: IndexRootAnchor,
+    base_counts: [u64; 8],
+    base_policy: Option<uste_policy::NamespacePolicy>,
 }
 
 impl core::fmt::Debug for DiskPreparedGraph {
@@ -573,6 +583,22 @@ where
     let mut report = GraphDiskPreparationReport::default();
     let mut pending = transaction_required_ids(&transaction, &mut report, &limits)?;
     validate_current_root(coordinator, base)?;
+
+    charge_logical_bytes(&mut report, &limits, b"graph-state-v1".len())?;
+    let (metadata, stats) = coordinator.index_get(
+        filesystem,
+        &base.root,
+        FAMILY_METADATA,
+        b"graph-state-v1",
+        cache,
+    )?;
+    add_read_stats(&mut report, stats)?;
+    let metadata = metadata.ok_or(GraphDiskError::IndexCorrupt)?;
+    charge_logical_bytes(&mut report, &limits, metadata.len())?;
+    let metadata =
+        parse_metadata(&metadata, base.revision()).map_err(|_| GraphDiskError::IndexCorrupt)?;
+    validate_metadata_against_root(&base.root, metadata)?;
+    let base_counts = metadata.state_counts();
 
     charge_logical_bytes(&mut report, &limits, 1)?;
     let current_policy = if has_family(&base.root, FAMILY_POLICY) {
@@ -660,7 +686,9 @@ where
 
     Ok(GraphDiskPreparationView {
         scope: transaction.scope(),
+        base_anchor: base.root.anchor(),
         base_revision: base.revision(),
+        base_counts,
         transaction,
         current,
         history,
@@ -1350,6 +1378,24 @@ where
     build_graph_state_root_delta(snapshot, base.root.anchor(), prepared, limits)
 }
 
+/// Derive exact bounded terminal-family changes from an authenticated disk preparation proof.
+///
+/// This consumes the proof-backed reducer result and performs no filesystem, coordinator, cache,
+/// or key-vault access. The resulting plan remains subject to the same postcommit full-state
+/// validation as plans prepared from the live reducer.
+pub fn prepare_graph_state_root_delta_from_disk(
+    prepared: DiskPreparedGraph,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphStateRootDelta, GraphDiskError> {
+    build_graph_state_root_delta_from_base(
+        prepared.base_anchor,
+        prepared.base_counts,
+        prepared.base_policy.as_ref(),
+        prepared.prepared,
+        limits,
+    )
+}
+
 /// Merge a previously prepared graph-state plan after its transaction has durably committed.
 ///
 /// All merged runs remain invisible until their exact descriptors have been compared with the
@@ -1456,6 +1502,29 @@ fn build_graph_state_root_delta(
     if prepared.scope != snapshot.scope() || prepared.base_revision != snapshot.revision() {
         return Err(GraphDiskError::RootStateMismatch);
     }
+    if prepared
+        .changes
+        .iter()
+        .any(|change| snapshot.records.get(&change.id) != change.before.as_ref())
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    build_graph_state_root_delta_from_base(
+        base_anchor,
+        metadata_counts(snapshot)?,
+        snapshot.policy.as_ref(),
+        prepared,
+        limits,
+    )
+}
+
+fn build_graph_state_root_delta_from_base(
+    base_anchor: IndexRootAnchor,
+    base_counts: [u64; 8],
+    base_policy: Option<&uste_policy::NamespacePolicy>,
+    prepared: PreparedGraph,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphStateRootDelta, GraphDiskError> {
     let mandatory_deltas = count(prepared.changes.len())?
         .checked_mul(2)
         .and_then(|value| value.checked_add(1))
@@ -1467,10 +1536,7 @@ fn build_graph_state_root_delta(
     let mut families: [DeltaMap; FAMILY_COUNT as usize] = core::array::from_fn(|_| BTreeMap::new());
     let mut budget = DeltaBudget::default();
     for change in &prepared.changes {
-        if change.after.id() != change.id
-            || change.after.modified_revision() != prepared.revision
-            || snapshot.records.get(&change.id) != change.before.as_ref()
-        {
+        if change.after.id() != change.id || change.after.modified_revision() != prepared.revision {
             return Err(GraphDiskError::IndexCorrupt);
         }
 
@@ -1530,9 +1596,7 @@ fn build_graph_state_root_delta(
     }
 
     if let Some(policy) = &prepared.policy_change {
-        let before = snapshot
-            .policy
-            .as_ref()
+        let before = base_policy
             .map(|policy| encode_result_policy(Some(policy)))
             .transpose()?;
         let after = encode_result_policy(Some(policy))?;
@@ -1558,7 +1622,6 @@ fn build_graph_state_root_delta(
         )?;
     }
 
-    let base_counts = metadata_counts(snapshot)?;
     let mut target_counts = base_counts;
     for family in FAMILY_CURRENT_RECORD..=FAMILY_REVERSE {
         for (before, after) in families[usize::from(family - 1)].values() {
@@ -2212,6 +2275,19 @@ struct GraphStateMetadata {
 }
 
 impl GraphStateMetadata {
+    const fn state_counts(self) -> [u64; 8] {
+        [
+            self.current,
+            self.history,
+            self.outgoing,
+            self.incoming,
+            self.provenance,
+            self.reverse,
+            self.policy_history,
+            self.current_policy,
+        ]
+    }
+
     fn family_counts(self) -> Result<[u64; 8], GraphDiskError> {
         let policy = self
             .policy_history
@@ -2228,6 +2304,30 @@ impl GraphStateMetadata {
             policy,
         ])
     }
+}
+
+fn validate_metadata_against_root(
+    root: &RecoveredIndexRoot,
+    metadata: GraphStateMetadata,
+) -> Result<(), GraphDiskError> {
+    if metadata.current_policy > 1 || (metadata.policy_history != 0 && metadata.current_policy != 1)
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let expected = metadata
+        .family_counts()?
+        .into_iter()
+        .enumerate()
+        .filter(|(_, count)| *count != 0)
+        .map(|(index, count)| (u8::try_from(index + 1).unwrap(), count));
+    if !root
+        .runs()
+        .map(|run| (run.family(), run.entry_count()))
+        .eq(expected)
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(())
 }
 
 struct LoadBudget {

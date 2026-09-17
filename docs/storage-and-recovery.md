@@ -229,7 +229,10 @@ reverse/history proof APIs. The live reducer and root-delta metadata remain full
 Decision 0036 supplies those proof APIs by collecting complete authenticated family-3 history
 prefixes and family-7 reverse buckets under aggregate entry/logical-byte and per-prefix result
 limits. They make `ReadView` and deletion safe in the pure partial reducer. Coordinator commit/root
-publication and recovered live state remain full-memory boundaries.
+publication and recovered live state remain full-memory boundaries. Decision 0037 authenticates
+the admitted root's canonical metadata entry in the same proof, retains its graph-state counters
+and policy, and derives the bounded terminal-root delta plan from the storage-free result. The
+authoritative coordinator commit and publication's independent validator remain full-memory.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

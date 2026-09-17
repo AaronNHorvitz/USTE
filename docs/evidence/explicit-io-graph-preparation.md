@@ -38,7 +38,7 @@ holes were corrected before this evidence was accepted.
 
 This is a privileged preparation foundation, not a consumer API, live disk-backed reducer,
 publication path or benchmark result. Decision 0036 subsequently adds bounded complete deletion
-and historical-precondition proofs. The coordinator still owns a complete in-memory reducer;
-partial proof preparation does not yet
-produce a `GraphStateRootDelta`; index exact-lookups have format bounds but no new caller-selected
-per-lookup page limit; logical proof bytes are not RSS. T-20 and BM-01/BM-06 remain open.
+and historical-precondition proofs, and Decision 0037 derives a `GraphStateRootDelta` from the
+complete proof. The coordinator still owns a complete in-memory reducer; index exact-lookups have
+format bounds but no new caller-selected per-lookup page limit; logical proof bytes are not RSS.
+T-20 and BM-01/BM-06 remain open.

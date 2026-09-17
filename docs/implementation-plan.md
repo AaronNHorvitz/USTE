@@ -89,7 +89,9 @@ changing that live-state boundary. T-20 next needs a live disk-backed base/overl
 I/O streaming semantic validation and qualifying scale evidence. Decision 0035 supplies the first
 explicit-I/O current-record proof/preparation slice, including exact negative proofs and a pure
 post-load phase. Decision 0036 adds complete bounded reverse/history proof buckets. Live persistent
-overlays, partial-view root deltas and benchmarks remain.
+overlays and benchmarks remain. Decision 0037 authenticates the base metadata/counts in that proof
+and derives the existing bounded terminal-root plan from the partial result without complete-
+snapshot access. Authoritative commit, postcommit validation and recovery remain full-memory.
 
 ## Architectural decomposition
 

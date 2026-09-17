@@ -166,9 +166,10 @@ root-delta metadata and recovery state remain full-memory. T-20 and BM-01/BM-06 
 
 Decision 0036 completes that preparation proof vocabulary with bounded authenticated history
 prefixes for `ReadView` and reverse-owner buckets for deletion. All graph operation/precondition
-variants can now use the storage-free partial reducer phase. Live coordinator integration,
-terminal-root derivation from the partial view, larger-than-memory recovery and qualification
-remain open.
+variants can now use the storage-free partial reducer phase. Decision 0037 authenticates the base
+metadata/counts in that proof and derives the bounded terminal-root plan directly from its result.
+The authoritative coordinator commit and independent postcommit validator still use the complete
+live reducer; larger-than-memory recovery and qualification remain open.
 
 ## Release gates
 

@@ -37,7 +37,8 @@ pub use state_disk::{
     GraphStateRootDelta, GraphStateRootMergeLimits, GraphStateRootMergeReport,
     load_graph_disk_preparation_view, load_graph_state_root_candidates,
     load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
-    prepare_graph_state_root_delta, publish_graph_state_root, publish_graph_state_root_delta,
-    reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate,
-    reconstruct_graph_state_candidate_for_recovery, scrub_graph_state_root,
+    prepare_graph_state_root_delta, prepare_graph_state_root_delta_from_disk,
+    publish_graph_state_root, publish_graph_state_root_delta, reconstruct_graph_recovery_seed,
+    reconstruct_graph_state_candidate, reconstruct_graph_state_candidate_for_recovery,
+    scrub_graph_state_root,
 };

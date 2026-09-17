@@ -2770,8 +2770,8 @@ pub(crate) fn prepare_from_complete_disk_proofs(
     reverse: BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
     policy: Option<NamespacePolicy>,
     transaction: &GraphTransaction,
-) -> Result<PreparedGraph, GraphError> {
-    GraphState {
+) -> Result<(PreparedGraph, Option<NamespacePolicy>), GraphError> {
+    let state = GraphState {
         snapshot: GraphSnapshot {
             scope,
             revision: Some(base_revision),
@@ -2784,13 +2784,14 @@ pub(crate) fn prepare_from_complete_disk_proofs(
             policy,
             policy_history: BTreeMap::new(),
         },
-    }
-    .prepare_transaction(
+    };
+    let prepared = state.prepare_transaction(
         transaction,
         base_revision
             .checked_next()
             .map_err(|_| GraphError::RevisionExhausted)?,
-    )
+    )?;
+    Ok((prepared, state.snapshot.policy))
 }
 
 fn try_visit_value_references<E>(

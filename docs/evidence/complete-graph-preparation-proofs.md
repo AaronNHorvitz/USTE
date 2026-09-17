@@ -28,8 +28,8 @@ bash scripts/check.sh
 
 ## Deliberate boundary
 
-This does not connect the proof result to the coordinator commit path or derive a terminal root
-delta from the partial view. The live coordinator and admitted-root comparison still retain the
-complete graph. Prefix collection is capped but not streaming reducer evaluation, per-prefix index
-results remain capped at 64 MiB, and no allocator/RSS or BM-01/BM-06 result is claimed. T-20 stays
-open.
+Decision 0037 subsequently derives a terminal-root delta from this proof result, but does not
+connect it to the authoritative coordinator commit path. The live coordinator and postcommit
+admitted-root comparison still retain the complete graph. Prefix collection is capped but not
+streaming reducer evaluation, per-prefix index results remain capped at 64 MiB, and no
+allocator/RSS or BM-01/BM-06 result is claimed. T-20 stays open.

@@ -223,7 +223,10 @@ the live coordinator and terminal-root validator remain full-memory.
 Decision 0036 adds complete bounded family-3 history prefixes and family-7 reverse-owner buckets
 to that proof capability. Historical predicates and deletion now execute in the unchanged pure
 reducer with explicit aggregate entry/byte budgets and the frozen per-prefix result cap. The
-capability still does not commit, publish roots or replace the coordinator's complete live state.
+capability still does not commit or replace the coordinator's complete live state. Decision 0037
+adds an exact authenticated metadata/count proof and lets the capability derive the existing
+bounded eight-family terminal-root plan without complete-snapshot access. Publication keeps its
+complete postcommit reducer comparison as an independent validator.
 
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver

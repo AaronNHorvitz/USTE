@@ -51,3 +51,7 @@ and pure preparation phase, but does not yet derive this root delta from its par
 derived plan limit is debited during retained family-map construction,
 but graph prepare and one-record reference-role coalescing remain under the graph's existing
 operation/reference caps. No allocator/RSS proof or BM-01/BM-06 result is claimed.
+
+Decision 0037 subsequently reuses this exact bounded family derivation for the complete
+authenticated disk preparation proof. Its precommit path no longer requires the complete live
+snapshot; publication's independent postcommit descriptor comparison intentionally still does.

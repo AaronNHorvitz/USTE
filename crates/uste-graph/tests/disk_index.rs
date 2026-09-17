@@ -9,7 +9,8 @@ use uste_graph::{
     ValidTime, disk_adjacent_ids, disk_record, disk_supported_ids, encode_stored_record,
     encode_transaction, load_current_graph_index_roots, load_graph_disk_preparation_view,
     load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
-    load_graph_state_roots, prepare_graph_state_root_delta, publish_current_graph_index,
+    load_graph_state_roots, prepare_graph_state_root_delta,
+    prepare_graph_state_root_delta_from_disk, publish_current_graph_index,
     publish_graph_state_root, publish_graph_state_root_delta, reconstruct_graph_recovery_seed,
     reconstruct_graph_state_candidate, scrub_current_graph_index, scrub_graph_state_root,
 };
@@ -757,7 +758,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     let snapshot = coordinator.read_view().unwrap().state().clone();
     publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
     let roots = load_graph_state_roots(&coordinator, &mut filesystem, &snapshot).unwrap();
-    let transaction = GraphTransaction::new(
+    let transaction = GraphTransaction::with_policy_mutation(
         scope(),
         vec![Operation::Create {
             expected: Expected::Absent,
@@ -770,6 +771,14 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
                 valid_time: ValidTime::Unknown,
             }),
         }],
+        DurablePolicyMutation::Replace {
+            expected: PolicyVersion::new(1).unwrap(),
+            policy: NamespacePolicy::new(
+                scope(),
+                PolicyVersion::new(2).unwrap(),
+                QuotaLimits::new(120, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
+            ),
+        },
     );
     let limits = GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap();
     let mut cache = PageCache::new(1024 * 1024).unwrap();
@@ -787,7 +796,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     assert_eq!(view.report().present_records, 3);
     assert_eq!(view.report().absent_records, 1);
     assert_eq!(view.report().reference_visits, 4);
-    assert_eq!(view.report().index_lookups, 5);
+    assert_eq!(view.report().index_lookups, 6);
     let exact = GraphDiskPreparationLimits::new(
         view.report().record_proofs,
         view.report().reference_visits,
@@ -862,13 +871,39 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     let prepared = view.prepare().unwrap();
     assert_eq!(prepared.revision(), CommitRevision::new(2).unwrap());
     assert_eq!(prepared.change_count(), 1);
+    let memory_plan = prepare_graph_state_root_delta(
+        &coordinator,
+        &roots[0],
+        &transaction,
+        CommitRevision::new(2).unwrap(),
+        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let disk_plan = prepare_graph_state_root_delta_from_disk(
+        prepared,
+        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disk_plan.delta_count(), memory_plan.delta_count());
+    assert_eq!(disk_plan.logical_bytes(), memory_plan.logical_bytes());
     let outcome = commit(&mut coordinator, &mut filesystem, 2, transaction.clone());
-    assert_eq!(prepared.result_digest(), outcome.result_digest);
+    let base_read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(base_read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    let (delta_root, _) = publish_graph_state_root_delta(
+        &mut coordinator,
+        &mut filesystem,
+        &roots[0],
+        &disk_plan,
+        outcome,
+        GraphStateRootMergeLimits::uniform(merge),
+    )
+    .unwrap();
 
     let revision_two = coordinator.read_view().unwrap().state().clone();
-    publish_graph_state_root(&mut coordinator, &mut filesystem, &revision_two).unwrap();
     let revision_two_roots =
         load_graph_state_roots(&coordinator, &mut filesystem, &revision_two).unwrap();
+    assert_eq!(revision_two_roots.len(), 1);
+    assert_eq!(revision_two_roots[0].generation(), delta_root.generation);
     let transition = GraphTransaction::new(
         scope(),
         vec![Operation::ActOnAssertion {
