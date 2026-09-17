@@ -1,22 +1,9 @@
-# Rust
-/target/
+# Rust build products are reproducible and must not be committed.
+target/
 **/target/
-**/*.rs.bk
-*.pdb
 
-# Simulation output — event logs, snapshots, benchmarks are generated, never committed
-/runs/
-/snapshots/
-*.uste-log
-# ...except small golden replay fixtures, which are deliberately committed
-!tests/fixtures/**
-/benchmarks/results/
-
-# Environment and editors
-.env
-.venv/
-__pycache__/
-.vscode/
-.idea/
-*.swp
-.DS_Store
+# Local databases, keys, evidence scratch and benchmark output are never source artifacts.
+*.uste-db/
+*.key
+benchmark-results/local/
+evidence/local/

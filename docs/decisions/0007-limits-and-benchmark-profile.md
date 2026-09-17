@@ -52,6 +52,11 @@ BM-06 recovery of 10 million events from a checkpoint <= 120 s. BM-10 warm radiu
 p99 <= 100 ms and bounded history p99 <= 500 ms. BM-12 runs 1,000 kinematic bodies at >=
 100,000 body-steps/s and refuses over-budget dense contacts before publication. BM-13 keeps
 ordinary point-read p99 <= 2x its isolated p99, writer queue within cap and RSS <= 24 GiB.
+BM-05 requires <= 5 s p95 for supported <= 10 MiB fixtures, <= 2 GiB worker RSS, exact
+locator expectations and cancellation <= 2 s. BM-07 keeps foreground p99 <= 3x isolated and
+reserves twice the largest rewritten segment. BM-08 creates branches at <= 50 ms p95 with
+exact replay and unchanged main hashes. Under BM-09's optional 16-CPU/16-GiB competing load,
+point-read p99 is <= 3x isolated and the engine remains within its 24-GiB allocation.
 
 Cold results, p50/p95, disk/index amplification, candidates, cancellation latency and
 background impact are always reported even where no release threshold is yet set. A workload

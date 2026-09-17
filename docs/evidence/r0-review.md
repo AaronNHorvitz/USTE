@@ -18,6 +18,9 @@ tasks are not checked.
 - Canonical time/state, crash, lifecycle, parser, benchmark, spatial and physics profiles are
   closed for v1 in the ADRs; alternatives, limitations and acceptance criteria are explicit.
 - Literal TSV vectors and a standalone safe-Rust test execute without external crates.
+- The storage-publication experiment exhaustively cuts both fixed experimental records and
+  flips every byte; incomplete unacknowledged tails recover the old frontier while every
+  complete-certificate data loss/corruption fails closed.
 
 ## Commands and results
 
@@ -26,6 +29,11 @@ $ rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 $ /tmp/uste-r0-vectors --nocapture
 running 9 tests
 test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
+$ /tmp/uste-storage-publication
+running 4 tests
+test result: ok. 4 passed; 0 failed
 ~~~
 
 Crates.io metadata was inspected with `cargo search`/`cargo info`; this selected candidates,

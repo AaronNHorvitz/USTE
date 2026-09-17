@@ -10,6 +10,10 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
 - Added Decisions 0003–0010 covering the v1 data/time, storage, cryptography/retention,
   content-worker, benchmark/limit, governance, spatial and physics profiles.
 - Added literal R0 acceptance vectors and a safe-Rust standalone vector test.
+- Added a storage-publication model that exhaustively tests every record cut and byte
+  corruption for the proposed commit frontier.
+- Resolved and compiled the pinned strict-profile dependency candidates; recorded a lockfile,
+  native-link/license feasibility and the remaining unsafe/advisory review scope.
 - Recorded the exact external governance blocker; did not claim R0 or any release gate.
 
 ## Verification run
@@ -18,6 +22,11 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
 rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 /tmp/uste-r0-vectors --nocapture
 # 9 passed; 0 failed
+rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication
+/tmp/uste-storage-publication
+# 4 passed; 0 failed
+cargo build --manifest-path experiments/dependency-audit/Cargo.toml --locked --offline
+# success
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
@@ -29,8 +38,10 @@ lockfile audit or benchmark measurement exists yet.
 - D-07/T-06 requires the repository owner to enable and test GitHub private vulnerability
   reporting. The configured GitHub CLI token is invalid; changing repository security settings
   is outside this task's authority. T-07 and dependent R1 tasks remain open.
-- T-04 still needs resolved transitive/native/unsafe/license evidence and fixtures.
-- T-05 still needs complete BM-01…13 machine-readable manifests/generators and measurements.
+- T-04 now has a resolved lock/native-link/license feasibility snapshot, but still needs
+  reachable unsafe review, policy/advisory tooling and fixtures.
+- T-05 has all BM-01…13 manifest rows, but still needs deterministic generators and measured
+  results; targets are not evidence of achieved performance.
 - The Rust files are design-vector experiments, not a database executable or production format.
 
 ## Next dependency-permitted work
