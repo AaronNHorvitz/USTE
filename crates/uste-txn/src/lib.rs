@@ -151,6 +151,7 @@ pub enum CheckpointStateError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ApplyError {
     Conflict,
+    SourceChanged,
     InvalidRequest,
     ResourceLimit,
     UnsupportedPredicate,
@@ -196,6 +197,7 @@ pub struct TransactionOutcome {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TransactionError {
     Conflict,
+    SourceChanged,
     InvalidRequest,
     ResourceLimit,
     UnsupportedPredicate,
@@ -1178,6 +1180,7 @@ fn transaction_request_digest(request: &[u8], blob_inventory_digest: [u8; 32]) -
 const fn map_apply_error(error: ApplyError) -> TransactionError {
     match error {
         ApplyError::Conflict => TransactionError::Conflict,
+        ApplyError::SourceChanged => TransactionError::SourceChanged,
         ApplyError::InvalidRequest => TransactionError::InvalidRequest,
         ApplyError::ResourceLimit => TransactionError::ResourceLimit,
         ApplyError::UnsupportedPredicate => TransactionError::UnsupportedPredicate,

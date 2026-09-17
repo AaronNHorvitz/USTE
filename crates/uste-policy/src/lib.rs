@@ -360,7 +360,7 @@ impl NamespacePolicy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Target {
     Namespace(NamespaceRef),
     Record(RecordRef),

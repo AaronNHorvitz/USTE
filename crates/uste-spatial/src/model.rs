@@ -442,8 +442,9 @@ impl SpatialRecord {
     }
 }
 
+/// Borrowed view of one canonical spatial record in deterministic catalog order.
 #[derive(Clone, Copy)]
-pub(crate) enum SpatialRecordRef<'a> {
+pub enum SpatialRecordRef<'a> {
     World(&'a WorldDefinition),
     Frame(&'a FrameDefinition),
     Geometry(&'a GeometryVersion),
@@ -462,6 +463,16 @@ impl<'a> From<&'a SpatialRecord> for SpatialRecordRef<'a> {
 }
 
 impl SpatialRecordRef<'_> {
+    #[must_use]
+    pub const fn id(self) -> RecordRef {
+        match self {
+            Self::World(value) => value.id(),
+            Self::Frame(value) => value.id(),
+            Self::Geometry(value) => value.id(),
+            Self::Observation(value) => value.id(),
+        }
+    }
+
     #[must_use]
     pub(crate) const fn order_key(self) -> (u8, RecordRef, u64) {
         match self {

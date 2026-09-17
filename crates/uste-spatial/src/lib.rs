@@ -18,7 +18,7 @@ pub use model::{
     MAX_OBSERVATIONS_PER_RESULT, MAX_SESSION_BYTES, MAX_SPATIAL_BATCH_RECORDS,
     MAX_SPATIAL_CATALOG_ENTRIES, MAX_SPATIAL_CATALOG_LOGICAL_BYTES, ObservationKey,
     ObservationReferences, PositionKnowledge, PositionObservation, PositionUncertainty,
-    SPATIAL_PROFILE, SpatialError, SpatialRecord, WorldDefinition,
+    SPATIAL_PROFILE, SpatialError, SpatialRecord, SpatialRecordRef, WorldDefinition,
 };
 pub use state::{
     SpatialSnapshot, SpatialState, SpatialTransaction, decode_transaction, encode_transaction,

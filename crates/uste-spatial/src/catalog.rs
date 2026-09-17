@@ -476,7 +476,8 @@ impl SpatialCatalog {
         }
     }
 
-    pub(crate) fn visit_records<E>(
+    /// Visit every retained version in deterministic canonical order.
+    pub fn visit_records<E>(
         &self,
         mut visitor: impl FnMut(CommitRevision, SpatialRecordRef<'_>) -> Result<(), E>,
     ) -> Result<(), E> {

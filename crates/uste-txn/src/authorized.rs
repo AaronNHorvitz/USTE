@@ -950,6 +950,7 @@ where
 const fn map_requirement_error(error: ApplyError) -> AuthorizedError {
     AuthorizedError::Transaction(match error {
         ApplyError::Conflict => TransactionError::Conflict,
+        ApplyError::SourceChanged => TransactionError::SourceChanged,
         ApplyError::InvalidRequest => TransactionError::InvalidRequest,
         ApplyError::ResourceLimit => TransactionError::ResourceLimit,
         ApplyError::UnsupportedPredicate => TransactionError::UnsupportedPredicate,

@@ -513,6 +513,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "uste-ingest"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "uste-crypto",
+ "uste-graph",
+ "uste-policy",
+ "uste-replay",
+ "uste-spatial",
+ "uste-storage",
+ "uste-testkit",
+ "uste-txn",
+ "uste-types",
+]
+
+[[package]]
 name = "uste-policy"
 version = "0.1.0"
 dependencies = [
