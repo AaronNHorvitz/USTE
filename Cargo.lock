@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
+name = "uste-testkit"
+version = "0.1.0"
+dependencies = [
+ "uste-types",
+]
+
+[[package]]
 name = "uste-types"
 version = "0.1.0"

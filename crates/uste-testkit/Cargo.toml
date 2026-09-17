@@ -1,0 +1,15 @@
+[package]
+name = "uste-testkit"
+description = "Independent in-memory specification oracle and deterministic histories for USTE"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+uste-types = { path = "../uste-types", version = "=0.1.0" }
+
+[lints]
+workspace = true
