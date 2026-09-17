@@ -115,6 +115,9 @@ recovery baseline during retention/compaction.
 Core storage/query code is safe Rust by default. Standard-library/platform boundaries,
 cryptographic implementations, native build dependencies, and optional workers are separately
 inventoried. “No C/C++ database engine” is not “no C anywhere in the operating system.”
+The safe-Rust `uste-crypto` boundary implements Decision 0013's versioned envelope admission,
+key derivation, padding, nonce-session and adapter contracts around pinned RustCrypto primitives;
+it is not itself a key store, clone detector or rotation coordinator.
 No mandatory C/C++ parser or model runtime is hidden behind Rust bindings. The strict engine
 requires Rust storage, graph, spatial, query and physics implementations, including algorithmic
 dependencies. A native physics/GIS engine behind bindings does not satisfy that profile.

@@ -6,6 +6,8 @@ Status: accepted for strict profile `crypto-v1`; OS key-store integration remain
 not a claim about an unavailable desktop secret service.
 
 Closes D-02 and D-04 and is the decision artifact for T-03.
+[Decision 0013](0013-crypto-envelope-and-key-interface.md) assigns the format-1.0 envelope bytes,
+derivation strings, bounded writer session and implemented key-adapter interface for T-11.
 
 ## Suite and key hierarchy
 
@@ -37,8 +39,9 @@ timing and access timing. Names, source media types, logical hashes, index keys 
 are encrypted. Blob chunks pad to 64 KiB except the authenticated terminal length; small
 records use 4 KiB framing. Traffic-analysis resistance is not claimed.
 
-Keys are unlocked into guarded process memory on a best-effort basis and zeroized on normal
-lock/drop; Rust/OS copies, swap, crash dumps and a compromised kernel remain limitations.
+Keys are unlocked into zeroizing process-owned memory on a best-effort basis and zeroized on normal
+lock/drop; guarded/locked pages are not implemented, and Rust/OS copies, swap, crash dumps and a
+compromised kernel remain limitations.
 Rotation writes new epochs and rewrites reachable objects transactionally before retiring an
 old key. Key loss is unrecoverable without a valid recovery wrapper. Logs contain stable
 redacted error codes, never keys, plaintext, raw source digests or low-entropy equality tokens.

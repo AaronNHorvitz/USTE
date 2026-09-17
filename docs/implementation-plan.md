@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.4 · 2026-09-17 · R0 design ready; T-08–T-10 correctness foundation implemented
+Design draft 1.5 · 2026-09-17 · R0 design ready; T-08–T-11 foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine
@@ -48,6 +48,11 @@ Implement simple reference models before optimized indexes. Start spatial correc
 bounded scans, then add the D-08-selected native disk index without changing query semantics.
 Do not claim speed until optimized paths pass the same reference fixtures and BM workloads.
 Hot object lookup, temporal history, blob reads and graph traversal need distinct access paths.
+
+`uste-crypto` owns only encrypted envelope admission, derivation, secret ownership, entropy use and
+trusted key-adapter contracts. Storage supplies durably published writer incarnation/object IDs and
+never resets an exhausted nonce session in place. Rotation, restore and writable-clone admission
+remain lifecycle operations rather than crypto-library side effects.
 
 ## R0 design deliverables
 

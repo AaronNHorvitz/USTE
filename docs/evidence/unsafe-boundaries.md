@@ -1,9 +1,11 @@
 # R0 unsafe and platform boundary review
 
-Date: 2026-09-16 · target: x86_64-unknown-linux-gnu · status: candidate review, not audit
+Date: 2026-09-17 · target: x86_64-unknown-linux-gnu · status: product/candidate review, not audit
 
 This review covers direct dependencies selected by Decisions 0005/0006 at the pinned versions
-in `experiments/dependency-audit/Cargo.lock`. It distinguishes source that contains `unsafe`
+in `experiments/dependency-audit/Cargo.lock`. The Decision 0005 subset is now also admitted to the
+root product `Cargo.lock` through `uste-crypto` with those exact features; the parser candidates
+remain confined to the experiment graph. This review distinguishes source that contains `unsafe`
 from code reachable under selected features. Transitive blocks still require ongoing review,
 fuzzing and advisory monitoring; this document is not an independent security assessment.
 
@@ -16,8 +18,9 @@ fuzzing and advisory monitoring; this document is not an independent security as
 | `getrandom 0.4.3` | std | OS syscall/platform implementations | sole entropy boundary; fail closed, deterministic injection only in tests |
 | `libc 0.2.189` | transitive/platform | OS ABI calls | Linux adapter only; never exposed as arbitrary syscall capability |
 
-No first-party core experiment contains unsafe code. Production core crates retain
-`#![forbid(unsafe_code)]`; dependency unsafe is not hidden by that lint and remains inventory.
+No first-party core crate contains unsafe code. `uste-crypto` has `#![forbid(unsafe_code)]` and its
+root product graph has no native `links` package. Dependency unsafe and the OS syscall boundary are
+not hidden by that lint and remain inventory.
 
 ## Parser/fixture candidates
 
@@ -46,7 +49,8 @@ boundaries. “No C/C++ engine” is therefore maintained without claiming an al
 - Parser unsafe is never placed in the privileged storage process by this profile.
 - The JPEG SIMD source is not reachable under selected features and must stay disabled.
 - Argon2 memory/pointer code and platform entropy are the principal privileged dependency
-  exceptions; they need upstream-vector, Miri/sanitizer and failure-injection evidence.
+  exceptions. T-11 covers real fixed-profile execution and injected boundary failures; upstream
+  vectors and supported sanitizer/Miri campaigns remain T-39 hardening and T-41 review evidence.
 - ZIP/TAR write APIs are fixture-only. Production workers expose bounded readers and validated
   outputs, not archive filesystem extraction.
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/uste-testkit", "crates/uste-types"]
+members = ["crates/uste-crypto", "crates/uste-testkit", "crates/uste-types"]
 exclude = [
     "experiments/content-fixtures",
     "experiments/dependency-audit",

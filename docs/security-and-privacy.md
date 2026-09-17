@@ -63,7 +63,9 @@ format, object role, epoch and record identifiers as appropriate authenticated c
 Public framing and size/timing leakage must be documented; encryption does not hide everything.
 
 Decision 0005 specifies random XChaCha nonces, distinct derivation contexts and restore/clone/
-rotation rules across process restarts, partial writes, backups and object rewriting. Tests must
+rotation rules across process restarts, partial writes, backups and object rewriting. Decision
+0013 fixes the implemented envelope bytes, complete authenticated context, 1,048,576-nonce writer
+session bound, fixed-cost portable recovery wrapper and trusted adapter boundary. Tests must
 exercise those rules rather than substitute a resettable counter under a reused key.
 Define unlock/lock, OS-keystore integration, recovery credentials, key loss, export keys,
 zeroization limits, swap/core-dump behavior, and operator-controlled rotation.
