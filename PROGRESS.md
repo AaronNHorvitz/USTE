@@ -2,9 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `00d0b1a` (T-12 I/O capability and deterministic fault harness).
-T-13 journal/recovery work is in progress in the current unbound increment. Review was performed by
-Codex agents and does not represent independent external security certification.
+Latest reviewed implementation: `65b0ed0` (partial T-13 encrypted journal/recovery foundation;
+T-13 remains open). Review was performed by Codex agents and does not represent independent
+external security certification.
 
 ## Completed this increment
 

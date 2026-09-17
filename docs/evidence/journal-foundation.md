@@ -2,6 +2,13 @@
 
 Date: 2026-09-17 · scope: partial T-13 evidence, not task completion or production qualification
 
+Reviewed implementation: commit `65b0ed023799585de0c52f09c8b8aa5e7fb7d4f5` · tree
+`456e7cb632a62d3f0dada1ca61dcab476b2efb4b`. Two read-only Codex agent audits compared the
+implementation, recovery ordering, Linux capability boundary, tests and claims with Decisions
+0004/0013/0014/0015, FR-03 and T-13. Findings were corrected before the recorded commit, and the
+final targeted review found no high-severity correctness or security blocker. This is automated
+implementation review, not independent recovery or security assessment.
+
 ## Implemented
 
 - Decision 0015 format-1.0 encrypted manifest, certificate-log header, segment headers, exact opaque
