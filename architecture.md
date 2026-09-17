@@ -170,6 +170,12 @@ versioned state profiles backed by
 encrypted scratch runs, bounded overlays/tombstones and affected-closure validation; it does not
 silently reinterpret the frozen current-graph projection as authoritative mutable state.
 
+Decision 0029 introduces `graph-state-v1` as a separate complete derived-cache root over the
+existing encrypted immutable-run carrier. It binds all current/history and derived families to the
+exact certificate, reducer profile and logical digest, but is admitted only by comparison with the
+live in-memory snapshot and cannot seed recovery. Journal authority and `graph-current-v1` remain
+unchanged.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

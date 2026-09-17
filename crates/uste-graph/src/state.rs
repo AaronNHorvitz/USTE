@@ -52,7 +52,7 @@ pub struct GraphSnapshot {
     scope: NamespaceRef,
     revision: Option<CommitRevision>,
     pub(crate) records: BTreeMap<RecordRef, Record>,
-    history: BTreeMap<RecordRef, Vec<Record>>,
+    pub(crate) history: BTreeMap<RecordRef, Vec<Record>>,
     pub(crate) outgoing: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
     pub(crate) incoming: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
     pub(crate) provenance: BTreeMap<RecordRef, BTreeSet<RecordRef>>,

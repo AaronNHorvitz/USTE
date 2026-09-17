@@ -69,6 +69,11 @@ candidates and reducer decoding remains full-memory. T-20 next requires new vers
 that persist those reverse references plus a genuine
 state-larger-than-memory BM-06 path before running the qualifying BM-01/BM-06 protocols.
 
+Decision 0029 freezes the complete `graph-state-v1` family/key/value contract and publishes fully
+scrubbed certificate-bound roots from the current snapshot. This is format/root groundwork, not a
+disk-backed reducer: construction and semantic admission still traverse full in-memory state and no
+root recovery reader exists yet.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

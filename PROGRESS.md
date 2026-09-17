@@ -3,11 +3,11 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `a1190ec` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
-deterministic benchmark-fixture foundations and bounded graph transaction deltas. The current
-Decision 0028 increment adds incremental target/owner reverse dependencies and removes graph
-deletion's total-record scan. T-20 remains open pending disk-backed larger-than-memory reducer state
-and qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
+through `cd47e48` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+deterministic benchmark-fixture foundations, bounded graph deltas and reverse dependencies. The
+current Decision 0029 increment adds the distinct complete certificate-anchored `graph-state-v1`
+derived root. T-20 remains open pending root-based larger-than-memory reducer recovery and
+qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
 independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
@@ -213,6 +213,16 @@ unverified external distribution prerequisite.
   rather than scanning unrelated records. Regressions cover added/removed property references,
   accepted/proposed/retracted status changes, exact cascade and duplicate-mutation ordering, nested
   duplicate role aggregation and rejected-prepare atomicity.
+- Added Decision 0029 and the pinned `graph-state-v1` profile: metadata, current records, complete
+  record history, outgoing/incoming adjacency, provenance, reverse references and current/policy
+  history stream into at most eight encrypted immutable runs under an exact certificate/root bind.
+  Metadata offsets and all reverse kind/state/role codes are literal acceptance data.
+- State-root publication independently verifies produced family counts/digests; admission compares
+  the exact live scope/revision/logical digest, rejects self-consistent wrong metadata, fully scrubs
+  pages, survives encrypted restart and becomes stale after the next commit. It remains optional and
+  cannot construct reducer state or change journal authority. A canonical fixture pins every
+  nonempty family key/value/count and seven run digests; focused agent re-review found no remaining
+  high- or medium-severity issue.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -284,12 +294,12 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 242 workspace tests including 74 uste-storage, 13
-# uste-crypto, 33 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 245 workspace tests including 74 uste-storage, 13
+# uste-crypto, 36 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 10 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 33 passed; 0 failed
+# 36 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -357,8 +367,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with new versioned disk-backed state profiles that persist the reverse map, ingest
-deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
+Continue T-20 with bounded full-run state reads, scratch merge, root-based graph reconstruction,
+ingest deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
 BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's remaining VT gaps and
 BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered

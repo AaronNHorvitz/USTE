@@ -2,10 +2,11 @@ use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
 use uste_graph::{
-    AdjacencyDirection, AssertionAction, Expected, GraphDiskError, GraphState, GraphTransaction,
-    NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, Record, ValidTime,
-    disk_adjacent_ids, disk_record, disk_supported_ids, encode_transaction,
-    load_current_graph_index_roots, publish_current_graph_index, scrub_current_graph_index,
+    AdjacencyDirection, AssertionAction, Expected, GRAPH_STATE_PROFILE_V1, GraphDiskError,
+    GraphState, GraphTransaction, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation,
+    Record, ValidTime, disk_adjacent_ids, disk_record, disk_supported_ids, encode_transaction,
+    load_current_graph_index_roots, load_graph_state_roots, publish_current_graph_index,
+    publish_graph_state_root, scrub_current_graph_index, scrub_graph_state_root,
 };
 use uste_storage::{
     ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexRootInput, PageCache,
@@ -228,6 +229,51 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
     ));
 
     publish_current_graph_index(&mut coordinator, &mut filesystem, &snapshot).unwrap();
+    let state_publication =
+        publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
+    let state_roots = load_graph_state_roots(&coordinator, &mut filesystem, &snapshot).unwrap();
+    assert_eq!(state_roots.len(), 1);
+    assert_eq!(state_roots[0].generation(), state_publication.generation);
+    let mut state_cache = PageCache::new(INDEX_PAGE_BYTES * 2).unwrap();
+    let state_scrub = scrub_graph_state_root(
+        &coordinator,
+        &mut filesystem,
+        &state_roots[0],
+        &mut state_cache,
+    )
+    .unwrap();
+    assert_eq!(state_scrub.runs, 7);
+    let (state_revision, state_certificate_digest) =
+        coordinator.checkpoint_anchor().unwrap().unwrap();
+    let wrong_state_run = coordinator
+        .publish_index_run(
+            &mut filesystem,
+            state_revision,
+            GRAPH_STATE_PROFILE_V1,
+            1,
+            [IndexEntry {
+                key: b"graph-state-v1".to_vec(),
+                value: b"wrong".to_vec(),
+            }],
+        )
+        .unwrap();
+    coordinator
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope: scope(),
+                revision: state_revision,
+                certificate_digest: state_certificate_digest,
+                reducer_profile: GraphState::REDUCER_PROFILE,
+                logical_state_digest: GraphState::logical_state_digest(&snapshot).unwrap(),
+                index_profile: GRAPH_STATE_PROFILE_V1,
+            },
+            &[wrong_state_run],
+        )
+        .unwrap();
+    let state_roots = load_graph_state_roots(&coordinator, &mut filesystem, &snapshot).unwrap();
+    assert_eq!(state_roots.len(), 1);
+    assert_eq!(state_roots[0].generation(), state_publication.generation);
     // A self-consistent encrypted root may still be semantically wrong. Publish one with the
     // exact journal/state anchors but an incorrect mandatory metadata entry; graph admission must
     // independently retain only the projection that matches the frozen reference snapshot.
@@ -329,6 +375,9 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
     let restarted_roots =
         load_current_graph_index_roots(&coordinator, &mut filesystem, &restarted).unwrap();
     assert_eq!(restarted_roots.len(), 1);
+    let restarted_state_roots =
+        load_graph_state_roots(&coordinator, &mut filesystem, &restarted).unwrap();
+    assert_eq!(restarted_state_roots.len(), 1);
     cache.clear();
     assert_eq!(
         disk_record(
@@ -363,6 +412,20 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
             .unwrap()
             .is_empty()
     );
+    assert!(
+        load_graph_state_roots(&coordinator, &mut filesystem, &newer)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        scrub_graph_state_root(
+            &coordinator,
+            &mut filesystem,
+            &restarted_state_roots[0],
+            &mut state_cache,
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
     assert!(matches!(
         disk_record(
             &coordinator,

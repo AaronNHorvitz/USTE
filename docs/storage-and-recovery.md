@@ -175,6 +175,12 @@ in-memory target/owner reverse map, so graph delete reads target fanout plus tra
 instead of all records. A new versioned state profile must persist that map and remove the remaining
 materialization assumptions; frozen `graph-current-v1` is not mutated. BM-06 remains unqualified.
 
+Decision 0029 adds a separate `graph-state-v1` optional root containing metadata, current records,
+record history, adjacency, provenance, reverse references and policy history. Publication and load
+independently reproduce every run digest from the exact live snapshot and bind the root to the
+current journal certificate. It is not a recovery seed or second authority; bounded full-run reads,
+scratch merge and root-based reducer reconstruction remain future T-20 work.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

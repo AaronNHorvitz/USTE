@@ -126,6 +126,11 @@ to target fanout plus transaction changes instead of all records. Explicit snaps
 decoding and ingest writes remain full-state boundaries, and reverse fanout has no accepted
 aggregate cap, so T-20 and both qualifying benchmarks remain open.
 
+Decision 0029 freezes and implements the distinct certificate-anchored `graph-state-v1` derived
+root with complete current/history, adjacency, provenance, reverse and policy families. Admission
+requires the exact live snapshot and fully scrubbed encrypted pages; it neither seeds recovery nor
+becomes commit authority. Full-memory publication/admission and bounded recovery remain open.
+
 ## Release gates
 
 | Gate | Required outcome |

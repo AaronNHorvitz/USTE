@@ -7,6 +7,7 @@ mod disk;
 mod query;
 mod record;
 mod state;
+mod state_disk;
 
 pub use codec::{
     GraphCodecError, decode_stored_record, decode_transaction, encode_stored_record,
@@ -27,4 +28,8 @@ pub use record::{
 pub use state::{
     AdjacencyDirection, GraphError, GraphSnapshot, GraphState, MAX_TRANSACTION_OPERATIONS,
     MAX_TRANSACTION_REFERENCES, MAX_TRAVERSAL_RESULTS, MAX_TRAVERSAL_VISITS,
+};
+pub use state_disk::{
+    DerivedGraphStateRoot, GRAPH_STATE_PROFILE_V1, load_graph_state_roots,
+    publish_graph_state_root, scrub_graph_state_root,
 };
