@@ -417,6 +417,188 @@ fn exact_declared_cascade_retracts_edge_and_delete_conflicts_are_atomic() {
 }
 
 #[test]
+fn delete_uses_transaction_overlay_reverse_dependencies() {
+    let scope = scope(22);
+    let target = record(scope, 1);
+    let owner = record(scope, 2);
+    let mut removed = GraphState::new(scope);
+    apply(
+        &mut removed,
+        &GraphTransaction::new(
+            scope,
+            vec![
+                create_entity(target),
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Entity(NewEntity {
+                        id: owner,
+                        entity_type: text("owner"),
+                        schema_version: 1,
+                        properties: Value::RecordRef(target),
+                    }),
+                },
+            ],
+        ),
+        1,
+    );
+    apply(
+        &mut removed,
+        &GraphTransaction::new(
+            scope,
+            vec![
+                Operation::ReplaceEntity {
+                    target: owner,
+                    expected: Expected::Version(RecordVersion::FIRST),
+                    properties: Value::Null,
+                },
+                Operation::DeleteEntity {
+                    target,
+                    expected: Expected::Version(RecordVersion::FIRST),
+                    policy: DeletePolicy::Reject,
+                    affected: Vec::new(),
+                },
+            ],
+        ),
+        2,
+    );
+    let snapshot = removed.snapshot();
+    let Record::Entity(target_record) = snapshot.record(target).unwrap() else {
+        panic!("entity")
+    };
+    assert_eq!(
+        target_record.lifecycle,
+        uste_graph::EntityLifecycle::Deleted
+    );
+    snapshot.validate_derived_indexes().unwrap();
+
+    let mut added = GraphState::new(scope);
+    apply(
+        &mut added,
+        &GraphTransaction::new(scope, vec![create_entity(target), create_entity(owner)]),
+        1,
+    );
+    let before = added.snapshot();
+    let add_then_delete = GraphTransaction::new(
+        scope,
+        vec![
+            Operation::ReplaceEntity {
+                target: owner,
+                expected: Expected::Version(RecordVersion::FIRST),
+                properties: Value::RecordRef(target),
+            },
+            Operation::DeleteEntity {
+                target,
+                expected: Expected::Version(RecordVersion::FIRST),
+                policy: DeletePolicy::Reject,
+                affected: Vec::new(),
+            },
+        ],
+    );
+    assert_eq!(
+        added.prepare_transaction(&add_then_delete, CommitRevision::new(2).unwrap()),
+        Err(GraphError::DeleteRestricted {
+            record: target,
+            dependents: 1,
+        })
+    );
+    assert_eq!(added.snapshot(), before);
+}
+
+#[test]
+fn delete_observes_same_transaction_claim_status_changes() {
+    let scope = scope(23);
+    let left = record(scope, 1);
+    let right = record(scope, 2);
+    let evidence = record(scope, 3);
+    let relationship = record(scope, 4);
+    let mut state = GraphState::new(scope);
+    apply(
+        &mut state,
+        &GraphTransaction::new(
+            scope,
+            vec![
+                create_entity(left),
+                create_entity(right),
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Evidence(NewEvidence {
+                        id: evidence,
+                        digest: [0x23; 32],
+                        locator: text("source:overlay-status"),
+                    }),
+                },
+                Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Relationship(NewRelationship {
+                        id: relationship,
+                        from: left,
+                        to: right,
+                        relationship_type: text("depends"),
+                        properties: Value::Null,
+                        evidence: vec![evidence],
+                        valid_time: ValidTime::Unknown,
+                    }),
+                },
+            ],
+        ),
+        1,
+    );
+    let accept = Operation::ActOnRelationship {
+        target: relationship,
+        expected: Expected::Version(RecordVersion::FIRST),
+        action: AssertionAction::Accept,
+        correction: None,
+        correction_expected: None,
+    };
+    let delete = |affected| Operation::DeleteEntity {
+        target: right,
+        expected: Expected::Version(RecordVersion::FIRST),
+        policy: DeletePolicy::CascadeAndRetract {
+            maximum_affected: 1,
+        },
+        affected,
+    };
+    assert_eq!(
+        state.prepare_transaction(
+            &GraphTransaction::new(scope, vec![accept.clone(), delete(Vec::new())]),
+            CommitRevision::new(2).unwrap(),
+        ),
+        Err(GraphError::CascadeDeclarationChanged)
+    );
+    assert_eq!(
+        state.prepare_transaction(
+            &GraphTransaction::new(scope, vec![accept.clone(), delete(vec![relationship])]),
+            CommitRevision::new(2).unwrap(),
+        ),
+        Err(GraphError::DuplicateMutation(relationship))
+    );
+    apply(&mut state, &GraphTransaction::new(scope, vec![accept]), 2);
+    apply(
+        &mut state,
+        &GraphTransaction::new(
+            scope,
+            vec![
+                Operation::ActOnRelationship {
+                    target: relationship,
+                    expected: Expected::Version(RecordVersion::new(2).unwrap()),
+                    action: AssertionAction::Retract,
+                    correction: None,
+                    correction_expected: None,
+                },
+                Operation::DeleteEntity {
+                    target: right,
+                    expected: Expected::Version(RecordVersion::FIRST),
+                    policy: DeletePolicy::Reject,
+                    affected: Vec::new(),
+                },
+            ],
+        ),
+        3,
+    );
+    state.snapshot().validate_derived_indexes().unwrap();
+}
+
+#[test]
 fn authorization_requirements_cover_targets_history_references_and_cascade_mutations() {
     let scope = scope(5);
     let target = record(scope, 1);

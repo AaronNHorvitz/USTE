@@ -121,8 +121,10 @@ Decision 0027 removes full graph snapshot cloning, full-state validation and ful
 rebuilds from ordinary successful graph transactions. Preparation retains only ordered before/after
 changes and validates them against a merged view; publication updates history and index
 contributions incrementally without changing canonical bytes or the frozen current projection.
-Explicit snapshots, checkpoint decoding, ingest writes and graph deletion scans remain full-state
-boundaries, so T-20 and both qualifying benchmarks remain open.
+Decision 0028 adds incremental reverse dependencies and makes graph delete discovery proportional
+to target fanout plus transaction changes instead of all records. Explicit snapshots, checkpoint
+decoding and ingest writes remain full-state boundaries, and reverse fanout has no accepted
+aggregate cap, so T-20 and both qualifying benchmarks remain open.
 
 ## Release gates
 

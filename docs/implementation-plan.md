@@ -63,9 +63,10 @@ contract. Its content-free
 manifest explicitly is not engine benchmark evidence. Opaque checkpoint candidates can now be
 authenticated and streamed without a complete transport buffer, but reducer decoding and
 Decision 0027 replaces graph prepared snapshots with ordered before/after deltas, changed-record
-validation and incremental derived-index publication. Graph deletion still scans the merged record
-set, ingest writes still clone full candidates and reducer decoding remains full-memory. T-20 next
-requires new versioned state profiles with general reverse references plus a genuine
+validation and incremental derived-index publication. Decision 0028 adds the general in-memory
+reverse dependencies and removes deletion's full-record scan. Ingest writes still clone full
+candidates and reducer decoding remains full-memory. T-20 next requires new versioned state profiles
+that persist those reverse references plus a genuine
 state-larger-than-memory BM-06 path before running the qualifying BM-01/BM-06 protocols.
 
 ## Architectural decomposition

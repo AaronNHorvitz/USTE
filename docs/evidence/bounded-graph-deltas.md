@@ -24,6 +24,6 @@ cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 ```
 
 This evidence does not claim a disk-backed graph reducer, bounded checkpoint decoding or T-20
-completion. Entity deletion still scans retained records, and explicit snapshots still clone the
-full in-memory state. The next profile needs a general reverse-reference family before deletion can
-use bounded prefix reads.
+completion. Decision 0028 subsequently replaces the entity-delete total-record scan with an
+in-memory reverse-dependency target bucket. Explicit snapshots still clone the full in-memory state,
+and the next profile must persist that reverse family before recovery can use bounded prefix reads.

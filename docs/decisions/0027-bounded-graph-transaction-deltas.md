@@ -32,7 +32,8 @@ infallible and does not rebuild the full indexes. Accepted relationships contrib
 assertion and relationship evidence contributes provenance in every lifecycle state. Canonical
 request, result, checkpoint and `graph-current-v1` bytes and the reducer profile do not change.
 
-Entity deletion still scans the merged graph because outgoing/incoming/provenance do not cover all
+At this decision boundary, entity deletion still scanned the merged graph because
+outgoing/incoming/provenance did not cover all
 dependencies. The scan counts accepted and proposed claims plus active-entity property references
 without collecting a graph-sized dependent list. A cascade is accepted only when its bounded,
 strictly sorted declared set exactly equals the accepted dependencies, after which only those
@@ -43,7 +44,8 @@ records enter the overlay.
 Successful non-delete preparation and publication are proportional to transaction changes rather
 than retained record/index count. Explicit snapshot/checkpoint capture still clones or materializes
 the full state, checkpoint decoding remains full-memory, and ingest retains its clone-based
-candidate. Deletion remains an O(total records) scan.
+candidate. Decision 0028 subsequently replaces deletion's total-record scan with an incrementally
+maintained reverse-dependency target bucket plus transaction-overlay reconciliation.
 
 Publication performs ordinary Rust collection insertions after journal durability. Their logical
 inputs are already prepared and cannot return a domain error; memory exhaustion follows the

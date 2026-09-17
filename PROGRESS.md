@@ -3,12 +3,12 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `ad1522e` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport
-and deterministic benchmark-fixture foundations. The current Decision 0027 increment removes
-full-state graph prepare/publish clones and rebuilds with exact bounded transaction deltas. T-20
-remains open pending disk-backed larger-than-memory reducer state and qualifying BM-01/BM-06
-results. Review was performed by Codex agents and does not represent independent external security
-certification.
+through `a1190ec` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+deterministic benchmark-fixture foundations and bounded graph transaction deltas. The current
+Decision 0028 increment adds incremental target/owner reverse dependencies and removes graph
+deletion's total-record scan. T-20 remains open pending disk-backed larger-than-memory reducer state
+and qualifying BM-01/BM-06 results. Review was performed by Codex agents and does not represent
+independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
 BM-01/BM-06 results depend on T-20, while T-20 incorrectly depended on T-19. Decision 0024 preserves
@@ -206,6 +206,13 @@ unverified external distribution prerequisite.
   the prior canonical result digest and a full-rebuild reference snapshot, and rejects a stale
   same-base prepared delta without mutation. Cascade retraction removes adjacency but retains
   provenance. Final agent review found no remaining high- or medium-severity finding.
+- Added Decision 0028 and an incrementally maintained reverse-dependency map with explicit owner
+  kind/state/version/revision and ORed roles for entity, assertion and relationship references.
+  Checkpoint decode rebuilds it and independent derived-index validation compares it.
+- Delete now reconciles the target's base bucket with earlier changes in the same transaction,
+  rather than scanning unrelated records. Regressions cover added/removed property references,
+  accepted/proposed/retracted status changes, exact cascade and duplicate-mutation ordering, nested
+  duplicate role aggregation and rejected-prepare atomicity.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -277,12 +284,12 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 239 workspace tests including 74 uste-storage, 13
-# uste-crypto, 30 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 242 workspace tests including 74 uste-storage, 13
+# uste-crypto, 33 uste-graph, 4 uste-ingest, 26 uste-spatial, 23 uste-types, 15 uste-time,
 # 10 uste-replay, 14 uste-testkit, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/content/fixture tests and 10 isolated T-20 fixture tests pass
 cargo test -p uste-graph --all-targets --locked --offline
-# 30 passed; 0 failed
+# 33 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -326,7 +333,8 @@ remaining mixed workload have not passed.
   Checkpoint discovery and seeded open each authenticate the journal, and publication can now stream
   with a one-new-payload-chunk buffer, and checkpoint transport can recover through a bounded chunk
   stream. Ordinary graph prepare/publish is now change-bounded, but checkpoint decoding, explicit
-  snapshots, graph deletion scans and composite ingest writes remain full-state boundaries.
+  snapshots and composite ingest writes remain full-state boundaries. Reverse dependencies add an
+  in-memory structure with no accepted aggregate/per-target fanout cap.
   BM-01/BM-06 have not run. Graph policy is durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
@@ -349,8 +357,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 with new versioned disk-backed state profiles, general reverse-reference runs,
-ingest deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
+Continue T-20 with new versioned disk-backed state profiles that persist the reverse map, ingest
+deltas and larger-than-memory reducer recovery, then connect the pinned fixture to exact
 BM-01 and define/run BM-06's 10-million-event protocol. Then return to T-19's remaining VT gaps and
 BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered

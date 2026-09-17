@@ -56,8 +56,18 @@ pub struct GraphSnapshot {
     pub(crate) outgoing: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
     pub(crate) incoming: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
     pub(crate) provenance: BTreeMap<RecordRef, BTreeSet<RecordRef>>,
-    policy: Option<NamespacePolicy>,
-    policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
+    pub(crate) reverse: BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
+    pub(crate) policy: Option<NamespacePolicy>,
+    pub(crate) policy_history: BTreeMap<CommitRevision, NamespacePolicy>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ReverseReference {
+    pub(crate) owner_kind: u8,
+    pub(crate) owner_state: u8,
+    pub(crate) roles: u16,
+    pub(crate) owner_version: RecordVersion,
+    pub(crate) owner_revision: CommitRevision,
 }
 
 impl GraphSnapshot {
@@ -216,6 +226,7 @@ impl GraphSnapshot {
         if rebuilt.outgoing == self.outgoing
             && rebuilt.incoming == self.incoming
             && rebuilt.provenance == self.provenance
+            && rebuilt.reverse == self.reverse
         {
             Ok(())
         } else {
@@ -241,6 +252,7 @@ impl GraphState {
                 outgoing: BTreeMap::new(),
                 incoming: BTreeMap::new(),
                 provenance: BTreeMap::new(),
+                reverse: BTreeMap::new(),
                 policy: None,
                 policy_history: BTreeMap::new(),
             },
@@ -298,7 +310,7 @@ impl GraphState {
             transaction.policy_mutation(),
         )?;
 
-        let mut records = RecordOverlay::new(&self.snapshot.records);
+        let mut records = RecordOverlay::new(&self.snapshot.records, &self.snapshot.reverse);
         let mut affected = BTreeSet::new();
         let mut protected_correction_targets = BTreeSet::new();
         for operation in transaction.operations() {
@@ -367,13 +379,18 @@ impl GraphState {
 /// Untouched records remain borrowed from the last journal-certified state.
 struct RecordOverlay<'a> {
     base: &'a BTreeMap<RecordRef, Record>,
+    base_reverse: &'a BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
     changed: BTreeMap<RecordRef, Record>,
 }
 
 impl<'a> RecordOverlay<'a> {
-    fn new(base: &'a BTreeMap<RecordRef, Record>) -> Self {
+    fn new(
+        base: &'a BTreeMap<RecordRef, Record>,
+        base_reverse: &'a BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
+    ) -> Self {
         Self {
             base,
+            base_reverse,
             changed: BTreeMap::new(),
         }
     }
@@ -397,12 +414,46 @@ impl<'a> RecordOverlay<'a> {
         self.changed.insert(id, record);
     }
 
-    fn values(&self) -> impl Iterator<Item = &Record> {
-        self.base
-            .iter()
-            .filter(|(id, _)| !self.changed.contains_key(id))
-            .map(|(_, record)| record)
-            .chain(self.changed.values())
+    fn for_each_reverse_reference(
+        &self,
+        target: RecordRef,
+        mut visitor: impl FnMut(RecordRef, ReverseReference),
+    ) {
+        let mut base = self
+            .base_reverse
+            .get(&target)
+            .into_iter()
+            .flat_map(|owners| owners.iter())
+            .peekable();
+        let mut changed = self.changed.iter().peekable();
+        loop {
+            let base_owner = base.peek().map(|(owner, _)| **owner);
+            let changed_owner = changed.peek().map(|(owner, _)| **owner);
+            match (base_owner, changed_owner) {
+                (Some(base_owner), Some(changed_owner)) if base_owner < changed_owner => {
+                    let (_, reference) = base.next().expect("peeked base reverse reference");
+                    visitor(base_owner, *reference);
+                }
+                (Some(base_owner), Some(changed_owner)) if base_owner == changed_owner => {
+                    let _ = base.next();
+                    let (_, record) = changed.next().expect("peeked changed record");
+                    if let Some(reference) = reverse_reference_for_target(record, target) {
+                        visitor(changed_owner, reference);
+                    }
+                }
+                (_, Some(changed_owner)) => {
+                    let (_, record) = changed.next().expect("peeked changed record");
+                    if let Some(reference) = reverse_reference_for_target(record, target) {
+                        visitor(changed_owner, reference);
+                    }
+                }
+                (Some(base_owner), None) => {
+                    let (_, reference) = base.next().expect("peeked base reverse reference");
+                    visitor(base_owner, *reference);
+                }
+                (None, None) => break,
+            }
+        }
     }
 
     fn into_changes(self) -> Vec<RecordChange> {
@@ -837,6 +888,7 @@ fn decode_graph_checkpoint(
         outgoing: BTreeMap::new(),
         incoming: BTreeMap::new(),
         provenance: BTreeMap::new(),
+        reverse: BTreeMap::new(),
         policy,
         policy_history,
     };
@@ -1938,42 +1990,34 @@ fn delete_entity(
     let mut proposed = 0_usize;
     let mut entity_references = 0_usize;
     let mut accepted_are_declared = true;
-    for record in records.values() {
-        let (is_accepted, is_proposed) = match record {
-            Record::Assertion(assertion)
-                if assertion.subject == target || value_contains(&assertion.object, target) =>
-            {
-                (
-                    assertion.status == AssertionStatus::Accepted,
-                    assertion.status == AssertionStatus::Proposed,
-                )
+    records.for_each_reverse_reference(target, |owner, reference| {
+        let claim_roles = match reference.owner_kind {
+            REVERSE_KIND_ASSERTION => {
+                REVERSE_ROLE_ASSERTION_SUBJECT | REVERSE_ROLE_ASSERTION_OBJECT
             }
-            Record::Relationship(relationship)
-                if relationship.from == target
-                    || relationship.to == target
-                    || value_contains(&relationship.properties, target) =>
-            {
-                (
-                    relationship.status == AssertionStatus::Accepted,
-                    relationship.status == AssertionStatus::Proposed,
-                )
+            REVERSE_KIND_RELATIONSHIP => {
+                REVERSE_ROLE_RELATIONSHIP_FROM
+                    | REVERSE_ROLE_RELATIONSHIP_TO
+                    | REVERSE_ROLE_RELATIONSHIP_PROPERTY
             }
-            Record::Entity(entity)
-                if entity.id != target
-                    && entity.lifecycle == EntityLifecycle::Active
-                    && value_contains(&entity.properties, target) =>
-            {
-                entity_references = entity_references.saturating_add(1);
-                (false, false)
-            }
-            _ => (false, false),
+            _ => 0,
         };
+        let is_claim_dependency = reference.roles & claim_roles != 0;
+        let is_accepted = is_claim_dependency && reference.owner_state == REVERSE_STATE_ACCEPTED;
+        let is_proposed = is_claim_dependency && reference.owner_state == REVERSE_STATE_PROPOSED;
+        if reference.owner_kind == REVERSE_KIND_ENTITY
+            && reference.owner_state == REVERSE_STATE_ACTIVE
+            && reference.roles & REVERSE_ROLE_ENTITY_PROPERTY != 0
+            && owner != target
+        {
+            entity_references = entity_references.saturating_add(1);
+        }
         if is_accepted {
             accepted = accepted.saturating_add(1);
-            accepted_are_declared &= declared.binary_search(&record.id()).is_ok();
+            accepted_are_declared &= declared.binary_search(&owner).is_ok();
         }
         proposed = proposed.saturating_add(usize::from(is_proposed));
-    }
+    });
     let dependents = accepted.saturating_add(entity_references);
 
     match policy {
@@ -2238,6 +2282,7 @@ fn rebuild_indexes(snapshot: &mut GraphSnapshot) {
     snapshot.outgoing.clear();
     snapshot.incoming.clear();
     snapshot.provenance.clear();
+    snapshot.reverse.clear();
     for record in snapshot.records.values() {
         match record {
             Record::Relationship(relationship) => {
@@ -2272,6 +2317,7 @@ fn rebuild_indexes(snapshot: &mut GraphSnapshot) {
             }
             _ => {}
         }
+        add_reverse_contributions(&mut snapshot.reverse, record);
     }
 }
 
@@ -2293,6 +2339,7 @@ fn remove_index_contributions(snapshot: &mut GraphSnapshot, record: &Record) {
         }
         _ => {}
     }
+    remove_reverse_contributions(&mut snapshot.reverse, record);
 }
 
 fn add_index_contributions(snapshot: &mut GraphSnapshot, record: &Record) {
@@ -2328,6 +2375,171 @@ fn add_index_contributions(snapshot: &mut GraphSnapshot, record: &Record) {
             }
         }
         _ => {}
+    }
+    add_reverse_contributions(&mut snapshot.reverse, record);
+}
+
+pub(crate) const REVERSE_KIND_ENTITY: u8 = 1;
+pub(crate) const REVERSE_KIND_ASSERTION: u8 = 2;
+pub(crate) const REVERSE_KIND_RELATIONSHIP: u8 = 3;
+
+pub(crate) const REVERSE_STATE_ACTIVE: u8 = 1;
+pub(crate) const REVERSE_STATE_DELETED: u8 = 2;
+pub(crate) const REVERSE_STATE_PROPOSED: u8 = 1;
+pub(crate) const REVERSE_STATE_ACCEPTED: u8 = 2;
+pub(crate) const REVERSE_STATE_REJECTED: u8 = 3;
+pub(crate) const REVERSE_STATE_DISPUTED: u8 = 4;
+pub(crate) const REVERSE_STATE_SUPERSEDED: u8 = 5;
+pub(crate) const REVERSE_STATE_RETRACTED: u8 = 6;
+pub(crate) const REVERSE_STATE_EXPIRED: u8 = 7;
+
+pub(crate) const REVERSE_ROLE_ENTITY_PROPERTY: u16 = 1 << 0;
+pub(crate) const REVERSE_ROLE_ASSERTION_SUBJECT: u16 = 1 << 1;
+pub(crate) const REVERSE_ROLE_ASSERTION_OBJECT: u16 = 1 << 2;
+pub(crate) const REVERSE_ROLE_RELATIONSHIP_FROM: u16 = 1 << 3;
+pub(crate) const REVERSE_ROLE_RELATIONSHIP_TO: u16 = 1 << 4;
+pub(crate) const REVERSE_ROLE_RELATIONSHIP_PROPERTY: u16 = 1 << 5;
+pub(crate) const REVERSE_ROLE_EVIDENCE: u16 = 1 << 6;
+pub(crate) const REVERSE_ROLE_CORRECTION_OF: u16 = 1 << 7;
+
+fn record_reverse_references(record: &Record) -> BTreeMap<RecordRef, ReverseReference> {
+    let mut references = BTreeMap::new();
+    visit_record_references(record, &mut |target, roles| {
+        references
+            .entry(target)
+            .and_modify(|reference: &mut ReverseReference| reference.roles |= roles)
+            .or_insert_with(|| reverse_reference(record, roles));
+    });
+    references
+}
+
+fn reverse_reference_for_target(record: &Record, expected: RecordRef) -> Option<ReverseReference> {
+    let mut roles = 0_u16;
+    visit_record_references(record, &mut |target, role| {
+        if target == expected {
+            roles |= role;
+        }
+    });
+    (roles != 0).then(|| reverse_reference(record, roles))
+}
+
+fn reverse_reference(record: &Record, roles: u16) -> ReverseReference {
+    let (owner_kind, owner_state) = match record {
+        Record::Entity(entity) => (
+            REVERSE_KIND_ENTITY,
+            match entity.lifecycle {
+                EntityLifecycle::Active => REVERSE_STATE_ACTIVE,
+                EntityLifecycle::Deleted => REVERSE_STATE_DELETED,
+            },
+        ),
+        Record::Assertion(assertion) => (
+            REVERSE_KIND_ASSERTION,
+            reverse_assertion_state(assertion.status),
+        ),
+        Record::Relationship(relationship) => (
+            REVERSE_KIND_RELATIONSHIP,
+            reverse_assertion_state(relationship.status),
+        ),
+        Record::Evidence(_) => unreachable!("evidence records have no graph references"),
+    };
+    ReverseReference {
+        owner_kind,
+        owner_state,
+        roles,
+        owner_version: record.version(),
+        owner_revision: record.modified_revision(),
+    }
+}
+
+const fn reverse_assertion_state(status: AssertionStatus) -> u8 {
+    match status {
+        AssertionStatus::Proposed => REVERSE_STATE_PROPOSED,
+        AssertionStatus::Accepted => REVERSE_STATE_ACCEPTED,
+        AssertionStatus::Rejected => REVERSE_STATE_REJECTED,
+        AssertionStatus::Disputed => REVERSE_STATE_DISPUTED,
+        AssertionStatus::Superseded => REVERSE_STATE_SUPERSEDED,
+        AssertionStatus::Retracted => REVERSE_STATE_RETRACTED,
+        AssertionStatus::Expired => REVERSE_STATE_EXPIRED,
+    }
+}
+
+fn visit_record_references(record: &Record, visitor: &mut impl FnMut(RecordRef, u16)) {
+    match record {
+        Record::Entity(entity) => {
+            visit_value_references(&entity.properties, REVERSE_ROLE_ENTITY_PROPERTY, visitor);
+        }
+        Record::Evidence(_) => {}
+        Record::Assertion(assertion) => {
+            visitor(assertion.subject, REVERSE_ROLE_ASSERTION_SUBJECT);
+            visit_value_references(&assertion.object, REVERSE_ROLE_ASSERTION_OBJECT, visitor);
+            for evidence in &assertion.evidence {
+                visitor(*evidence, REVERSE_ROLE_EVIDENCE);
+            }
+            if let Some(previous) = assertion.correction_of {
+                visitor(previous, REVERSE_ROLE_CORRECTION_OF);
+            }
+        }
+        Record::Relationship(relationship) => {
+            visitor(relationship.from, REVERSE_ROLE_RELATIONSHIP_FROM);
+            visitor(relationship.to, REVERSE_ROLE_RELATIONSHIP_TO);
+            visit_value_references(
+                &relationship.properties,
+                REVERSE_ROLE_RELATIONSHIP_PROPERTY,
+                visitor,
+            );
+            for evidence in &relationship.evidence {
+                visitor(*evidence, REVERSE_ROLE_EVIDENCE);
+            }
+            if let Some(previous) = relationship.correction_of {
+                visitor(previous, REVERSE_ROLE_CORRECTION_OF);
+            }
+        }
+    }
+}
+
+fn visit_value_references(value: &Value, role: u16, visitor: &mut impl FnMut(RecordRef, u16)) {
+    match value {
+        Value::RecordRef(record) => visitor(*record, role),
+        Value::List(values) => {
+            for value in values.as_slice() {
+                visit_value_references(value, role, visitor);
+            }
+        }
+        Value::Map(values) => {
+            for (_, value) in values.as_slice() {
+                visit_value_references(value, role, visitor);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn add_reverse_contributions(
+    reverse: &mut BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
+    record: &Record,
+) {
+    for (target, reference) in record_reverse_references(record) {
+        reverse
+            .entry(target)
+            .or_default()
+            .insert(record.id(), reference);
+    }
+}
+
+fn remove_reverse_contributions(
+    reverse: &mut BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
+    record: &Record,
+) {
+    for target in record_reverse_references(record).into_keys() {
+        let remove_target = if let Some(owners) = reverse.get_mut(&target) {
+            owners.remove(&record.id());
+            owners.is_empty()
+        } else {
+            false
+        };
+        if remove_target {
+            reverse.remove(&target);
+        }
     }
 }
 
@@ -2380,21 +2592,6 @@ fn is_visible_record(record: &Record) -> bool {
     match record {
         Record::Entity(entity) => entity.lifecycle == EntityLifecycle::Active,
         _ => true,
-    }
-}
-
-fn value_contains(value: &Value, target: RecordRef) -> bool {
-    match value {
-        Value::RecordRef(record) => *record == target,
-        Value::List(values) => values
-            .as_slice()
-            .iter()
-            .any(|value| value_contains(value, target)),
-        Value::Map(values) => values
-            .as_slice()
-            .iter()
-            .any(|(_, value)| value_contains(value, target)),
-        _ => false,
     }
 }
 
@@ -2526,7 +2723,7 @@ impl std::error::Error for GraphError {}
 #[cfg(test)]
 mod delta_tests {
     use super::*;
-    use crate::NewEntity;
+    use crate::{NewEntity, NewEvidence};
     use uste_types::BoundedString;
 
     fn scope() -> NamespaceRef {
@@ -2674,6 +2871,83 @@ mod delta_tests {
         assert!(rejected.is_err());
         assert_eq!(state.snapshot(), published);
     }
+
+    #[test]
+    fn reverse_references_aggregate_roles_and_track_owner_state() {
+        let target = id(1);
+        let other = id(2);
+        let evidence = id(3);
+        let relationship = id(4);
+        let mut state = GraphState::new(scope());
+        let properties =
+            Value::list(vec![Value::RecordRef(target), Value::RecordRef(target)]).unwrap();
+        let prepared = state
+            .prepare_transaction(
+                &GraphTransaction::new(
+                    scope(),
+                    vec![
+                        entity(target),
+                        entity(other),
+                        Operation::Create {
+                            expected: Expected::Absent,
+                            record: NewRecord::Evidence(NewEvidence {
+                                id: evidence,
+                                digest: [0x94; 32],
+                                locator: BoundedString::new("reverse-source".to_owned()).unwrap(),
+                            }),
+                        },
+                        Operation::Create {
+                            expected: Expected::Absent,
+                            record: NewRecord::Relationship(NewRelationship {
+                                id: relationship,
+                                from: target,
+                                to: other,
+                                relationship_type: BoundedString::new("reverse-edge".to_owned())
+                                    .unwrap(),
+                                properties,
+                                evidence: vec![evidence],
+                                valid_time: crate::ValidTime::Unknown,
+                            }),
+                        },
+                    ],
+                ),
+                CommitRevision::FIRST,
+            )
+            .unwrap();
+        TransactionState::publish(&mut state, prepared);
+
+        let bucket = state.snapshot.reverse.get(&target).unwrap();
+        assert_eq!(bucket.len(), 1);
+        let reference = bucket.get(&relationship).unwrap();
+        assert_eq!(reference.owner_kind, REVERSE_KIND_RELATIONSHIP);
+        assert_eq!(reference.owner_state, REVERSE_STATE_PROPOSED);
+        assert_eq!(
+            reference.roles,
+            REVERSE_ROLE_RELATIONSHIP_FROM | REVERSE_ROLE_RELATIONSHIP_PROPERTY
+        );
+        assert_eq!(reference.owner_version, RecordVersion::FIRST);
+
+        let prepared = state
+            .prepare_transaction(
+                &GraphTransaction::new(
+                    scope(),
+                    vec![Operation::ActOnRelationship {
+                        target: relationship,
+                        expected: Expected::Version(RecordVersion::FIRST),
+                        action: AssertionAction::Accept,
+                        correction: None,
+                        correction_expected: None,
+                    }],
+                ),
+                CommitRevision::new(2).unwrap(),
+            )
+            .unwrap();
+        TransactionState::publish(&mut state, prepared);
+        let reference = state.snapshot.reverse[&target][&relationship];
+        assert_eq!(reference.owner_state, REVERSE_STATE_ACCEPTED);
+        assert_eq!(reference.owner_version, RecordVersion::new(2).unwrap());
+        assert_eq!(reference.owner_revision, CommitRevision::new(2).unwrap());
+    }
 }
 
 #[cfg(test)]
@@ -2710,6 +2984,7 @@ mod checkpoint_history_tests {
             outgoing: BTreeMap::new(),
             incoming: BTreeMap::new(),
             provenance: BTreeMap::new(),
+            reverse: BTreeMap::new(),
             policy: None,
             policy_history: BTreeMap::new(),
         }

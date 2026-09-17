@@ -85,6 +85,10 @@ disk-backed state root, but explicit snapshot/checkpoint decoding, ingest prepar
 delete scans remain full-state boundaries. See
 [`bounded-graph-deltas.md`](bounded-graph-deltas.md).
 
+Decision 0028 then adds the incrementally maintained target/owner reverse map and removes delete's
+full-record scan. The map remains in memory and is not yet part of a durable state profile; see
+[`reverse-dependency-index.md`](reverse-dependency-index.md).
+
 Index prefix scans can now yield entries to a fallible visitor under the existing shared result
 limits. The collecting and visitor forms return identical entries/statistics, and visitor failure
 stops after the first delivered entry in the regression.

@@ -170,10 +170,10 @@ owner/key context remains live. Consumers must discard partial decoded state if 
 sink fails. The legacy collecting API remains available. Current reducer decoders still materialize
 complete logical state. Decision 0027 removes the graph write-path clone/rebuild by preparing
 ordered before/after record deltas and updating derived-index contributions incrementally; ingest
-writes and explicit snapshots remain materialized. Graph delete still scans all retained records
-until a new versioned state profile adds general reverse-reference runs. That profile, not a
-mutation of frozen `graph-current-v1`, must remove the remaining assumptions before BM-06 can
-qualify.
+writes and explicit snapshots remain materialized. Decision 0028 adds an incrementally maintained
+in-memory target/owner reverse map, so graph delete reads target fanout plus transaction changes
+instead of all records. A new versioned state profile must persist that map and remove the remaining
+materialization assumptions; frozen `graph-current-v1` is not mutated. BM-06 remains unqualified.
 
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.

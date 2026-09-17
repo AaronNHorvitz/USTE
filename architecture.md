@@ -163,8 +163,9 @@ changing format-1.0 or `graph-current-v1`. The collecting APIs remain compatibil
 Decision 0027 changes graph write preparation to a bounded record overlay and publishes exact
 before/after contributions without rebuilding full indexes. Preconditions remain against the
 pre-transaction view and canonical formats remain unchanged. Ingest preparation and reducer
-decoding still materialize/clone complete state, while graph deletion scans the merged graph because
-the present index lacks general reverse references. The scalable design therefore uses new
+decoding still materialize/clone complete state. Decision 0028 adds a derived target/owner reverse
+map and transaction-overlay reconciliation, so graph deletion no longer scans unrelated records.
+The scalable design therefore uses new
 versioned state profiles backed by
 encrypted scratch runs, bounded overlays/tombstones and affected-closure validation; it does not
 silently reinterpret the frozen current-graph projection as authoritative mutable state.
