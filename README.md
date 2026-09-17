@@ -13,8 +13,8 @@ to persist game-world items, track real-world objects, or link items to imported
 observations. These are uses of the same storage, graph, space, time and physics capabilities.
 An item can link to a price record without USTE fetching that price from an external provider.
 
-**Status: R0 design ready; implementation has not started.** There is no database executable,
-supported parser, benchmark result, security certification, or production release yet.
+**Status: R0 design ready; T-08 workspace/quality foundation implemented.** There is no database
+executable, supported parser, benchmark result, security certification, or production release yet.
 The features below are requirements, not existing capabilities.
 
 ## Product direction
@@ -117,8 +117,9 @@ implementer to choose the most convenient interpretation.
 4. R3: local hardened-beta readiness with rich formats, disk spatial history, constrained contacts and lifecycle hardening.
 5. R4: production candidate with independent review and measured operating limits.
 
-There is not yet a database executable. The current R0 experiments and deterministic synthetic
-fixture generator are runnable using the [Fedora Kinoite development setup](docs/development-setup.md).
+There is not yet a database executable. The Rust workspace, current R0 experiments and
+deterministic synthetic fixture generator are runnable using the
+[Fedora Kinoite development setup](docs/development-setup.md).
 See [TASKS.md](TASKS.md) for gate status. Local production-format implementation is unblocked;
 external executable distribution remains prohibited until private vulnerability reporting is
 verified under T-62 and all applicable release requirements pass.

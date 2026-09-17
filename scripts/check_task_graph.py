@@ -65,12 +65,13 @@ def ancestors(task_id: str) -> set[str]:
     return result
 
 
-for required in ("T-06", "T-07", "T-08", "T-44", "T-62"):
+for required in ("T-06", "T-07", "T-08", "T-19", "T-29", "T-40", "T-44", "T-62"):
     if required not in dependencies:
         fail(f"required gate task {required} is absent")
 
-if "T-62" in ancestors("T-08"):
-    fail("T-62 must not block local implementation task T-08")
+for local_gate in ("T-08", "T-19", "T-29", "T-40"):
+    if "T-62" in ancestors(local_gate):
+        fail(f"T-62 must not block local implementation gate {local_gate}")
 if "T-62" not in ancestors("T-44"):
     fail("T-44 must transitively require distribution gate T-62")
 if "T-06" not in ancestors("T-07"):

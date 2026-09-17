@@ -1,9 +1,9 @@
 # Fedora Kinoite development setup
 
-This setup runs the current R0 experiments; it does **not** create a database executable or
-claim a supported release. Commands are pinned to Fedora 44, Rust 1.95.0 and cargo-deny 0.20.2,
-matching the first reference runner. Run development tools inside a Toolbox rather than
-layering packages onto the immutable host.
+This setup runs the Rust workspace foundation and current R0 experiments; it does **not** create
+a database executable or claim a supported release. Commands are pinned to Fedora 44, Rust
+1.95.0 and cargo-deny 0.20.2, matching the first reference runner. Run development tools inside
+a Toolbox rather than layering packages onto the immutable host.
 
 ## Create the Toolbox
 
@@ -32,6 +32,10 @@ cargo install cargo-deny --version 0.20.2 --locked --root .tools
 ## Reproduce current evidence
 
 ~~~bash
+bash scripts/check.sh
+CARGO_DENY_BIN=.tools/bin/cargo-deny bash scripts/check_supply_chain.sh
+
+# Individual R0 commands, when diagnosing a failure:
 rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors
 /tmp/uste-r0-vectors
 rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-storage-publication

@@ -1,7 +1,7 @@
 # Contributing
 
-The repository contains accepted R0 design evidence and development experiments, not a released
-or supported database executable. Reproduce them using
+The repository contains accepted R0 design evidence, a Rust workspace foundation and development
+experiments, not a released or supported database executable. Reproduce them using
 [the Fedora Kinoite setup](docs/development-setup.md).
 
 ## Work sequence and completion

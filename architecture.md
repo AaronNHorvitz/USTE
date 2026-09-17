@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.4 · 2026-09-17 · R0 design ready; production engine not implemented
+Database design draft 1.4 · 2026-09-17 · R0 design ready; workspace foundation implemented
 
 ## Component boundaries
 
@@ -36,7 +36,8 @@ See [application use cases](docs/application-use-cases.md).
 
 ## Proposed Rust workspace
 
-These are component boundaries, not existing directories or a fixed public API.
+`uste-types` now exists as the first workspace crate. The remaining rows are planned component
+boundaries, not claims of implemented directories or a fixed public API.
 
 | Crate | Responsibility |
 |---|---|

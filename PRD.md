@@ -2,9 +2,9 @@
 
 Version: database design draft 1.4 · Date: 2026-09-17
 
-Status: R0 design ready; implementation not started. Requirement and test identifiers below
-belong to this database design, not the archived simulation PRD. External executable
-distribution remains blocked by unverified private vulnerability reporting (T-62).
+Status: R0 design ready; T-08 workspace/quality foundation implemented. Requirement and test
+identifiers below belong to this database design, not the archived simulation PRD. External
+executable distribution remains blocked by unverified private vulnerability reporting (T-62).
 
 ## Purpose and users
 

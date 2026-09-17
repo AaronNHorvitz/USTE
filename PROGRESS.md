@@ -13,6 +13,9 @@ Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 - Added a task-graph check proving the 62-task graph is acyclic, T-08 does not inherit T-62,
   and R4 decision T-44 does inherit T-62. R2/R3 are explicitly local readiness gates and no
   executable distribution is allowed while T-62 is open.
+- Completed T-08 with a Rust 1.95.0/resolver-3 workspace, initial safe-Rust `uste-types` crate,
+  root lockfile, read-only CI, active-document/reference validation and reproducible quality/
+  supply-chain scripts. Excluded experiment workspaces retain their independent pinned locks.
 - Read the complete current requirement set, both accepted product decisions and every
   current domain specification. No applicable USTE `AGENTS.md` exists.
 - Preserved the clean starting worktree and created the requested branch from `be5f7a4`.
@@ -60,6 +63,10 @@ cargo fmt ... -- --check; rustfmt --check ...
 # success
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
+bash scripts/check.sh
+# workspace format/clippy/test/doc pass; docs=ok; task graph=ok; R0/fixture tests pass
+CARGO_DENY_BIN=/tmp/uste-gate-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
+# zero advisory/license/source errors; documented miniz_oxide duplicate warnings only
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
@@ -75,11 +82,12 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The Rust files are design-vector experiments, not a database executable or production format.
+- The workspace is a quality scaffold, not a database executable or production format. T-09
+  owns the first product types/codec and remains open.
 
 ## Next dependency-permitted work
 
-T-08 is unblocked: scaffold the root Rust workspace and quality automation, then implement T-09
-bounded canonical types/encoding against the frozen vectors. T-10 reference model, T-11 crypto
-boundary and T-12 I/O fault adapters follow T-09 in dependency order. T-62 remains independent
-and must not be represented as complete without owner-administered evidence.
+Implement T-09 bounded canonical types/encoding against a wire-complete v1 specification and
+independent literal vectors. T-10 reference model, T-11 crypto boundary and T-12 I/O fault
+adapters follow T-09 in dependency order. T-62 remains independent and must not be represented
+as complete without owner-administered evidence.
