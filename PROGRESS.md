@@ -14,6 +14,8 @@ Updated: 2026-09-16 · Branch: `codex/uste-implementation`
   corruption for the proposed commit frontier.
 - Resolved and compiled the pinned strict-profile dependency candidates; recorded a lockfile,
   native-link/license feasibility and the remaining unsafe/advisory review scope.
+- Added the `synthetic-v1` Rust fixture-generator kernel with strict seed parsing, domain
+  separation and a pinned BLAKE3 golden digest.
 - Recorded the exact external governance blocker; did not claim R0 or any release gate.
 
 ## Verification run
@@ -27,6 +29,8 @@ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-stor
 # 4 passed; 0 failed
 cargo build --manifest-path experiments/dependency-audit/Cargo.toml --locked --offline
 # success
+cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
+# 3 passed; 0 failed
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
@@ -40,8 +44,8 @@ lockfile audit or benchmark measurement exists yet.
   is outside this task's authority. T-07 and dependent R1 tasks remain open.
 - T-04 now has a resolved lock/native-link/license feasibility snapshot, but still needs
   reachable unsafe review, policy/advisory tooling and fixtures.
-- T-05 has all BM-01…13 manifest rows, but still needs deterministic generators and measured
-  results; targets are not evidence of achieved performance.
+- T-05 has all BM-01…13 manifest rows and a deterministic generator kernel, but benchmark
+  drivers/materializers and measured results remain; targets are not achieved performance.
 - The Rust files are design-vector experiments, not a database executable or production format.
 
 ## Next dependency-permitted work

@@ -71,6 +71,14 @@ wall clock. Exact sizes are BM-01 100k/1m; BM-03 10m events; BM-04 100k 4 KiB bl
 5% late, 1% corrected, 1% duplicates; BM-12 100/1k/10k bodies; BM-13 the documented world
 with 100k moving objects and simultaneous 10k-row batches.
 
+`experiments/fixture-generator` is the executable generator kernel. Benchmark drivers use
+`cargo run --release --locked --offline --manifest-path experiments/fixture-generator/Cargo.toml
+-- KIND COUNT SEED`, with domain kinds `graph`, `events`, `blobs`, `content`, `points`,
+`observations`, `bodies` and `mixed`. Its output is the BLAKE3 digest of the logical generated
+record stream; drivers must record that digest and their materialization version. The pinned
+three-record graph golden digest is
+`eb2cf7582dcdd97ccf55925e9c4b5026fbf6dc05dcd2d4f773485e6961568203`.
+
 `acceptance/r0/benchmark-manifest.tsv` is the machine-readable registry. Initial values are
 targets based on the intended local workstation class, not achieved results. Bench reports
 must include failures; no marketing claim follows from this decision.

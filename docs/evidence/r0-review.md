@@ -34,6 +34,10 @@ $ rustc --edition=2024 --test experiments/storage-publication.rs -o /tmp/uste-st
 $ /tmp/uste-storage-publication
 running 4 tests
 test result: ok. 4 passed; 0 failed
+
+$ cargo test --manifest-path experiments/fixture-generator/Cargo.toml --locked --offline
+running 3 tests
+test result: ok. 3 passed; 0 failed
 ~~~
 
 Crates.io metadata was inspected with `cargo search`/`cargo info`; this selected candidates,
