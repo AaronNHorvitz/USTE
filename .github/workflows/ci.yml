@@ -15,15 +15,7 @@ jobs:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Fetch locked dependency graphs
-        run: |
-          cargo fetch --locked
-          for manifest in \
-            experiments/dependency-audit/Cargo.toml \
-            experiments/fixture-generator/Cargo.toml \
-            experiments/content-fixtures/Cargo.toml
-          do
-            cargo fetch --manifest-path "$manifest" --locked
-          done
+        run: bash scripts/fetch_dependencies.sh
       - name: Run workspace and R0 checks
         run: bash scripts/check.sh
       - name: Install pinned dependency policy tool

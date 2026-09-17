@@ -11,13 +11,16 @@ types, transactions, storage, parsing, simulation or any database executable is 
 - `uste-types` is the first safe-Rust core crate. Later crates join the workspace only when their
   owning task starts, avoiding empty packages that look like implemented components.
 - Workspace lint policy forbids unsafe Rust and denies incompatible idioms/lifetime issues.
-- The current root workspace has no third-party packages, build scripts or native links.
+- The current root workspace has one first-party package, no third-party packages, no build
+  scripts, no native `links` packages and no first-party unsafe exceptions.
 - MIT OR Apache-2.0 metadata is inherited consistently and packages are non-publishable while
   the product is in local development.
 - `scripts/check_docs.py` checks required documents, local links and active D/FR/NFR/T/VT/BM
   references. `scripts/check_task_graph.py` checks dependencies and the distribution-gate split.
 - `scripts/check.sh` runs formatting, Clippy, tests, rustdoc and the existing R0 executable
   evidence. `scripts/check_supply_chain.sh` runs the pinned policy against every lockfile.
+- `scripts/fetch_dependencies.sh` resolves every locked graph before offline checks, so a clean
+  Toolbox/CI runner does not depend on an already-populated Cargo cache.
 - CI has read-only repository permission, uses a commit-pinned checkout action and runs the same
   scripts. It installs exactly cargo-deny 0.20.2 with its lockfile.
 
@@ -31,6 +34,10 @@ bash scripts/check.sh
 
 CARGO_DENY_BIN=/tmp/uste-gate-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # pass: zero advisory/license/source errors; documented miniz_oxide duplicate warnings only
+
+cargo metadata --locked --offline --format-version 1
+# root workspace: packages=1, resolve nodes=1, external packages=0,
+# custom-build targets=0, native links packages=0
 ~~~
 
 The existing parser candidate graph still contains the recorded duplicate versions and unsafe

@@ -32,6 +32,7 @@ cargo install cargo-deny --version 0.20.2 --locked --root .tools
 ## Reproduce current evidence
 
 ~~~bash
+bash scripts/fetch_dependencies.sh
 bash scripts/check.sh
 CARGO_DENY_BIN=.tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 
