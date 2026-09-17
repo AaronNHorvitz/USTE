@@ -2,6 +2,13 @@
 
 Date: 2026-09-17 · scope: partial T-14 evidence, not task completion or production qualification
 
+Reviewed implementation: commit `04751345b284901cf0a8943020b5ed4c3539c938` · tree
+`a0ad75c5aa8ec78af2c7971d88237b11a9ca6f4d`. A read-only Codex agent review checked reducer
+isolation, publication ordering, retry identity, retention ownership, recovery and time handling.
+The reported high-severity API/isolation findings were corrected before this commit, and the final
+review found no remaining blocker or high-severity issue. This is automated implementation review,
+not independent transaction or security assessment.
+
 ## Implemented
 
 - New safe-Rust `uste-txn` crate with a domain-neutral deterministic reducer boundary.

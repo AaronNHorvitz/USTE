@@ -2,9 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest verified implementation: `3453d67` (completed T-13 encrypted journal/recovery and Btrfs/ext4
-filesystem qualification). Review was performed by Codex agents and does not represent independent
-external security certification.
+Latest verified implementation: `0475134` (T-14 durable transaction-coordinator foundation over
+the completed T-13 journal). Review was performed by Codex agents and does not represent
+independent external security certification.
 
 ## Completed this increment
 
