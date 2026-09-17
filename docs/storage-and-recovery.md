@@ -1,6 +1,6 @@
 # Storage, transactions, and recovery
 
-Draft contract · 2026-09-17 · T-12 I/O/fault boundary implemented; journal/recovery not implemented
+Draft contract · 2026-09-17 · T-13 journal/recovery foundation implemented; qualification ongoing
 
 Owns FR-02, FR-03, FR-12, FR-16 and persistent publication rules.
 
@@ -33,9 +33,10 @@ before acknowledging success. Failures must not resemble a valid created databas
 An exclusive owner lock prevents competing writers. Stale-lock handling must not permit
 two owners. Network filesystems are unsupported initially.
 
-Decision 0014 implements the handle-relative interface and deterministic volatile/durable fault
-model. It intentionally omits a production host filesystem implementation until T-13 can provide
-reviewed no-follow, no-replace and ownership semantics rather than ambient path operations.
+Decisions 0014/0015 implement the handle-relative interface, deterministic volatile/durable fault
+model and x86_64 Linux adapter. The adapter uses descriptor-rooted `openat2`, no-replace rename,
+explicit file/directory syncs and a unique-descriptor nonblocking ownership lock. Current host
+evidence covers Btrfs; ext4 remains an unperformed qualification trial.
 
 ## Transaction lifecycle
 
@@ -73,6 +74,10 @@ mutable commit-root slots. A simple
 previously acknowledged newer slot and is therefore not the v1 recovery rule. The selected
 certificate chain distinguishes an incomplete final unacknowledged tail under its declared
 failure model; complete-certificate damage or missing referenced data fails closed.
+
+Decision 0015 fixes the format-1.0 manifest, authenticated log/segment headers, exact opaque group
+envelopes and fixed 4,161-byte encrypted certificates. T-13 currently accepts only the canonical
+empty blob inventory; T-15 adds nonempty inventory publication and verification.
 
 Crash safety assumes correctly implemented supported filesystem flush/rename semantics and
 storage honoring durability requests. Arbitrary media destruction is not survivable without

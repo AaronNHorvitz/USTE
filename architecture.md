@@ -110,10 +110,13 @@ Avoid two independent sources of commit truth. The journal owns commits; project
 worker queues derive from it. A checkpoint is a cache until explicitly promoted to a new
 recovery baseline during retention/compaction.
 
-Decision 0014 makes filesystem, clock and randomness explicit capabilities. Storage paths are
+Decisions 0014/0015 make filesystem, clock and randomness explicit capabilities and bind the
+first Linux implementation to `openat2`, no-replace rename, explicit flushes and unique-descriptor
+ownership locks. Storage paths are
 single validated names relative to opaque directory handles; positional I/O exposes short progress,
 and file/directory flushes and no-replace rename remain separate observable operations. The T-12
-memory/fault adapter is a correctness harness, not the supported Linux implementation.
+memory/fault adapter remains a correctness harness; the Linux implementation is exercised on the
+Btrfs reference runner, while full qualification and the ext4 trial remain open.
 
 ## Security scope
 

@@ -16,7 +16,8 @@ fuzzing and advisory monitoring; this document is not an independent security as
 | `chacha20poly1305 0.11.0` | alloc, getrandom, zeroize | no `unsafe` token in crate `src`; CPU/entropy transitives use platform/optimized code | cryptographic adapter only; wrong-key/context/tag vectors required |
 | `argon2 0.6.0` | alloc, getrandom, password-hash, zeroize | raw allocated block array, lane/slice pointer views, `Send`/`Sync`, optional AVX2 dispatch | key-recovery adapter only; fixed memory/lanes, upstream vectors, Miri where supported |
 | `getrandom 0.4.3` | std | OS syscall/platform implementations | sole entropy boundary; fail closed, deterministic injection only in tests |
-| `libc 0.2.189` | transitive/platform | OS ABI calls | Linux adapter only; never exposed as arbitrary syscall capability |
+| `libc 0.2.189` | transitive/platform | OS ABI calls | platform support under entropy and related dependencies; never exposed as arbitrary syscall capability |
+| `rustix 1.1.5` | std, fs; normal Linux raw-sys backend | syscall marshalling and initialized-buffer boundary | descriptor-rooted storage adapter only; `openat2`, positional I/O, sync, rename and lock operations |
 
 No first-party core crate contains unsafe code. `uste-crypto` has `#![forbid(unsafe_code)]` and its
 root product graph has no native `links` package. Dependency unsafe and the OS syscall boundary are
@@ -48,8 +49,8 @@ boundaries. “No C/C++ engine” is therefore maintained without claiming an al
 - No dependency silently introduces a native database, GIS or physics engine.
 - Parser unsafe is never placed in the privileged storage process by this profile.
 - The JPEG SIMD source is not reachable under selected features and must stay disabled.
-- Argon2 memory/pointer code and platform entropy are the principal privileged dependency
-  exceptions. T-11 covers real fixed-profile execution and injected boundary failures; upstream
+- Argon2 memory/pointer code, platform entropy and rustix's Linux syscall boundary are the principal
+  privileged dependency exceptions. T-11 covers real fixed-profile execution and injected boundary failures; upstream
   vectors and supported sanitizer/Miri campaigns remain T-39 hardening and T-41 review evidence.
 - ZIP/TAR write APIs are fixture-only. Production workers expose bounded readers and validated
   outputs, not archive filesystem extraction.

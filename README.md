@@ -13,11 +13,10 @@ to persist game-world items, track real-world objects, or link items to imported
 observations. These are uses of the same storage, graph, space, time and physics capabilities.
 An item can link to a price record without USTE fetching that price from an external provider.
 
-**Status: R0 design ready; T-08–T-12 workspace, canonical types, logical oracle, encrypted envelope
-boundary and deterministic I/O fault harness implemented.** There is no database executable,
-durable transaction path, supported parser,
-benchmark result, security certification, or production release yet. The features below are
-requirements, not existing capabilities.
+**Status: R0 design ready; T-08–T-12 are complete and the T-13 encrypted journal/recovery
+foundation is implemented but still under qualification.** There is no database executable,
+transaction coordinator, supported parser, benchmark result, security certification, or production
+release yet. The features below are requirements unless explicitly identified as implemented.
 
 ## Product direction
 

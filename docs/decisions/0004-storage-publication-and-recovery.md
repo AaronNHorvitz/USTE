@@ -6,7 +6,8 @@ Status: accepted for storage profile `linux-local-v1`.
 
 Closes D-01 and is the decision artifact for T-02.
 [Decision 0014](0014-io-capability-and-fault-profile.md) fixes the T-12 capability and deterministic
-fault-harness contract used to implement and test these publication rules.
+fault-harness contract used to implement and test these publication rules. [Decision 0015](0015-journal-format-and-linux-adapter.md)
+fixes the format-1.0 journal records and production Linux syscall profile.
 
 ## Failure model and platform
 

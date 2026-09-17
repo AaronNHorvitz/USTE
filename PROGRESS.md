@@ -2,8 +2,9 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest reviewed implementation: `00d0b1a` (T-12 I/O capability and deterministic fault harness). Review was
-performed by Codex agents and does not represent independent external security certification.
+Latest reviewed implementation: `00d0b1a` (T-12 I/O capability and deterministic fault harness).
+T-13 journal/recovery work is in progress in the current unbound increment. Review was performed by
+Codex agents and does not represent independent external security certification.
 
 ## Completed this increment
 
@@ -41,6 +42,16 @@ performed by Codex agents and does not represent independent external security c
 - Added a guarded real-process scenario under Btrfs-backed Cargo target scratch: the child flushes
   file bytes and the directory, signals over a pipe, is killed with SIGKILL, and exact bytes reopen.
   This is process-loss harness evidence, not a power-loss or production-filesystem claim.
+- Began T-13 with Decision 0015 and the pinned `rustix 1.1.5` x86_64 Linux adapter: descriptor-rooted
+  no-symlink opens, checked object types, positional I/O, 0600/0700 creation, no-replace rename,
+  explicit data/full/directory syncs, recovery truncation and unique-FD nonblocking ownership.
+- Implemented encrypted creation manifest, authenticated log/segment headers, exact opaque group
+  envelopes, fixed hash-chained commit certificates, poisoned uncertain writers and bounded
+  streaming recovery. T-13 accepts only the canonical empty blob inventory until T-15.
+- Verified exact byte replay, competing-owner rejection, durable lost-response recovery, previous-
+  frontier recovery after certificate-sync failure, incomplete-tail repair and hard failure for
+  complete certificate/group corruption. A Btrfs child was SIGKILLed after certificate sync and
+  the production adapter reopened the exact committed group.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -105,10 +116,11 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 56 workspace tests including 11 uste-storage tests;
+# workspace format/clippy/test/doc pass; 72 workspace tests including 27 uste-storage tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
-# all five lockfiles: zero advisory/license/source errors; documented miniz_oxide warnings only
+# all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
+# documented miniz_oxide warnings only
 cargo +nightly-2026-08-01 fuzz run decode_v1 -- \
   -max_total_time=60 -seed=1592639215 -max_len=4096 -rss_limit_mb=1024 -print_final_stats=1
 # 14,518,800 executions; 61 seconds; 513 MiB peak RSS; no crash artifact
@@ -130,19 +142,19 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The canonical type/codec kernel, test-only logical oracle and envelope/key boundary are implemented,
-  but there is still no database executable, production transaction coordinator, durable storage
-  path, authorization or production qualification. Crypto is not yet wired to durable storage. The
+- The canonical type/codec kernel, test-only logical oracle, envelope/key boundary and initial
+  encrypted durable journal path are implemented, but there is still no database executable,
+  production transaction coordinator, authorization or production qualification. The
   oracle intentionally retains full snapshots and scans records;
   it is a correctness reference, not a scalable implementation. The fuzz runner requires nightly
   Rust plus a C++ compiler, both confined to development tooling.
-- T-12 intentionally has no production host filesystem adapter or exclusive lock. The memory model
-  and one Btrfs SIGKILL/reopen test do not satisfy T-13's encrypted journal crash matrix; ext4 and
-  actual power-loss behavior remain untested.
+- T-13 remains open: journal-specific error/short-progress and hard-corruption coverage, additional
+  real-process boundaries, cross-process lock death and the ext4 trial are not yet evidence-backed. Current Btrfs
+  SIGKILL tests do not simulate controller cache loss or actual power loss. The certificate log
+  fails closed at 1 GiB pending later maintenance/rollover design.
 
 ## Next dependency-permitted work
 
-Implement T-13 journal creation, exclusive ownership, encrypted transaction groups, commit
-certificates and fail-closed recovery using the completed T-10/T-12 oracle/fault foundations and
-T-11 crypto boundary. T-62 remains independent and must not be represented as complete without
-owner-administered evidence.
+Continue T-13 with remaining injected error/short-progress and hard-corruption cases, additional
+real-process/lock-death boundaries, then run the available filesystem qualification matrix. T-62 remains
+independent and must not be represented as complete without owner-administered evidence.

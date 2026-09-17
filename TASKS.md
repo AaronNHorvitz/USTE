@@ -62,7 +62,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-10 | Independent in-memory reference model; FR-01/04/05/06 | T-09 | [uste-testkit model and generated histories](crates/uste-testkit), with [evidence](docs/evidence/reference-model.md) | VT-01 exposes both valid and invalid transitions independently of storage code |
 | [x] T-11 | Encryption/key-adapter boundary; FR-10 | T-09 | [Reviewed crypto envelopes and key interfaces](docs/evidence/crypto-boundary.md) | T-11 slice of VT-07 covers wrong context/key, tampering, nonce lifecycle, lock/unlock and redaction; rotation/clone/restore remain later tasks |
 | [x] T-12 | Filesystem/clock/random adapters and fault harness; FR-03, NFR-03 | T-09 | [Narrow I/O interfaces and deterministic failure injection](docs/evidence/io-fault-harness.md) | Reproducible short-write/read, file/directory-sync, rename, disk-full and SIGKILL/reopen scenarios; production Linux adapter remains T-13 |
-| [ ] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | uste-storage journal/recovery | VT-03/04 pass every initial publication boundary and hard-corruption case |
+| [ ] T-13 | Journal, creation, ownership, commit roots and recovery; FR-03 | T-10, T-11, T-12 | [uste-storage journal/recovery foundation](docs/evidence/journal-foundation.md) | VT-03/04 pass every initial publication boundary and hard-corruption case |
 | [ ] T-14 | Commit coordinator, readers, conflict checks, idempotency; FR-02 | T-13 | uste-txn and durable outcome lookup | VT-02 includes lost response, competing mutations, cancellation and restart |
 | [ ] T-15 | Streaming encrypted blob store and artifact publication; FR-17/18 | T-11, T-14 | Staging/finalization/resume/cleanup and inventory | VT-08 plus blob-specific VT-03: exact unknown-binary round-trip, bounded RSS, no committed dangling object |
 | [ ] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | uste-policy and trusted adapter checks | VT-06 proves no cross-scope graph/blob/existence leakage; quotas enforced on actual bytes |
@@ -72,6 +72,13 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [ ] T-48 | World/frame/geometry/observation schemas and typed units; FR-27/28 | T-09, T-45 | uste-types spatial records and reference histories | VT-18/19 schema subset rejects invalid units, frame cycles, nonfinite values and invented missing positions |
 | [ ] T-49 | Bounded import transaction contracts and durable checkpoints; FR-34 | T-14, T-15, T-48 | Mapping types, batch IDs, checkpoint/outcome records | VT-23 transaction subset proves atomic batches, retry identity, changed-source refusal and no dangling references |
 | [ ] T-19 | R1 acceptance and operating limitations | T-15, T-16, T-17, T-18, T-45, T-48, T-49 | R1 evidence report and runnable kernel instructions | Required R1 VT/BM scope passes; clear non-production and scalability limits |
+
+T-13 progress: Decision 0015, the Linux capability adapter, exclusive ownership, encrypted
+manifest/log/segment headers, opaque transaction groups, fixed commit certificates and streaming
+recovery are implemented. Deterministic every-operation creation/commit/rollover crash tests,
+targeted corruption, real portable-key wiring and a Btrfs SIGKILL-after-certificate case pass. The
+task remains open for the remaining error/short-progress, hard-corruption and real-process matrix
+plus ext4 qualification; no partial evidence is represented as task completion.
 
 ## R2 — Developer alpha
 
@@ -105,7 +112,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [ ] T-32 | Images, OCR, audio/video and local transcription; FR-19/20/21/24 | T-29 | D-05-pinned media/model workers and weights manifests | VT-09/10/11: tested baseline formats, truthful time/region locators, model identity, no download/cloud fallback |
 | [ ] T-33 | Optional embedding and vector/hybrid retrieval; FR-13/24 | T-25, T-29 | Versioned embedding jobs/indexes and relevance baseline | VT-11 measures relevance/recall and speed; dimension drift, permissions and stale-source invalidation tested |
 | [ ] T-34 | Retention/expiry/purge and derivation invalidation; FR-11/23 | T-22, T-26, T-29 | Deletion planner, receipts, lease/pin invalidation and minimal tombstones | VT-06/13 across originals, chunks, worker scratch, summaries, embeddings and branches |
-| [ ] T-35 | Atomic compaction, baselines and blob reclamation; FR-03/11/16/18 | T-20, T-34 | Versioned compaction/root switch and safe garbage collector | VT-03/13/14: old/new complete roots, no committed blob loss, bounded pins and explicit history cutoff |
+| [ ] T-35 | Atomic compaction, baselines, certificate-log rollover and storage/blob orphan reclamation; FR-03/11/16/18 | T-20, T-34 | Versioned compaction/root switch, bounded log maintenance and safe garbage collector | VT-03/13/14: old/new complete roots, no committed blob loss, bounded pins/garbage and explicit history cutoff |
 | [ ] T-36 | Encrypted backup, restore and migration; FR-12 | T-35 | Inventory verification, restore-to-new-path and migration tools | VT-13/14 include stale deletion epoch, wrong keys, interrupted upgrade and rollback limits |
 | [ ] T-37 | Time partitioning and correction-aware summaries; FR-16 | T-21, T-35 | Partition/index management and summary invalidation | VT-05/11 with late corrections; BM-03/07 meet declared budgets and retained-state equivalence |
 | [ ] T-38 | Resumable bounded change subscriptions; FR-25 | T-27, T-34 | Cursor/lease/backpressure implementation | Duplicate delivery is deduplicable; retention gaps explicit; revocation prevents buffered leaks |

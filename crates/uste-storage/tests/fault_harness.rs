@@ -1,5 +1,6 @@
 use uste_storage::{
-    AdapterErrorKind, Clock, ClockObservation, EntryName, FileSystem, RandomSource,
+    AdapterErrorKind, Clock, ClockObservation, EntryName, FileSystem, OwnershipFileSystem,
+    RandomSource,
     fault::{
         FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation, ScriptedClock,
         ScriptedRandom,
@@ -23,6 +24,30 @@ fn entry_names_are_single_bounded_components() {
     assert!(EntryName::new("x".repeat(255)).is_ok());
     assert!(EntryName::new("x".repeat(256)).is_err());
     assert_eq!(name("journal-0001").as_str(), "journal-0001");
+}
+
+#[test]
+fn stale_memory_lock_guard_cannot_release_a_post_restart_owner() {
+    let mut filesystem = MemoryFileSystem::default();
+    let root = filesystem.root();
+    let lock = filesystem.create_new(&root, &name("LOCK")).unwrap();
+    filesystem.sync_all(&lock).unwrap();
+    filesystem.sync_directory(&root).unwrap();
+    let stale = filesystem.try_lock_exclusive(&root, &name("LOCK")).unwrap();
+
+    filesystem.restart().unwrap();
+    let root = filesystem.root();
+    let current = filesystem.try_lock_exclusive(&root, &name("LOCK")).unwrap();
+    drop(stale);
+    assert_eq!(
+        filesystem
+            .try_lock_exclusive(&root, &name("LOCK"))
+            .unwrap_err()
+            .kind(),
+        AdapterErrorKind::OwnershipConflict
+    );
+    drop(current);
+    filesystem.try_lock_exclusive(&root, &name("LOCK")).unwrap();
 }
 
 #[test]

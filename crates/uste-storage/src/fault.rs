@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
     AdapterError, AdapterErrorKind, Clock, ClockObservation, EntryName, FileMetadata, FileSystem,
-    RandomSource, RestartableFileSystem,
+    OwnershipFileSystem, RandomSource, RestartableFileSystem,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -16,10 +16,12 @@ pub enum Operation {
     Metadata,
     ReadAt,
     WriteAt,
+    SetLen,
     SyncData,
     SyncAll,
     RenameNoReplace,
     SyncDirectory,
+    TryLockExclusive,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -301,6 +303,15 @@ impl<F: FileSystem> FileSystem for FaultFileSystem<F> {
         self.finish(result, crash_after)
     }
 
+    fn set_len(&mut self, file: &Self::File, len: u64) -> Result<(), AdapterError> {
+        let (crash_after, error) = self.ordinary_action(Operation::SetLen)?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let result = self.inner.set_len(file, len);
+        self.finish(result, crash_after)
+    }
+
     fn sync_data(&mut self, file: &Self::File) -> Result<(), AdapterError> {
         let (crash_after, error) = self.ordinary_action(Operation::SyncData)?;
         if let Some(error) = error {
@@ -345,6 +356,23 @@ impl<F: FileSystem> FileSystem for FaultFileSystem<F> {
             return Err(error);
         }
         let result = self.inner.sync_directory(directory);
+        self.finish(result, crash_after)
+    }
+}
+
+impl<F: OwnershipFileSystem> OwnershipFileSystem for FaultFileSystem<F> {
+    type OwnershipGuard = F::OwnershipGuard;
+
+    fn try_lock_exclusive(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<Self::OwnershipGuard, AdapterError> {
+        let (crash_after, error) = self.ordinary_action(Operation::TryLockExclusive)?;
+        if let Some(error) = error {
+            return Err(error);
+        }
+        let result = self.inner.try_lock_exclusive(directory, name);
         self.finish(result, crash_after)
     }
 }

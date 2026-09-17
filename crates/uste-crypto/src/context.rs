@@ -90,6 +90,7 @@ pub enum ObjectRole {
     Backup = 6,
     TemporarySpill = 7,
     WorkerOutput = 8,
+    CreationManifest = 9,
 }
 
 /// Public ciphertext padding class.

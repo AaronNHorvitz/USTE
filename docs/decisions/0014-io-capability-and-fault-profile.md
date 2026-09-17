@@ -15,15 +15,16 @@ relative to an authorized directory handle; empty names, `.`, `..`, slash, NUL a
 255 bytes are rejected before adapter dispatch.
 
 The filesystem contract assigns create/open directory, create-new/open-existing file, metadata,
-positional read/write, data/full file sync, no-replace rename and directory sync operations.
+positional read/write, recovery truncation, data/full file sync, no-replace rename and directory
+sync operations. Decision 0015 adds a separate non-cloneable exclusive-ownership capability;
 `write_at` and `read_at` report checked progress. The shared exact loops retry only `Interrupted`,
 advance only by reported bytes, reject an over-reporting adapter, reject zero write progress and
 turn read EOF before the requested length into `UnexpectedEof`. No flush, rename, space, quota,
 permission or generic I/O error is silently retried.
 
 Errors have stable content-free codes; platform path strings and raw OS diagnostics do not cross the
-boundary. T-13 must implement a Linux adapter with reviewed handle-relative no-follow operations,
-exclusive ownership and the exact Btrfs/ext4 semantics in Decision 0004. The Rust standard library
+boundary. Decision 0015 implements the T-13 Linux adapter with reviewed handle-relative no-follow
+operations, exclusive ownership and fail-closed filesystem admission. The Rust standard library
 alone does not expose every required primitive, so T-12 deliberately does not disguise a path-based
 adapter as production-safe or claim a supported host implementation.
 

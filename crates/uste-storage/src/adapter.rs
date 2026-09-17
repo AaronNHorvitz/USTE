@@ -62,6 +62,9 @@ pub enum AdapterErrorKind {
     NoSpace,
     QuotaExceeded,
     PermissionDenied,
+    OwnershipConflict,
+    WrongEntryType,
+    CrossDevice,
     AlreadyExists,
     NotFound,
     UnexpectedEof,
@@ -99,6 +102,9 @@ impl AdapterError {
             AdapterErrorKind::NoSpace => "USTE_ADAPTER_NO_SPACE",
             AdapterErrorKind::QuotaExceeded => "USTE_ADAPTER_QUOTA_EXCEEDED",
             AdapterErrorKind::PermissionDenied => "USTE_ADAPTER_PERMISSION_DENIED",
+            AdapterErrorKind::OwnershipConflict => "USTE_ADAPTER_OWNERSHIP_CONFLICT",
+            AdapterErrorKind::WrongEntryType => "USTE_ADAPTER_WRONG_ENTRY_TYPE",
+            AdapterErrorKind::CrossDevice => "USTE_ADAPTER_CROSS_DEVICE",
             AdapterErrorKind::AlreadyExists => "USTE_ADAPTER_ALREADY_EXISTS",
             AdapterErrorKind::NotFound => "USTE_ADAPTER_NOT_FOUND",
             AdapterErrorKind::UnexpectedEof => "USTE_ADAPTER_UNEXPECTED_EOF",
@@ -184,6 +190,9 @@ pub trait FileSystem {
         input: &[u8],
     ) -> Result<usize, AdapterError>;
 
+    /// Set the exact file length. Recovery uses this only after authenticating a durable prefix.
+    fn set_len(&mut self, file: &Self::File, len: u64) -> Result<(), AdapterError>;
+
     fn sync_data(&mut self, file: &Self::File) -> Result<(), AdapterError>;
 
     fn sync_all(&mut self, file: &Self::File) -> Result<(), AdapterError>;
@@ -197,6 +206,21 @@ pub trait FileSystem {
     ) -> Result<(), AdapterError>;
 
     fn sync_directory(&mut self, directory: &Self::Directory) -> Result<(), AdapterError>;
+}
+
+/// Exclusive single-writer ownership held independently from ordinary cloned file handles.
+///
+/// Implementations release ownership when the non-cloneable guard is dropped or the process
+/// exits. The lock file is opened independently by this operation so unrelated handles cannot
+/// accidentally extend ownership lifetime.
+pub trait OwnershipFileSystem: FileSystem {
+    type OwnershipGuard;
+
+    fn try_lock_exclusive(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<Self::OwnershipGuard, AdapterError>;
 }
 
 /// Test/reopen capability that atomically discards process-local state and invalidates handles.

@@ -56,8 +56,9 @@ remain lifecycle operations rather than crypto-library side effects.
 
 `uste-storage` begins with Decision 0014's host-capability traits and deterministic fault adapter.
 The memory durability model keeps file bytes and directory names independently synchronized and
-invalidates handles on restart. T-13 adds the reviewed Linux implementation and journal; T-12's
-test-only host SIGKILL scenario is not a durability or supported-filesystem claim.
+invalidates handles on restart. Decision 0015's T-13 slice adds the reviewed Linux implementation,
+exclusive ownership, encrypted opaque groups, fixed commit certificates and streaming fail-closed
+recovery. Btrfs process-loss evidence does not establish power-loss behavior or ext4 qualification.
 
 ## R0 design deliverables
 

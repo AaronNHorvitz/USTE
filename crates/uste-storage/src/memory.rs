@@ -1,9 +1,10 @@
 //! Deterministic volatile/durable filesystem model for publication and restart tests.
 
-use std::collections::BTreeMap;
+use std::{cell::Cell, collections::BTreeMap, rc::Rc};
 
 use crate::{
-    AdapterError, AdapterErrorKind, EntryName, FileMetadata, FileSystem, RestartableFileSystem,
+    AdapterError, AdapterErrorKind, EntryName, FileMetadata, FileSystem, OwnershipFileSystem,
+    RestartableFileSystem,
 };
 
 const ROOT_NODE: u64 = 1;
@@ -27,10 +28,36 @@ enum Node {
     Directory(u64),
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct MemoryFileState {
     volatile: Vec<u8>,
     durable: Vec<u8>,
+    exclusive_lock_generation: Rc<Cell<u64>>,
+}
+
+impl Default for MemoryFileState {
+    fn default() -> Self {
+        Self {
+            volatile: Vec::new(),
+            durable: Vec::new(),
+            exclusive_lock_generation: Rc::new(Cell::new(0)),
+        }
+    }
+}
+
+/// Non-cloneable process-local ownership guard for the deterministic model.
+#[derive(Debug)]
+pub struct MemoryOwnershipGuard {
+    lock_generation: Rc<Cell<u64>>,
+    generation: u64,
+}
+
+impl Drop for MemoryOwnershipGuard {
+    fn drop(&mut self) {
+        if self.lock_generation.get() == self.generation {
+            self.lock_generation.set(0);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -80,6 +107,7 @@ impl MemoryFileSystem {
             .ok_or_else(|| AdapterError::new(AdapterErrorKind::ResourceLimit))?;
         for file in self.files.values_mut() {
             file.volatile.clone_from(&file.durable);
+            file.exclusive_lock_generation.set(0);
         }
         for directory in self.directories.values_mut() {
             directory.volatile.clone_from(&directory.durable);
@@ -133,6 +161,55 @@ impl MemoryFileSystem {
         self.files
             .get_mut(&handle.node)
             .ok_or_else(|| AdapterErrorKind::NotFound.into())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_child_names(
+        &self,
+        directory: &MemoryDirectory,
+    ) -> Result<Vec<EntryName>, AdapterError> {
+        Ok(self
+            .directory(directory)?
+            .volatile
+            .keys()
+            .cloned()
+            .collect())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_mutate_file(
+        &mut self,
+        directory: &MemoryDirectory,
+        name: &EntryName,
+        offset: usize,
+    ) -> Result<(), AdapterError> {
+        let file = self.open_existing(directory, name)?;
+        let file = self.file_mut(&file)?;
+        let volatile = file
+            .volatile
+            .get_mut(offset)
+            .ok_or_else(|| AdapterError::new(AdapterErrorKind::UnexpectedEof))?;
+        *volatile ^= 0x80;
+        let durable = file
+            .durable
+            .get_mut(offset)
+            .ok_or_else(|| AdapterError::new(AdapterErrorKind::UnexpectedEof))?;
+        *durable ^= 0x80;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_append_file(
+        &mut self,
+        directory: &MemoryDirectory,
+        name: &EntryName,
+        bytes: &[u8],
+    ) -> Result<(), AdapterError> {
+        let file = self.open_existing(directory, name)?;
+        let file = self.file_mut(&file)?;
+        file.volatile.extend_from_slice(bytes);
+        file.durable.extend_from_slice(bytes);
+        Ok(())
     }
 }
 
@@ -259,6 +336,16 @@ impl FileSystem for MemoryFileSystem {
         Ok(input.len())
     }
 
+    fn set_len(&mut self, file: &Self::File, len: u64) -> Result<(), AdapterError> {
+        let len =
+            usize::try_from(len).map_err(|_| AdapterError::new(AdapterErrorKind::ResourceLimit))?;
+        if len > self.file_limit {
+            return Err(AdapterErrorKind::NoSpace.into());
+        }
+        self.file_mut(file)?.volatile.resize(len, 0);
+        Ok(())
+    }
+
     fn sync_data(&mut self, file: &Self::File) -> Result<(), AdapterError> {
         let file = self.file_mut(file)?;
         file.durable.clone_from(&file.volatile);
@@ -302,6 +389,27 @@ impl FileSystem for MemoryFileSystem {
         let directory = self.directory_mut(directory)?;
         directory.durable.clone_from(&directory.volatile);
         Ok(())
+    }
+}
+
+impl OwnershipFileSystem for MemoryFileSystem {
+    type OwnershipGuard = MemoryOwnershipGuard;
+
+    fn try_lock_exclusive(
+        &mut self,
+        directory: &Self::Directory,
+        name: &EntryName,
+    ) -> Result<Self::OwnershipGuard, AdapterError> {
+        let file = self.open_existing(directory, name)?;
+        let lock_generation = Rc::clone(&self.file(&file)?.exclusive_lock_generation);
+        if lock_generation.get() != 0 {
+            return Err(AdapterErrorKind::OwnershipConflict.into());
+        }
+        lock_generation.set(self.generation);
+        Ok(MemoryOwnershipGuard {
+            lock_generation,
+            generation: self.generation,
+        })
     }
 }
 
