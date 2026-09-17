@@ -2,7 +2,7 @@
 
 Version: database design draft 1.4 · Date: 2026-09-17
 
-Status: R0 design ready; T-08 workspace/quality foundation implemented. Requirement and test
+Status: R0 design ready; T-08/T-09 workspace and canonical types implemented. Requirement and test
 identifiers below belong to this database design, not the archived simulation PRD. External
 executable distribution remains blocked by unverified private vulnerability reporting (T-62).
 

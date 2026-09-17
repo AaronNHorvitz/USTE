@@ -5,6 +5,9 @@ Date: 2026-09-16
 Status: accepted for format profile `uste-v1`; revisiting any item requires a migration
 decision and the vectors in `acceptance/r0`.
 
+[Decision 0012](0012-canonical-wire-profile.md) completes the exact format-1.0 tag, framing,
+integer, identity and field bytes required to implement this profile.
+
 Closes D-06 and is the decision artifact for T-01. It narrows the draft contracts without
 changing their authority boundaries.
 

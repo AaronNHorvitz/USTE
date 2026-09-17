@@ -1,7 +1,8 @@
 # Contributing
 
-The repository contains accepted R0 design evidence, a Rust workspace foundation and development
-experiments, not a released or supported database executable. Reproduce them using
+The repository contains accepted R0 design evidence, a Rust workspace, canonical type/codec
+kernel and development experiments, not a released or supported database executable. Reproduce
+them using
 [the Fedora Kinoite setup](docs/development-setup.md).
 
 ## Work sequence and completion
@@ -51,6 +52,7 @@ when changing contracts rather than rewriting history.
 ## Required automation
 
 Task T-08 establishes formatting/lint/tests, documentation links, requirement/task references
-and dependency/license checks. Later work adds fuzz, concurrency, crash and benchmark jobs.
+and dependency/license checks. T-09 adds canonical-codec fuzzing; later work adds concurrency,
+crash and benchmark jobs.
 Release jobs must not imply independent security review when only automated checks ran.
 See [SECURITY.md](SECURITY.md) for the current distribution-only disclosure-readiness gap.

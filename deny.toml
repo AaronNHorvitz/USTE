@@ -37,6 +37,7 @@ allow = [
     "BSL-1.0",
     "CC0-1.0",
     "MIT",
+    "NCSA",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",

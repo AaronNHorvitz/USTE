@@ -10,7 +10,7 @@ a Toolbox rather than layering packages onto the immutable host.
 ~~~bash
 toolbox create --container uste-dev --image registry.fedoraproject.org/fedora-toolbox:44
 toolbox enter uste-dev
-sudo dnf install -y gcc git curl pkgconf-pkg-config
+sudo dnf install -y gcc gcc-c++ git curl pkgconf-pkg-config
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.95.0
 source "$HOME/.cargo/env"
 rustup component add rustfmt
@@ -29,12 +29,22 @@ Install the pinned policy checker into a repository-local ignored directory:
 cargo install cargo-deny --version 0.20.2 --locked --root .tools
 ~~~
 
+Canonical-codec fuzzing additionally uses pinned `cargo-fuzz` 0.13.2 and the pinned nightly
+instrumentation toolchain. These are test tools only; `libfuzzer-sys` and its C++ build do not
+enter the Rust-only product dependency graph.
+
+~~~bash
+rustup toolchain install nightly-2026-08-01 --profile minimal
+cargo install cargo-fuzz --version 0.13.2 --locked
+~~~
+
 ## Reproduce current evidence
 
 ~~~bash
 bash scripts/fetch_dependencies.sh
 bash scripts/check.sh
 CARGO_DENY_BIN=.tools/bin/cargo-deny bash scripts/check_supply_chain.sh
+USTE_FUZZ_SECONDS=60 USTE_FUZZ_SEED=1592639215 bash scripts/fuzz_types.sh
 
 # Individual R0 commands, when diagnosing a failure:
 rustc --edition=2024 --test tests/r0_vectors.rs -o /tmp/uste-r0-vectors

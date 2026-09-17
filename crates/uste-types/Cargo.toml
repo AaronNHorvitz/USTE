@@ -1,6 +1,6 @@
 [package]
 name = "uste-types"
-description = "Workspace scaffold for shared USTE engine types"
+description = "Bounded canonical values, identities, revisions, and format-1.0 codec for USTE"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

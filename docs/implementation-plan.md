@@ -1,6 +1,6 @@
 # Spatial-temporal database implementation plan
 
-Design draft 1.4 · 2026-09-17 · R0 design ready; T-08 workspace foundation implemented
+Design draft 1.4 · 2026-09-17 · R0 design ready; T-08/T-09 canonical foundation implemented
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.
 [TASKS](../TASKS.md) owns dependencies and completion evidence. No schedule, working engine

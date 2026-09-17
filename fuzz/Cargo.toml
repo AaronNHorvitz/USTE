@@ -1,0 +1,27 @@
+[package]
+name = "uste-types-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+uste-types = { version = "=0.1.0", path = "../crates/uste-types" }
+
+[[bin]]
+name = "decode_v1"
+path = "fuzz_targets/decode_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structured_v1"
+path = "fuzz_targets/structured_v1.rs"
+test = false
+doc = false
+bench = false

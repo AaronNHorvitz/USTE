@@ -16,6 +16,16 @@ Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 - Completed T-08 with a Rust 1.95.0/resolver-3 workspace, initial safe-Rust `uste-types` crate,
   root lockfile, read-only CI, active-document/reference validation and reproducible quality/
   supply-chain scripts. Excluded experiment workspaces retain their independent pinned locks.
+- Completed T-09 with Decision 0012, bounded generic values, typed/scoped identities, UTC
+  instants, nonzero monotonic commit revisions and a strict canonical format-1.0 codec.
+- Added independent literal R1 goldens for all assigned value tags and numeric/time/reference
+  endpoints; malformed length/integer/version/tag/order/UTF-8/depth inputs fail closed.
+- Added a fixed 262,144-node aggregate budget and fallible decode allocation after review found
+  that per-container/wire limits alone permitted heap amplification. Adversarial nested input now
+  rejects before the violating container reserves its declared children.
+- Added isolated pinned `cargo-fuzz` targets for arbitrary malformed frames and generated valid
+  trees, a reproducible runner and bounded CI smoke campaigns. The native fuzz runtime remains a
+  test-only graph outside the safe-Rust product workspace.
 - Read the complete current requirement set, both accepted product decisions and every
   current domain specification. No applicable USTE `AGENTS.md` exists.
 - Preserved the clean starting worktree and created the requested branch from `be5f7a4`.
@@ -64,9 +74,16 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; docs=ok; task graph=ok; R0/fixture tests pass
-CARGO_DENY_BIN=/tmp/uste-gate-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
-# zero advisory/license/source errors; documented miniz_oxide duplicate warnings only
+# workspace format/clippy/test/doc pass; uste-types 7 unit + 12 integration tests;
+# docs=ok; task graph=ok; R0/fixture tests pass
+CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
+# all five lockfiles: zero advisory/license/source errors; documented miniz_oxide warnings only
+cargo +nightly-2026-08-01 fuzz run decode_v1 -- \
+  -max_total_time=60 -seed=1592639215 -max_len=4096 -rss_limit_mb=1024 -print_final_stats=1
+# 14,518,800 executions; 61 seconds; 513 MiB peak RSS; no crash artifact
+cargo +nightly-2026-08-01 fuzz run structured_v1 -- \
+  -max_total_time=60 -seed=1592639215 -max_len=4096 -rss_limit_mb=1024 -print_final_stats=1
+# 1,610,094 executions; 61 seconds; 554 MiB peak RSS; no crash artifact
 ~~~
 
 Reference runner observed: Fedora 44, kernel 7.1.10, Btrfs 7.1/local NVMe, Intel i9-13900KF,
@@ -82,12 +99,13 @@ policy checks; no benchmark measurement exists yet.
 - R0 decisions do not provide implementation, achieved benchmark performance or production
   security evidence. Transitive unsafe validation, the T-23 supervisor and actual BM results
   remain later-gate work.
-- The workspace is a quality scaffold, not a database executable or production format. T-09
-  owns the first product types/codec and remains open.
+- The canonical type/codec kernel is implemented, but there is still no database executable,
+  transaction coordinator, durable storage, encryption or production qualification. The fuzz
+  runner requires nightly Rust plus a C++ compiler, both confined to development tooling.
 
 ## Next dependency-permitted work
 
-Implement T-09 bounded canonical types/encoding against a wire-complete v1 specification and
-independent literal vectors. T-10 reference model, T-11 crypto boundary and T-12 I/O fault
-adapters follow T-09 in dependency order. T-62 remains independent and must not be represented
-as complete without owner-administered evidence.
+Implement T-10's independent in-memory reference model. T-11's encryption/key boundary and
+T-12's deterministic I/O fault harness are also unblocked by T-09 and can proceed as independent
+work packages. T-62 remains independent and must not be represented as complete without
+owner-administered evidence.

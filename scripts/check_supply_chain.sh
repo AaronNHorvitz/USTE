@@ -8,6 +8,7 @@ cd -- "$repo_root"
 
 for manifest in \
   Cargo.toml \
+  fuzz/Cargo.toml \
   experiments/dependency-audit/Cargo.toml \
   experiments/fixture-generator/Cargo.toml \
   experiments/content-fixtures/Cargo.toml
@@ -15,4 +16,3 @@ do
   "$deny_bin" --manifest-path "$manifest" --config deny.toml --locked \
     check all --show-stats
 done
-

@@ -58,7 +58,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
 |---|---|---|---|---|
 | [x] T-08 | Scaffold Rust workspace and quality automation; NFR-01/03/05 | T-07 | Workspace, lockfile, CI, doc/reference checks | Reproducible local setup; checks run against real files; unsafe/native exceptions inventoried |
-| [ ] T-09 | Bounded types, identities and canonical serialization; FR-01/03 | T-08 | uste-types with golden encodings | VT-01 and encoding fuzz reject overflow, unknown versions, malformed lengths and ambiguous data |
+| [x] T-09 | Bounded types, identities and canonical serialization; FR-01/03 | T-08 | [uste-types](crates/uste-types) with [golden encodings and evidence](docs/evidence/canonical-types.md) | VT-01 and encoding fuzz reject overflow, unknown versions, malformed lengths and ambiguous data |
 | [ ] T-10 | Independent in-memory reference model; FR-01/04/05/06 | T-09 | uste-testkit model and generated operation histories | VT-01 exposes both valid and invalid transitions independently of storage code |
 | [ ] T-11 | Encryption/key-adapter boundary; FR-10 | T-09 | Reviewed crypto envelopes and key interfaces | VT-07 covers wrong context/key, tampering, nonce lifecycle, lock/unlock and redaction |
 | [ ] T-12 | Filesystem/clock/random adapters and fault harness; FR-03, NFR-03 | T-09 | Narrow I/O interfaces and deterministic failure injection | Reproducible short-write, fsync, rename, disk-full and process-restart scenarios |

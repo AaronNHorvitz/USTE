@@ -1,6 +1,6 @@
 # USTE — Architecture
 
-Database design draft 1.4 · 2026-09-17 · R0 design ready; workspace foundation implemented
+Database design draft 1.4 · 2026-09-17 · R0 design ready; canonical type kernel implemented
 
 ## Component boundaries
 

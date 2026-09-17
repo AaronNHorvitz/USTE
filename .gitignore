@@ -8,3 +8,5 @@ target/
 benchmark-results/local/
 evidence/local/
 .tools/
+fuzz/artifacts/
+fuzz/corpus/

@@ -22,3 +22,17 @@ jobs:
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Check advisories, licenses and sources
         run: bash scripts/check_supply_chain.sh
+
+  canonical-fuzz-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned nightly toolchain
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+      - name: Install pinned cargo-fuzz
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Fuzz malformed canonical input
+        run: cargo +nightly-2026-08-01 fuzz run decode_v1 -- -runs=100000 -seed=1592639215 -max_len=4096 -rss_limit_mb=1024
+      - name: Fuzz generated canonical values
+        run: cargo +nightly-2026-08-01 fuzz run structured_v1 -- -runs=100000 -seed=1592639215 -max_len=4096 -rss_limit_mb=1024

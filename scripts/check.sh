@@ -15,6 +15,9 @@ RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps --lock
 cargo fmt --manifest-path experiments/dependency-audit/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/fixture-generator/Cargo.toml -- --check
 cargo fmt --manifest-path experiments/content-fixtures/Cargo.toml -- --check
+cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+cargo metadata --manifest-path fuzz/Cargo.toml --locked --offline --format-version 1 \
+  > /dev/null
 rustfmt --edition 2024 --check experiments/storage-publication.rs tests/r0_vectors.rs
 
 python3 scripts/check_docs.py
