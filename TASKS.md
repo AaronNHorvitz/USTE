@@ -68,7 +68,7 @@ This clarification preserves task IDs, dependencies and completed R0 evidence.
 | [x] T-16 | Principal/namespace authorization and quotas; FR-09, NFR-04 | T-14, T-15 | [`uste-policy`](crates/uste-policy) and [authorization foundation evidence](docs/evidence/authorization-foundation.md) | VT-06 namespace/blob/outcome slice proves default denial, no cross-scope/existence leakage and exact-byte quotas; T-17 repeats through real graph paths |
 | [x] T-17 | Graph records, evidence and transactional adjacency; FR-01/04/06 | T-10, T-14, T-16 | [`uste-graph`](crates/uste-graph) and [transactional graph evidence](docs/evidence/transactional-evidence-graph.md) | T-17 adjacency/reference/rebuild slice of VT-05 and encrypted restart cover create/correct/delete/conflict; VT-06 graph concealment passes |
 | [x] T-18 | Deterministic replay and verified cache snapshots; FR-03/07 | T-13, T-17 | [`uste-replay`, encrypted checkpoints and evidence](docs/evidence/replay-checkpoints.md) | VT-04/14 show cold/checkpoint logical equivalence, exact journal anchors, suffix recovery and fail-closed fallback without model/parser/network dependencies |
-| [ ] T-45 | Shared UTC/time types, normalization, source envelopes and replay integration; FR-26 | T-09, T-12, T-18 | Versioned time codec, pinned local timezone profile and golden vectors | VT-17 kernel cases pass: no silent guessing, clock rollback does not reorder commits, replay preserves accepted interpretation |
+| [x] T-45 | Shared UTC/time types, normalization, source envelopes and replay integration; FR-26 | T-09, T-12, T-18 | [`uste-time`, Decision 0021 and evidence](docs/evidence/time-normalization.md) | VT-17 kernel cases pass: no silent guessing, clock rollback does not reorder commits, replay preserves accepted interpretation |
 | [ ] T-48 | World/frame/geometry/observation schemas and typed units; FR-27/28 | T-09, T-45 | uste-types spatial records and reference histories | VT-18/19 schema subset rejects invalid units, frame cycles, nonfinite values and invented missing positions |
 | [ ] T-49 | Bounded import transaction contracts and durable checkpoints; FR-34 | T-14, T-15, T-48 | Mapping types, batch IDs, checkpoint/outcome records | VT-23 transaction subset proves atomic batches, retry identity, changed-source refusal and no dangling references |
 | [ ] T-19 | R1 acceptance and operating limitations | T-15, T-16, T-17, T-18, T-45, T-48, T-49 | R1 evidence report and runnable kernel instructions | Required R1 VT/BM scope passes; clear non-production and scalability limits |
@@ -101,6 +101,13 @@ applies only the reducer suffix. The 28-case publication crash matrix, 21-case a
 malformed-carrier matrix, older-slot fallback and encrypted graph restart equivalence pass. The
 journal is currently opened twice and checkpoints remain capped in-memory caches; BM-06 and disk
 projections remain T-20 work rather than implied performance results.
+
+T-45 completion: Decision 0021 adds strict explicit timestamp normalization, checked full-range
+Gregorian arithmetic, hash-verified embedded TZDB 2026c local rules and bounded canonical source
+envelopes. Graph cold replay restores the accepted pair without parsing or zone resolution; equal
+and rolling-back wall samples remain ordered only by distinct recovered commit revisions. The 12
+R0 time vectors, envelope malformed matrix and all supported Gregorian days pass. Temporal indexes
+and content-adapter timestamp extraction remain T-21/T-24 rather than implied completion.
 
 ## R2 — Developer alpha
 

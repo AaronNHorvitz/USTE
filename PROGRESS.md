@@ -2,14 +2,14 @@
 
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
-Latest completed implementation: `595c47a` (local T-18 deterministic replay and encrypted,
-journal-anchored checkpoint recovery over the T-13–T-17 foundation). Decision 0020 and the linked
-evidence bind closure in the following documentation commit. Review was performed by Codex agents
-and does not represent independent external security certification.
+Latest completed implementation: `274e5d2` (local T-45 pinned time normalization, bounded source
+envelopes and replay-preserved interpretation over the T-09/T-12/T-18 foundation). Decision 0021
+and the linked evidence bind closure in the following documentation commit. Review was performed
+by Codex agents and does not represent independent external security certification.
 
-T-18 is complete at its local correctness scope. T-45 shared UTC/time normalization and source
-timestamp provenance is the next dependency-permitted R1 task. T-62 remains an independent,
-unverified external distribution prerequisite.
+T-45 is complete at its local correctness scope. T-48 world/frame/geometry/observation schemas and
+typed units is the next dependency-permitted R1 task. T-62 remains an independent, unverified
+external distribution prerequisite.
 
 ## Completed this increment
 
@@ -124,6 +124,19 @@ unverified external distribution prerequisite.
 - Closed review findings for split-brain generations, frontier-only anchor matching, forgeable
   seed provenance, infallible large-frame allocation and encoder/decoder invariant drift. Final
   code/evidence review reported no remaining high- or medium-severity T-18 finding.
+- Completed T-45 with Decision 0021 and the safe-Rust `uste-time` crate while keeping `uste-types`
+  std-only: strict RFC 3339 and explicit-unit numeric normalization, checked full-range Gregorian
+  arithmetic, hash-verified embedded TZDB 2026c local resolution and explicit local presentation.
+- Added bounded canonical timestamp envelopes carrying exact source token, artifact/version/locator,
+  interpretation, precision, uncertainty, assumptions and accepted result. Closed invariants reject
+  unknown profiles, contradictory states and over-limit inputs before copying or scanning them.
+- Proved graph cold replay restores the authenticated accepted instant without reparsing the source
+  token or resolving a zone. Equal and rolling-back wall samples still publish and recover distinct
+  consecutive revisions. All 12 R0 time vectors execute across time/graph tests, and all 3,652,059
+  supported Gregorian days round-trip through the independent checked calendar arithmetic.
+- Corrected review findings for normalizer-construction bypass, cap-before-copy behavior, malformed
+  date-only inputs and open semantic reason combinations. Final review found no remaining high- or
+  medium-severity T-45 finding; dependency unsafe remains explicitly inventoried.
 - Modeled scoped entity/evidence/assertion/relationship records, evidence-backed relationship
   lifecycle, explicit correction preconditions, final-state reference closure, bitemporal reads,
   bounded reject/cascade/retract deletion and typed atomic failures.
@@ -188,9 +201,11 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 175 workspace tests including 69 uste-storage, 13
-# uste-crypto, 23 uste-graph, 8 uste-replay, 4 uste-policy and 25 uste-txn tests;
+# workspace format/clippy/test/doc pass; 193 workspace tests including 69 uste-storage, 13
+# uste-crypto, 25 uste-graph, 15 uste-time, 8 uste-replay, 4 uste-policy and 26 uste-txn tests;
 # docs=ok; task graph=ok; R0/fixture tests pass
+/tmp/uste-t09-tools/bin/cargo-deny --locked check advisories licenses sources bans
+# advisories ok, bans ok, licenses ok, sources ok
 CARGO_DENY_BIN=/tmp/uste-t09-tools/bin/cargo-deny bash scripts/check_supply_chain.sh
 # all five lockfiles including rustix 1.1.5: zero advisory/license/source errors;
 # documented miniz_oxide warnings only
@@ -225,6 +240,9 @@ remaining mixed workload have not passed.
   exact current copy at authorized open. The oracle intentionally scans records and is not a
   scalable implementation. The fuzz runner requires nightly Rust plus a C++ compiler, both confined
   to development tooling.
+- T-45 normalizes timestamps and preserves their provenance but does not add temporal indexes,
+  content-adapter extraction, clock-drift estimation or leap/TAI/GPS conversion tables. T-21 and
+  T-24 own those layers. The admitted named-zone behavior is pinned to embedded TZDB 2026c.
 - T-13 local acceptance is complete on the reference Btrfs runner and the independently identified
   ext4 mount `/var/mnt/archive_vault` (`/dev/sda1`). These SIGKILL tests do not simulate controller
   cache loss or actual power loss. The certificate log fails closed at 1 GiB pending later
@@ -232,8 +250,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue with T-45: implement versioned shared UTC/time normalization, source timestamp envelopes,
-the pinned local-timezone profile and replay-preserved interpretation with VT-17 edge cases.
+Continue with T-48: implement world/frame/geometry/observation schemas, typed units, reference
+histories and VT-18/19 validation for cycles, nonfinite values and absent observations.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.

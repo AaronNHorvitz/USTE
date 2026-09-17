@@ -1,6 +1,7 @@
 # T-45 pinned time normalization evidence
 
-Date: 2026-09-17 · local correctness evidence, not independent security certification
+Date: 2026-09-17 · implementation commit: `274e5d2` · local correctness evidence, not independent
+security certification
 
 ## Implemented result
 
