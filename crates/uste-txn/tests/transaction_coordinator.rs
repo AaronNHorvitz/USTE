@@ -276,6 +276,42 @@ fn journal_anchored_external_suffix_is_reauthenticated_before_recovery() {
         Err(TransactionError::IntegrityFailure)
     ));
 
+    // A refusal in the prefix or at the pending suffix must release ownership, so a subsequent
+    // adequately admitted recovery can still authenticate and recover the exact durable state.
+    for maximum_outcomes in [0, 1] {
+        let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut filesystem,
+            &name,
+            scope,
+            CounterEntropy(199),
+            CounterEntropy(200),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+        let suffix = frontier.unwrap().bind_prepared(7_i64);
+        drop(recovery);
+        assert!(matches!(
+            CommitCoordinator::open_journal_anchored_prepared_bounded(
+                &mut filesystem,
+                &name,
+                scope,
+                RetentionDays::new(30).unwrap(),
+                CounterEntropy(201),
+                CounterEntropy(202),
+                &mut TestKeyAdapter,
+                AnchoredCounterState {
+                    scope,
+                    revision: base_revision,
+                    certificate_digest: base_certificate_digest,
+                    value: 5,
+                },
+                Some(suffix),
+                uste_txn::CoordinatorRecoveryLimits::new(maximum_outcomes, 0).unwrap(),
+            ),
+            Err(TransactionError::ResourceLimit)
+        ));
+    }
+
     let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
         &mut filesystem,
         &name,
@@ -287,7 +323,7 @@ fn journal_anchored_external_suffix_is_reauthenticated_before_recovery() {
     .unwrap();
     let suffix = frontier.unwrap().bind_prepared(7_i64);
     drop(recovery);
-    let (mut recovered, report) = CommitCoordinator::open_journal_anchored_prepared(
+    let (mut recovered, report) = CommitCoordinator::open_journal_anchored_prepared_bounded(
         &mut filesystem,
         &name,
         scope,
@@ -302,6 +338,7 @@ fn journal_anchored_external_suffix_is_reauthenticated_before_recovery() {
             value: 5,
         },
         Some(suffix),
+        uste_txn::CoordinatorRecoveryLimits::new(2, 0).unwrap(),
     )
     .unwrap();
     assert_eq!(report.frontier, Some(second.revision));

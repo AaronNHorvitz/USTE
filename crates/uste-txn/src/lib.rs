@@ -57,6 +57,40 @@ pub const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024 - GROUP_HEADER_BYTES;
 /// Accepted `limits-v1` cap for retained idempotency outcomes in one namespace.
 pub const MAX_OUTCOMES_PER_NAMESPACE: usize = 10_000_000;
 
+/// Admission limits for the still memory-resident metadata in journal-anchored recovery.
+/// These count bounds do not claim a byte/RSS bound for the journal or reducer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoordinatorRecoveryLimits {
+    maximum_outcomes: usize,
+    maximum_blob_owners: usize,
+}
+
+impl CoordinatorRecoveryLimits {
+    pub const fn new(
+        maximum_outcomes: usize,
+        maximum_blob_owners: usize,
+    ) -> Result<Self, TransactionError> {
+        if maximum_outcomes > MAX_OUTCOMES_PER_NAMESPACE
+            || maximum_blob_owners > uste_storage::MAX_COMMITTED_BLOBS_PER_JOURNAL
+        {
+            return Err(TransactionError::ResourceLimit);
+        }
+        Ok(Self {
+            maximum_outcomes,
+            maximum_blob_owners,
+        })
+    }
+}
+
+impl Default for CoordinatorRecoveryLimits {
+    fn default() -> Self {
+        Self {
+            maximum_outcomes: MAX_OUTCOMES_PER_NAMESPACE,
+            maximum_blob_owners: uste_storage::MAX_COMMITTED_BLOBS_PER_JOURNAL,
+        }
+    }
+}
+
 /// Authenticate the complete journal and return only cache candidates whose certificate anchor is
 /// on that exact chain. `open_seeded` revalidates the anchor after this temporary reader releases
 /// ownership, closing the read/open race without trusting the cache as authority.
@@ -879,8 +913,42 @@ where
         vault_entropy: E,
         identity_entropy: I,
         key_adapter: &mut A,
+        state: S,
+        suffix: Option<RecoveredPreparedSuffix<S::Prepared>>,
+    ) -> Result<(Self, RecoveryReport), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+        S: JournalAnchoredTransactionState,
+    {
+        Self::open_journal_anchored_prepared_bounded(
+            filesystem,
+            final_name,
+            scope,
+            retention,
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            state,
+            suffix,
+            CoordinatorRecoveryLimits::default(),
+        )
+    }
+
+    /// Journal-anchored recovery with explicit metadata admission limits checked before insertion.
+    /// The entire journal is still authenticated before replay callbacks, and metadata remains
+    /// memory-resident. A limit refusal never returns a partially recovered coordinator.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_journal_anchored_prepared_bounded<A>(
+        filesystem: &mut F,
+        final_name: &uste_storage::EntryName,
+        scope: NamespaceRef,
+        retention: RetentionDays,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
         mut state: S,
         suffix: Option<RecoveredPreparedSuffix<S::Prepared>>,
+        limits: CoordinatorRecoveryLimits,
     ) -> Result<(Self, RecoveryReport), TransactionError>
     where
         A: KeyAdapter<Envelope = W>,
@@ -921,6 +989,7 @@ where
             key_adapter,
             |group| {
                 let decoded = decode_recovered_group(scope, group)?;
+                admit_recovered_metadata(&outcomes, &committed_blob_owners, &decoded, limits)?;
                 if group.revision <= base_revision {
                     if group.revision == base_revision {
                         if group.certificate_digest != base_certificate_digest {
@@ -969,7 +1038,10 @@ where
                 Ok(())
             },
         )
-        .map_err(map_open_error)?;
+        .map_err(|error| match error {
+            StorageError::ResourceLimit => TransactionError::ResourceLimit,
+            other => map_open_error(other),
+        })?;
         if !base_seen
             || suffix.is_some()
             || report.frontier != Some(expected_frontier)
@@ -1935,6 +2007,34 @@ fn decode_recovered_group(
     })
 }
 
+fn admit_recovered_metadata(
+    outcomes: &BTreeMap<RetryKey, TransactionOutcome>,
+    owners: &BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    decoded: &DecodedGroup<'_>,
+    limits: CoordinatorRecoveryLimits,
+) -> Result<(), StorageError> {
+    if outcomes.len() >= limits.maximum_outcomes {
+        return Err(StorageError::ResourceLimit);
+    }
+    // BlobInventory is canonical and duplicate-free. Count only previously unseen identities;
+    // a repeated inventory must not consume a second ownership slot.
+    let additional = decoded.blob_inventory.map_or(0, |inventory| {
+        inventory
+            .references()
+            .iter()
+            .filter(|reference| !owners.contains_key(&(reference.scope(), reference.id())))
+            .count()
+    });
+    if owners
+        .len()
+        .checked_add(additional)
+        .is_none_or(|count| count > limits.maximum_blob_owners)
+    {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
+}
+
 fn record_decoded_group_metadata(
     outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
     transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
@@ -2257,6 +2357,55 @@ mod tests {
             result_digest,
             expires_at: UtcInstant::new(2_592_000, 123).unwrap(),
         }
+    }
+
+    #[test]
+    fn recovery_owner_budget_counts_only_first_ownership_and_refuses_before_mutation() {
+        let first =
+            BlobReference::new(scope(), BlobId::from_bytes([7; 16]), 5, 1, [8; 32]).unwrap();
+        let second =
+            BlobReference::new(scope(), BlobId::from_bytes([9; 16]), 5, 1, [8; 32]).unwrap();
+        let principal = PrincipalDigest::from_bytes([3; 32]);
+        let retry_key = RetryKey {
+            principal,
+            key: IdempotencyKey::from_bytes([4; 16]),
+        };
+        let mut owners = BTreeMap::from([((scope(), first.id()), (first, principal))]);
+        let outcomes = BTreeMap::new();
+        let repeated = BlobInventory::new(scope(), [first]).unwrap();
+        let expanded = BlobInventory::new(scope(), [first, second]).unwrap();
+        let mut decoded = DecodedGroup {
+            retry_key,
+            outcome: outcome(),
+            request: b"synthetic",
+            blob_inventory: Some(&repeated),
+        };
+        let limits = CoordinatorRecoveryLimits::new(1, 1).unwrap();
+        assert_eq!(
+            admit_recovered_metadata(&outcomes, &owners, &decoded, limits),
+            Ok(())
+        );
+        decoded.blob_inventory = Some(&expanded);
+        assert_eq!(
+            admit_recovered_metadata(&outcomes, &owners, &decoded, limits),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(owners.len(), 1);
+        owners.clear();
+        decoded.blob_inventory = Some(&repeated);
+        assert_eq!(
+            admit_recovered_metadata(
+                &outcomes,
+                &owners,
+                &decoded,
+                CoordinatorRecoveryLimits::new(1, 0).unwrap()
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            CoordinatorRecoveryLimits::new(MAX_OUTCOMES_PER_NAMESPACE + 1, 0),
+            Err(TransactionError::ResourceLimit)
+        );
     }
 
     #[test]

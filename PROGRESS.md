@@ -51,6 +51,14 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added `CoordinatorRecoveryLimits` and `open_journal_anchored_prepared_bounded`: callers can
+  cap retained outcomes and first blob owners before coordinator map insertion during recovery.
+  Duplicate blob inventory use consumes no additional owner slot. Refusal returns no coordinator
+  and releases ownership; a later adequately admitted open recovers the exact durable suffix.
+  The first regression exposed nested storage error mapping; recovery budget refusal now returns
+  typed `TransactionError::ResourceLimit`. Final sequential capped verification passed 29
+  transaction tests, 5 graph disk-index tests and warnings-denied transaction clippy. These are
+  count limits for coordinator maps, not journal/RSS bounds or disk-backed metadata completion.
 - Resumed after the capacity interruption and pushed `8885da4`/`808f2fd` without rewriting history.
   Confirmed the M1 pin's lock digest and unchanged pilot sources against Decision 0058, and
   reconciled obsolete T-64 next-step instructions with completed T-63–T-68 status.
@@ -752,7 +760,10 @@ Continue the preserved full-product work below. Large benchmarks still require a
 headroom; the resumed preflight showed 4.1 GiB available RAM and 112 KiB free swap.
 
 Continue T-20 by moving coordinator retry, transaction and blob-owner metadata off the full
-in-memory journal replay path. Extend bounded
+in-memory journal replay path. The v1 metadata root has retry and blob-owner families but no
+transaction-ID lookup family; introduce and validate that disk lookup contract before replacing
+the live maps. Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
+transaction collision and first-owner semantics. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's
@@ -760,3 +771,9 @@ remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepte
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated
 as passed.
+
+Persistent-goal continuity: the existing goal remains recorded as blocked by the service following
+the capacity interruption. Its API exposes completion/blocking but no resume operation; creating a
+replacement is rejected because the existing goal is unfinished. The user's resumed implementation
+authorization remains in force. This status is a control-plane limitation, not project completion
+or a blocker to local work; preserve the original goal and use this handoff for continuity.
