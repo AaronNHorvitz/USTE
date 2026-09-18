@@ -217,6 +217,20 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Load certificate-bound root manifests without an implicit absolute-maximum run scrub.
+    ///
+    /// Returned handles remain provisional until trusted domain code exhausts complete
+    /// authenticated cursors with explicit limits and completes semantic admission.
+    pub fn load_index_root_manifests(
+        &self,
+        filesystem: &mut F,
+        index_profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        self.journal
+            .load_index_root_manifests(filesystem, self.scope, index_profile)
+            .map_err(TransactionError::Storage)
+    }
+
     /// Authenticated exact lookup for trusted recovery semantic proofs.
     pub fn index_get(
         &self,

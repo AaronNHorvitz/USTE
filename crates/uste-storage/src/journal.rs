@@ -1308,6 +1308,38 @@ where
             .collect())
     }
 
+    /// Load certificate-chain-bound root manifests without scanning referenced run pages.
+    ///
+    /// These handles are provisional discovery results. Trusted domain recovery must authenticate
+    /// every complete run with caller-selected cursor limits and withhold all visible state until
+    /// those terminal reports and its semantic validation succeed. Use [`Self::load_index_roots`]
+    /// when an immediately fully scrubbed root is required.
+    pub fn load_index_root_manifests(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        index_profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, StorageError> {
+        let roots = index::load_manifests(
+            filesystem,
+            IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            scope,
+            index_profile,
+        )?;
+        Ok(roots
+            .into_iter()
+            .filter(|root| {
+                self.certificate_anchors.get(&root.revision()) == Some(root.certificate_digest())
+            })
+            .collect())
+    }
+
     /// Exact key lookup in one family of an authenticated derived root.
     pub fn index_get(
         &self,
@@ -3461,6 +3493,19 @@ mod tests {
         damaged_run
             .test_mutate_file(&root_directory, &run_name, 100)
             .unwrap();
+        // Bounded recovery discovery authenticates only the two fixed-size manifests. The run
+        // damage therefore remains a provisional candidate and is rejected only when a trusted
+        // caller advances a complete cursor or requests the compatibility full scrub.
+        let manifests = store
+            .load_index_root_manifests(&mut damaged_run, scope, profile)
+            .unwrap();
+        assert_eq!(manifests.len(), 2);
+        assert!(
+            store
+                .load_index_roots(&mut damaged_run, scope, profile)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             store
                 .scrub_index_root(&mut damaged_run, &roots[0], &mut warm_cache)

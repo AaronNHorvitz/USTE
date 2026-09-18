@@ -890,6 +890,29 @@ where
     )
 }
 
+/// Load only authenticated fixed-size root manifests and run-file shape metadata.
+///
+/// Referenced run pages have not been authenticated by this operation. Callers must keep every
+/// returned root provisional and use complete run cursors with explicit limits before publishing
+/// any derived result. This is the bounded discovery half of recovery; [`load`] remains the
+/// fully-scrubbed compatibility path.
+pub(crate) fn load_manifests<F, W, E>(
+    filesystem: &mut F,
+    context: IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    scope: NamespaceRef,
+    index_profile: [u8; 32],
+) -> Result<Vec<RecoveredIndexRoot>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let candidates = load_manifest_candidates(filesystem, &context, vault, scope, index_profile)?;
+    validate_candidate_generations(&candidates)?;
+    Ok(candidates.into_iter().map(|(_, root)| root).collect())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn get<F, W, E>(
     filesystem: &mut F,
@@ -2775,28 +2798,55 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
+    let manifests = load_manifest_candidates(filesystem, context, vault, scope, index_profile)?;
+    let mut candidates = Vec::new();
+    for (slot, root) in manifests {
+        // A root is usable only when all referenced durable pages authenticate and reproduce
+        // the committed run digests. Publication must make its overwrite choice from usable
+        // roots so a corrupt newest run cannot cause the sole good fallback to be removed.
+        let mut cache = PageCache::default();
+        match scrub(filesystem, context, vault, &root, &mut cache) {
+            Ok(_) => candidates.push((slot, root)),
+            Err(StorageError::IntegrityFailure | StorageError::UnsupportedProfile) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    validate_candidate_generations(&candidates)?;
+    Ok(candidates)
+}
+
+fn load_manifest_candidates<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    scope: NamespaceRef,
+    index_profile: [u8; 32],
+) -> Result<Vec<(Slot, RecoveredIndexRoot)>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
     let mut candidates = Vec::new();
     for slot in [Slot::A, Slot::B] {
         if let Some(root) = load_slot(filesystem, context, vault, scope, index_profile, slot)? {
-            // A root is usable only when all referenced durable pages authenticate and reproduce
-            // the committed run digests. Publication must make its overwrite choice from usable
-            // roots so a corrupt newest run cannot cause the sole good fallback to be removed.
-            let mut cache = PageCache::default();
-            match scrub(filesystem, context, vault, &root, &mut cache) {
-                Ok(_) => candidates.push((slot, root)),
-                Err(StorageError::IntegrityFailure | StorageError::UnsupportedProfile) => {}
-                Err(error) => return Err(error),
-            }
+            candidates.push((slot, root));
         }
     }
     candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.1.generation));
+    Ok(candidates)
+}
+
+fn validate_candidate_generations(
+    candidates: &[(Slot, RecoveredIndexRoot)],
+) -> Result<(), StorageError> {
     if candidates.len() == 2
         && candidates[0].1.generation == candidates[1].1.generation
         && candidates[0].1 != candidates[1].1
     {
         return Err(StorageError::IntegrityFailure);
     }
-    Ok(candidates)
+    Ok(())
 }
 
 fn load_slot<F, W, E>(

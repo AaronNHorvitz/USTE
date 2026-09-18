@@ -522,7 +522,7 @@ where
 {
     fn reader_scope(&self) -> NamespaceRef;
 
-    fn reader_load_roots(
+    fn reader_load_root_manifests(
         &self,
         filesystem: &mut F,
         profile: [u8; 32],
@@ -603,12 +603,12 @@ where
         self.scope()
     }
 
-    fn reader_load_roots(
+    fn reader_load_root_manifests(
         &self,
         filesystem: &mut F,
         profile: [u8; 32],
     ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
-        self.load_index_roots(filesystem, profile)
+        self.load_index_root_manifests(filesystem, profile)
     }
 
     fn reader_visit_run(
@@ -705,12 +705,12 @@ where
         self.scope()
     }
 
-    fn reader_load_roots(
+    fn reader_load_root_manifests(
         &self,
         filesystem: &mut F,
         profile: [u8; 32],
     ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
-        self.load_index_roots(filesystem, profile)
+        self.load_index_root_manifests(filesystem, profile)
     }
 
     fn reader_visit_run(
@@ -3262,8 +3262,9 @@ where
     Ok(admitted)
 }
 
-/// Discover authenticated roots on the journal certificate chain without comparing them to the
-/// already-live reducer. Returned handles remain candidates until full semantic reconstruction.
+/// Discover authenticated root manifests on the journal certificate chain without comparing them
+/// to the already-live reducer or implicitly scrubbing run pages. Returned handles remain
+/// provisional until full caller-bounded semantic reconstruction or admission exhausts every run.
 pub fn load_graph_state_root_candidates<F, W, E, I>(
     coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
     filesystem: &mut F,
@@ -4163,7 +4164,7 @@ where
     R: GraphStateIndexReader<F>,
 {
     Ok(reader
-        .reader_load_roots(filesystem, GRAPH_STATE_PROFILE_V1)?
+        .reader_load_root_manifests(filesystem, GRAPH_STATE_PROFILE_V1)?
         .into_iter()
         .filter(|root| root.reducer_profile() == &GraphState::REDUCER_PROFILE)
         .map(|root| GraphStateRootCandidate { root })

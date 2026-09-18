@@ -1347,6 +1347,23 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted recovery discovery of certificate-bound root manifests.
+    ///
+    /// Run contents remain provisional until a domain exhausts complete authenticated cursors
+    /// under its own explicit work limits and finishes semantic admission.
+    pub fn load_index_root_manifests(
+        &self,
+        filesystem: &mut F,
+        index_profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .load_index_root_manifests(filesystem, self.scope, index_profile)
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted raw exact lookup. Consumer-facing callers must use an authorized projection.
     pub fn index_get(
         &self,
