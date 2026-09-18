@@ -27,10 +27,11 @@ use crate::{
         DurableCheckpoint, RecoveredCheckpoint,
     },
     index::{
-        self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexPredecessor,
-        IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor,
-        IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
-        IndexScanEntry, IndexScrubReport, MergedIndexRun, PageCache, RecoveredIndexRoot,
+        self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexGetLimits,
+        IndexPredecessor, IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor,
+        IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport,
+        IndexRunVisitor, IndexScan, IndexScanEntry, IndexScrubReport, MergedIndexRun, PageCache,
+        RecoveredIndexRoot,
     },
     read_exact_at, write_all_at,
 };
@@ -1331,6 +1332,37 @@ where
             root,
             family,
             key,
+            cache,
+        )
+    }
+
+    /// Exact key lookup with caller-selected page-visit and result-allocation bounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::get_bounded(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            key,
+            limits,
             cache,
         )
     }
@@ -2959,6 +2991,40 @@ mod tests {
         assert!(cold.pages_read >= 3);
         assert!(cache.accounted_bytes() <= cache.budget());
         assert!(cache.evictions() > 0);
+        let (bounded_read, bounded_stats) = store
+            .index_get_bounded(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"beta",
+                IndexGetLimits::new(32, large.len()).unwrap(),
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(bounded_read.as_deref(), Some(large.as_slice()));
+        assert_eq!(bounded_stats.result_bytes, large.len() as u64);
+        assert_eq!(
+            store.index_get_bounded(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"beta",
+                IndexGetLimits::new(32, large.len() - 1).unwrap(),
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.index_get_bounded(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"beta",
+                IndexGetLimits::new(1, large.len()).unwrap(),
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
 
         let predecessor_limits = IndexPredecessorLimits::new(32, large.len() + 16).unwrap();
         let between = store

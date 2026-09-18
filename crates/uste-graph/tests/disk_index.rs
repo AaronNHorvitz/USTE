@@ -3,10 +3,12 @@ use uste_crypto::{
 };
 use uste_graph::{
     AdjacencyDirection, AssertionAction, DeletePolicy, DurablePolicyMutation, Expected,
-    GRAPH_STATE_PROFILE_V1, GraphDiskError, GraphDiskPreparationLimits, GraphError, GraphState,
-    GraphStateDeltaLimits, GraphStateLoadLimits, GraphStateRootMergeLimits, GraphTransaction,
-    NewAssertion, NewEntity, NewEvidence, NewRecord, NewRelationship, Operation, Predicate, Record,
-    ValidTime, commit_graph_disk_prepared, disk_adjacent_ids, disk_record, disk_supported_ids,
+    GRAPH_STATE_PROFILE_V1, GraphDiskBaseAdmissionLimits, GraphDiskError,
+    GraphDiskPreparationLimits, GraphError, GraphState, GraphStateDeltaLimits,
+    GraphStateLoadLimits, GraphStateRootMergeLimits, GraphTransaction, NewAssertion, NewEntity,
+    NewEvidence, NewRecord, NewRelationship, Operation, Predicate, Record, ValidTime,
+    admit_graph_disk_base_candidate, admit_graph_disk_base_candidate_for_recovery,
+    commit_graph_disk_prepared, disk_adjacent_ids, disk_record, disk_supported_ids,
     encode_stored_record, encode_transaction, load_current_graph_index_roots,
     load_graph_disk_preparation_view, load_graph_state_root_candidates,
     load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
@@ -17,9 +19,9 @@ use uste_graph::{
 };
 use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
 use uste_storage::{
-    ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexRootInput, IndexRunMergeLimits,
-    IndexRunReadLimits, PageCache, fault::ScriptedClock, journal::DurableKeyEnvelope,
-    memory::MemoryFileSystem,
+    ClockObservation, EntryName, INDEX_PAGE_BYTES, IndexEntry, IndexPredecessorLimits,
+    IndexRootInput, IndexRunMergeLimits, IndexRunReadLimits, PageCache, fault::ScriptedClock,
+    journal::DurableKeyEnvelope, memory::MemoryFileSystem,
 };
 use uste_txn::{
     AuthenticatedIndexRecovery, CheckpointState, CommitCoordinator, CoordinatorMetadataLoadLimits,
@@ -55,6 +57,24 @@ fn clock(revision: u64) -> ScriptedClock {
         wall_utc: UtcInstant::new(i64::try_from(revision).unwrap(), 0).unwrap(),
         monotonic_ticks: revision,
     })])
+}
+
+fn state_load_limits() -> GraphStateLoadLimits {
+    GraphStateLoadLimits::new(100, 1_000, 100, 10_000, 10_000, 16 * 1024 * 1024).unwrap()
+}
+
+fn admission_limits() -> GraphDiskBaseAdmissionLimits {
+    GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        100,
+        4 * 1024 * 1024,
+        100_000,
+        10_000,
+        100_000,
+        64 * 1024 * 1024,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap()
 }
 
 fn commit(
@@ -289,6 +309,195 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
     assert_eq!(reconstruction.entries, 18);
     assert!(reconstruction.pages_read >= reconstruction.runs);
     assert!(reconstruction.logical_bytes > 0);
+    let mut admission_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    let (disk_base, admission) = admit_graph_disk_base_candidate(
+        &coordinator,
+        &mut filesystem,
+        &state_candidates[0],
+        admission_limits(),
+        &mut admission_cache,
+    )
+    .unwrap();
+    assert_eq!(disk_base.scope(), scope());
+    assert_eq!(disk_base.anchor(), state_candidates[0].anchor());
+    assert_eq!(disk_base.revision(), snapshot.revision().unwrap());
+    assert_eq!(disk_base.generation(), state_candidates[0].generation());
+    assert_eq!(disk_base.namespace_policy(), snapshot.namespace_policy());
+    assert_eq!(disk_base.state_counts(), [4, 5, 1, 1, 1, 3, 1, 1]);
+    assert_eq!(admission.scan.runs, 8);
+    assert_eq!(admission.scan.entries, 18);
+    assert!(admission.predecessor_lookups > 0);
+    assert!(admission.exact_lookups > 0);
+    assert!(admission.semantic_reference_visits > 1);
+    assert!(admission.lookup_page_visits > 1);
+    assert!(admission.lookup_result_bytes > 1);
+    assert!(format!("{disk_base:?}").contains("[REDACTED]"));
+    assert_eq!(
+        scrub_graph_state_root(
+            &coordinator,
+            &mut filesystem,
+            disk_base.admitted_root(),
+            &mut admission_cache,
+        )
+        .unwrap()
+        .runs,
+        8
+    );
+    let handoff = load_graph_disk_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        disk_base.admitted_root(),
+        GraphTransaction::new(
+            scope(),
+            vec![Operation::ReplaceEntity {
+                target: left,
+                expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+                properties: Value::Bool(true),
+            }],
+        ),
+        GraphDiskPreparationLimits::new(10, 100, 10, 10, 1024 * 1024).unwrap(),
+        &mut admission_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    assert_eq!(handoff.base_revision(), snapshot.revision().unwrap());
+    assert_eq!(
+        handoff.revision().get(),
+        snapshot.revision().unwrap().get() + 1
+    );
+    let mut limit_baseline_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    let (_, bounded_admission) = admit_graph_disk_base_candidate(
+        &coordinator,
+        &mut filesystem,
+        &state_candidates[0],
+        admission_limits(),
+        &mut limit_baseline_cache,
+    )
+    .unwrap();
+    let one_history_version = GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        1,
+        4 * 1024 * 1024,
+        100_000,
+        10_000,
+        100_000,
+        64 * 1024 * 1024,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            one_history_version,
+            &mut admission_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let lookup_count = admission.exact_lookups + admission.predecessor_lookups;
+    let one_lookup_short = GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        100,
+        4 * 1024 * 1024,
+        100_000,
+        lookup_count - 1,
+        100_000,
+        64 * 1024 * 1024,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            one_lookup_short,
+            &mut admission_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let one_semantic_visit_short = GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        100,
+        4 * 1024 * 1024,
+        bounded_admission.semantic_reference_visits - 1,
+        10_000,
+        100_000,
+        64 * 1024 * 1024,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let mut semantic_limit_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    assert!(matches!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            one_semantic_visit_short,
+            &mut semantic_limit_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    let one_lookup_page_short = GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        100,
+        4 * 1024 * 1024,
+        100_000,
+        10_000,
+        bounded_admission.lookup_page_visits - 1,
+        64 * 1024 * 1024,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let mut page_limit_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    let page_limit_result = admit_graph_disk_base_candidate(
+        &coordinator,
+        &mut filesystem,
+        &state_candidates[0],
+        one_lookup_page_short,
+        &mut page_limit_cache,
+    );
+    assert!(
+        matches!(
+            page_limit_result,
+            Err(GraphDiskError::Storage(
+                uste_storage::journal::StorageError::ResourceLimit
+            ))
+        ),
+        "baseline={bounded_admission:?}; limited={page_limit_result:?}"
+    );
+    let one_lookup_byte_short = GraphDiskBaseAdmissionLimits::new(
+        state_load_limits(),
+        100,
+        4 * 1024 * 1024,
+        100_000,
+        10_000,
+        100_000,
+        bounded_admission.lookup_result_bytes - 1,
+        IndexPredecessorLimits::new(1_000, 16 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let mut byte_limit_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    assert!(matches!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            &state_candidates[0],
+            one_lookup_byte_short,
+            &mut byte_limit_cache,
+        ),
+        Err(GraphDiskError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
     let too_few_records = GraphStateLoadLimits::new(3, 20, 10, 100, 100, 1024 * 1024).unwrap();
     assert!(matches!(
         reconstruct_graph_state_candidate(
@@ -422,6 +631,16 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
         ),
         Err(GraphDiskError::IndexCorrupt)
     );
+    assert!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            malformed_current_candidate,
+            admission_limits(),
+            &mut admission_cache,
+        )
+        .is_err()
+    );
     let malformed_derived_candidate = semantic_candidates
         .iter()
         .find(|candidate| candidate.generation() == malformed_derived_root.generation)
@@ -439,6 +658,16 @@ fn current_graph_disk_projection_matches_reference_and_rejects_stale_roots() {
             )
         ))
     ));
+    assert!(
+        admit_graph_disk_base_candidate(
+            &coordinator,
+            &mut filesystem,
+            malformed_derived_candidate,
+            admission_limits(),
+            &mut admission_cache,
+        )
+        .is_err()
+    );
     // The root carrier intentionally retains two alternating manifests. Restore a current valid
     // candidate after the two negative generations so later restart/history checks exercise it.
     state_publication =
@@ -1712,6 +1941,23 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
         .iter()
         .find(|candidate| candidate.generation() == graph_publication.generation)
         .unwrap();
+    let mut admission_cache = PageCache::new(INDEX_PAGE_BYTES * 4).unwrap();
+    let (cold_base, admission) = admit_graph_disk_base_candidate_for_recovery(
+        &recovery,
+        &mut filesystem,
+        graph_candidate,
+        admission_limits(),
+        &mut admission_cache,
+    )
+    .unwrap();
+    assert_eq!(cold_base.anchor(), graph_candidate.anchor());
+    assert_eq!(cold_base.revision(), CommitRevision::FIRST);
+    assert_eq!(
+        cold_base.namespace_policy(),
+        checkpoint_snapshot.namespace_policy()
+    );
+    assert!(admission.scan.runs >= 4);
+    assert!(admission.exact_lookups > 0);
     let metadata_candidates =
         load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
             &recovery,

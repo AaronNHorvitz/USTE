@@ -216,7 +216,11 @@ Decision 0050 adds that resumable authenticated cursor and bounded predecessor p
 live-coordinator and recovery owners. The cursor permits interleaved proof I/O but releases a
 terminal report only after complete run authentication. The two-pass predecessor retains only a
 key during selection and only the selected value during assembly, with explicit page/result caps.
-Graph semantic admission remains open.
+Decision 0051 uses those proofs to admit a cold `GraphDiskBase`: all family streams, history/current
+and reference invariants, secondary correspondence, policy history and the canonical digest must
+pass under aggregate history/proof/semantic budgets. The base immediately drives bounded disk
+preparation without complete-map reconstruction. The live reducer, coordinator metadata, suffix
+recovery and candidate discovery/scrub remain memory-resident.
 
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
@@ -229,7 +233,7 @@ reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo`
 The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition blocks only a qualifying
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
-The full `bash scripts/check.sh` gate passed after the latest extension: 263 workspace tests, all
+The full `bash scripts/check.sh` gate passed after the latest extension: 264 workspace tests, all
 docs, strict clippy/rustdoc, the storage publication model, and 31 isolated T-20 fixture/engine/
 Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
 acceptance commands and ignored by the debug suite.

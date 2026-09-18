@@ -159,6 +159,14 @@ equal the complete-run visitor, early/corrupt/incomplete cursors must never fini
 proofs must cover exact, between, absent, fragmented, corrupted and exact-minus-limit cases. A
 large earlier prefix match must not consume the final predecessor's result budget.
 
+Decision 0051 verifies semantic cold admission through both live and recovery owners. Tests must
+prove terminal cursor exhaustion, current/history equality, lifecycle and historical/current
+reference closure, secondary-family correspondence, policy equality and canonical digest before a
+base is released. Storage-authenticated semantic corruption must fail. Exact-minus history-group,
+proof-operation, semantic-reference, lookup-page and lookup-byte budgets must return a typed
+resource limit; exact-value byte limits apply before allocation. The resulting base must work with
+the existing bounded disk-preparation path without reconstructing complete graph maps.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

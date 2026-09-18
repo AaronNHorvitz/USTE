@@ -31,10 +31,12 @@ pub use state::{
     PreparedGraphView,
 };
 pub use state_disk::{
-    DerivedGraphStateRoot, DiskPreparedGraph, GRAPH_STATE_PROFILE_V1, GraphDiskPreparationLimits,
+    DerivedGraphStateRoot, DiskPreparedGraph, GRAPH_STATE_PROFILE_V1, GraphDiskBase,
+    GraphDiskBaseAdmissionLimits, GraphDiskBaseAdmissionReport, GraphDiskPreparationLimits,
     GraphDiskPreparationReport, GraphDiskPreparationView, GraphRecoverySeedReport,
     GraphStateDeltaLimits, GraphStateLoadLimits, GraphStateLoadReport, GraphStateRootCandidate,
     GraphStateRootDelta, GraphStateRootMergeLimits, GraphStateRootMergeReport,
+    admit_graph_disk_base_candidate, admit_graph_disk_base_candidate_for_recovery,
     commit_graph_disk_prepared, load_graph_disk_preparation_view, load_graph_state_root_candidates,
     load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
     prepare_graph_state_root_delta, prepare_graph_state_root_delta_from_disk,

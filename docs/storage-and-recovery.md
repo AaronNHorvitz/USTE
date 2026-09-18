@@ -196,6 +196,13 @@ reauthenticates and compares the transaction prefix before suffix replay. Prefix
 entries from expected to verified maps instead of duplicating complete maps. Graph/coordinator
 state and root discovery remain memory-resident, so this is not the BM-06 endpoint.
 
+Decision 0051 permits that temporary recovery owner, or a live coordinator, to semantically admit
+a cold `graph-state-v1` root without rebuilding complete graph maps. It streams all families,
+retains at most one bounded history group, resolves references through bounded exact/predecessor
+proofs and releases an I/O-capability-free `GraphDiskBase` only after the canonical digest and all
+cross-family invariants match. Discovery and initial carrier scrub still use absolute storage
+maxima, while coordinator metadata, the live reducer and suffix replay remain memory-resident.
+
 Decision 0032 adds an authenticated bounded merge from one optional base run and sorted exact
 before/after deltas into one unpublished encrypted run. Present before-values must match byte-for-
 byte, absent before-values require absence and absent after-values are tombstones. The merge holds a

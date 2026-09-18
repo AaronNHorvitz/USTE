@@ -192,6 +192,13 @@ before lookup for historical reference resolution. Terminal cursor reports requi
 authentication, and predecessor values use a two-pass one-value bound. Graph semantic admission
 and a cold `GraphDiskBase` remain the next T-20 increment.
 
+Decision 0051 completes that cold semantic-admission increment. Live and recovery owners can
+stream all eight families, validate history/current/reference/derived/policy invariants, reproduce
+the canonical digest and return an I/O-capability-free `GraphDiskBase` for bounded preparation.
+History groups, exact/predecessor proof work and semantic reference comparisons have explicit
+caller limits; no complete graph map is reconstructed. Candidate discovery/scrub, the live
+coordinator/reducer, suffix replay and qualifying BM-01/BM-06 evidence remain open T-20 work.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

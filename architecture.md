@@ -254,6 +254,16 @@ finds the greatest prefix key at or before a revision key without consumer scan 
 only the selected value. These are the authenticated I/O capabilities for cold graph admission,
 not semantic admission or journal authority themselves.
 
+Decision 0051 adds that semantic layer. `GraphDiskBase` is returned only after all family cursors
+finish, current and terminal history agree, lifecycle/reference requirements resolve against the
+same root, every secondary entry and aggregate count agree, policy history terminates at the exact
+current policy and the streamed canonical digest matches. It retains only the exact root, counts
+and policy and owns no I/O/key capability. Shared iterator-oriented transition/reference rules keep
+cold and in-memory validation aligned. Caller limits cover one retained history group, exact and
+predecessor operations/pages/results, and each semantic reference comparison. Candidate discovery,
+the live reducer/coordinator maps and recovery suffix are still memory-resident; the admitted base
+is the cold base for the next persistent overlay increment, not a second commit authority.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

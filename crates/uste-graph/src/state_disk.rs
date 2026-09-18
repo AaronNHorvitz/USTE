@@ -7,13 +7,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
+use uste_policy::NamespacePolicy;
 use uste_storage::{
-    Clock, DurableIndexRoot, IndexDelta, IndexEntry, IndexReadStats, IndexRootAnchor,
-    IndexRootInput, IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport,
-    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScrubReport,
-    MAX_INDEX_DELTA_LOGICAL_BYTES, MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_PAGES_PER_RUN,
+    Clock, DurableIndexRoot, IndexDelta, IndexEntry, IndexGetLimits, IndexPredecessor,
+    IndexPredecessorLimits, IndexReadStats, IndexRootAnchor, IndexRootInput, IndexRunCursor,
+    IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits,
+    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES,
+    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_PAGES_PER_RUN,
     MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_SCAN_RESULTS,
-    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
+    MAX_INDEX_VALUE_BYTES, OwnershipFileSystem, PageCache, RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
 use uste_txn::{
@@ -37,9 +39,12 @@ use crate::{
         REVERSE_ROLE_RELATIONSHIP_TO, REVERSE_STATE_ACCEPTED, REVERSE_STATE_ACTIVE,
         REVERSE_STATE_DELETED, REVERSE_STATE_DISPUTED, REVERSE_STATE_EXPIRED,
         REVERSE_STATE_PROPOSED, REVERSE_STATE_REJECTED, REVERSE_STATE_RETRACTED,
-        REVERSE_STATE_SUPERSEDED, ReverseReference, prepare_from_complete_disk_proofs,
-        record_reverse_references, try_visit_record_references, validate_request_limits,
-        visit_record_references,
+        REVERSE_STATE_SUPERSEDED, ReferenceRequirement, ReferenceRequirementVisitError,
+        ReverseReference, prepare_from_complete_disk_proofs, record_reverse_references,
+        reference_requirement_matches, reverse_reference, try_visit_record_references,
+        validate_history_first, validate_history_successor, validate_request_limits,
+        visit_current_reference_requirements, visit_history_first_reference_requirements,
+        visit_history_successor_reference_requirements, visit_record_references,
     },
 };
 
@@ -147,6 +152,133 @@ pub struct GraphStateLoadReport {
     pub entries: u64,
     pub logical_bytes: u64,
     pub pages_read: u64,
+}
+
+/// Caller-selected bounds for cold semantic admission without materializing complete graph maps.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GraphDiskBaseAdmissionLimits {
+    scan: GraphStateLoadLimits,
+    maximum_history_group_versions: u64,
+    maximum_history_group_logical_bytes: u64,
+    maximum_semantic_reference_visits: u64,
+    maximum_lookup_operations: u64,
+    maximum_lookup_page_visits: u64,
+    maximum_lookup_result_bytes: u64,
+    predecessor: IndexPredecessorLimits,
+}
+
+impl GraphDiskBaseAdmissionLimits {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        scan: GraphStateLoadLimits,
+        maximum_history_group_versions: u64,
+        maximum_history_group_logical_bytes: u64,
+        maximum_semantic_reference_visits: u64,
+        maximum_lookup_operations: u64,
+        maximum_lookup_page_visits: u64,
+        maximum_lookup_result_bytes: u64,
+        predecessor: IndexPredecessorLimits,
+    ) -> Result<Self, GraphDiskError> {
+        if maximum_history_group_versions == 0
+            || maximum_history_group_versions > MAX_INDEX_ENTRIES_PER_RUN
+            || maximum_history_group_logical_bytes == 0
+            || maximum_history_group_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES
+            || maximum_history_group_logical_bytes > usize::MAX as u64
+            || maximum_semantic_reference_visits == 0
+            || maximum_semantic_reference_visits
+                > MAX_INDEX_ENTRIES_PER_RUN * crate::MAX_TRANSACTION_REFERENCES as u64
+            || maximum_lookup_operations == 0
+            || maximum_lookup_operations
+                > MAX_INDEX_ENTRIES_PER_RUN * crate::MAX_TRANSACTION_REFERENCES as u64
+            || maximum_lookup_page_visits == 0
+            || maximum_lookup_page_visits > MAX_INDEX_PAGES_PER_RUN * FAMILY_COUNT as u64
+            || maximum_lookup_result_bytes == 0
+            || maximum_lookup_result_bytes > MAX_INDEX_RUN_LOGICAL_BYTES * FAMILY_COUNT as u64
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(Self {
+            scan,
+            maximum_history_group_versions,
+            maximum_history_group_logical_bytes,
+            maximum_semantic_reference_visits,
+            maximum_lookup_operations,
+            maximum_lookup_page_visits,
+            maximum_lookup_result_bytes,
+            predecessor,
+        })
+    }
+}
+
+/// Authenticated work observed while semantically admitting one cold graph-state root.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GraphDiskBaseAdmissionReport {
+    pub scan: GraphStateLoadReport,
+    pub exact_lookups: u64,
+    pub predecessor_lookups: u64,
+    pub semantic_reference_visits: u64,
+    pub lookup_page_visits: u64,
+    pub lookup_result_bytes: u64,
+    pub peak_history_group_logical_bytes: u64,
+}
+
+/// Semantically admitted cold graph-state base. It owns no filesystem or journal capability.
+pub struct GraphDiskBase {
+    root: DerivedGraphStateRoot,
+    counts: [u64; 8],
+    current_policy: Option<NamespacePolicy>,
+}
+
+impl core::fmt::Debug for GraphDiskBase {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphDiskBase")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision())
+            .field("generation", &self.generation())
+            .field("counts", &"[REDACTED]")
+            .field("has_policy", &self.current_policy.is_some())
+            .finish()
+    }
+}
+
+impl GraphDiskBase {
+    #[must_use]
+    pub const fn scope(&self) -> NamespaceRef {
+        self.root.root.scope()
+    }
+
+    #[must_use]
+    pub const fn anchor(&self) -> IndexRootAnchor {
+        self.root.root.anchor()
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.root.revision()
+    }
+
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.root.generation()
+    }
+
+    #[must_use]
+    pub const fn namespace_policy(&self) -> Option<&NamespacePolicy> {
+        self.current_policy.as_ref()
+    }
+
+    /// Privileged admitted counts in current, history, outgoing, incoming, provenance, reverse,
+    /// policy-history and current-policy order. Debug output deliberately redacts these values.
+    #[must_use]
+    pub const fn state_counts(&self) -> [u64; 8] {
+        self.counts
+    }
+
+    #[must_use]
+    pub const fn admitted_root(&self) -> &DerivedGraphStateRoot {
+        &self.root
+    }
 }
 
 /// Aggregate bounds for retaining one transaction's exact graph-state family deltas.
@@ -308,6 +440,47 @@ where
         limits: IndexRunReadLimits,
         visitor: &mut IndexRunVisitor<'_>,
     ) -> Result<IndexRunReadReport, TransactionError>;
+
+    fn reader_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn reader_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, TransactionError>;
+
+    fn reader_open_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, TransactionError>;
+
+    fn reader_next_cursor(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, TransactionError>;
+
+    fn reader_finish_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, TransactionError>;
 }
 
 impl<F, W, E, I> GraphStateIndexReader<F> for CommitCoordinator<GraphState, F, W, E, I>
@@ -339,6 +512,56 @@ where
     ) -> Result<IndexRunReadReport, TransactionError> {
         self.visit_index_run(filesystem, root, family, limits, visitor)
     }
+
+    fn reader_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError> {
+        self.index_get_bounded(filesystem, root, family, key, limits, cache)
+    }
+
+    fn reader_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, TransactionError> {
+        self.index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+    }
+
+    fn reader_open_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, TransactionError> {
+        self.open_index_run_cursor(filesystem, root, family, limits)
+    }
+
+    fn reader_next_cursor(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, TransactionError> {
+        self.next_index_run_entry(filesystem, cursor)
+    }
+
+    fn reader_finish_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.finish_index_run_cursor(cursor)
+    }
 }
 
 impl<F, W, E, I> GraphStateIndexReader<F> for AuthenticatedIndexRecovery<F, W, E, I>
@@ -369,6 +592,56 @@ where
         visitor: &mut IndexRunVisitor<'_>,
     ) -> Result<IndexRunReadReport, TransactionError> {
         self.visit_index_run(filesystem, root, family, limits, visitor)
+    }
+
+    fn reader_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError> {
+        self.index_get_bounded(filesystem, root, family, key, limits, cache)
+    }
+
+    fn reader_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, TransactionError> {
+        self.index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+    }
+
+    fn reader_open_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, TransactionError> {
+        self.open_index_run_cursor(filesystem, root, family, limits)
+    }
+
+    fn reader_next_cursor(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, TransactionError> {
+        self.next_index_run_entry(filesystem, cursor)
+    }
+
+    fn reader_finish_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.finish_index_run_cursor(cursor)
     }
 }
 
@@ -468,7 +741,7 @@ pub struct GraphDiskPreparationView {
     current: BTreeMap<RecordRef, CurrentRecordProof>,
     history: BTreeMap<RecordRef, Vec<Record>>,
     reverse: BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>,
-    current_policy: Option<uste_policy::NamespacePolicy>,
+    current_policy: Option<NamespacePolicy>,
     report: GraphDiskPreparationReport,
 }
 
@@ -541,7 +814,7 @@ pub struct DiskPreparedGraph {
     prepared: PreparedGraph,
     base_anchor: IndexRootAnchor,
     base_counts: [u64; 8],
-    base_policy: Option<uste_policy::NamespacePolicy>,
+    base_policy: Option<NamespacePolicy>,
 }
 
 impl core::fmt::Debug for DiskPreparedGraph {
@@ -1034,7 +1307,7 @@ where
                     remaining_scan_bytes(report, limits)?,
                     cache,
                 )
-                .map_err(preparation_scan_error)?;
+                .map_err(index_reader_error)?;
             add_read_stats(report, scan.stats.clone())?;
             for entry in scan.entries {
                 if entry.key.len() != 24 || &entry.key[..16] != target.record().as_bytes() {
@@ -1107,7 +1380,7 @@ where
                     remaining_scan_bytes(report, limits)?,
                     cache,
                 )
-                .map_err(preparation_scan_error)?;
+                .map_err(index_reader_error)?;
             add_read_stats(report, scan.stats.clone())?;
             for entry in scan.entries {
                 if entry.key.len() != 32
@@ -1168,7 +1441,7 @@ fn remaining_scan_count(current: u64, maximum: u64) -> Result<usize, GraphDiskEr
     .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))
 }
 
-fn preparation_scan_error(error: TransactionError) -> GraphDiskError {
+fn index_reader_error(error: TransactionError) -> GraphDiskError {
     match error {
         TransactionError::Storage(StorageError::ResourceLimit) => {
             GraphDiskError::Storage(StorageError::ResourceLimit)
@@ -1941,7 +2214,7 @@ fn build_graph_state_root_delta(
 fn build_graph_state_root_delta_from_base(
     base_anchor: IndexRootAnchor,
     base_counts: [u64; 8],
-    base_policy: Option<&uste_policy::NamespacePolicy>,
+    base_policy: Option<&NamespacePolicy>,
     prepared: &PreparedGraph,
     limits: GraphStateDeltaLimits,
 ) -> Result<GraphStateRootDelta, GraphDiskError> {
@@ -2382,6 +2655,870 @@ where
     I: EntropySource,
 {
     load_candidates(recovery, filesystem)
+}
+
+/// Semantically admit one authenticated graph root without reconstructing complete graph maps.
+pub fn admit_graph_disk_base_candidate<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphDiskBaseAdmissionLimits,
+    cache: &mut PageCache,
+) -> Result<(GraphDiskBase, GraphDiskBaseAdmissionReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_graph_disk_base_with_reader(coordinator, filesystem, candidate, limits, cache)
+}
+
+/// Recovery-owner form of [`admit_graph_disk_base_candidate`].
+pub fn admit_graph_disk_base_candidate_for_recovery<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphDiskBaseAdmissionLimits,
+    cache: &mut PageCache,
+) -> Result<(GraphDiskBase, GraphDiskBaseAdmissionReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_graph_disk_base_with_reader(recovery, filesystem, candidate, limits, cache)
+}
+
+fn admit_graph_disk_base_with_reader<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    limits: GraphDiskBaseAdmissionLimits,
+    cache: &mut PageCache,
+) -> Result<(GraphDiskBase, GraphDiskBaseAdmissionReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    validate_candidate_identity(reader, candidate)?;
+    let metadata_run = candidate
+        .root
+        .runs()
+        .find(|run| run.family() == FAMILY_METADATA)
+        .ok_or(GraphDiskError::IndexCorrupt)?;
+    if metadata_run.entry_count() != 1 {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    let mut scan = LoadBudget::new(limits.scan);
+    let mut metadata_cursor =
+        open_admission_cursor(reader, filesystem, candidate, FAMILY_METADATA, 1, &scan)?;
+    let metadata_entry = reader
+        .reader_next_cursor(filesystem, &mut metadata_cursor)
+        .map_err(index_reader_error)?
+        .ok_or(GraphDiskError::IndexCorrupt)?;
+    if reader
+        .reader_next_cursor(filesystem, &mut metadata_cursor)
+        .map_err(index_reader_error)?
+        .is_some()
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    finish_admission_cursor(reader, metadata_cursor, 1, &mut scan)?;
+    if metadata_entry.key != b"graph-state-v1" {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let metadata = parse_metadata(&metadata_entry.value, candidate.revision())
+        .map_err(|_| GraphDiskError::IndexCorrupt)?;
+    let family_counts = metadata.family_counts()?;
+    validate_candidate_shape(candidate, metadata, &family_counts, limits.scan)?;
+
+    let scope = candidate.root.scope();
+    let revision = candidate.revision();
+    let counts = metadata.state_counts();
+    let mut digest_validator = MergedGraphStateValidator::new(
+        scope,
+        revision,
+        counts,
+        limits.maximum_history_group_logical_bytes,
+    )?;
+    digest_validator
+        .observe(FAMILY_METADATA, &metadata_entry.key, &metadata_entry.value)
+        .map_err(GraphDiskError::Storage)?;
+    digest_validator.finish_family(FAMILY_METADATA)?;
+
+    let mut report = GraphDiskBaseAdmissionReport::default();
+    let mut derived_counts = [0_u64; 4];
+    if metadata.current != 0 {
+        let mut cursor = open_admission_cursor(
+            reader,
+            filesystem,
+            candidate,
+            FAMILY_CURRENT_RECORD,
+            metadata.current,
+            &scan,
+        )?;
+        while let Some(entry) = reader
+            .reader_next_cursor(filesystem, &mut cursor)
+            .map_err(index_reader_error)?
+        {
+            digest_validator
+                .observe(FAMILY_CURRENT_RECORD, &entry.key, &entry.value)
+                .map_err(GraphDiskError::Storage)?;
+            let id = record_key(scope, &entry.key).map_err(GraphDiskError::Storage)?;
+            let record = decode_stored_record(&entry.value)?;
+            if record.id() != id || record.modified_revision() > revision {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            for (index, entries) in record_secondary_counts(&record, limits, &mut report)?
+                .into_iter()
+                .enumerate()
+            {
+                derived_counts[index] = derived_counts[index]
+                    .checked_add(entries)
+                    .ok_or(GraphDiskError::IndexCorrupt)?;
+            }
+        }
+        finish_admission_cursor(reader, cursor, metadata.current, &mut scan)?;
+    }
+    digest_validator.finish_family(FAMILY_CURRENT_RECORD)?;
+    if derived_counts
+        != [
+            metadata.outgoing,
+            metadata.incoming,
+            metadata.provenance,
+            metadata.reverse,
+        ]
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    let mut history_group: Option<HistoryAdmissionGroup> = None;
+    if metadata.history != 0 {
+        let mut cursor = open_admission_cursor(
+            reader,
+            filesystem,
+            candidate,
+            FAMILY_RECORD_HISTORY,
+            metadata.history,
+            &scan,
+        )?;
+        while let Some(entry) = reader
+            .reader_next_cursor(filesystem, &mut cursor)
+            .map_err(index_reader_error)?
+        {
+            digest_validator
+                .observe(FAMILY_RECORD_HISTORY, &entry.key, &entry.value)
+                .map_err(GraphDiskError::Storage)?;
+            if entry.key.len() != 24 {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            let id = record_key(scope, &entry.key[..16]).map_err(GraphDiskError::Storage)?;
+            let key_revision = CommitRevision::new(
+                read_u64_be(&entry.key[16..]).map_err(GraphDiskError::Storage)?,
+            )
+            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+            let record = decode_stored_record(&entry.value)?;
+            if record.id() != id
+                || record.modified_revision() != key_revision
+                || key_revision > revision
+            {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            if history_group.as_ref().is_some_and(|group| group.id != id) {
+                finish_history_admission_group(
+                    reader,
+                    filesystem,
+                    candidate,
+                    history_group.take().ok_or(GraphDiskError::IndexCorrupt)?,
+                    limits,
+                    &mut report,
+                    cache,
+                )?;
+            }
+            if history_group.is_none() {
+                history_group = Some(HistoryAdmissionGroup::new(id));
+            }
+            let group = history_group.as_mut().ok_or(GraphDiskError::IndexCorrupt)?;
+            group.observe(
+                scope,
+                record,
+                u64::try_from(entry.value.len())
+                    .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?,
+                limits,
+            )?;
+            let record = group
+                .previous
+                .as_ref()
+                .ok_or(GraphDiskError::IndexCorrupt)?;
+            if group.versions == 1 {
+                visit_history_first_reference_requirements(record, &mut |requirement| {
+                    validate_historical_requirement(
+                        reader,
+                        filesystem,
+                        candidate,
+                        requirement,
+                        limits,
+                        &mut report,
+                        cache,
+                    )
+                })
+            } else {
+                visit_history_successor_reference_requirements(record, &mut |requirement| {
+                    validate_historical_requirement(
+                        reader,
+                        filesystem,
+                        candidate,
+                        requirement,
+                        limits,
+                        &mut report,
+                        cache,
+                    )
+                })
+            }
+            .map_err(graph_requirement_error)?;
+            report.peak_history_group_logical_bytes = report
+                .peak_history_group_logical_bytes
+                .max(group.logical_bytes);
+        }
+        finish_admission_cursor(reader, cursor, metadata.history, &mut scan)?;
+    }
+    if let Some(group) = history_group.take() {
+        finish_history_admission_group(
+            reader,
+            filesystem,
+            candidate,
+            group,
+            limits,
+            &mut report,
+            cache,
+        )?;
+    }
+    digest_validator.finish_family(FAMILY_RECORD_HISTORY)?;
+
+    for family in FAMILY_OUTGOING..=FAMILY_REVERSE {
+        let expected = family_counts[usize::from(family - 1)];
+        if expected != 0 {
+            let mut cursor =
+                open_admission_cursor(reader, filesystem, candidate, family, expected, &scan)?;
+            while let Some(entry) = reader
+                .reader_next_cursor(filesystem, &mut cursor)
+                .map_err(index_reader_error)?
+            {
+                digest_validator
+                    .observe(family, &entry.key, &entry.value)
+                    .map_err(GraphDiskError::Storage)?;
+                validate_secondary_entry(
+                    reader,
+                    filesystem,
+                    candidate,
+                    family,
+                    &entry,
+                    limits,
+                    &mut report,
+                    cache,
+                )?;
+            }
+            finish_admission_cursor(reader, cursor, expected, &mut scan)?;
+        }
+        digest_validator.finish_family(family)?;
+    }
+
+    let mut current_policy = None;
+    let mut terminal_policy = None;
+    let mut previous_policy_revision = None;
+    let mut previous_policy_version = None;
+    let policy_entries = family_counts[usize::from(FAMILY_POLICY - 1)];
+    if policy_entries != 0 {
+        let mut cursor = open_admission_cursor(
+            reader,
+            filesystem,
+            candidate,
+            FAMILY_POLICY,
+            policy_entries,
+            &scan,
+        )?;
+        while let Some(entry) = reader
+            .reader_next_cursor(filesystem, &mut cursor)
+            .map_err(index_reader_error)?
+        {
+            digest_validator
+                .observe(FAMILY_POLICY, &entry.key, &entry.value)
+                .map_err(GraphDiskError::Storage)?;
+            let policy = decode_result_policy(&entry.value)?.ok_or(GraphDiskError::IndexCorrupt)?;
+            if policy.scope() != scope {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            match entry.key.as_slice() {
+                [0] if current_policy.is_none() => current_policy = Some(policy),
+                [1, bytes @ ..] if bytes.len() == 8 && current_policy.is_some() => {
+                    let policy_revision =
+                        CommitRevision::new(read_u64_be(bytes).map_err(GraphDiskError::Storage)?)
+                            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+                    if policy_revision > revision
+                        || previous_policy_revision.is_some_and(|prior| prior >= policy_revision)
+                        || previous_policy_version.is_some_and(|prior| prior >= policy.version())
+                    {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    }
+                    previous_policy_revision = Some(policy_revision);
+                    previous_policy_version = Some(policy.version());
+                    terminal_policy = Some(policy);
+                }
+                _ => return Err(GraphDiskError::IndexCorrupt),
+            }
+        }
+        finish_admission_cursor(reader, cursor, policy_entries, &mut scan)?;
+    }
+    digest_validator.finish_family(FAMILY_POLICY)?;
+    let logical_digest = digest_validator.finish()?;
+    if logical_digest != *candidate.root.logical_state_digest() {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    if metadata.policy_history == 0 {
+        if current_policy.is_some() {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+    } else if terminal_policy.as_ref() != current_policy.as_ref() {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+
+    report.scan = scan.report;
+    Ok((
+        GraphDiskBase {
+            root: DerivedGraphStateRoot {
+                root: candidate.root.clone(),
+            },
+            counts,
+            current_policy,
+        },
+        report,
+    ))
+}
+
+fn validate_candidate_identity<F, R>(
+    reader: &R,
+    candidate: &GraphStateRootCandidate,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    if candidate.root.reducer_profile() != &GraphState::REDUCER_PROFILE
+        || candidate.root.index_profile() != &GRAPH_STATE_PROFILE_V1
+        || candidate.root.scope() != reader.reader_scope()
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    Ok(())
+}
+
+fn open_admission_cursor<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    family: u8,
+    expected_entries: u64,
+    budget: &LoadBudget,
+) -> Result<IndexRunCursor<F>, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    let limits = IndexRunReadLimits::new(
+        budget.remaining_pages()?.min(MAX_INDEX_PAGES_PER_RUN),
+        expected_entries,
+        budget
+            .remaining_logical_bytes()?
+            .min(MAX_INDEX_RUN_LOGICAL_BYTES),
+    )?;
+    reader
+        .reader_open_cursor(filesystem, &candidate.root, family, limits)
+        .map_err(index_reader_error)
+}
+
+fn finish_admission_cursor<F, R>(
+    reader: &R,
+    cursor: IndexRunCursor<F>,
+    expected_entries: u64,
+    budget: &mut LoadBudget,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    let report = reader
+        .reader_finish_cursor(cursor)
+        .map_err(index_reader_error)?;
+    if report.entries != expected_entries {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    budget.add(&report)
+}
+
+struct HistoryAdmissionGroup {
+    id: RecordRef,
+    versions: u64,
+    logical_bytes: u64,
+    previous: Option<Record>,
+}
+
+impl HistoryAdmissionGroup {
+    const fn new(id: RecordRef) -> Self {
+        Self {
+            id,
+            versions: 0,
+            logical_bytes: 0,
+            previous: None,
+        }
+    }
+
+    fn observe(
+        &mut self,
+        scope: NamespaceRef,
+        record: Record,
+        encoded_bytes: u64,
+        limits: GraphDiskBaseAdmissionLimits,
+    ) -> Result<(), GraphDiskError> {
+        let expected_version = self
+            .versions
+            .checked_add(1)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        if record.id() != self.id || record.version().get() != expected_version {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        if let Some(previous) = &self.previous {
+            validate_history_successor(scope, previous, &record)
+                .map_err(checkpoint_state_disk_error)?;
+        } else {
+            validate_history_first(scope, &record).map_err(checkpoint_state_disk_error)?;
+        }
+        let frame_bytes = 8_u64
+            .checked_add(encoded_bytes)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.logical_bytes = self
+            .logical_bytes
+            .checked_add(frame_bytes)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        self.versions = expected_version;
+        if self.versions > limits.maximum_history_group_versions
+            || self.logical_bytes > limits.maximum_history_group_logical_bytes
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        self.previous = Some(record);
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_history_admission_group<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    group: HistoryAdmissionGroup,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+    cache: &mut PageCache,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    let current = load_exact_current_record(
+        reader, filesystem, candidate, group.id, limits, report, cache,
+    )?
+    .ok_or(GraphDiskError::IndexCorrupt)?;
+    let terminal = group.previous.ok_or(GraphDiskError::IndexCorrupt)?;
+    if current != terminal {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    visit_current_reference_requirements(&current, candidate.revision(), &mut |requirement| {
+        validate_current_requirement(
+            reader,
+            filesystem,
+            candidate,
+            requirement,
+            limits,
+            report,
+            cache,
+        )
+    })
+    .map_err(graph_requirement_error)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_historical_requirement<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    requirement: ReferenceRequirement,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+    cache: &mut PageCache,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    charge_semantic_reference_visits(report, limits, 1)?;
+    charge_lookup_operation(report, limits, false)?;
+    let target_record = requirement.target.record();
+    let prefix = target_record.as_bytes();
+    let upper = history_key(requirement.target, requirement.revision);
+    let predecessor_limits = remaining_predecessor_limits(report, limits)?;
+    let predecessor = reader
+        .reader_get_predecessor(
+            filesystem,
+            &candidate.root,
+            FAMILY_RECORD_HISTORY,
+            prefix,
+            &upper,
+            predecessor_limits,
+            cache,
+        )
+        .map_err(index_reader_error)?;
+    charge_lookup_stats(report, limits, &predecessor.stats)?;
+    let record = predecessor
+        .entry
+        .map(|entry| decode_history_lookup(candidate, requirement.target, entry))
+        .transpose()?;
+    if !reference_requirement_matches(requirement, record.as_ref()) {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(())
+}
+
+fn remaining_predecessor_limits(
+    report: &GraphDiskBaseAdmissionReport,
+    limits: GraphDiskBaseAdmissionLimits,
+) -> Result<IndexPredecessorLimits, GraphDiskError> {
+    let remaining_pages = limits
+        .maximum_lookup_page_visits
+        .checked_sub(report.lookup_page_visits)
+        .filter(|remaining| *remaining != 0)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let remaining_bytes = limits
+        .maximum_lookup_result_bytes
+        .checked_sub(report.lookup_result_bytes)
+        .filter(|remaining| *remaining != 0)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let maximum_result_bytes = usize::try_from(remaining_bytes)
+        .unwrap_or(usize::MAX)
+        .min(limits.predecessor.maximum_result_bytes());
+    Ok(IndexPredecessorLimits::new(
+        remaining_pages.min(limits.predecessor.maximum_page_visits()),
+        maximum_result_bytes,
+    )?)
+}
+
+fn remaining_exact_get_limits(
+    report: &GraphDiskBaseAdmissionReport,
+    limits: GraphDiskBaseAdmissionLimits,
+) -> Result<IndexGetLimits, GraphDiskError> {
+    let remaining_pages = limits
+        .maximum_lookup_page_visits
+        .checked_sub(report.lookup_page_visits)
+        .filter(|remaining| *remaining != 0)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let remaining_bytes = limits
+        .maximum_lookup_result_bytes
+        .checked_sub(report.lookup_result_bytes)
+        .filter(|remaining| *remaining != 0)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    let maximum_result_bytes = usize::try_from(remaining_bytes)
+        .unwrap_or(usize::MAX)
+        .min(MAX_INDEX_VALUE_BYTES);
+    Ok(IndexGetLimits::new(
+        remaining_pages.min(MAX_INDEX_GET_PAGE_VISITS),
+        maximum_result_bytes,
+    )?)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_current_requirement<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    requirement: ReferenceRequirement,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+    cache: &mut PageCache,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    charge_semantic_reference_visits(report, limits, 1)?;
+    let record = load_exact_current_record(
+        reader,
+        filesystem,
+        candidate,
+        requirement.target,
+        limits,
+        report,
+        cache,
+    )?;
+    if !reference_requirement_matches(requirement, record.as_ref()) {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(())
+}
+
+fn graph_requirement_error(
+    error: ReferenceRequirementVisitError<GraphDiskError>,
+) -> GraphDiskError {
+    match error {
+        ReferenceRequirementVisitError::State(error) => checkpoint_state_disk_error(error),
+        ReferenceRequirementVisitError::Visitor(error) => error,
+    }
+}
+
+fn decode_history_lookup(
+    candidate: &GraphStateRootCandidate,
+    id: RecordRef,
+    entry: uste_storage::IndexScanEntry,
+) -> Result<Record, GraphDiskError> {
+    if entry.key.len() != 24 || entry.key[..16] != *id.record().as_bytes() {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let revision =
+        CommitRevision::new(read_u64_be(&entry.key[16..]).map_err(GraphDiskError::Storage)?)
+            .map_err(|_| GraphDiskError::IndexCorrupt)?;
+    let record = decode_stored_record(&entry.value)?;
+    if record.id() != id
+        || record.modified_revision() != revision
+        || revision > candidate.revision()
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(record)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_exact_current_record<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    id: RecordRef,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+    cache: &mut PageCache,
+) -> Result<Option<Record>, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    charge_lookup_operation(report, limits, true)?;
+    let get_limits = remaining_exact_get_limits(report, limits)?;
+    let (encoded, stats) = reader
+        .reader_get_bounded(
+            filesystem,
+            &candidate.root,
+            FAMILY_CURRENT_RECORD,
+            id.record().as_bytes(),
+            get_limits,
+            cache,
+        )
+        .map_err(index_reader_error)?;
+    charge_lookup_stats(report, limits, &stats)?;
+    encoded
+        .map(|encoded| {
+            let record = decode_stored_record(&encoded)?;
+            if record.id() != id || record.modified_revision() > candidate.revision() {
+                return Err(GraphDiskError::IndexCorrupt);
+            }
+            Ok(record)
+        })
+        .transpose()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_secondary_entry<F, R>(
+    reader: &R,
+    filesystem: &mut F,
+    candidate: &GraphStateRootCandidate,
+    family: u8,
+    entry: &IndexEntry,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+    cache: &mut PageCache,
+) -> Result<(), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    R: GraphStateIndexReader<F>,
+{
+    if entry.key.len() != 32 {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let owner =
+        record_key(candidate.root.scope(), &entry.key[16..]).map_err(GraphDiskError::Storage)?;
+    let record =
+        load_exact_current_record(reader, filesystem, candidate, owner, limits, report, cache)?
+            .ok_or(GraphDiskError::IndexCorrupt)?;
+    if !record_contributes_secondary_entry(
+        candidate.root.scope(),
+        &record,
+        family,
+        entry,
+        limits,
+        report,
+    )? {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(())
+}
+
+fn record_secondary_counts(
+    record: &Record,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+) -> Result<[u64; 4], GraphDiskError> {
+    let mut counts = [0_u64; 4];
+    match record {
+        Record::Relationship(relationship) => {
+            if relationship.status == crate::AssertionStatus::Accepted {
+                counts[0] = 1;
+                counts[1] = 1;
+            }
+            counts[2] = u64::try_from(relationship.evidence.len())
+                .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        }
+        Record::Assertion(assertion) => {
+            counts[2] = u64::try_from(assertion.evidence.len())
+                .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+        }
+        Record::Entity(_) | Record::Evidence(_) => {}
+    }
+    let mut targets = BTreeSet::new();
+    try_visit_record_references(record, &mut |target, _| {
+        charge_semantic_reference_visits(report, limits, 1)?;
+        targets.insert(target);
+        Ok::<(), GraphDiskError>(())
+    })?;
+    counts[3] = u64::try_from(targets.len())
+        .map_err(|_| GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    Ok(counts)
+}
+
+fn record_contributes_secondary_entry(
+    scope: NamespaceRef,
+    record: &Record,
+    family: u8,
+    entry: &IndexEntry,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+) -> Result<bool, GraphDiskError> {
+    let target = record_key(scope, &entry.key[..16]).map_err(GraphDiskError::Storage)?;
+    match (family, record) {
+        (FAMILY_OUTGOING, Record::Relationship(relationship)) => Ok(relationship.status
+            == crate::AssertionStatus::Accepted
+            && relationship.from == target
+            && entry.value == relationship.to.record().as_bytes()),
+        (FAMILY_INCOMING, Record::Relationship(relationship)) => Ok(relationship.status
+            == crate::AssertionStatus::Accepted
+            && relationship.to == target
+            && entry.value == relationship.from.record().as_bytes()),
+        (FAMILY_PROVENANCE, Record::Assertion(assertion)) => {
+            evidence_contains(&assertion.evidence, target, limits, report)
+        }
+        (FAMILY_PROVENANCE, Record::Relationship(relationship)) => {
+            evidence_contains(&relationship.evidence, target, limits, report)
+        }
+        (FAMILY_REVERSE, _) => {
+            let mut roles = 0_u16;
+            try_visit_record_references(record, &mut |candidate, role| {
+                charge_semantic_reference_visits(report, limits, 1)?;
+                if candidate == target {
+                    roles |= role;
+                }
+                Ok::<(), GraphDiskError>(())
+            })?;
+            Ok(roles != 0 && entry.value == reverse_value(reverse_reference(record, roles)))
+        }
+        _ => Ok(false),
+    }
+}
+
+fn evidence_contains(
+    evidence: &[RecordRef],
+    target: RecordRef,
+    limits: GraphDiskBaseAdmissionLimits,
+    report: &mut GraphDiskBaseAdmissionReport,
+) -> Result<bool, GraphDiskError> {
+    for candidate in evidence {
+        charge_semantic_reference_visits(report, limits, 1)?;
+        if *candidate == target {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn charge_lookup_operation(
+    report: &mut GraphDiskBaseAdmissionReport,
+    limits: GraphDiskBaseAdmissionLimits,
+    exact: bool,
+) -> Result<(), GraphDiskError> {
+    let total = report
+        .exact_lookups
+        .checked_add(report.predecessor_lookups)
+        .and_then(|value| value.checked_add(1))
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if total > limits.maximum_lookup_operations {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    if exact {
+        report.exact_lookups = report
+            .exact_lookups
+            .checked_add(1)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    } else {
+        report.predecessor_lookups = report
+            .predecessor_lookups
+            .checked_add(1)
+            .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    }
+    Ok(())
+}
+
+fn charge_semantic_reference_visits(
+    report: &mut GraphDiskBaseAdmissionReport,
+    limits: GraphDiskBaseAdmissionLimits,
+    visits: u64,
+) -> Result<(), GraphDiskError> {
+    report.semantic_reference_visits = report
+        .semantic_reference_visits
+        .checked_add(visits)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if report.semantic_reference_visits > limits.maximum_semantic_reference_visits {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    Ok(())
+}
+
+fn charge_lookup_stats(
+    report: &mut GraphDiskBaseAdmissionReport,
+    limits: GraphDiskBaseAdmissionLimits,
+    stats: &IndexReadStats,
+) -> Result<(), GraphDiskError> {
+    report.lookup_page_visits = report
+        .lookup_page_visits
+        .checked_add(stats.pages_read)
+        .and_then(|value| value.checked_add(stats.cache_hits))
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    report.lookup_result_bytes = report
+        .lookup_result_bytes
+        .checked_add(stats.result_bytes)
+        .ok_or(GraphDiskError::Storage(StorageError::ResourceLimit))?;
+    if report.lookup_page_visits > limits.maximum_lookup_page_visits
+        || report.lookup_result_bytes > limits.maximum_lookup_result_bytes
+    {
+        return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+    }
+    Ok(())
 }
 
 fn load_candidates<F, R>(
@@ -2881,6 +4018,17 @@ fn validate_candidate_shape(
 ) -> Result<(), GraphDiskError> {
     if metadata.current_policy > 1
         || (metadata.policy_history != 0 && metadata.current_policy != 1)
+        || metadata.history < metadata.current
+        || (metadata.current == 0
+            && [
+                metadata.history,
+                metadata.outgoing,
+                metadata.incoming,
+                metadata.provenance,
+                metadata.reverse,
+            ]
+            .into_iter()
+            .any(|count| count != 0))
         || family_counts
             .iter()
             .any(|count| *count > MAX_INDEX_ENTRIES_PER_RUN)

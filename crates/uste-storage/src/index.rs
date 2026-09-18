@@ -31,6 +31,7 @@ pub const MAX_INDEX_SCAN_RESULTS: usize = 1_000_000;
 pub const MAX_INDEX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_INDEX_RUN_LOGICAL_BYTES: u64 = MAX_INDEX_PAGES_PER_RUN * INDEX_PAGE_BYTES as u64;
 pub const MAX_INDEX_DELTA_LOGICAL_BYTES: u64 = MAX_INDEX_RUN_LOGICAL_BYTES * 2;
+pub const MAX_INDEX_GET_PAGE_VISITS: u64 = MAX_INDEX_PAGES_PER_RUN + 64;
 // Three full-run passes cover fragment-start backtracking, key selection and selected-value
 // assembly. The additive allowance covers the binary-search path (at most 25 visits at the
 // admitted run ceiling) and the repeated boundary page, including the one-page-run case.
@@ -342,6 +343,42 @@ pub struct IndexScan {
 pub struct IndexPredecessor {
     pub entry: Option<IndexScanEntry>,
     pub stats: IndexReadStats,
+}
+
+/// Per-operation work bounds for an authenticated exact-key lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexGetLimits {
+    maximum_page_visits: u64,
+    maximum_result_bytes: usize,
+}
+
+impl IndexGetLimits {
+    pub const fn new(
+        maximum_page_visits: u64,
+        maximum_result_bytes: usize,
+    ) -> Result<Self, StorageError> {
+        if maximum_page_visits == 0
+            || maximum_page_visits > MAX_INDEX_GET_PAGE_VISITS
+            || maximum_result_bytes == 0
+            || maximum_result_bytes > MAX_INDEX_VALUE_BYTES
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Self {
+            maximum_page_visits,
+            maximum_result_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn maximum_page_visits(self) -> u64 {
+        self.maximum_page_visits
+    }
+
+    #[must_use]
+    pub const fn maximum_result_bytes(self) -> usize {
+        self.maximum_result_bytes
+    }
 }
 
 /// Per-operation work bounds for an authenticated greatest-key-at-or-before lookup.
@@ -868,11 +905,52 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
+    get_bounded(
+        filesystem,
+        context,
+        vault,
+        root,
+        family,
+        key,
+        IndexGetLimits {
+            maximum_page_visits: MAX_INDEX_GET_PAGE_VISITS,
+            maximum_result_bytes: MAX_INDEX_VALUE_BYTES,
+        },
+        cache,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn get_bounded<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    key: &[u8],
+    limits: IndexGetLimits,
+    cache: &mut PageCache,
+) -> Result<(Option<Vec<u8>>, IndexReadStats), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
     validate_read(root, context, key)?;
     let run = root.run(family)?;
     let mut stats = IndexReadStats::default();
-    let start = lower_bound_page(
-        filesystem, context, vault, root, run, key, cache, &mut stats,
+    let mut page_visits = 0_u64;
+    let start = lower_bound_page_bounded(
+        filesystem,
+        context,
+        vault,
+        root,
+        run,
+        key,
+        limits,
+        &mut page_visits,
+        cache,
+        &mut stats,
     )?;
     let Some(mut page_index) = start else {
         return Ok((None, stats));
@@ -880,8 +958,17 @@ where
     let mut value = Vec::new();
     let mut expected_len = None;
     while page_index < run.page_count {
-        let page = load_page(
-            filesystem, context, vault, root, run, page_index, cache, &mut stats,
+        let page = load_get_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            page_index,
+            limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
         )?;
         let parsed = ParsedPage::new(page, root, run, page_index)?;
         for fragment in parsed.fragments() {
@@ -898,6 +985,9 @@ where
             if expected_len.is_none() {
                 if fragment.offset != 0 {
                     return Err(StorageError::IntegrityFailure);
+                }
+                if fragment.total_len > limits.maximum_result_bytes {
+                    return Err(StorageError::ResourceLimit);
                 }
                 expected_len = Some(fragment.total_len);
                 value
@@ -2855,6 +2945,77 @@ where
         }
     }
     Ok((low < run.page_count).then_some(low))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lower_bound_page_bounded<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    run: &IndexRunDescriptor,
+    key: &[u8],
+    limits: IndexGetLimits,
+    page_visits: &mut u64,
+    cache: &mut PageCache,
+    stats: &mut IndexReadStats,
+) -> Result<Option<u64>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let mut low = 0_u64;
+    let mut high = run.page_count;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let page = load_get_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            middle,
+            limits,
+            page_visits,
+            cache,
+            stats,
+        )?;
+        let parsed = ParsedPage::new(page, root, run, middle)?;
+        if parsed.last_key()? < key {
+            low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
+        } else {
+            high = middle;
+        }
+    }
+    Ok((low < run.page_count).then_some(low))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_get_page<'a, F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    run: &IndexRunDescriptor,
+    page_index: u64,
+    limits: IndexGetLimits,
+    page_visits: &mut u64,
+    cache: &'a mut PageCache,
+    stats: &mut IndexReadStats,
+) -> Result<&'a [u8], StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    *page_visits = page_visits
+        .checked_add(1)
+        .filter(|visits| *visits <= limits.maximum_page_visits)
+        .ok_or(StorageError::ResourceLimit)?;
+    load_page(
+        filesystem, context, vault, root, run, page_index, cache, stats,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -31,10 +31,11 @@ pub use uste_policy::PrincipalDigest;
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
     CheckpointStreamCandidate, CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot,
-    EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexPredecessor, IndexPredecessorLimits,
-    IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor, IndexRunMergeLimits,
-    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScrubReport,
-    MergedIndexRun, OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
+    EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexGetLimits, IndexPredecessor,
+    IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor,
+    IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
+    IndexScrubReport, MergedIndexRun, OwnershipFileSystem, PageCache, RecoveredCheckpoint,
+    RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -1001,6 +1002,28 @@ where
         }
         self.journal
             .index_get(filesystem, root, family, key, cache)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted exact lookup with caller-selected page and result bounds.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .index_get_bounded(filesystem, root, family, key, limits, cache)
             .map_err(TransactionError::Storage)
     }
 

@@ -25,8 +25,9 @@ correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume c
 sampling without claiming a benchmark pass. Decision 0047 adds a preemptive persistent-worker query
 deadline for the CLI. Decision 0048 removes the complete snapshot from proof-derived terminal-root
 publication. Decision 0049 returns that admitted root directly for the next disk preparation.
-Decision 0050 adds the resumable cursor and predecessor proof needed for cold admission. T-20 remains
-open pending a disk-backed live publication target,
+Decision 0050 adds the resumable cursor and predecessor proof needed for cold admission. Decision
+0051 uses them to semantically admit a cold `GraphDiskBase` without rebuilding complete graph maps.
+T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -372,6 +373,16 @@ unverified external distribution prerequisite.
   an upper bound without consumer scan caps and assembles only the final value. Coverage interleaves
   cursor and exact reads, exercises fragmentation/corruption/early finish and proves a large prior
   value cannot exhaust a later small predecessor's result cap.
+- Added Decision 0051. Live and recovery owners now stream-admit a cold `graph-state-v1` candidate
+  into a capability-free `GraphDiskBase`. Admission checks history transitions, historical/current
+  reference closure, current/history equality, every derived family, policy history and the
+  canonical digest before returning the exact root/counts/policy handoff. The base drives existing
+  bounded disk preparation without reconstructing complete graph maps.
+- Added bounded exact-key reads and aggregate admission limits for history-group versions/bytes,
+  exact/predecessor operations, proof page visits/result bytes and semantic reference comparisons.
+  Iterator-oriented shared reference validation charges and resolves one requirement at a time,
+  with no intermediate requirement vector. Exact-minus semantic/page/byte fixtures fail closed;
+  targeted agent re-review found no remaining high- or medium-severity issue.
 - Added Decision 0039 and a synchronized runtime for every admitted authorized graph root. Its
   privileged report now includes cumulative decrypted-cache occupancy/events, completed authorized
   reads/raw operations, authenticated pages, fragments and logical result bytes. The counters are
@@ -530,10 +541,10 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 263 workspace tests including 77 uste-storage, 13
-# uste-crypto, 41 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 264 workspace tests including 77 uste-storage, 13
+# uste-crypto, 42 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (112 links, 109 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# docs=ok (114 links, 111 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
 # and 31 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
 # intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
@@ -599,8 +610,9 @@ remaining mixed workload have not passed.
   The bounded scratch merge and graph terminal planner can rewrite and cross-check all eight
   families for one revision without collecting base runs. Proof-derived publication now validates
   actual merged outputs and the canonical digest with one caller-bounded history bucket rather than
-  scanning the complete reducer, but the live base/overlay lifecycle and root admission remain
-  memory-resident. The explicit-I/O preparation proof now supports
+  scanning the complete reducer. Cold semantic admission now returns a bounded `GraphDiskBase`
+  without complete graph-map reconstruction, but discovery/initial scrub and the live base/overlay
+  lifecycle remain memory-resident. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
   The coordinator's live publication target, coordinator metadata and recovery remain fully
@@ -629,14 +641,12 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by running the exact five-sample BM-01 campaign under the accepted host reservation.
-Use the resumable authenticated run cursor and bounded predecessor lookup to implement streaming
-semantic admission of a graph disk base, then replace the complete
-live graph publication target with a disk-backed base/overlay state and remove the full-memory
-coordinator/recovery boundary. Run exact
-BM-01 under the accepted 24 GiB reservation and
-define/run BM-06's 10-million-event
-protocol. Then return to T-19's
+Continue T-20 by replacing the complete live graph publication target with a persistent
+disk-backed base/overlay state built on the cold-admitted `GraphDiskBase`, then move coordinator
+metadata and suffix recovery off their full-memory state. Bound candidate discovery/initial scrub
+as part of that recovery path. Run the exact five-sample BM-01 campaign under the accepted host
+24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
+10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

@@ -1185,18 +1185,31 @@ fn validate_derived_entry_counts(
     Ok(())
 }
 
-fn validate_record_history(
+pub(crate) fn validate_record_history(
     scope: NamespaceRef,
     versions: &[Record],
 ) -> Result<(), CheckpointStateError> {
     let first = versions.first().ok_or(CheckpointStateError::Invalid)?;
-    validate_historical_record_shape(scope, first)?;
-    match first {
+    validate_history_first(scope, first)?;
+    for pair in versions.windows(2) {
+        let [previous, next] = pair else {
+            unreachable!("windows of two")
+        };
+        validate_history_successor(scope, previous, next)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_history_first(
+    scope: NamespaceRef,
+    record: &Record,
+) -> Result<(), CheckpointStateError> {
+    validate_historical_record_shape(scope, record)?;
+    match record {
         Record::Entity(record)
             if record.lifecycle == EntityLifecycle::Active
                 && record.created_revision == record.modified_revision => {}
-        Record::Evidence(record)
-            if versions.len() == 1 && record.version == RecordVersion::FIRST => {}
+        Record::Evidence(record) if record.version == RecordVersion::FIRST => {}
         Record::Assertion(record)
             if record.status == AssertionStatus::Proposed
                 && record.recorded_revision == record.modified_revision => {}
@@ -1205,129 +1218,150 @@ fn validate_record_history(
                 && record.recorded_revision == record.modified_revision => {}
         _ => return Err(CheckpointStateError::Invalid),
     }
-    for pair in versions.windows(2) {
-        let [previous, next] = pair else {
-            unreachable!("windows of two")
-        };
-        validate_historical_record_shape(scope, next)?;
-        match (previous, next) {
-            (Record::Entity(previous), Record::Entity(next))
-                if previous.id == next.id
-                    && previous.entity_type == next.entity_type
-                    && previous.schema_version == next.schema_version
-                    && previous.created_revision == next.created_revision
-                    && previous.lifecycle == EntityLifecycle::Active
-                    && matches!(
-                        next.lifecycle,
-                        EntityLifecycle::Active | EntityLifecycle::Deleted
-                    )
-                    && (next.lifecycle == EntityLifecycle::Active
-                        || previous.properties == next.properties) => {}
-            (Record::Assertion(previous), Record::Assertion(next))
-                if previous.id == next.id
-                    && previous.subject == next.subject
-                    && previous.predicate == next.predicate
-                    && previous.object == next.object
-                    && previous.evidence == next.evidence
-                    && previous.valid_time == next.valid_time
-                    && previous.correction_of == next.correction_of
-                    && previous.recorded_revision == next.recorded_revision
-                    && valid_checkpoint_status_transition(previous.status, next.status) => {}
-            (Record::Relationship(previous), Record::Relationship(next))
-                if previous.id == next.id
-                    && previous.from == next.from
-                    && previous.to == next.to
-                    && previous.relationship_type == next.relationship_type
-                    && previous.properties == next.properties
-                    && previous.evidence == next.evidence
-                    && previous.valid_time == next.valid_time
-                    && previous.correction_of == next.correction_of
-                    && previous.recorded_revision == next.recorded_revision
-                    && valid_checkpoint_status_transition(previous.status, next.status) => {}
-            _ => return Err(CheckpointStateError::Invalid),
-        }
-    }
     Ok(())
 }
 
-fn validate_historical_reference_closure(
-    history: &BTreeMap<RecordRef, Vec<Record>>,
+pub(crate) fn validate_history_successor(
+    scope: NamespaceRef,
+    previous: &Record,
+    next: &Record,
 ) -> Result<(), CheckpointStateError> {
-    for versions in history.values() {
-        let first = versions.first().ok_or(CheckpointStateError::Invalid)?;
-        match first {
-            Record::Entity(entity) => {
-                validate_checkpoint_value_at(
-                    history,
-                    &entity.properties,
-                    entity.modified_revision,
+    validate_historical_record_shape(scope, next)?;
+    match (previous, next) {
+        (Record::Entity(previous), Record::Entity(next))
+            if previous.id == next.id
+                && previous.entity_type == next.entity_type
+                && previous.schema_version == next.schema_version
+                && previous.created_revision == next.created_revision
+                && previous.lifecycle == EntityLifecycle::Active
+                && matches!(
+                    next.lifecycle,
+                    EntityLifecycle::Active | EntityLifecycle::Deleted
+                )
+                && (next.lifecycle == EntityLifecycle::Active
+                    || previous.properties == next.properties) => {}
+        (Record::Assertion(previous), Record::Assertion(next))
+            if previous.id == next.id
+                && previous.subject == next.subject
+                && previous.predicate == next.predicate
+                && previous.object == next.object
+                && previous.evidence == next.evidence
+                && previous.valid_time == next.valid_time
+                && previous.correction_of == next.correction_of
+                && previous.recorded_revision == next.recorded_revision
+                && valid_checkpoint_status_transition(previous.status, next.status) => {}
+        (Record::Relationship(previous), Record::Relationship(next))
+            if previous.id == next.id
+                && previous.from == next.from
+                && previous.to == next.to
+                && previous.relationship_type == next.relationship_type
+                && previous.properties == next.properties
+                && previous.evidence == next.evidence
+                && previous.valid_time == next.valid_time
+                && previous.correction_of == next.correction_of
+                && previous.recorded_revision == next.recorded_revision
+                && valid_checkpoint_status_transition(previous.status, next.status) => {}
+        _ => return Err(CheckpointStateError::Invalid),
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RequiredRecordKind {
+    Visible,
+    ActiveEntity,
+    Evidence,
+    Assertion,
+    Relationship,
+    AcceptedAssertion,
+    AcceptedRelationship,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ReferenceRequirement {
+    pub target: RecordRef,
+    pub revision: CommitRevision,
+    pub kind: RequiredRecordKind,
+}
+
+pub(crate) enum ReferenceRequirementVisitError<E> {
+    State(CheckpointStateError),
+    Visitor(E),
+}
+
+pub(crate) fn visit_history_first_reference_requirements<E>(
+    record: &Record,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
+    match record {
+        Record::Entity(entity) => visit_value_reference_requirements(
+            &entity.properties,
+            entity.modified_revision,
+            RequiredRecordKind::Visible,
+            visitor,
+        )?,
+        Record::Evidence(_) => {}
+        Record::Assertion(assertion) => {
+            emit_reference_requirement(
+                ReferenceRequirement {
+                    target: assertion.subject,
+                    revision: assertion.recorded_revision,
+                    kind: RequiredRecordKind::ActiveEntity,
+                },
+                visitor,
+            )?;
+            visit_value_reference_requirements(
+                &assertion.object,
+                assertion.recorded_revision,
+                RequiredRecordKind::Visible,
+                visitor,
+            )?;
+            visit_evidence_requirements(&assertion.evidence, assertion.recorded_revision, visitor)?;
+            if let Some(target) = assertion.correction_of {
+                let revision = preceding_revision(assertion.recorded_revision)
+                    .map_err(ReferenceRequirementVisitError::State)?;
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target,
+                        revision,
+                        kind: RequiredRecordKind::AcceptedAssertion,
+                    },
+                    visitor,
                 )?;
-            }
-            Record::Evidence(_) => {}
-            Record::Assertion(assertion) => {
-                require_checkpoint_active_entity_at(
-                    history,
-                    assertion.subject,
-                    assertion.recorded_revision,
-                )?;
-                validate_checkpoint_value_at(
-                    history,
-                    &assertion.object,
-                    assertion.recorded_revision,
-                )?;
-                validate_checkpoint_evidence_at(
-                    history,
-                    &assertion.evidence,
-                    assertion.recorded_revision,
-                )?;
-                if let Some(correction) = assertion.correction_of {
-                    require_checkpoint_accepted_correction_target(
-                        history,
-                        correction,
-                        assertion.recorded_revision,
-                        false,
-                    )?;
-                }
-            }
-            Record::Relationship(relationship) => {
-                require_checkpoint_active_entity_at(
-                    history,
-                    relationship.from,
-                    relationship.recorded_revision,
-                )?;
-                require_checkpoint_active_entity_at(
-                    history,
-                    relationship.to,
-                    relationship.recorded_revision,
-                )?;
-                validate_checkpoint_value_at(
-                    history,
-                    &relationship.properties,
-                    relationship.recorded_revision,
-                )?;
-                validate_checkpoint_evidence_at(
-                    history,
-                    &relationship.evidence,
-                    relationship.recorded_revision,
-                )?;
-                if let Some(correction) = relationship.correction_of {
-                    require_checkpoint_accepted_correction_target(
-                        history,
-                        correction,
-                        relationship.recorded_revision,
-                        true,
-                    )?;
-                }
             }
         }
-        for record in versions.iter().skip(1) {
-            if let Record::Entity(entity) = record
-                && entity.lifecycle == EntityLifecycle::Active
-            {
-                validate_checkpoint_value_at(
-                    history,
-                    &entity.properties,
-                    entity.modified_revision,
+        Record::Relationship(relationship) => {
+            for target in [relationship.from, relationship.to] {
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target,
+                        revision: relationship.recorded_revision,
+                        kind: RequiredRecordKind::ActiveEntity,
+                    },
+                    visitor,
+                )?;
+            }
+            visit_value_reference_requirements(
+                &relationship.properties,
+                relationship.recorded_revision,
+                RequiredRecordKind::Visible,
+                visitor,
+            )?;
+            visit_evidence_requirements(
+                &relationship.evidence,
+                relationship.recorded_revision,
+                visitor,
+            )?;
+            if let Some(target) = relationship.correction_of {
+                let revision = preceding_revision(relationship.recorded_revision)
+                    .map_err(ReferenceRequirementVisitError::State)?;
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target,
+                        revision,
+                        kind: RequiredRecordKind::AcceptedRelationship,
+                    },
+                    visitor,
                 )?;
             }
         }
@@ -1335,27 +1369,178 @@ fn validate_historical_reference_closure(
     Ok(())
 }
 
-fn validate_checkpoint_value_at(
-    history: &BTreeMap<RecordRef, Vec<Record>>,
+pub(crate) fn visit_history_successor_reference_requirements<E>(
+    record: &Record,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
+    if let Record::Entity(entity) = record
+        && entity.lifecycle == EntityLifecycle::Active
+    {
+        visit_value_reference_requirements(
+            &entity.properties,
+            entity.modified_revision,
+            RequiredRecordKind::Visible,
+            visitor,
+        )?;
+    }
+    Ok(())
+}
+
+pub(crate) fn visit_current_reference_requirements<E>(
+    record: &Record,
+    revision: CommitRevision,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
+    match record {
+        Record::Entity(entity) if entity.lifecycle == EntityLifecycle::Active => {
+            visit_value_reference_requirements(
+                &entity.properties,
+                revision,
+                RequiredRecordKind::Visible,
+                visitor,
+            )?;
+        }
+        Record::Entity(_) | Record::Evidence(_) => {}
+        Record::Assertion(assertion) => {
+            visit_evidence_requirements(&assertion.evidence, revision, visitor)?;
+            if matches!(
+                assertion.status,
+                AssertionStatus::Proposed | AssertionStatus::Accepted
+            ) {
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target: assertion.subject,
+                        revision,
+                        kind: RequiredRecordKind::ActiveEntity,
+                    },
+                    visitor,
+                )?;
+                visit_value_reference_requirements(
+                    &assertion.object,
+                    revision,
+                    RequiredRecordKind::Visible,
+                    visitor,
+                )?;
+            }
+            if let Some(target) = assertion.correction_of {
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target,
+                        revision,
+                        kind: RequiredRecordKind::Assertion,
+                    },
+                    visitor,
+                )?;
+            }
+        }
+        Record::Relationship(relationship) => {
+            visit_evidence_requirements(&relationship.evidence, revision, visitor)?;
+            if matches!(
+                relationship.status,
+                AssertionStatus::Proposed | AssertionStatus::Accepted
+            ) {
+                for target in [relationship.from, relationship.to] {
+                    emit_reference_requirement(
+                        ReferenceRequirement {
+                            target,
+                            revision,
+                            kind: RequiredRecordKind::ActiveEntity,
+                        },
+                        visitor,
+                    )?;
+                }
+                visit_value_reference_requirements(
+                    &relationship.properties,
+                    revision,
+                    RequiredRecordKind::Visible,
+                    visitor,
+                )?;
+            }
+            if let Some(target) = relationship.correction_of {
+                emit_reference_requirement(
+                    ReferenceRequirement {
+                        target,
+                        revision,
+                        kind: RequiredRecordKind::Relationship,
+                    },
+                    visitor,
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn reference_requirement_matches(
+    requirement: ReferenceRequirement,
+    record: Option<&Record>,
+) -> bool {
+    match (requirement.kind, record) {
+        (RequiredRecordKind::Visible, Some(record)) => is_visible_record(record),
+        (RequiredRecordKind::ActiveEntity, Some(Record::Entity(entity))) => {
+            entity.lifecycle == EntityLifecycle::Active
+        }
+        (RequiredRecordKind::Evidence, Some(Record::Evidence(_)))
+        | (RequiredRecordKind::Assertion, Some(Record::Assertion(_)))
+        | (RequiredRecordKind::Relationship, Some(Record::Relationship(_))) => true,
+        (RequiredRecordKind::AcceptedAssertion, Some(Record::Assertion(assertion))) => {
+            assertion.status == AssertionStatus::Accepted
+        }
+        (RequiredRecordKind::AcceptedRelationship, Some(Record::Relationship(relationship))) => {
+            relationship.status == AssertionStatus::Accepted
+        }
+        _ => false,
+    }
+}
+
+fn emit_reference_requirement<E>(
+    requirement: ReferenceRequirement,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
+    visitor(requirement).map_err(ReferenceRequirementVisitError::Visitor)
+}
+
+fn visit_evidence_requirements<E>(
+    evidence: &[RecordRef],
+    revision: CommitRevision,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
+    for target in evidence {
+        emit_reference_requirement(
+            ReferenceRequirement {
+                target: *target,
+                revision,
+                kind: RequiredRecordKind::Evidence,
+            },
+            visitor,
+        )?;
+    }
+    Ok(())
+}
+
+fn visit_value_reference_requirements<E>(
     value: &Value,
     revision: CommitRevision,
-) -> Result<(), CheckpointStateError> {
+    kind: RequiredRecordKind,
+    visitor: &mut impl FnMut(ReferenceRequirement) -> Result<(), E>,
+) -> Result<(), ReferenceRequirementVisitError<E>> {
     match value {
-        Value::RecordRef(reference) => {
-            let record =
-                record_at(history, *reference, revision).ok_or(CheckpointStateError::Invalid)?;
-            if !is_visible_record(record) {
-                return Err(CheckpointStateError::Invalid);
-            }
-        }
+        Value::RecordRef(target) => emit_reference_requirement(
+            ReferenceRequirement {
+                target: *target,
+                revision,
+                kind,
+            },
+            visitor,
+        )?,
         Value::List(values) => {
             for value in values.as_slice() {
-                validate_checkpoint_value_at(history, value, revision)?;
+                visit_value_reference_requirements(value, revision, kind, visitor)?;
             }
         }
         Value::Map(values) => {
             for (_, value) in values.as_slice() {
-                validate_checkpoint_value_at(history, value, revision)?;
+                visit_value_reference_requirements(value, revision, kind, visitor)?;
             }
         }
         _ => {}
@@ -1363,58 +1548,52 @@ fn validate_checkpoint_value_at(
     Ok(())
 }
 
-fn require_checkpoint_active_entity_at(
-    history: &BTreeMap<RecordRef, Vec<Record>>,
-    id: RecordRef,
-    revision: CommitRevision,
-) -> Result<(), CheckpointStateError> {
-    if matches!(
-        record_at(history, id, revision),
-        Some(Record::Entity(entity)) if entity.lifecycle == EntityLifecycle::Active
-    ) {
-        Ok(())
-    } else {
-        Err(CheckpointStateError::Invalid)
-    }
+fn preceding_revision(revision: CommitRevision) -> Result<CommitRevision, CheckpointStateError> {
+    revision
+        .get()
+        .checked_sub(1)
+        .and_then(|value| CommitRevision::new(value).ok())
+        .ok_or(CheckpointStateError::Invalid)
 }
 
-fn validate_checkpoint_evidence_at(
+fn validate_historical_reference_closure(
     history: &BTreeMap<RecordRef, Vec<Record>>,
-    evidence: &[RecordRef],
-    revision: CommitRevision,
 ) -> Result<(), CheckpointStateError> {
-    for id in evidence {
-        if !matches!(record_at(history, *id, revision), Some(Record::Evidence(_))) {
-            return Err(CheckpointStateError::Invalid);
+    for versions in history.values() {
+        let first = versions.first().ok_or(CheckpointStateError::Invalid)?;
+        visit_history_first_reference_requirements(first, &mut |requirement| {
+            validate_reference_requirement(history, requirement)
+        })
+        .map_err(flatten_checkpoint_requirement_error)?;
+        for record in versions.iter().skip(1) {
+            visit_history_successor_reference_requirements(record, &mut |requirement| {
+                validate_reference_requirement(history, requirement)
+            })
+            .map_err(flatten_checkpoint_requirement_error)?;
         }
     }
     Ok(())
 }
 
-fn require_checkpoint_accepted_correction_target(
+fn validate_reference_requirement(
     history: &BTreeMap<RecordRef, Vec<Record>>,
-    id: RecordRef,
-    recorded_revision: CommitRevision,
-    relationship: bool,
+    requirement: ReferenceRequirement,
 ) -> Result<(), CheckpointStateError> {
-    let previous = recorded_revision
-        .get()
-        .checked_sub(1)
-        .and_then(|value| CommitRevision::new(value).ok())
-        .ok_or(CheckpointStateError::Invalid)?;
-    let accepted = match record_at(history, id, previous) {
-        Some(Record::Assertion(record)) if !relationship => {
-            record.status == AssertionStatus::Accepted
-        }
-        Some(Record::Relationship(record)) if relationship => {
-            record.status == AssertionStatus::Accepted
-        }
-        _ => false,
-    };
-    if accepted {
-        Ok(())
-    } else {
-        Err(CheckpointStateError::Invalid)
+    if !reference_requirement_matches(
+        requirement,
+        record_at(history, requirement.target, requirement.revision),
+    ) {
+        return Err(CheckpointStateError::Invalid);
+    }
+    Ok(())
+}
+
+fn flatten_checkpoint_requirement_error(
+    error: ReferenceRequirementVisitError<CheckpointStateError>,
+) -> CheckpointStateError {
+    match error {
+        ReferenceRequirementVisitError::State(error)
+        | ReferenceRequirementVisitError::Visitor(error) => error,
     }
 }
 
@@ -2712,7 +2891,7 @@ fn reverse_reference_for_target(record: &Record, expected: RecordRef) -> Option<
     (roles != 0).then(|| reverse_reference(record, roles))
 }
 
-fn reverse_reference(record: &Record, roles: u16) -> ReverseReference {
+pub(crate) fn reverse_reference(record: &Record, roles: u16) -> ReverseReference {
     let (owner_kind, owner_state) = match record {
         Record::Entity(entity) => (
             REVERSE_KIND_ENTITY,
