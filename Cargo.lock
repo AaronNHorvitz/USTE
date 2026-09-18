@@ -541,6 +541,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "uste-memory-adapter"
+version = "0.1.0"
+dependencies = [
+ "sha2",
+ "uste-crypto",
+ "uste-memory",
+ "uste-policy",
+ "uste-storage",
+ "uste-txn",
+ "uste-types",
+]
+
+[[package]]
 name = "uste-policy"
 version = "0.1.0"
 dependencies = [
