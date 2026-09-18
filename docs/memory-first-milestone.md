@@ -1,7 +1,8 @@
 # M1 — Bounded local memory integration pilot
 
 Date: 2026-09-18
-Status: owner-approved delivery plan; implementation and acceptance remain open.
+Status: completed at Decision 0058 for exact implementation `b9689f3`; broader roadmap and release
+gates remain open.
 
 ## Outcome and non-goals
 

@@ -2,12 +2,14 @@
 
 Updated: 2026-09-18 · Branch: `codex/uste-implementation`
 
-Latest completed task is T-67. Decision 0055 selects verified recovery commit `7393def` and freezes
+Latest completed task is T-68; M1 is complete at exact implementation `b9689f3`. Decision 0055 selects verified recovery commit `7393def` and freezes
 the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Implementation
 commit `97537e5` adds durable source/fact admission, bounded authorized retrieval, exact citations,
 corrections, revocation and fail-closed rebuild under Decision 0056. Commit `a07bdec` adds the
 Decision 0057 restricted embedded Linux adapter, consumer-owned versioned source/outbox contract
-and runnable offline demo. All T-68 process-fault, measurement and exact handoff work remains open.
+and runnable offline demo. Decision 0058 records the passing M1-A–J matrix, frozen-limit release
+measurements and exact consumer handoff. Work now resumes T-20 and then T-19; full-project tasks and
+release gates remain open.
 Branch history
 through the current handoff adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
@@ -48,6 +50,17 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Completed T-68/M1 at `b9689f3` plus Decision 0058 evidence. A real child acknowledged memory
+  revision 4, was SIGKILLed and recovered the exact citation in a fresh process. Wrong password and
+  committed-certificate mutation fail closed. Existing no-space publication matrices, pilot query
+  cancellation/budgets, authorization/revocation and independent-oracle recovery complete M1-F.
+- The exact `b9689f3` release path measured 55,512,414 B/s for a durable encrypted 1 MiB ingest, 355 ms cold
+  recovery, warm authorized-query p99 below 1 microsecond reporting resolution across 1,000 samples,
+  and 265,180 KiB peak RSS. All pass the thresholds frozen in T-63; no threshold or full-product
+  benchmark was changed.
+- Added the exact-version consumer handoff pinned to full commit, Cargo.lock SHA-256, Rust 1.95.0,
+  default features and x86_64 Linux/Btrfs. It requires separate consumer-side source/outbox/policy
+  mapping, shadow testing and rollback; it authorizes no AgentMage change or authoritative migration.
 - Completed T-67 at `a07bdec` with `uste-memory-adapter`. One mutable embedded adapter owns the
   Linux/Btrfs writer, key, scope, policy principal and authority generation; it returns only bounded
   owned results. The consumer remains authoritative for immutable source bytes and a strict

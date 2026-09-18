@@ -34,8 +34,7 @@ checkpoint without changing existing R0–R4 dependencies or accepting failed be
 Execute T-63–T-68 next in dependency order, then resume T-20/T-19 and the complete roadmap.
 A full-product goal continues after M1; an explicitly M1-only goal ends at verified T-68.
 [The milestone contract](docs/memory-first-milestone.md) owns the detailed exit cases.
-T-63 through T-67 are complete; T-68 remains open. Planning approval is not implementation
-evidence.
+T-63 through T-68 and M1 are complete. Resume T-20, then T-19 and the unchanged full roadmap.
 
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
 |---|---|---|---|---|
@@ -44,7 +43,7 @@ evidence.
 | [x] T-65 | Bounded authorized graph/lexical retrieval and citation resolution; FR-05/09/13/20/26 | T-64 | [Small-corpus API, independent oracle and explicit time subset](docs/evidence/memory-pilot-core.md) | Exact citations, history/corrections/contradictions, cross-scope denial, work/output budgets and cooperative cancellation pass |
 | [x] T-66 | Pilot lifecycle, revocation and fail-closed rebuild; FR-09/11/23 | T-65 | [Generation/revocation/rebuild contract and evidence](docs/decisions/0056-bounded-memory-write-query-lifecycle.md) | Source/policy revocation hides content/counts, stale views/generations refuse, and interrupted rebuild remains closed; no erasure claim |
 | [x] T-67 | Generic local Rust consumer adapter and offline demo; FR-14/15, NFR-04 | T-66 | [Decision 0057](docs/decisions/0057-local-memory-consumer-adapter.md), [runnable demo](docs/memory-pilot-demo.md) and [adapter evidence](docs/evidence/memory-pilot-adapter.md) | Real Btrfs demo proves exact source authority, reopen/lock/version boundaries, cited corrections/revocation/rebuild and no cloud/feed/model dependency |
-| [ ] T-68 | M1 end-to-end acceptance and consumer handoff; NFR-02/03/05 | T-67 | Exact build/features, test and measurement report, reproducible demo and integration checklist | Every M1 case passes under declared bounds; no unsupported release/security claim; consumer integration remains separately admitted |
+| [x] T-68 | M1 end-to-end acceptance and consumer handoff; NFR-02/03/05 | T-67 | [Decision 0058](docs/decisions/0058-memory-pilot-qualification.md), [M1-A–J evidence](docs/evidence/memory-pilot-acceptance.md) and [exact consumer handoff](docs/memory-pilot-handoff.md) | Every M1 case passes at pinned `b9689f3` under frozen bounds; integration/release/security admission remains separate |
 
 ## R0 — Foundational decisions
 

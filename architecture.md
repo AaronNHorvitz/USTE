@@ -169,6 +169,11 @@ request and verifies the complete authoritative source digest before clearing it
 read only inside an already-authorized operation. The synthetic consumer and derived index use
 separate filesystem roots. No IPC or consumer-specific runtime integration is implied.
 
+Decision 0058 qualifies that bounded pilot at exact commit `b9689f3`: real SIGKILL recovery,
+wrong-key/corruption/lock refusal, the M1-A–J matrix and pre-frozen throughput/latency/recovery/RSS
+limits pass. This is an M1 source handoff only. Disk-scale indexes, full temporal/content/lifecycle
+semantics and release gates remain on the main roadmap.
+
 Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
 revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,
 one-mutation-per-record revisions with read-stable correction targets, durable policy records and
