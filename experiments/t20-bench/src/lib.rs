@@ -11,6 +11,7 @@ pub mod linux_runner;
 pub mod manifest;
 pub mod materialization;
 pub mod oracle;
+pub mod oracle_summary;
 pub mod query;
 pub mod synthetic;
 
@@ -23,6 +24,10 @@ pub use materialization::{
     ACCEPTED_SEED, Bm01Profile, Edge, EntityId, Materializer, RelationshipId, Topology,
 };
 pub use oracle::{Oracle, OracleError, OracleLimits, OracleOutput};
+pub use oracle_summary::{
+    MAX_ORACLE_SUMMARY_BYTES, ORACLE_SUMMARY_PROFILE, OracleExpectation, OracleExpectedOutcome,
+    OracleSummary, QUALIFYING_ORACLE_SUMMARY_DIGEST, RESULT_SIZE_PROFILE,
+};
 pub use query::{
     Direction, QueryClass, QuerySet, QuerySpec, measured_queries, query_digest, warmup_queries,
 };

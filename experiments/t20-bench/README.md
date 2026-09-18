@@ -27,7 +27,10 @@ From this directory:
 ```text
 cargo run --release --locked --offline -- manifest
 cargo run --release --locked --offline -- manifest --entities 1000
+cargo run --release --locked --offline -- oracle-summary --entities 20 > ORACLE
 cargo run --release --locked --offline -- engine-check --entities 20
+cargo run --release --locked --offline -- linux-query --root ROOT \
+  --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo test --locked --offline
 cargo clippy --all-targets --locked --offline -- -D warnings
 ```
@@ -42,6 +45,14 @@ then accepts them in a separate durable revision. After encrypted index publicat
 durable memory adapter, replays the journal, loads the persisted authorized root and compares all
 384 measured query shapes with the independent oracle. The 20-entity/200-relationship golden output
 digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
+
+`oracle-summary` is intended to run separately from `linux-query`, so the independent oracle's
+adjacency arrays do not enter the query process. The bounded 256 KiB summary pins profile/query
+digests and exact output or limit outcomes without record identifiers. At exact scale it contains
+299 successful outputs and 85 expected result-limit refusals. `linux-query` reopens the production
+Btrfs database, clears USTE's page cache before each authorized traversal and checks exact outcome
+equivalence. Its single-pass timings/RSS/counters are correctness diagnostics and the JSON still
+sets `engine_benchmark:false`.
 
 ## Oracle semantics
 

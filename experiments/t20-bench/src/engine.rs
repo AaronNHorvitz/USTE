@@ -17,8 +17,8 @@ use uste_policy::{
     TrustedPrincipalAdapter,
 };
 use uste_storage::{
-    ClockObservation, EntryName, fault::ScriptedClock, journal::DurableKeyEnvelope,
-    memory::MemoryFileSystem,
+    ClockObservation, EntryName, OwnershipFileSystem, fault::ScriptedClock,
+    journal::DurableKeyEnvelope, memory::MemoryFileSystem,
 };
 use uste_txn::{
     AuthorizedCoordinator, AuthorizedIndexRoot, AuthorizedReadView, AuthorizedTransactionRequest,
@@ -233,7 +233,8 @@ pub fn verify_development_profile(profile: Bm01Profile) -> Result<DevelopmentVer
             &root,
             materializer,
             *query,
-        )?;
+        )
+        .map_err(|error| error.to_string())?;
         if actual != expected {
             return Err(format!("engine/oracle mismatch for query {query:?}"));
         }
@@ -252,15 +253,40 @@ pub fn verify_development_profile(profile: Bm01Profile) -> Result<DevelopmentVer
     })
 }
 
-fn execute_query(
-    coordinator: &EngineCoordinator,
-    filesystem: &mut MemoryFileSystem,
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum EngineQueryError {
+    VisitLimit,
+    ResultLimit,
+    Invalid(&'static str),
+    Engine(String),
+}
+
+impl core::fmt::Display for EngineQueryError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::VisitLimit => formatter.write_str("engine visit limit exceeded"),
+            Self::ResultLimit => formatter.write_str("engine result limit exceeded"),
+            Self::Invalid(message) => formatter.write_str(message),
+            Self::Engine(message) => formatter.write_str(message),
+        }
+    }
+}
+
+pub(crate) fn execute_query<F, W, E, I>(
+    coordinator: &AuthorizedCoordinator<GraphState, F, W, E, I>,
+    filesystem: &mut F,
     principal: &AuthenticatedPrincipal,
     view: &AuthorizedReadView<GraphSnapshot>,
     root: &AuthorizedIndexRoot<AuthorizedGraphIndex>,
     materializer: Materializer,
     query: QuerySpec,
-) -> Result<OracleOutput, String> {
+) -> Result<OracleOutput, EngineQueryError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let limits = OracleLimits::default();
     let mut visits = 0_usize;
     let mut relationships = BTreeSet::new();
@@ -282,23 +308,30 @@ fn execute_query(
                         maximum: limits.maximum_results,
                     },
                 )
-                .map_err(debug)?;
+                .map_err(|error| EngineQueryError::Engine(debug(error)))?;
             let GraphReadOutput::Adjacent(candidates) = output else {
-                return Err("adjacency request returned another output kind".into());
+                return Err(EngineQueryError::Invalid(
+                    "adjacency request returned another output kind",
+                ));
             };
             for candidate in candidates {
-                visits = visits.checked_add(1).ok_or("visit count overflow")?;
+                visits = visits
+                    .checked_add(1)
+                    .ok_or(EngineQueryError::Invalid("visit count overflow"))?;
                 if visits > limits.maximum_visits {
-                    return Err("engine visit limit exceeded".into());
+                    return Err(EngineQueryError::VisitLimit);
                 }
                 if candidate.relationship.status != AssertionStatus::Accepted {
-                    return Err("non-accepted relationship entered adjacency".into());
+                    return Err(EngineQueryError::Invalid(
+                        "non-accepted relationship entered adjacency",
+                    ));
                 }
                 let relationship = ordinal(
                     candidate.relationship.id.record(),
                     materializer.profile().relationships(),
                     "relationship",
-                )?;
+                )
+                .map_err(EngineQueryError::Engine)?;
                 let edge = materializer.edge(relationship);
                 if candidate.relationship.id
                     != relationship_ref(scope(), materializer, relationship)
@@ -306,30 +339,37 @@ fn execute_query(
                     || candidate.relationship.to
                         != entity_ref(scope(), materializer, edge.destination)
                 {
-                    return Err("engine relationship does not match materializer".into());
+                    return Err(EngineQueryError::Invalid(
+                        "engine relationship does not match materializer",
+                    ));
                 }
                 let neighbor = ordinal(
                     candidate.entity.id.record(),
                     materializer.profile().entities(),
                     "entity",
-                )?;
+                )
+                .map_err(EngineQueryError::Engine)?;
                 if candidate.entity.id != entity_ref(scope(), materializer, neighbor) {
-                    return Err("engine entity does not match materializer".into());
+                    return Err(EngineQueryError::Invalid(
+                        "engine entity does not match materializer",
+                    ));
                 }
                 let expected_neighbor = if edge.source == entity {
                     edge.destination
                 } else if edge.destination == entity {
                     edge.source
                 } else {
-                    return Err("adjacency relationship does not touch frontier entity".into());
+                    return Err(EngineQueryError::Invalid(
+                        "adjacency relationship does not touch frontier entity",
+                    ));
                 };
                 if neighbor != expected_neighbor {
-                    return Err("adjacency neighbor mismatch".into());
+                    return Err(EngineQueryError::Invalid("adjacency neighbor mismatch"));
                 }
                 if relationships.insert(relationship)
                     && relationships.len() > limits.maximum_results
                 {
-                    return Err("engine result limit exceeded".into());
+                    return Err(EngineQueryError::ResultLimit);
                 }
                 reachable_entities.insert(neighbor);
                 if seen_entities.insert(neighbor) {

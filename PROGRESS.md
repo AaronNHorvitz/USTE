@@ -3,7 +3,7 @@
 Updated: 2026-09-17 · Branch: `codex/uste-implementation`
 
 Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
-through `035e4e9` adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
+through the current handoff adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
 certificate-paired coordinator metadata increment adds an executable cold root-to-seeded-open path.
@@ -19,7 +19,8 @@ preparation. Decision 0039 adds explicit authorized cache/I/O measurement. Decis
 capped, nonqualifying production-engine equivalence driver to the pinned fixture and oracle.
 Decision 0041 streams exact-profile construction through bounded transactions and pins its
 212-revision plan. Decision 0042 adds resumable Linux/Btrfs materialization and authenticated
-portable-recovery open phases. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
+portable-recovery open phases. Decision 0043 adds a separate bounded oracle summary and Linux
+correctness-query phase. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -382,6 +383,19 @@ unverified external distribution prerequisite.
   nonqualifying platform/recovery evidence, not BM-01 query timing or a host-cold result.
   Interrupted-prefix process-loss recovery remains unexecuted; retries are limited by the fixed
   30-day idempotency-outcome retention.
+- Added Decision 0043, `bm01-oracle-summary-v1` and `bm01-result-v1`. A separate process now emits
+  at most 256 KiB of canonical, content-free expectations bound to the engine mapping and measured
+  corpus. The exact accepted profile pins 299 successful outputs, zero visit-limit outcomes, 85
+  expected result-limit outcomes and summary digest
+  `5e9cb81200b2016ab470419021561e0a304e1eb1d6610e0633b35925b27df402`.
+- Added Linux `linux-query`: it independently reopens revision/profile/root, clears the USTE page
+  cache before each authorized disk traversal, and requires exact visits/counts/logical bytes/
+  digest or the exact typed limit refusal. Its content-free report includes outcome counts,
+  diagnostic percentiles, RSS and authenticated cache/index counter deltas.
+- A release-built 20/200 Btrfs correctness smoke matched all 384 outputs after revision-4 recovery.
+  It reported an 891 ms query phase, 2.430/4.892/4.955 ms p50/p95/p99, 5,660 KiB current RSS and
+  265,104 KiB peak RSS. The host caches were uncontrolled and graph state remained full-memory;
+  `engine_benchmark:false` is preserved and no BM-01 pass is claimed.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -456,8 +470,12 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (101 links, 98 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 17 isolated T-20 fixture/engine/Linux-runner tests pass
+# docs=ok (102 links, 99 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 20 isolated T-20 fixture/engine/Linux-runner tests pass; one exact-profile oracle test is
+# intentionally ignored in debug and executed under the release-profile acceptance command
+cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
+  oracle_summary::tests::qualifying_summary_outcomes_and_digest_are_golden -- --ignored --exact
+# 1 passed in 5.40 s; exact 299/0/85 outcome split, accepted digest and round-trip
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
@@ -543,9 +561,10 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by adding separately generated oracle summaries and repeated authorized-query
-sampling to the Linux/Btrfs runner, while replacing the complete live graph publication target
-with a disk-backed base/overlay state and removing the full-memory recovery boundary. Run exact
+Continue T-20 by adding repeated authorized-query sampling to the Linux/Btrfs runner, with the 299
+exact-profile successes separated from the 85 expected result-limit refusals, and add interrupted-
+prefix materialization recovery. Replace the complete live graph publication target
+with a disk-backed base/overlay state and remove the full-memory recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's

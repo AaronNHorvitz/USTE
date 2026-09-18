@@ -49,8 +49,8 @@ evidence.
 
 Root publication/admission and authorized views still clone or validate complete graph state and
 warm host caches. The runner therefore does not claim larger-than-memory behavior or a host-cold
-query state. It currently prepares and validates storage; a subsequent phase must add separately
-generated oracle summaries and repeated authorized-query sampling before an exact run can be a
+query state. Decision 0043 subsequently adds separate oracle summaries and a one-pass correctness
+query phase; repeated authorized cold/warm sampling is still required before an exact run can be a
 BM-01 candidate. The accepted 24 GiB reservation is still required for that run.
 
 ## Verification

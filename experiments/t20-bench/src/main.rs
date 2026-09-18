@@ -1,6 +1,6 @@
 use std::{env, path::PathBuf, process::ExitCode};
 
-use uste_t20_bench::{Bm01Manifest, Bm01Profile, verify_development_profile};
+use uste_t20_bench::{Bm01Manifest, Bm01Profile, OracleSummary, verify_development_profile};
 
 fn run() -> Result<(), String> {
     let mut arguments = env::args_os().skip(1);
@@ -15,14 +15,19 @@ fn run() -> Result<(), String> {
     }
     let linux_command = matches!(
         command.as_str(),
-        "linux-create" | "linux-resume" | "linux-open"
+        "linux-create" | "linux-resume" | "linux-open" | "linux-query"
     );
-    if command != "manifest" && command != "engine-check" && !linux_command {
+    if command != "manifest"
+        && command != "oracle-summary"
+        && command != "engine-check"
+        && !linux_command
+    {
         return Err("unsupported command".into());
     }
     let mut entities = 100_000_u64;
     let mut root = None::<PathBuf>;
     let mut password_file = None::<PathBuf>;
+    let mut oracle_file = None::<PathBuf>;
     while let Some(argument) = arguments.next() {
         match argument.to_str() {
             Some("--entities") => {
@@ -44,6 +49,11 @@ fn run() -> Result<(), String> {
                     arguments.next().ok_or("--password-file requires a value")?,
                 ));
             }
+            Some("--oracle-file") => {
+                oracle_file = Some(PathBuf::from(
+                    arguments.next().ok_or("--oracle-file requires a value")?,
+                ));
+            }
             Some("--help" | "-h") => {
                 print_usage();
                 return Ok(());
@@ -54,6 +64,8 @@ fn run() -> Result<(), String> {
     let profile = Bm01Profile::new(entities).map_err(str::to_owned)?;
     if command == "manifest" {
         print!("{}", Bm01Manifest::build(profile).to_json());
+    } else if command == "oracle-summary" {
+        print!("{}", OracleSummary::build(profile)?.to_tsv());
     } else if command == "engine-check" {
         let report = verify_development_profile(profile)?;
         println!(
@@ -77,21 +89,31 @@ fn run() -> Result<(), String> {
             let report = match command.as_str() {
                 "linux-create" => {
                     uste_t20_bench::linux_runner::create(&root, &password_file, profile)
+                        .map(|report| report.to_json())
                 }
                 "linux-resume" => {
                     uste_t20_bench::linux_runner::resume(&root, &password_file, profile)
+                        .map(|report| report.to_json())
                 }
                 "linux-open" => {
                     uste_t20_bench::linux_runner::validate_open(&root, &password_file, profile)
+                        .map(|report| report.to_json())
                 }
+                "linux-query" => uste_t20_bench::linux_runner::query_correctness(
+                    &root,
+                    &password_file,
+                    &oracle_file.ok_or("--oracle-file is required")?,
+                    profile,
+                )
+                .map(|report| report.to_json()),
                 _ => unreachable!("command was validated"),
             }
             .map_err(|error| error.code().to_owned())?;
-            println!("{}", report.to_json());
+            println!("{report}");
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = (root, password_file, profile);
+            let _ = (root, password_file, oracle_file, profile);
             return Err("linux runner requires x86_64 Linux".into());
         }
     }
@@ -100,10 +122,13 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     println!(
-        "usage: uste-t20-bench <manifest|engine-check> [--entities COUNT]\n\
+        "usage: uste-t20-bench <manifest|oracle-summary|engine-check> [--entities COUNT]\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
+         uste-t20-bench linux-query --root DIR --password-file FILE \
+         --oracle-file FILE [--entities COUNT]\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
+         oracle-summary emits content-free expectations for a separate query process;\n\
          engine-check accepts at most 1000 entities and is always nonqualifying;\n\
          Linux phases require an existing Btrfs directory and owner-only password file"
     );

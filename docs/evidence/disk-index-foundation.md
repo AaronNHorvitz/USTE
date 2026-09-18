@@ -42,7 +42,8 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 11 isolated t20-bench tests passed; format, clippy, rustdoc,
+# 262 workspace tests and 20 isolated t20-bench tests passed (1 exact-profile release test ignored
+# in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
 
@@ -153,6 +154,19 @@ query latency, were not sampled repeatedly and are explicitly nonqualifying.
 Interrupted-prefix process-loss coverage has not yet run; this evidence covers a completed-frontier
 retry only.
 
+Decision 0043 adds `bm01-oracle-summary-v1` generation outside the Linux query process and a
+`linux-query` correctness phase. The summary is bounded to 256 KiB, binds the engine mapping and
+measured corpus, and pins the exact-profile outcome split at 299 successful outputs, zero visit
+limits and 85 expected result limits with digest
+`5e9cb81200b2016ab470419021561e0a304e1eb1d6610e0633b35925b27df402`. The Linux phase reopens
+portable recovery, clears only USTE's page cache before each authorized traversal, and compares
+visits, result counts, `bm01-result-v1` logical bytes and digest or the typed limit outcome.
+
+A release-built 20/200 Btrfs smoke matched all 384 outputs after revision-4 recovery. It reported
+891 ms for the one-pass query phase, 2.430/4.892/4.955 ms p50/p95/p99, 5,660 KiB current RSS and
+265,104 KiB peak RSS. Host caches were uncontrolled and graph state was full-memory. The report
+therefore states `engine_benchmark:false`; these are diagnostics, not BM-01 evidence.
+
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
 65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
@@ -160,5 +174,6 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 17 isolated T-20 fixture/engine/
-Linux-runner tests passed.
+docs, strict clippy/rustdoc, the storage publication model, and 20 isolated T-20 fixture/engine/
+Linux-runner tests passed; one exact-profile oracle test is reserved for the release-profile
+acceptance command and ignored by the debug suite.

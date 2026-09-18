@@ -256,6 +256,13 @@ boundaries. Create, raw replay/resume and independently authorized open are sepa
 owner phases. Reports expose aggregate state only; root admission and read-view setup remain full-
 memory and outside future query-latency samples.
 
+Decision 0043 keeps the independent oracle out of the Linux query process. A bounded content-free
+summary binds the exact mapping, corpus and successful-output or typed-limit expectations; the
+recovered authorized query phase validates that summary and traverses the encrypted index through
+the same production adapter. Per-query USTE cache clearing and authenticated counter deltas are
+explicit, while host caches and full-memory recovery remain disclosed uncontrolled boundaries.
+One-pass diagnostics are not qualifying latency evidence.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

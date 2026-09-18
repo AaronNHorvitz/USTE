@@ -256,6 +256,11 @@ transaction identities allow raw journal replay followed by idempotent policy/da
 interruption before the authorization facade can open. The phase publishes an index only when no
 current root is admitted. Complete graph replay/root validation is still a full-memory boundary.
 
+Decision 0043 reuses that recovered authorized view for a separate Linux correctness-query phase.
+It admits a bounded external oracle summary, clears the USTE page cache between traversals and
+reports authenticated disk/cache work plus process RSS. This does not alter the recovery format or
+remove the full-memory graph replay/root-validation boundary; host caches remain uncontrolled.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

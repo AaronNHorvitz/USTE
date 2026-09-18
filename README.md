@@ -126,11 +126,18 @@ cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --
   linux-resume --root ROOT --password-file PASSWORD [--entities 100000]
 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
   linux-open --root ROOT --password-file PASSWORD [--entities 100000]
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  oracle-summary [--entities 100000] > ORACLE
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  linux-query --root ROOT --password-file PASSWORD --oracle-file ORACLE [--entities 100000]
 ~~~
 
 Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate. Reports
-currently set `engine_benchmark:false`: they validate durable materialization/recovery but do not
-measure query latency or establish bounded-memory behavior.
+currently set `engine_benchmark:false`: materialization/recovery phases validate storage, and the
+query phase performs one correctness pass against a separately generated content-free oracle. Its
+diagnostic timing is not the required repeated cold/warm benchmark and does not establish
+bounded-memory behavior. The exact corpus has 299 successful outputs and 85 expected result-cap
+refusals; later latency evidence must keep those populations separate.
 
 ## Delivery
 

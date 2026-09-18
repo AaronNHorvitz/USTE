@@ -11,6 +11,9 @@ topology	ring_cycle_relationships	qualifying	100000
 topology	hubs	qualifying	100
 queries	measured	3-classes-x-4-depths-x-32	384
 queries	warmup	3-classes-x-4-depths-x-8	96
+queries	successful_outcomes	qualifying	299
+queries	visit_limit_outcomes	qualifying	0
+queries	result_limit_outcomes	qualifying	85
 limits	visits	global-per-query	1000000
 limits	unique_relationship_results	global-per-query	100000
 digest	synthetic_entities	synthetic-v1-graph-count-100000	f2d0051a2f2930990ccb4f272e6b02208167c9c7c17a92ba12bc8b118cb5ebae
@@ -19,4 +22,5 @@ digest	materialization	bm01-materialization-v1	ac2899311100d05f5cbf9772ce2ba0fa2
 digest	topology	bm01-topology-v1	237ae96c6872fa5b2e016686e78ed90e380c72799c16e2efb5800eaecd5f27d6
 digest	measured_queries	bm01-query-corpus-v1	5e12be0c9c8016d5b1da1dbceddbccc351c8729013925ebad81b96a100a6ce27
 digest	warmup_queries	bm01-query-corpus-v1	f350fba4568e146bdd0f61542a1b3c4579fa5f4dee53ccad65b738b1a75bf226
+digest	oracle_summary	bm01-oracle-summary-v1	5e9cb81200b2016ab470419021561e0a304e1eb1d6610e0633b35925b27df402
 claim	engine_benchmark	fixture-only	false

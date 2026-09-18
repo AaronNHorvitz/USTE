@@ -115,8 +115,10 @@ the accepted repeated measurements remain before BM-01 can pass.
 
 Decision 0042 supplies Linux/Btrfs creation, deterministic resume and authenticated open with OS
 entropy and portable recovery. A 20/200 real-filesystem smoke preserves revision 4 across reopen and
-resume. Next add a separately generated content-free oracle summary and repeated authorized-query
-sampling; exact scale and accepted host/RSS/cache evidence remain mandatory.
+resume. Decision 0043 adds a separately generated content-free oracle summary and a one-pass Linux
+correctness phase with exact output/typed-limit matching, RSS and authenticated index counters.
+Next add repeated authorized-query sampling that separates the 299 exact-profile successes from 85
+expected result-limit refusals; exact scale and accepted host/RSS/cache evidence remain mandatory.
 
 ## Architectural decomposition
 

@@ -35,9 +35,10 @@ acceptance through `AuthorizedCoordinator`, publishes the encrypted current inde
 durable adapter restart, replays the journal, discovers the persisted root and then queries only
 through `read_indexed`. Its breadth-first adapter uses stable ordered frontiers, validates every
 returned relationship/endpoint/status/neighbor against the materializer, and applies the frozen
-global one-million-visit and 100,000-unique-result caps. Every one of the 384 measured query shapes
-must exactly equal the independent oracle's visits, relationship ordinals, reachable entity
-ordinals and output digest.
+global one-million-visit and 100,000-unique-result caps. Every measured query shape must have the
+same outcome as the independent oracle: successful outputs exactly match visits, relationship
+ordinals, reachable entity ordinals and digest, while bounded refusals must match the same typed
+limit. The evidenced 20/200 profile has 384 successful outputs.
 
 ## Consequences and limits
 

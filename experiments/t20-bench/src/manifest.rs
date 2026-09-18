@@ -231,7 +231,7 @@ mod tests {
             hex(manifest.warmup_query_digest()),
             "f350fba4568e146bdd0f61542a1b3c4579fa5f4dee53ccad65b738b1a75bf226"
         );
-        assert_eq!(ACCEPTANCE.lines().count(), 22);
+        assert_eq!(ACCEPTANCE.lines().count(), 26);
         for expected in [
             "profile\tseed\tbm01-materialization-v1\t8f41d0a52b40f13f4a77bc3beae2026a8bc42ad48d12ce53d92e29f612111001",
             "profile\tentities\tqualifying\t100000",
@@ -245,6 +245,9 @@ mod tests {
             "topology\thubs\tqualifying\t100",
             "queries\tmeasured\t3-classes-x-4-depths-x-32\t384",
             "queries\twarmup\t3-classes-x-4-depths-x-8\t96",
+            "queries\tsuccessful_outcomes\tqualifying\t299",
+            "queries\tvisit_limit_outcomes\tqualifying\t0",
+            "queries\tresult_limit_outcomes\tqualifying\t85",
             "limits\tvisits\tglobal-per-query\t1000000",
             "limits\tunique_relationship_results\tglobal-per-query\t100000",
             "digest\tsynthetic_entities\tsynthetic-v1-graph-count-100000\tf2d0051a2f2930990ccb4f272e6b02208167c9c7c17a92ba12bc8b118cb5ebae",
@@ -253,6 +256,7 @@ mod tests {
             "digest\ttopology\tbm01-topology-v1\t237ae96c6872fa5b2e016686e78ed90e380c72799c16e2efb5800eaecd5f27d6",
             "digest\tmeasured_queries\tbm01-query-corpus-v1\t5e12be0c9c8016d5b1da1dbceddbccc351c8729013925ebad81b96a100a6ce27",
             "digest\twarmup_queries\tbm01-query-corpus-v1\tf350fba4568e146bdd0f61542a1b3c4579fa5f4dee53ccad65b738b1a75bf226",
+            "digest\toracle_summary\tbm01-oracle-summary-v1\t5e9cb81200b2016ab470419021561e0a304e1eb1d6610e0633b35925b27df402",
             "claim\tengine_benchmark\tfixture-only\tfalse",
         ] {
             assert!(ACCEPTANCE.lines().any(|line| line == expected));

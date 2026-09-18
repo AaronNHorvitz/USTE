@@ -110,8 +110,14 @@ does not turn the capped development verifier into BM-01 timing or memory eviden
 
 Decision 0042 adds Linux/Btrfs `create`, `resume` and `open` phases with OS entropy, portable
 recovery, fixed content-free reports and exact frontier/root admission checks. The report labels
-host caches uncontrolled and full graph state memory-resident. No query timing is collected yet,
-and the 20/200 platform smoke is explicitly nonqualifying.
+host caches uncontrolled and full graph state memory-resident.
+
+Decision 0043 adds a separately generated, bounded, content-free oracle summary and a Linux
+correctness-query phase. The exact corpus pins 299 successful outputs, no visit-limit outcomes and
+85 expected result-limit refusals. Each query starts with an empty USTE page cache and must match
+the oracle's output or typed refusal, but host caches remain uncontrolled and the full graph is
+memory-resident. Its one-pass aggregate timing includes expected refusals, is diagnostic only and
+sets `engine_benchmark:false`; qualifying repeated cold/warm success samples remain required.
 
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
