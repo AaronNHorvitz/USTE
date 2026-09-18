@@ -20,6 +20,18 @@ graph index.** There is no general database executable, supported content parser
 certification, or production release yet. One T-15 component benchmark is recorded and misses its
 throughput target. The features below are requirements unless explicitly identified as implemented.
 
+## Next delivery milestone: local memory pilot
+
+The next implementation priority is **M1: a bounded, experimental local memory backend**:
+persist approved source-backed facts, retrieve them with exact citations, correct/revoke them,
+and verify restart recovery through a generic Rust consumer harness. It is not implemented
+or accepted yet. The consumer keeps its existing store authoritative and can disable/rebuild
+the derived index. Synthetic data only until the applicable lifecycle gates pass.
+
+See the [memory-first milestone](docs/memory-first-milestone.md) and tasks T-63–T-68.
+This does not close R1/R2, lower existing benchmarks, or remove spatial indexes, navigation,
+physics, rich content, or production hardening from the full roadmap.
+
 ## Product direction
 
 The product is an original Rust database engine, not a wrapper around ArangoDB, TimescaleDB,

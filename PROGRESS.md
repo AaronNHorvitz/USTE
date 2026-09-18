@@ -654,6 +654,15 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
+Owner-approved planning update (2026-09-18): Decision 0054 prioritizes the separate
+[bounded M1 memory pilot](docs/memory-first-milestone.md), T-63–T-68. Start with T-63:
+inspect and preserve the interrupted recovery changes, verify or explicitly exclude them,
+and freeze a tested bounded baseline. These new tasks are all open. No code or acceptance
+result follows from this planning update. Do not launch a large benchmark campaign until
+the host has adequate memory headroom; qualify M1 under recorded caps first.
+
+After M1's verified handoff, resume the following preserved full-product work:
+
 Continue T-20 by making the warm reducer's pending plan and coordinator metadata recoverable
 without complete `GraphState` replay, then stream the recovery suffix into bounded disk state.
 Bound candidate discovery/initial scrub as part of that recovery path. Run the exact five-sample BM-01 campaign under the accepted host

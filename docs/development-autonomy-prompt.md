@@ -24,6 +24,18 @@ records suffice. Do not build exchange/broker/feed connectors, collect provider 
 require live accounts. Preserve local encryption keys and authorization: these are not
 external-provider credentials. Keep physics scope within the documented baseline.
 
+## Current next-delivery priority
+
+The development/distribution gate correction below is historical work recorded by Decision
+0011; inspect actual status and do not repeat it if already complete. Decision 0054 now puts
+the bounded M1 memory pilot (docs/memory-first-milestone.md, T-63–T-68) first. Reconcile the
+interrupted recovery changes under T-63, preserve unrelated work, select a verified baseline,
+and complete M1 acceptance and handoff before resuming T-20/T-19 and the full roadmap.
+This full-product prompt does not end at M1. It does not authorize changing AgentMage or
+treating a local derived-index demo as production-ready or as full R1/R2 acceptance.
+Record available RAM/swap and enforce build/test/benchmark resource limits; do not run
+competing heavy jobs or repeatedly rerun a workload killed by memory pressure.
+
 ## First action: owner-authorized gate correction
 
 I explicitly authorize separating development readiness from external distribution readiness.
@@ -133,4 +145,5 @@ No purchases, paid provisioning, production deployment, credential fabrication, 
 file deletion, system-security changes or bypass of tool/platform controls is authorized.
 If a session ends, save enough state for the next session to continue rather than restart.
 
-Begin now with the gate correction, then carry the implementation forward.
+Begin with the current T-63 baseline review and M1 priority; preserve the completed gate
+correction and carry the full implementation forward after the verified M1 handoff.

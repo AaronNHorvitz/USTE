@@ -18,6 +18,21 @@ No native feed/broker/exchange API client, credential onboarding or live account
 Keep local encryption/authentication while demonstrating offline operation without provider
 secrets. Decision 0011 separately governs the external executable-distribution gate.
 
+## Execution priority: bounded memory integration first
+
+Implement [M1](memory-first-milestone.md) through T-63–T-68 before continuing the
+larger-than-memory T-20 campaign and full spatial/physics delivery. First reconcile the
+interrupted recovery work; do not commit or depend on it merely because it exists.
+The pilot may use a verified small-state durable profile with enforced total-state caps.
+It must not mislabel that profile as completion of T-20, T-19 or T-29.
+
+M1 produces a generic, source-backed, rebuildable memory index and runnable Rust consumer
+harness. Existing consumer storage stays authoritative. Application-specific integration is
+separate work; neither a fake adapter nor a USTE-only demo proves it complete.
+After M1 acceptance and handoff, return to T-20, T-19, then every remaining release increment.
+Reuse tested pilot components in T-21–T-28 and T-34–T-36; those tasks still require their full
+original acceptance scope. No benchmark threshold or distribution gate is weakened.
+
 ## Implementation increments
 
 | Increment | Tasks | Deliverable and exit demonstration |

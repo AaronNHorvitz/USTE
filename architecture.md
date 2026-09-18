@@ -2,6 +2,16 @@
 
 Database design draft 1.6 · 2026-09-17 · R0 design ready; T-08–T-18/T-45 foundation implemented
 
+## Delivery profile: bounded memory pilot
+
+[Decision 0054](docs/decisions/0054-memory-first-delivery.md) prioritizes a
+[local memory pilot](docs/memory-first-milestone.md) using the same native Rust storage,
+authorization, graph and source-evidence boundaries. This adds a delivery profile, not another
+database engine or a new authority. A strictly capped in-memory projection may be used over
+verified durable state; unbounded recovery is not an acceptable implicit fallback. Broader
+disk-scale, spatial and physics obligations remain unchanged. Consumer-specific approval
+policy remains outside USTE; the initial adapter is a disposable derived index.
+
 ## Component boundaries
 
 ~~~text

@@ -27,6 +27,24 @@ asset-price records, alongside agent memory. T-28/T-54/T-56 own the offline exam
 account, provider password/token or trading implementation is required by these tasks.
 This clarification preserves task IDs, dependencies and completed R0 evidence.
 
+## Next priority — M1 experimental local memory pilot
+
+[Decision 0054](docs/decisions/0054-memory-first-delivery.md) adds this earlier delivery
+checkpoint without changing existing R0–R4 dependencies or accepting failed benchmarks.
+Execute T-63–T-68 next in dependency order, then resume T-20/T-19 and the complete roadmap.
+A full-product goal continues after M1; an explicitly M1-only goal ends at verified T-68.
+[The milestone contract](docs/memory-first-milestone.md) owns the detailed exit cases.
+All six tasks are open; planning approval is not implementation evidence.
+
+| Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |
+|---|---|---|---|---|
+| [ ] T-63 | Reconcile interrupted work and freeze bounded pilot profile; FR-02/03/09/10, NFR-02/03/04 | T-15, T-16, T-17, T-18, T-45, T-49 | Exact baseline, recovery review, numeric admission/resource budgets, selected backend profile and fault matrix | Preserved pending work individually verified or explicitly excluded; reproducible green baseline; no silent fallback to unbounded recovery |
+| [ ] T-64 | Durable source-backed memory writes and restart-safe ingestion; FR-01/02/03/06/17/18 | T-63 | Synthetic UTF-8/opaque-byte fixtures, approved records, evidence bindings and retryable import harness | Acknowledged writes survive restart; retries do not duplicate; abandoned upload reservations reconciled safely; new ingestion works after restart |
+| [ ] T-65 | Bounded authorized graph/lexical retrieval and citation resolution; FR-05/09/13/20/26 | T-64 | Small-corpus query API and reference oracle with explicit supported time/filter subset | Exact source/version/locator checks, current/historical corrections, visible contradictions, denied cross-scope reads, budgets and cancellation |
+| [ ] T-66 | Pilot lifecycle, revocation and fail-closed rebuild; FR-09/11/23 | T-65 | Trusted-source reconciliation, stale-index denial and disposable-index cleanup protocol | Revoked/superseded records never leak; interrupted cleanup/rebuild stays closed; stale copies refused; physical-erasure limitations visible |
+| [ ] T-67 | Generic local Rust consumer adapter and offline demo; FR-14/15, NFR-04 | T-66 | Restricted API, versioned source/outbox contract, runnable harness, setup and rollback instructions | One owner, restart/lock/version errors, exact approval/scope mapping, source remains authoritative, no cloud/feed/model dependency |
+| [ ] T-68 | M1 end-to-end acceptance and consumer handoff; NFR-02/03/05 | T-67 | Exact build/features, test and measurement report, reproducible demo and integration checklist | Every M1 case passes under declared bounds; no unsupported release/security claim; consumer integration remains separately admitted |
+
 ## R0 — Foundational decisions
 
 | Status / ID | Work package and requirement | Depends on | Artifact to produce | Completion evidence |

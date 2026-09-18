@@ -44,6 +44,21 @@ the selected security-reporting route remains mandatory before distributing an e
 See [application use cases](docs/application-use-cases.md) for R2 synthetic acceptance examples
 under FR-15/27/28/31/33/34. Game rendering and broader physics remain future consumer work.
 
+## Earlier delivery milestone — M1 local memory pilot
+
+Deliver the [bounded memory-first milestone](docs/memory-first-milestone.md) before resuming
+the full-scale T-20 acceptance campaign and broader spatial/physics rollout. M1 is a separate
+experimental local integration checkpoint, not a renamed R1/R2 gate or a production release.
+Its scope is approved source-backed records, small-corpus retrieval/citations, corrections,
+access revocation, restart and a rebuildable generic consumer adapter. T-63–T-68 own its
+profile, implementation and acceptance. No required FR/NFR obligation or existing benchmark
+target is removed; unsupported operations must be refused explicitly.
+
+An in-memory index over durable encrypted state is admissible only within a tested total-state
+cap that includes replay, history and metadata, with safe refusal before exceeding the cap.
+It is not evidence of the larger-than-memory disk engine. Actual consumer adoption remains
+separately reviewed; M1 does not authorize authoritative migration or sensitive production use.
+
 ## Requirements
 
 SHALL means a release obligation, not an implemented feature. Each row names its first
