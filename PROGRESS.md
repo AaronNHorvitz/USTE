@@ -1,8 +1,9 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-17 · Branch: `codex/uste-implementation`
+Updated: 2026-09-18 · Branch: `codex/uste-implementation`
 
-Latest completed task remains T-49 (`9ec08db`, with evidence bound by `0b665f9`). Branch history
+Latest completed task is T-63. Decision 0055 selects verified recovery commit `7393def` and freezes
+the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Branch history
 through the current handoff adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
@@ -41,6 +42,16 @@ every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 rem
 unverified external distribution prerequisite.
 
 ## Completed this increment
+
+- Recovered the unstaged Decision 0053 implementation without discarding or presuming it valid.
+  Focused transaction/graph suites, warnings-denied clippy and the complete repository check passed
+  before it was committed and pushed as `7393def`.
+- Completed T-63 with Decision 0055 and `uste_memory::PILOT_PROFILE`: 4,096 commits, 256 source
+  versions, 2,048 retained facts, 32 MiB total/1 MiB per source, 16 MiB logical state, bounded
+  staging/query/concurrency, 512 MiB RSS and predeclared recovery/latency/throughput thresholds.
+  These are pilot limits, not replacements for BM-01/BM-04/BM-06.
+- Added T-63 evidence recording the exact baseline, dirty-work disposition, host RAM/swap/Btrfs
+  preflight and sequential 4 GiB-cgroup verification. The large T-20 campaign was not run.
 
 - Recorded owner-authorized Decision 0011, separating local development governance (T-06)
   from operational private-reporting verification (new T-62) without claiming verification.
@@ -584,6 +595,8 @@ cargo test -p uste-graph --all-targets --locked --offline
 # 43 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
+cargo test -p uste-memory --all-targets --locked --offline
+# 2 passed; 0 failed
 cargo test -p uste-spatial --all-targets --locked
 # 34 passed; 0 failed
 cargo test -p uste-types --test spatial_primitives --locked
@@ -663,12 +676,11 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Owner-approved planning update (2026-09-18): Decision 0054 prioritizes the separate
-[bounded M1 memory pilot](docs/memory-first-milestone.md), T-63–T-68. Start with T-63:
-inspect and preserve the interrupted recovery changes, verify or explicitly exclude them,
-and freeze a tested bounded baseline. These new tasks are all open. No code or acceptance
-result follows from this planning update. Do not launch a large benchmark campaign until
-the host has adequate memory headroom; qualify M1 under recorded caps first.
+T-63 is complete at the exact `7393def` baseline with Decision 0055 and executable limits.
+Continue T-64 by implementing durable source/fact admission and consumer-outbox upload
+reconciliation so new bounded ingestion works after reopen without quota leakage. Then execute
+T-65–T-68 in order. Do not launch a large benchmark campaign until M1 is qualified and the host
+has adequate memory headroom.
 
 After M1's verified handoff, resume the following preserved full-product work:
 

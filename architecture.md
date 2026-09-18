@@ -142,6 +142,14 @@ reference before returning content; absent policy denies.
 Recovered unique committed usage is rebuilt, while new uploads fail closed after reopen until T-35
 can enumerate every uncommitted reservation; known evidenced tokens remain recoverable.
 
+Decision 0055 adds the `uste-memory` experimental derived-profile boundary. Its executable
+`memory-pilot-v1` constants cap journal/retry growth, source versions and bytes, retained facts,
+canonical requests, complete logical state, staging, query work/output, reader concurrency, RSS
+and recovery/latency/throughput acceptance. The profile reuses the journal, blob and policy
+authorities; it does not create another commit store or qualify the disk-scale engine. A consumer
+authority generation must match before results can be served, and rebuild first makes the derived
+projection unservable. The source store and complete upload outbox remain consumer authority.
+
 Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
 revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,
 one-mutation-per-record revisions with read-stable correction targets, durable policy records and

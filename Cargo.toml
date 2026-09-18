@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/uste-crypto", "crates/uste-graph", "crates/uste-ingest", "crates/uste-policy", "crates/uste-replay", "crates/uste-spatial", "crates/uste-storage", "crates/uste-testkit", "crates/uste-time", "crates/uste-txn", "crates/uste-types"]
+members = ["crates/uste-crypto", "crates/uste-graph", "crates/uste-ingest", "crates/uste-memory", "crates/uste-policy", "crates/uste-replay", "crates/uste-spatial", "crates/uste-storage", "crates/uste-testkit", "crates/uste-time", "crates/uste-txn", "crates/uste-types"]
 exclude = [
     "experiments/content-fixtures",
     "experiments/dependency-audit",

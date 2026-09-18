@@ -16,7 +16,8 @@ An item can link to a price record without USTE fetching that price from an exte
 **Status: R0 design ready; the T-08–T-18/T-45/T-48/T-49 correctness foundation now includes the
 workspace, encrypted journal/transactions/blobs, authorization, evidence graph, replay/checkpoints,
 pinned time, spatial schemas, atomic typed import contracts and an encrypted disk-backed current-
-graph index.** There is no general database executable, supported content parser, security
+graph index. T-63 has selected and verified the bounded M1 baseline and frozen its executable
+resource profile.** There is no general database executable, supported content parser, security
 certification, or production release yet. One T-15 component benchmark is recorded and misses its
 throughput target. The features below are requirements unless explicitly identified as implemented.
 
@@ -24,8 +25,8 @@ throughput target. The features below are requirements unless explicitly identif
 
 The next implementation priority is **M1: a bounded, experimental local memory backend**:
 persist approved source-backed facts, retrieve them with exact citations, correct/revoke them,
-and verify restart recovery through a generic Rust consumer harness. It is not implemented
-or accepted yet. The consumer keeps its existing store authoritative and can disable/rebuild
+and verify restart recovery through a generic Rust consumer harness. Its bounded profile is
+implemented, but writes, queries and acceptance remain open. The consumer keeps its existing store authoritative and can disable/rebuild
 the derived index. Synthetic data only until the applicable lifecycle gates pass.
 
 See the [memory-first milestone](docs/memory-first-milestone.md) and tasks T-63–T-68.
