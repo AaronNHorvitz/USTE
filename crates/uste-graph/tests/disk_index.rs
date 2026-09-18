@@ -2416,12 +2416,18 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
         &mut admission_cache,
     )
     .unwrap();
-    let disk = uste_txn::DiskCommitCoordinator::from_admitted_base(
+    let disk = uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
         recovery,
+        &mut filesystem,
         metadata_base,
         GraphDiskLiveState::new(current_base),
         RetentionDays::new(30).unwrap(),
-        uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
+        uste_txn::DiskCoordinatorRecoveryLimits {
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(0, 0).unwrap(),
+            lookup: lookup_limits,
+            maximum_encoded_bytes: 0,
+        },
+        &mut metadata_cache,
     )
     .unwrap();
     assert_eq!(disk.overlay_counts(), (0, 0));

@@ -31,7 +31,9 @@ pub use index_recovery::{
 };
 
 mod disk_coordinator;
-pub use disk_coordinator::{DiskCommitCoordinator, DiskCoordinatorState};
+pub use disk_coordinator::{
+    DiskCommitCoordinator, DiskCoordinatorRecoveryLimits, DiskCoordinatorState,
+};
 
 use std::collections::BTreeMap;
 

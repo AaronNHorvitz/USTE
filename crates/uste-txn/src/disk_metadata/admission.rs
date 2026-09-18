@@ -23,6 +23,36 @@ pub struct CoordinatorDiskBase {
 }
 
 impl CoordinatorDiskBase {
+    pub(crate) fn revalidate_journal_binding<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        // The journal lookup verifies this root's historical certificate on its own chain,
+        // including the zero-suffix case where no later group would otherwise be inspected.
+        let (value, _) = journal
+            .index_get_bounded(
+                filesystem,
+                &self.metadata,
+                FAMILY_METADATA,
+                METADATA_KEY,
+                limits,
+                cache,
+            )
+            .map_err(TransactionError::Storage)?;
+        let value = value.ok_or(TransactionError::IntegrityFailure)?;
+        parse_metadata(&value, self.metadata.revision()).map_err(TransactionError::Storage)?;
+        Ok(())
+    }
+
     pub fn anchor(&self) -> IndexRootAnchor {
         self.metadata.anchor()
     }

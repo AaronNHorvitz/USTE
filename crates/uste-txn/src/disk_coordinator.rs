@@ -9,6 +9,14 @@ pub trait DiskCoordinatorState: TransactionState {
     fn validate_metadata_base(&self, root: &RecoveredIndexRoot) -> Result<(), ApplyError>;
 }
 
+/// Bounds for rebuilding only post-base coordinator metadata and replaying ordinary reducers.
+#[derive(Clone, Copy, Debug)]
+pub struct DiskCoordinatorRecoveryLimits {
+    pub overlay: CoordinatorRecoveryLimits,
+    pub lookup: IndexGetLimits,
+    pub maximum_encoded_bytes: u64,
+}
+
 pub(crate) struct DiskCommitMetadata<'a> {
     pub base: &'a CoordinatorDiskBase,
     pub overlay: CoordinatorRecoveryLimits,
@@ -87,6 +95,154 @@ where
             return Err(TransactionError::OutcomeUnknown);
         }
         Ok(&self.inner.state)
+    }
+
+    /// Replay an authenticated suffix into bounded private overlays and an ordinary reducer.
+    /// No state is returned until the terminal group succeeds. Reducers requiring external I/O
+    /// preparation (including pending disk-graph states) are not silently reconstructed in RAM;
+    /// their `prepare` refusal propagates and their separate streaming path remains required.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_from_admitted_base(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        mut state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        cache: &mut PageCache,
+    ) -> Result<Self, TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        let frontier = recovery
+            .journal
+            .frontier()
+            .ok_or(TransactionError::IntegrityFailure)?;
+        if recovery.scope() != base.metadata.scope() || frontier < base.metadata.revision() {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        state
+            .validate_metadata_base(&base.metadata)
+            .map_err(map_apply_error)?;
+        let suffix_count = frontier.get() - base.metadata.revision().get();
+        if suffix_count > limits.overlay.maximum_outcomes as u64
+            || frontier.get() > MAX_OUTCOMES_PER_NAMESPACE as u64
+        {
+            return Err(TransactionError::ResourceLimit);
+        }
+        base.revalidate_journal_binding(&recovery.journal, filesystem, limits.lookup, cache)?;
+        let mut outcomes = BTreeMap::new();
+        let mut transactions = BTreeMap::new();
+        let mut owners = BTreeMap::new();
+        if suffix_count != 0 {
+            let first = base
+                .metadata
+                .revision()
+                .checked_next()
+                .map_err(|_| TransactionError::RevisionExhausted)?;
+            recovery.visit_transactions(
+                filesystem,
+                first,
+                frontier,
+                suffix_count,
+                limits.maximum_encoded_bytes,
+                |filesystem, transaction| {
+                    let key = RetryKey {
+                        principal: transaction.principal,
+                        key: transaction.idempotency_key,
+                    };
+                    if outcomes.contains_key(&key)
+                        || transactions.contains_key(&transaction.outcome.transaction_id)
+                        || base
+                            .retry_from_journal(
+                                &recovery.journal,
+                                filesystem,
+                                key.principal,
+                                key.key,
+                                limits.lookup,
+                                cache,
+                            )
+                            .map_err(recovery_storage_error)?
+                            .is_some()
+                        || base
+                            .transaction_from_journal(
+                                &recovery.journal,
+                                filesystem,
+                                transaction.outcome.transaction_id,
+                                limits.lookup,
+                                cache,
+                            )
+                            .map_err(recovery_storage_error)?
+                            .is_some()
+                    {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    if let Some(inventory) = transaction.blob_inventory.as_ref() {
+                        for reference in inventory.references() {
+                            let identity = (reference.scope(), reference.id());
+                            let owner = match owners.get(&identity) {
+                                Some(value) => Some(*value),
+                                None => base
+                                    .owner_from_journal(
+                                        &recovery.journal,
+                                        filesystem,
+                                        reference.id(),
+                                        limits.lookup,
+                                        cache,
+                                    )
+                                    .map_err(recovery_storage_error)?,
+                            };
+                            if let Some((stored, _)) = owner {
+                                if stored != *reference {
+                                    return Err(StorageError::IntegrityFailure);
+                                }
+                            } else {
+                                if owners.len() >= limits.overlay.maximum_blob_owners {
+                                    return Err(StorageError::ResourceLimit);
+                                }
+                                owners.insert(identity, (*reference, transaction.principal));
+                            }
+                        }
+                    }
+                    let prepared = state
+                        .prepare(
+                            &transaction.canonical_request,
+                            transaction.blob_inventory.as_ref(),
+                            transaction.revision,
+                        )
+                        .map_err(|error| match error {
+                            ApplyError::ResourceLimit => StorageError::ResourceLimit,
+                            _ => StorageError::IntegrityFailure,
+                        })?;
+                    if S::result_digest(&prepared) != transaction.outcome.result_digest {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    state.publish(prepared);
+                    outcomes.insert(key, transaction.outcome);
+                    transactions.insert(
+                        transaction.outcome.transaction_id,
+                        (transaction.principal, transaction.outcome),
+                    );
+                    Ok(())
+                },
+            )?;
+        }
+        let inner = CommitCoordinator {
+            scope: recovery.scope(),
+            retention,
+            journal: recovery.journal,
+            state,
+            outcomes,
+            transactions,
+            committed_blob_owners: owners,
+            recovered: true,
+            uncertain: false,
+        };
+        Ok(Self {
+            inner,
+            base,
+            overlay_limits: limits.overlay,
+        })
     }
 
     pub fn checkpoint_anchor(
@@ -317,5 +473,13 @@ where
         S: PostCommitStateMaintenance,
     {
         self.inner.install_postcommit_publication(publication)
+    }
+}
+
+fn recovery_storage_error(error: TransactionError) -> StorageError {
+    match error {
+        TransactionError::Storage(error) => error,
+        TransactionError::ResourceLimit => StorageError::ResourceLimit,
+        _ => StorageError::IntegrityFailure,
     }
 }

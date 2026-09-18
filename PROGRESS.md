@@ -51,6 +51,22 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0062 now includes authenticated multi-revision suffix replay for ordinary reducers.
+  It revalidates the historical base against the current journal owner, admits suffix cardinality,
+  streams canonical requests with cumulative byte limits, checks base/overlay collisions and
+  first owners, and reproduces every reducer result digest. Only terminal success exposes the
+  coordinator. Two-revision restart tests retain only two outcomes/one new owner, preserve old
+  ownership and exact retries, and refuse insufficient outcome, owner and early/late byte budgets.
+  Disk-graph external preparation is not implemented by this ordinary-reducer path; no full graph
+  map fallback or general graph suffix claim is made.
+- Suffix verification on parent `43caccb` plus this increment: one job/test thread under
+  `MemoryHigh=3G MemoryMax=4G MemorySwapMax=512M`; `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed 3, and
+  `cargo test -p uste-graph --test disk_index --locked --offline -- --test-threads=1` passed 5
+  (including zero-suffix disk-graph recovery with zero overlay/byte allowance). Strict all-target
+  clippy passed for txn/replay and graph. Documentation/task-graph checks passed. Latest host
+  preflight showed 9.9 GiB RAM available but only 54 MiB swap free; no larger workload was started.
+
 - [Decision 0062](docs/decisions/0062-disk-coordinator-overlays.md) installs the admitted disk
   metadata base without coordinator-prefix maps and adds bounded live overlays. The separate
   privileged `DiskCommitCoordinator` consumes recovery ownership at the exact frontier, requires
@@ -835,8 +851,9 @@ its cold admission now uses authenticated journal/disk correspondence without a 
 comparator map. Decision 0061 pairs retry, transaction and owner indexes into an admitted disk
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
-0062). Next extend authenticated suffix recovery into those overlays, add disk-aware authorization
-and metadata rebase, and replace per-owner prefix scans with scalable authenticated first-reference
+0062). Ordinary-reducer suffix recovery is implemented; next extend the disk-graph external
+preparation/recovery path, add disk-aware authorization and metadata rebase, and replace per-owner
+prefix scans with scalable authenticated first-reference
 evidence before qualification.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. Extend bounded

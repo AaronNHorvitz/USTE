@@ -35,3 +35,21 @@ admission, metadata rebase and disk-specific fault matrices remain required.
 
 Storage's certificate/blob metadata collections remain memory-resident. The current tests use
 small synthetic fixtures and capped processes, not BM-01/BM-06 qualification. T-20 stays open.
+
+## Ordinary-reducer suffix recovery
+
+`recover_from_admitted_base` now validates the supplied base state, preflights the suffix outcome
+count against overlay capacity, and revalidates the metadata root against the current owner's
+authenticated historical certificate chain. This binding check also applies to a zero-length
+suffix. It streams only subsequent canonical transactions through the range visitor's byte budget.
+Each retry key and transaction ID must be absent from both base and preceding suffix. First-owner
+references are checked against base/overlay; only new owners consume admitted overlay entries.
+The ordinary reducer prepares each revision and must reproduce the stored result digest before
+its private state advances. Expiry is restored exactly, never recomputed from the recovery clock.
+
+Only a terminal successful replay returns a coordinator. Any late byte/admission/I/O/integrity or
+reducer failure drops the entire provisional state and overlays. This path supports ordinary
+`TransactionState::prepare` reducers; it does not supply the explicit-I/O graph proof preparation
+or intermediate graph-root handling needed for multi-revision `GraphDiskLiveState` recovery.
+No fallback materializes a graph map. The generic suffix capability does not close that graph gap,
+the disk-specific crash/fault matrix, authorization, rebase or large-scale qualification.

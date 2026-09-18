@@ -990,7 +990,7 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
     let mut disk = uste_txn::DiskCommitCoordinator::from_admitted_base(
         recovery,
         admitted_base.unwrap(),
-        state,
+        state.clone(),
         RetentionDays::new(30).unwrap(),
         uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
     )
@@ -1174,6 +1174,139 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         recovered.committed_blob_owner(reference),
         Some(PrincipalDigest::from_bytes([1; 32]))
     );
+    let mut recovered = recovered;
+    let fourth = recovered
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&new_inventory),
+                ..request(4, &third_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(recovered);
+    filesystem.restart().unwrap();
+    for (maximum_outcomes, maximum_owners, maximum_encoded_bytes) in [
+        (1, 1, 1_000_000),
+        (2, 0, 1_000_000),
+        (2, 1, 1),
+        (2, 1, 10_000),
+        (2, 1, 1_000_000),
+    ] {
+        let (recovery, _) = uste_txn::AuthenticatedIndexRecovery::open(
+            &mut filesystem,
+            &name,
+            scope,
+            CounterEntropy::new(28_000),
+            CounterEntropy::new(29_000),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+        let transaction_root = recovery
+            .load_index_root_manifests(
+                &mut filesystem,
+                uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            )
+            .unwrap()
+            .into_iter()
+            .find(|root| root.generation() == good_generation)
+            .unwrap();
+        let transaction_index = uste_txn::admit_coordinator_transaction_index_for_recovery(
+            &recovery,
+            &mut filesystem,
+            transaction_root,
+            admission_limits,
+            &mut transaction_cache,
+        )
+        .unwrap();
+        let candidate = uste_txn::load_coordinator_metadata_candidates_for_recovery::<
+            CounterState,
+            _,
+            _,
+            _,
+            _,
+        >(&recovery, &mut filesystem)
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.generation() == good_metadata.generation)
+        .unwrap();
+        let base = uste_txn::admit_coordinator_disk_base(
+            &recovery,
+            &mut filesystem,
+            candidate,
+            transaction_index,
+            base_limits,
+            &mut transaction_cache,
+        )
+        .unwrap();
+        let result = uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
+            recovery,
+            &mut filesystem,
+            base,
+            state.clone(),
+            RetentionDays::new(30).unwrap(),
+            uste_txn::DiskCoordinatorRecoveryLimits {
+                overlay: uste_txn::CoordinatorRecoveryLimits::new(maximum_outcomes, maximum_owners)
+                    .unwrap(),
+                lookup: lookup_limits,
+                maximum_encoded_bytes,
+            },
+            &mut transaction_cache,
+        );
+        if maximum_outcomes == 1 || maximum_owners == 0 || maximum_encoded_bytes < 1_000_000 {
+            assert!(matches!(
+                result,
+                Err(TransactionError::ResourceLimit
+                    | TransactionError::Storage(
+                        uste_storage::journal::StorageError::ResourceLimit
+                    ))
+            ));
+        } else {
+            let mut recovered = result.unwrap();
+            assert_eq!(recovered.state().unwrap().value, 30);
+            assert_eq!(recovered.overlay_counts(), (2, 1));
+            assert_eq!(
+                recovered
+                    .commit(
+                        &mut filesystem,
+                        TransactionRequest {
+                            blob_inventory: Some(&new_inventory),
+                            ..request(4, &third_bytes)
+                        },
+                        &mut clock,
+                        &NeverCancel,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                fourth
+            );
+            assert_eq!(
+                recovered
+                    .committed_blob_owner(
+                        &mut filesystem,
+                        reference,
+                        lookup_limits,
+                        &mut transaction_cache
+                    )
+                    .unwrap(),
+                Some(principal)
+            );
+            assert_eq!(
+                recovered
+                    .committed_blob_owner(
+                        &mut filesystem,
+                        new_reference,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                Some(PrincipalDigest::from_bytes([4; 32]))
+            );
+        }
+    }
 }
 
 #[test]
