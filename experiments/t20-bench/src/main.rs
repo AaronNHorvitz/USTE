@@ -1,38 +1,60 @@
-use std::{env, process::ExitCode};
+use std::{env, path::PathBuf, process::ExitCode};
 
 use uste_t20_bench::{Bm01Manifest, Bm01Profile, verify_development_profile};
 
 fn run() -> Result<(), String> {
-    let mut arguments = env::args().skip(1);
-    let command = arguments.next().unwrap_or_else(|| "manifest".into());
+    let mut arguments = env::args_os().skip(1);
+    let command = arguments
+        .next()
+        .unwrap_or_else(|| "manifest".into())
+        .into_string()
+        .map_err(|_| "command must be UTF-8")?;
     if command == "--help" || command == "-h" {
         print_usage();
         return Ok(());
     }
-    if command != "manifest" && command != "engine-check" {
-        return Err(format!("unsupported command: {command}"));
+    let linux_command = matches!(
+        command.as_str(),
+        "linux-create" | "linux-resume" | "linux-open"
+    );
+    if command != "manifest" && command != "engine-check" && !linux_command {
+        return Err("unsupported command".into());
     }
     let mut entities = 100_000_u64;
+    let mut root = None::<PathBuf>;
+    let mut password_file = None::<PathBuf>;
     while let Some(argument) = arguments.next() {
-        match argument.as_str() {
-            "--entities" => {
+        match argument.to_str() {
+            Some("--entities") => {
                 entities = arguments
                     .next()
                     .ok_or("--entities requires a value")?
+                    .into_string()
+                    .map_err(|_| "--entities must be UTF-8")?
                     .parse()
                     .map_err(|_| "--entities must be an unsigned integer")?;
             }
-            "--help" | "-h" => {
+            Some("--root") => {
+                root = Some(PathBuf::from(
+                    arguments.next().ok_or("--root requires a value")?,
+                ));
+            }
+            Some("--password-file") => {
+                password_file = Some(PathBuf::from(
+                    arguments.next().ok_or("--password-file requires a value")?,
+                ));
+            }
+            Some("--help" | "-h") => {
                 print_usage();
                 return Ok(());
             }
-            _ => return Err(format!("unsupported argument: {argument}")),
+            _ => return Err("unsupported argument".into()),
         }
     }
     let profile = Bm01Profile::new(entities).map_err(str::to_owned)?;
     if command == "manifest" {
         print!("{}", Bm01Manifest::build(profile).to_json());
-    } else {
+    } else if command == "engine-check" {
         let report = verify_development_profile(profile)?;
         println!(
             "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-development-equivalence\",\"entities\":{},\"relationships\":{},\"recovered_revision\":{},\"queries\":{},\"output_digest\":\"{}\",\"authorized_reads\":{},\"index_operations\":{},\"pages_read\":{},\"cache_hits\":{},\"cache_misses\":{}}}",
@@ -47,6 +69,31 @@ fn run() -> Result<(), String> {
             report.cache_report.hits,
             report.cache_report.misses,
         );
+    } else {
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        {
+            let root = root.ok_or("--root is required")?;
+            let password_file = password_file.ok_or("--password-file is required")?;
+            let report = match command.as_str() {
+                "linux-create" => {
+                    uste_t20_bench::linux_runner::create(&root, &password_file, profile)
+                }
+                "linux-resume" => {
+                    uste_t20_bench::linux_runner::resume(&root, &password_file, profile)
+                }
+                "linux-open" => {
+                    uste_t20_bench::linux_runner::validate_open(&root, &password_file, profile)
+                }
+                _ => unreachable!("command was validated"),
+            }
+            .map_err(|error| error.code().to_owned())?;
+            println!("{}", report.to_json());
+        }
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            let _ = (root, password_file, profile);
+            return Err("linux runner requires x86_64 Linux".into());
+        }
     }
     Ok(())
 }
@@ -54,8 +101,11 @@ fn run() -> Result<(), String> {
 fn print_usage() {
     println!(
         "usage: uste-t20-bench <manifest|engine-check> [--entities COUNT]\n\
+         uste-t20-bench <linux-create|linux-resume|linux-open> \
+         --root DIR --password-file FILE [--entities COUNT]\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
-         engine-check accepts at most 1000 entities and is always nonqualifying"
+         engine-check accepts at most 1000 entities and is always nonqualifying;\n\
+         Linux phases require an existing Btrfs directory and owner-only password file"
     );
 }
 

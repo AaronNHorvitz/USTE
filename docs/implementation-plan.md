@@ -113,6 +113,11 @@ most 10,000 operations at a time and the shared Evidence record makes the qualif
 212 durable revisions. Linux/Btrfs execution, portable recovery, independent oracle generation and
 the accepted repeated measurements remain before BM-01 can pass.
 
+Decision 0042 supplies Linux/Btrfs creation, deterministic resume and authenticated open with OS
+entropy and portable recovery. A 20/200 real-filesystem smoke preserves revision 4 across reopen and
+resume. Next add a separately generated content-free oracle summary and repeated authorized-query
+sampling; exact scale and accepted host/RSS/cache evidence remain mandatory.
+
 ## Architectural decomposition
 
 Use separate Rust crates/modules for stable types, storage, transaction coordination, policy,

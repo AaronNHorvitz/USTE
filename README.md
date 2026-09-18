@@ -15,11 +15,10 @@ An item can link to a price record without USTE fetching that price from an exte
 
 **Status: R0 design ready; the T-08–T-18/T-45/T-48/T-49 correctness foundation now includes the
 workspace, encrypted journal/transactions/blobs, authorization, evidence graph, replay/checkpoints,
-pinned time, spatial schemas and atomic typed import contracts.** There is no database executable,
-disk-backed graph index, supported
-content parser, security certification, or production release yet. One T-15 component benchmark is
-recorded and misses its throughput target. The features below are requirements unless explicitly
-identified as implemented.
+pinned time, spatial schemas, atomic typed import contracts and an encrypted disk-backed current-
+graph index.** There is no general database executable, supported content parser, security
+certification, or production release yet. One T-15 component benchmark is recorded and misses its
+throughput target. The features below are requirements unless explicitly identified as implemented.
 
 ## Product direction
 
@@ -113,6 +112,26 @@ The domain specification owns the detailed contract. The PRD owns scope; decisio
 changes. A contradiction blocks the affected work until resolved, rather than allowing an
 implementer to choose the most convenient interpretation.
 
+## T-20 Linux runner
+
+The isolated benchmark runner can create, resume and verify the encrypted BM-01 graph mapping on
+x86_64 Linux/Btrfs. It is qualification-candidate tooling, not the database CLI or a benchmark
+pass. Use an existing Btrfs directory and a password file owned by the current user, with one hard
+link, mode `0600` (or stricter), and 1–1024 exact bytes. The file is not newline-trimmed.
+
+~~~text
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  linux-create --root ROOT --password-file PASSWORD [--entities 100000]
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  linux-resume --root ROOT --password-file PASSWORD [--entities 100000]
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  linux-open --root ROOT --password-file PASSWORD [--entities 100000]
+~~~
+
+Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate. Reports
+currently set `engine_benchmark:false`: they validate durable materialization/recovery but do not
+measure query latency or establish bounded-memory behavior.
+
 ## Delivery
 
 1. R0: close foundational decisions and make acceptance vectors executable.
@@ -121,9 +140,9 @@ implementer to choose the most convenient interpretation.
 4. R3: local hardened-beta readiness with rich formats, disk spatial history, constrained contacts and lifecycle hardening.
 5. R4: production candidate with independent review and measured operating limits.
 
-There is not yet a database executable. The Rust workspace, current graph/transaction libraries,
-R0 experiments and
-deterministic synthetic fixture generator are runnable using the
+There is not yet a general database executable. The Rust workspace, current graph/transaction
+libraries, isolated T-20 Linux/Btrfs benchmark runner, R0 experiments and deterministic synthetic
+fixture generator are runnable using the
 [Fedora Kinoite development setup](docs/development-setup.md).
 See [TASKS.md](TASKS.md) for gate status. Local production-format implementation is unblocked;
 external executable distribution remains prohibited until private vulnerability reporting is

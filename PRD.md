@@ -191,6 +191,11 @@ exact qualifying plan at 212 durable revisions, including its shared Evidence re
 cap and nonqualifying label remain; bounded operation construction is not Linux/RSS/latency or
 larger-than-memory evidence.
 
+Decision 0042 adds resumable Linux/Btrfs creation and authenticated open phases using OS entropy
+and the portable recovery profile. Its fixed content-free reports disclose uncontrolled host
+caches and the full-memory graph boundary. This is platform runner implementation, not an exact
+BM-01 run or a performance pass.
+
 ## Release gates
 
 | Gate | Required outcome |

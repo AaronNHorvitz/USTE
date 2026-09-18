@@ -108,6 +108,11 @@ Decision 0041 streams the exact fixture mapping in maximum-10,000-operation tran
 the qualifying plan at 212 durable revisions. This removes profile-sized operation collection but
 does not turn the capped development verifier into BM-01 timing or memory evidence.
 
+Decision 0042 adds Linux/Btrfs `create`, `resume` and `open` phases with OS entropy, portable
+recovery, fixed content-free reports and exact frontier/root admission checks. The report labels
+host caches uncontrolled and full graph state memory-resident. No query timing is collected yet,
+and the 20/200 platform smoke is explicitly nonqualifying.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

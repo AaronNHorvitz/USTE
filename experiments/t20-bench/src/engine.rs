@@ -35,7 +35,7 @@ use crate::{
 };
 
 pub const MAX_DEVELOPMENT_ENTITIES: u64 = 1_000;
-const PRINCIPAL: PrincipalDigest = PrincipalDigest::from_bytes([0xb1; 32]);
+pub(crate) const PRINCIPAL: PrincipalDigest = PrincipalDigest::from_bytes([0xb1; 32]);
 
 type EngineCoordinator = AuthorizedCoordinator<
     GraphState,
@@ -121,8 +121,8 @@ pub fn verify_development_profile(profile: Bm01Profile) -> Result<DevelopmentVer
             expected: Expected::Absent,
             record: NewRecord::Evidence(NewEvidence {
                 id: evidence_ref(scope),
-                digest: crate::ACCEPTED_SEED,
-                locator: text("bm01-materialization-v1")?,
+                digest: engine_mapping_digest(profile),
+                locator: text("bm01-uste-graph-v1")?,
             }),
         }))
         .chain((0..profile.entities()).map(|ordinal| {
@@ -415,7 +415,17 @@ pub fn materialization_revision_count(profile: Bm01Profile) -> u64 {
         + profile.relationships().div_ceil(batch)
 }
 
-fn benchmark_policy(scope: NamespaceRef) -> Result<NamespacePolicy, String> {
+/// Durable profile binding stored in the shared Evidence record for the production mapping.
+#[must_use]
+pub fn engine_mapping_digest(profile: Bm01Profile) -> [u8; 32] {
+    let mut digest = blake3::Hasher::new_derive_key("USTE BM-01 engine-mapping-v1");
+    digest.update(b"bm01-uste-graph-v1");
+    digest.update(&crate::ACCEPTED_SEED);
+    digest.update(&Materializer::new(profile).digests().materialization);
+    *digest.finalize().as_bytes()
+}
+
+pub(crate) fn benchmark_policy(scope: NamespaceRef) -> Result<NamespacePolicy, String> {
     let quotas = QuotaLimits::new(16 * 1024 * 1024, 0, 0, 0, 1024 * 1024).map_err(debug)?;
     let mut policy = NamespacePolicy::new(scope, PolicyVersion::new(1).map_err(debug)?, quotas);
     policy
@@ -435,20 +445,24 @@ fn benchmark_policy(scope: NamespaceRef) -> Result<NamespacePolicy, String> {
     Ok(policy)
 }
 
-fn kernel(policy: NamespacePolicy) -> Result<PolicyKernel, String> {
+pub(crate) fn kernel(policy: NamespacePolicy) -> Result<PolicyKernel, String> {
     let mut kernel = PolicyKernel::new();
     kernel.install_initial_policy(policy).map_err(debug)?;
     Ok(kernel)
 }
 
-fn scope() -> NamespaceRef {
+pub(crate) fn scope() -> NamespaceRef {
     NamespaceRef::new(
         DatabaseId::from_bytes([0xb0; 16]),
         NamespaceId::from_bytes([0xb1; 16]),
     )
 }
 
-fn entity_ref(scope: NamespaceRef, materializer: Materializer, ordinal: u64) -> RecordRef {
+pub(crate) fn entity_ref(
+    scope: NamespaceRef,
+    materializer: Materializer,
+    ordinal: u64,
+) -> RecordRef {
     RecordRef::new(
         scope.database(),
         scope.namespace(),
@@ -456,7 +470,11 @@ fn entity_ref(scope: NamespaceRef, materializer: Materializer, ordinal: u64) -> 
     )
 }
 
-fn relationship_ref(scope: NamespaceRef, materializer: Materializer, ordinal: u64) -> RecordRef {
+pub(crate) fn relationship_ref(
+    scope: NamespaceRef,
+    materializer: Materializer,
+    ordinal: u64,
+) -> RecordRef {
     RecordRef::new(
         scope.database(),
         scope.namespace(),
@@ -464,7 +482,7 @@ fn relationship_ref(scope: NamespaceRef, materializer: Materializer, ordinal: u6
     )
 }
 
-fn evidence_ref(scope: NamespaceRef) -> RecordRef {
+pub(crate) fn evidence_ref(scope: NamespaceRef) -> RecordRef {
     RecordRef::new(
         scope.database(),
         scope.namespace(),
@@ -492,7 +510,7 @@ fn direction(value: Direction) -> AdjacencyDirection {
     }
 }
 
-fn text(value: &str) -> Result<BoundedString, String> {
+pub(crate) fn text(value: &str) -> Result<BoundedString, String> {
     BoundedString::new(value.to_owned()).map_err(debug)
 }
 
@@ -515,7 +533,7 @@ fn debug(error: impl core::fmt::Debug) -> String {
     format!("{error:?}")
 }
 
-struct AuthAdapter;
+pub(crate) struct AuthAdapter;
 
 impl TrustedPrincipalAdapter for AuthAdapter {
     type Credential = ();
@@ -587,7 +605,9 @@ impl EntropySource for CounterEntropy {
 
 #[cfg(test)]
 mod tests {
-    use super::{materialization_revision_count, verify_development_profile};
+    use super::{
+        engine_mapping_digest, materialization_revision_count, verify_development_profile,
+    };
     use crate::Bm01Profile;
 
     #[test]
@@ -614,6 +634,18 @@ mod tests {
         assert_eq!(
             materialization_revision_count(Bm01Profile::qualifying()),
             212
+        );
+    }
+
+    #[test]
+    fn qualifying_engine_mapping_digest_is_pinned() {
+        assert_eq!(
+            engine_mapping_digest(Bm01Profile::qualifying()),
+            *blake3::Hash::from_hex(
+                "b23db073664e93178d6b1dd23acf4cd72e12de9cb1b0d15007d616ea08907fe8"
+            )
+            .unwrap()
+            .as_bytes()
         );
     }
 }

@@ -4,6 +4,7 @@ profile	entities	qualifying	100000
 profile	relationships	qualifying	1000000
 profile	engine_mapping	qualifying	bm01-uste-graph-v1
 profile	durable_revisions	maximum-10000-operations	212
+digest	engine_mapping	bm01-uste-graph-v1	b23db073664e93178d6b1dd23acf4cd72e12de9cb1b0d15007d616ea08907fe8
 topology	uniform_relationships	qualifying	800000
 topology	distributed_hub_relationships	qualifying	100000
 topology	ring_cycle_relationships	qualifying	100000

@@ -134,6 +134,25 @@ collection with maximum-10,000-operation streaming transactions. The accepted pr
 212 durable revisions: one policy, 11 evidence/entity, 100 relationship-create and 100 acceptance
 revisions. The accepted TSV and generated manifest pin that plan without presenting it as a run.
 
+Decision 0042 adds Linux-only `linux-create`, `linux-resume` and `linux-open` phases around that
+mapping. They use the production Btrfs adapter, OS entropy and the portable Argon2id recovery
+envelope. Password files are opened no-follow and must be owner-only, singly linked regular files
+of 1–1024 exact bytes. The authenticated shared Evidence record binds the exact mapping and
+materialization digest to the requested profile. Resume validates the recovered frontier, every
+returned transaction revision and the final authorized read-view revision. Stable transaction
+identities are designed to replay a durable prefix within the fixed 30-day outcome-retention
+interval. Reports are content-free, set `engine_benchmark:false`, identify uncontrolled host caches
+and disclose that graph state remains full-memory.
+
+A release-built real-Btrfs development smoke created the 20/200 profile at revision 4, opened it in
+a fresh process with exactly one current root, performed an idempotent resume that stayed at
+revision 4 and reopened the same frontier/root again. Create reported 399 ms; the two opens and
+resume reported 396 ms, 357 ms and 344 ms on the reference host. An attempted same-frontier open as
+30/300 failed with the fixed `USTE_BM01_PROFILE_BINDING` code. These aggregate phase times are not
+query latency, were not sampled repeatedly and are explicitly nonqualifying.
+Interrupted-prefix process-loss coverage has not yet run; this evidence covers a completed-frontier
+retry only.
+
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
 65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
@@ -141,5 +160,5 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 12 isolated T-20 fixture/engine
-tests passed.
+docs, strict clippy/rustdoc, the storage publication model, and 17 isolated T-20 fixture/engine/
+Linux-runner tests passed.

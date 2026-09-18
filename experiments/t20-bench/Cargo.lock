@@ -391,12 +391,14 @@ name = "uste-t20-bench"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "rustix",
  "uste-crypto",
  "uste-graph",
  "uste-policy",
  "uste-storage",
  "uste-txn",
  "uste-types",
+ "zeroize",
 ]
 
 [[package]]

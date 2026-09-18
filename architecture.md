@@ -251,6 +251,11 @@ Decision 0041 replaces profile-sized operation collection with sequential transa
 policy, 11 evidence/entity, 100 relationship-create and 100 relationship-accept revisions. This
 bounds construction batches but not the current live reducer or recovery footprint.
 
+Decision 0042 runs that plan through the production Linux/Btrfs, OS-entropy and portable-recovery
+boundaries. Create, raw replay/resume and independently authorized open are separate exclusive-
+owner phases. Reports expose aggregate state only; root admission and read-view setup remain full-
+memory and outside future query-latency samples.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

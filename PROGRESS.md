@@ -18,7 +18,8 @@ that proof result into the authoritative coordinator commit without repeating fu
 preparation. Decision 0039 adds explicit authorized cache/I/O measurement. Decision 0040 connects a
 capped, nonqualifying production-engine equivalence driver to the pinned fixture and oracle.
 Decision 0041 streams exact-profile construction through bounded transactions and pins its
-212-revision plan. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
+212-revision plan. Decision 0042 adds resumable Linux/Btrfs materialization and authenticated
+portable-recovery open phases. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -368,6 +369,19 @@ unverified external distribution prerequisite.
   100 relationship-create and 100 relationship-accept revisions. The accepted TSV and generated
   manifest pin this plan while continuing to emit `engine_benchmark:false`; it is not a completed
   qualifying run.
+- Added Decision 0042 and Linux-only `linux-create`, `linux-resume` and `linux-open` phases using
+  the production Btrfs adapter, OS entropy and portable Argon2id recovery. Password files use a
+  no-follow descriptor and must be current-user-owned, singly linked, owner-only regular files with
+  1–1024 exact bytes. Errors and JSON reports are content-free. Authenticated profile-digest,
+  recovered/returned/final revision checks prevent same-frontier profile mislabeling and synthetic
+  frontier reporting.
+- A release-built 20/200 Btrfs smoke created revision 4 and one current encrypted root, reopened it
+  in a new process, idempotently resumed every deterministic transaction without frontier advance,
+  then reopened revision 4/root count 1 again. Aggregate phase times were 399/396/357/344 ms. A
+  same-frontier 30/300 open was rejected by its authenticated profile binding. This is
+  nonqualifying platform/recovery evidence, not BM-01 query timing or a host-cold result.
+  Interrupted-prefix process-loss recovery remains unexecuted; retries are limited by the fixed
+  30-day idempotency-outcome retention.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -442,8 +456,8 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (100 links, 97 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 12 isolated T-20 fixture/engine-equivalence tests pass
+# docs=ok (101 links, 98 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 17 isolated T-20 fixture/engine/Linux-runner tests pass
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
@@ -529,10 +543,10 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by adding the Linux/Btrfs and portable-recovery qualifying runner around the now
-bounded exact-profile materializer, while replacing the complete live graph publication target
+Continue T-20 by adding separately generated oracle summaries and repeated authorized-query
+sampling to the Linux/Btrfs runner, while replacing the complete live graph publication target
 with a disk-backed base/overlay state and removing the full-memory recovery boundary. Run exact
-BM-01 and
+BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

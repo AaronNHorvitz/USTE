@@ -6,6 +6,8 @@
 #![forbid(unsafe_code)]
 
 pub mod engine;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod linux_runner;
 pub mod manifest;
 pub mod materialization;
 pub mod oracle;
@@ -13,7 +15,8 @@ pub mod query;
 pub mod synthetic;
 
 pub use engine::{
-    DevelopmentVerification, materialization_revision_count, verify_development_profile,
+    DevelopmentVerification, engine_mapping_digest, materialization_revision_count,
+    verify_development_profile,
 };
 pub use manifest::Bm01Manifest;
 pub use materialization::{

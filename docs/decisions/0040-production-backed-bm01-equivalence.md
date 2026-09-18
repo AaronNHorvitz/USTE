@@ -23,7 +23,8 @@ The mapping profile is `bm01-uste-graph-v1`:
 
 - typed fixture entity and relationship IDs become the exact bytes of scoped graph `RecordId`s;
 - entities use type `bm01-entity-v1`, schema 1 and null properties;
-- one shared Evidence record binds relationships to `bm01-materialization-v1` and the accepted seed;
+- one shared Evidence record binds relationships to the versioned engine mapping and its profile-
+  specific materialization digest;
 - relationship types distinguish uniform, distributed-hub and ring topology, with null properties,
   unknown valid time and the shared Evidence reference; and
 - every relationship is created `Proposed` and transitioned to `Accepted` in a later transaction
@@ -66,4 +67,3 @@ cargo clippy --manifest-path experiments/t20-bench/Cargo.toml \
   --all-targets --locked --offline -- -D warnings
 # passed
 ~~~
-

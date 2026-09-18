@@ -14,6 +14,10 @@ uste-storage = { path = "../../crates/uste-storage" }
 uste-txn = { path = "../../crates/uste-txn" }
 uste-types = { path = "../../crates/uste-types" }
 
+[target.'cfg(all(target_os = "linux", target_arch = "x86_64"))'.dependencies]
+rustix = { version = "=1.1.5", default-features = false, features = ["std", "fs", "process"] }
+zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 

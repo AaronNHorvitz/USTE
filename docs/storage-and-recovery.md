@@ -251,6 +251,11 @@ Decision 0041 bounds benchmark materialization to the graph transaction maximum 
 qualifying plan at 212 durable revisions. It does not change the memory-backed live-state or
 recovery boundary and therefore supplies no larger-than-memory or platform-durability evidence.
 
+Decision 0042 adds a Linux/Btrfs benchmark owner using OS entropy and portable recovery. Stable
+transaction identities allow raw journal replay followed by idempotent policy/data retry, including
+interruption before the authorization facade can open. The phase publishes an index only when no
+current root is admitted. Complete graph replay/root validation is still a full-memory boundary.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections
