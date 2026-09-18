@@ -35,12 +35,107 @@ const SOURCE: &str = "consumer-source-v1.txt";
 const CHECKPOINT_MAGIC: &[u8; 4] = b"UMCP";
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut arguments = std::env::args_os().skip(1);
-    let root = arguments.next().ok_or("usage: uste-memory-demo ROOT")?;
-    if arguments.next().is_some() {
-        return Err("usage: uste-memory-demo ROOT".into());
+    let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+    match arguments.as_slice() {
+        [root] => run(Path::new(root)),
+        [command, root] if command == "crash-probe" => crash_probe(Path::new(root)),
+        [command, root] if command == "verify-crash" => verify_crash(Path::new(root), false),
+        [command, root] if command == "verify-wrong-key" => verify_crash(Path::new(root), true),
+        _ => Err("usage: uste-memory-demo [crash-probe|verify-crash|verify-wrong-key] ROOT".into()),
     }
-    run(Path::new(&root))
+}
+
+fn crash_probe(root: &Path) -> Result<(), Box<dyn Error>> {
+    if !root.is_dir() || fs::read_dir(root)?.next().is_some() {
+        return Err("ROOT must be an existing empty directory".into());
+    }
+    let source = SourceVersionId {
+        source: record(10),
+        version: 1,
+    };
+    let bytes = b"project status alpha\nproject status beta\n";
+    let consumer_root = root.join("consumer-authority");
+    let engine_root = root.join("uste-derived-index");
+    fs::DirBuilder::new().mode(0o700).create(&consumer_root)?;
+    fs::DirBuilder::new().mode(0o700).create(&engine_root)?;
+    File::open(root)?.sync_all()?;
+    let mut authority = DiskAuthority::create(&consumer_root, scope(), source, bytes)?;
+    let config = LocalAdapterConfig {
+        root: engine_root,
+        database_name: EntryName::new("memory-demo")?,
+        scope: scope(),
+        filesystem_profile: LinuxFilesystemProfile::Btrfs,
+    };
+    let (policy, principal) = policy_and_principal(scope())?;
+    let mut adapter = LocalMemoryAdapter::create(
+        &config,
+        password()?,
+        policy,
+        principal,
+        &mut authority,
+        operation(1),
+    )?;
+    adapter.ingest_source(
+        &mut authority,
+        source,
+        SourceEncoding::ExactUtf8,
+        Some(UtcInstant::new(1_700_000_000, 0)?),
+        operation(2),
+    )?;
+    adapter.put_fact(fact(20, source, "alpha", 0, 20, 1), operation(3))?;
+    let ready = adapter.complete_rebuild(operation(4))?;
+    if adapter
+        .resolve_citation(&citation(1, record(20)))?
+        .exact_source_bytes
+        != bytes
+    {
+        return Err("crash-probe precondition mismatch".into());
+    }
+    println!(
+        "M1_CRASH_READY schema=memory-pilot-v1 revision={}",
+        ready.revision.get()
+    );
+    std::io::stdout().flush()?;
+    loop {
+        std::thread::park();
+    }
+}
+
+fn verify_crash(root: &Path, wrong_key: bool) -> Result<(), Box<dyn Error>> {
+    let consumer_root = root.join("consumer-authority");
+    let source = SourceVersionId {
+        source: record(10),
+        version: 1,
+    };
+    let bytes = fs::read(consumer_root.join(SOURCE))?;
+    let mut authority = DiskAuthority::open(&consumer_root, source)?;
+    let config = LocalAdapterConfig {
+        root: root.join("uste-derived-index"),
+        database_name: EntryName::new("memory-demo")?,
+        scope: scope(),
+        filesystem_profile: LinuxFilesystemProfile::Btrfs,
+    };
+    let (policy, principal) = policy_and_principal(scope())?;
+    let supplied_password = if wrong_key {
+        RecoveryPassword::new(b"uste-m1-deliberately-wrong-password".to_vec())?
+    } else {
+        password()?
+    };
+    let mut adapter = LocalMemoryAdapter::open(
+        &config,
+        supplied_password,
+        policy,
+        principal,
+        &mut authority,
+    )?;
+    let resolved = adapter.resolve_citation(&citation(1, record(20)))?;
+    if resolved.exact_source_bytes != bytes
+        || resolved.citation.exact_utf8_excerpt.as_deref() != Some("project status alpha")
+    {
+        return Err("crash recovery citation mismatch".into());
+    }
+    println!("M1_CRASH_RECOVERED revision=4 citation=exact");
+    Ok(())
 }
 
 fn run(root: &Path) -> Result<(), Box<dyn Error>> {
