@@ -591,7 +591,10 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
     coordinator
         .commit(
             &mut filesystem,
-            request(2, &second_bytes),
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(2, &second_bytes)
+            },
             &mut clock,
             &NeverCancel,
         )
@@ -636,6 +639,7 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         .is_empty()
     );
     let mut recovered = recovered;
+    let good_metadata = publish_coordinator_metadata_root(&mut recovered, &mut filesystem).unwrap();
     uste_txn::publish_coordinator_transaction_index(&mut recovered, &mut filesystem).unwrap();
     let indexes = uste_txn::load_coordinator_transaction_indexes(
         &recovered,
@@ -723,6 +727,63 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         "authenticated but wrong principal must not be admitted"
     );
     let good_generation = root.generation();
+    let metadata_root = recovered
+        .load_index_root_manifests(&mut filesystem, COORDINATOR_METADATA_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|root| root.generation() == good_metadata.generation)
+        .unwrap();
+    let mut owner_entries = Vec::new();
+    recovered
+        .visit_index_run(
+            &mut filesystem,
+            &metadata_root,
+            3,
+            uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+            &mut |key, value| {
+                owner_entries.push(IndexEntry {
+                    key: key.to_vec(),
+                    value: value.to_vec(),
+                });
+                Ok(())
+            },
+        )
+        .unwrap();
+    // The second principal also references the blob, but must never become its first owner.
+    owner_entries[0].value[48..].copy_from_slice(&[2; 32]);
+    let wrong_owner_run = recovered
+        .publish_index_run(
+            &mut filesystem,
+            metadata_root.revision(),
+            COORDINATOR_METADATA_PROFILE_V1,
+            3,
+            owner_entries,
+        )
+        .unwrap();
+    let owner_runs = metadata_root
+        .runs()
+        .map(|run| {
+            if run.family() == 3 {
+                wrong_owner_run
+            } else {
+                *run
+            }
+        })
+        .collect::<Vec<_>>();
+    recovered
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope,
+                revision: metadata_root.revision(),
+                certificate_digest: *metadata_root.certificate_digest(),
+                reducer_profile: *metadata_root.reducer_profile(),
+                logical_state_digest: *metadata_root.logical_state_digest(),
+                index_profile: COORDINATOR_METADATA_PROFILE_V1,
+            },
+            &owner_runs,
+        )
+        .unwrap();
     drop(recovered);
     filesystem.restart().unwrap();
     let (recovery, _) = uste_txn::AuthenticatedIndexRecovery::open(
@@ -795,6 +856,110 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
             )
             .is_err()
         );
+    }
+    let base_limits = uste_txn::CoordinatorDiskAdmissionLimits {
+        metadata: CoordinatorMetadataLoadLimits::new(2, 1, 4, 32, 4096).unwrap(),
+        lookup: lookup_limits,
+        maximum_total_journal_groups: 4,
+        maximum_encoded_bytes_per_pass: 1_000_000,
+    };
+    let mismatched_candidate =
+        uste_txn::load_coordinator_metadata_candidates_for_recovery::<CounterState, _, _, _, _>(
+            &recovery,
+            &mut filesystem,
+        )
+        .unwrap()
+        .remove(0);
+    assert!(matches!(
+        uste_txn::admit_coordinator_disk_base(
+            &recovery,
+            &mut filesystem,
+            mismatched_candidate,
+            transaction_index,
+            base_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
+    for maximum_total_journal_groups in [3, 4] {
+        let candidates = uste_txn::load_coordinator_metadata_candidates_for_recovery::<
+            CounterState,
+            _,
+            _,
+            _,
+            _,
+        >(&recovery, &mut filesystem)
+        .unwrap();
+        assert_eq!(candidates.len(), 2);
+        for candidate in candidates {
+            let good = candidate.generation() == good_metadata.generation;
+            let transaction_root = recovery
+                .load_index_root_manifests(
+                    &mut filesystem,
+                    uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+                )
+                .unwrap()
+                .into_iter()
+                .find(|root| root.generation() == good_generation)
+                .unwrap();
+            let transaction_index = uste_txn::admit_coordinator_transaction_index_for_recovery(
+                &recovery,
+                &mut filesystem,
+                transaction_root,
+                admission_limits,
+                &mut transaction_cache,
+            )
+            .unwrap();
+            let result = uste_txn::admit_coordinator_disk_base(
+                &recovery,
+                &mut filesystem,
+                candidate,
+                transaction_index,
+                uste_txn::CoordinatorDiskAdmissionLimits {
+                    maximum_total_journal_groups,
+                    ..base_limits
+                },
+                &mut transaction_cache,
+            );
+            assert_eq!(result.is_ok(), good && maximum_total_journal_groups == 4);
+            if let Ok(base) = result {
+                assert_eq!(
+                    base.retry_at_base(
+                        &recovery,
+                        &mut filesystem,
+                        principal,
+                        idempotency_key,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                    Some(expected_outcome)
+                );
+                assert_eq!(
+                    base.retry_at_base(
+                        &recovery,
+                        &mut filesystem,
+                        PrincipalDigest::from_bytes([0xee; 32]),
+                        idempotency_key,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                    None
+                );
+                assert_eq!(
+                    base.owner_at_base(
+                        &recovery,
+                        &mut filesystem,
+                        reference.id(),
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                    Some((reference, PrincipalDigest::from_bytes([1; 32])))
+                );
+            }
+        }
     }
 }
 

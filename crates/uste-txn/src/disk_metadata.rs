@@ -5,6 +5,11 @@
 
 use std::collections::BTreeMap;
 
+mod admission;
+pub use admission::{
+    CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, admit_coordinator_disk_base,
+};
+
 use uste_crypto::EntropySource;
 use uste_storage::{
     BlobId, BlobReference, DurableIndexRoot, IndexEntry, IndexRootAnchor, IndexRootInput,

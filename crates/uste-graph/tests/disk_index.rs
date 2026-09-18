@@ -2250,6 +2250,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     let expected = coordinator.read_view().unwrap().state().clone();
     let newer_metadata_publication =
         publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
     drop(coordinator);
     filesystem.restart().unwrap();
 
@@ -2291,6 +2292,53 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
         )
         .unwrap();
     assert_eq!(streamed_revisions, vec![1, 2]);
+    let transaction_root = recovery
+        .load_index_root_manifests(
+            &mut filesystem,
+            uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+        )
+        .unwrap()
+        .remove(0);
+    let mut metadata_cache = PageCache::new(64 * 1024).unwrap();
+    let lookup_limits = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+    let transaction_index = uste_txn::admit_coordinator_transaction_index_for_recovery(
+        &recovery,
+        &mut filesystem,
+        transaction_root,
+        uste_txn::CoordinatorTransactionAdmissionLimits {
+            run: IndexRunReadLimits::new(16, 2, 4096).unwrap(),
+            lookup: lookup_limits,
+            maximum_groups: 2,
+            maximum_encoded_bytes: 1_000_000,
+        },
+        &mut metadata_cache,
+    )
+    .unwrap();
+    let metadata_candidate =
+        load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
+            &recovery,
+            &mut filesystem,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|candidate| candidate.generation() == newer_metadata_publication.generation)
+        .unwrap();
+    let expected_anchor = transaction_index.anchor();
+    let metadata_base = uste_txn::admit_coordinator_disk_base(
+        &recovery,
+        &mut filesystem,
+        metadata_candidate,
+        transaction_index,
+        uste_txn::CoordinatorDiskAdmissionLimits {
+            metadata: CoordinatorMetadataLoadLimits::new(2, 0, 3, 16, 4096).unwrap(),
+            lookup: lookup_limits,
+            maximum_total_journal_groups: 2,
+            maximum_encoded_bytes_per_pass: 1_000_000,
+        },
+        &mut metadata_cache,
+    )
+    .unwrap();
+    assert_eq!(metadata_base.anchor(), expected_anchor);
     let graph_candidates =
         load_graph_state_root_candidates_for_recovery(&recovery, &mut filesystem).unwrap();
     let graph_candidate = graph_candidates
