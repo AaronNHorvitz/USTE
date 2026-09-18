@@ -144,7 +144,7 @@ SIGKILL that exact process and then run `linux-resume`; it is not a normal creat
 Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate.
 Materialization/recovery and one-pass correctness reports set `engine_benchmark:false`.
 `linux-sample` measures the production engine and sets it true, but withholds qualification and
-budget evaluation while the deadline, accepted environment and memory boundary remain unresolved.
+budget evaluation while the accepted environment and memory boundary remain unresolved.
 The exact corpus has 299 successful outputs and 85 expected result-cap refusals; latency evidence
 keeps those populations separate.
 
@@ -153,8 +153,9 @@ The bundle additionally carries 96 independently checked, disjoint warm-up queri
 retained USTE-cache executions. Exact scale fixes five complete samples of at least 60 seconds;
 scaled development runs use one complete round. Reports keep outcome/class/depth populations
 separate, attribute successful work and index counters by USTE cache state, and disclose
-uncontrolled host caches, full-memory graph state and the non-preemptive query deadline, so the
-current runner does not yet qualify BM-01.
+uncontrolled host caches and full-memory graph state. A parent process now enforces the 30-second
+engine-call deadline while one worker retains cache state across every pair. The accepted host run
+and removal of the full-memory boundary remain before BM-01 can qualify.
 
 ## Delivery
 

@@ -3,7 +3,7 @@
 use std::{
     collections::BTreeMap,
     fs::File,
-    io::Read,
+    io::{Read, Write},
     path::Path,
     time::{Duration, Instant},
 };
@@ -214,6 +214,7 @@ impl CacheWorkAccumulator {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LinuxSamplingReport {
+    query_deadline_enforced: bool,
     entities: u64,
     relationships: u64,
     frontier: u64,
@@ -229,7 +230,11 @@ pub struct LinuxSamplingReport {
 impl LinuxSamplingReport {
     #[must_use]
     pub fn to_json(&self) -> String {
-        let qualification = if self.entities == Bm01Profile::qualifying().entities() {
+        let qualification = if self.entities == Bm01Profile::qualifying().entities()
+            && self.query_deadline_enforced
+        {
+            "qualification-candidate-environment-unverified"
+        } else if self.entities == Bm01Profile::qualifying().entities() {
             "qualification-candidate-deadline-and-environment-unverified"
         } else {
             "nonqualifying-development-sampling"
@@ -244,7 +249,7 @@ impl LinuxSamplingReport {
                 "\"cache_pairing\":\"empty-then-retained-identical-query\",",
                 "\"kernel_filesystem_device_cache\":\"uncontrolled\",",
                 "\"full_memory_graph_state\":true,",
-                "\"query_deadline_seconds\":30,\"query_deadline_enforced\":false,",
+                "\"query_deadline_seconds\":30,\"query_deadline_enforced\":{},",
                 "\"query_deadline_postchecked\":true,",
                 "\"maximum_timed_executions_per_sample\":{},",
                 "\"budget_evaluation\":\"not-performed\",",
@@ -255,6 +260,7 @@ impl LinuxSamplingReport {
                 "\"oracle_bundle_digest\":\"{}\",\"samples\":["
             ),
             qualification,
+            self.query_deadline_enforced,
             MAX_TIMED_EXECUTIONS_PER_SAMPLE,
             self.entities,
             self.relationships,
@@ -357,11 +363,124 @@ impl CacheWorkReport {
     }
 }
 
+trait QueryObserver {
+    fn query_started(&mut self) -> Result<(), LinuxRunnerError>;
+    fn query_finished(&mut self) -> Result<(), LinuxRunnerError>;
+}
+
+struct NoopObserver;
+
+impl QueryObserver for NoopObserver {
+    fn query_started(&mut self) -> Result<(), LinuxRunnerError> {
+        Ok(())
+    }
+
+    fn query_finished(&mut self) -> Result<(), LinuxRunnerError> {
+        Ok(())
+    }
+}
+
+struct ProtocolObserver {
+    output: std::io::Stdout,
+}
+
+impl ProtocolObserver {
+    fn new() -> Self {
+        Self {
+            output: std::io::stdout(),
+        }
+    }
+
+    fn line(&mut self, line: &str) -> Result<(), LinuxRunnerError> {
+        writeln!(self.output, "{line}")
+            .and_then(|()| self.output.flush())
+            .map_err(|_| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))
+    }
+
+    fn report(&mut self, report: &str) -> Result<(), LinuxRunnerError> {
+        self.line(&format!("bm01-report-v1\t{report}"))
+    }
+
+    fn error(&mut self, code: &str) -> Result<(), LinuxRunnerError> {
+        self.line(&format!("bm01-error-v1\t{code}"))
+    }
+}
+
+impl QueryObserver for ProtocolObserver {
+    fn query_started(&mut self) -> Result<(), LinuxRunnerError> {
+        self.line("bm01-query-start-v1")
+    }
+
+    fn query_finished(&mut self) -> Result<(), LinuxRunnerError> {
+        self.line("bm01-query-finish-v1")
+    }
+}
+
 pub fn sample(
     root: &Path,
     password_file: &Path,
     bundle_file: &Path,
     profile: Bm01Profile,
+) -> Result<LinuxSamplingReport, LinuxRunnerError> {
+    sample_with_observer(
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        false,
+        &mut NoopObserver,
+    )
+}
+
+pub fn sample_worker(
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    let mut observer = ProtocolObserver::new();
+    match sample_with_observer(
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        false,
+        &mut observer,
+    ) {
+        Ok(report) => observer.report(&report.to_json()),
+        Err(error) => {
+            let _ = observer.error(error.code());
+            Err(error)
+        }
+    }
+}
+
+pub fn start_parent_watchdog() -> Result<(), LinuxRunnerError> {
+    std::thread::Builder::new()
+        .name("bm01-parent-watchdog".into())
+        .spawn(|| {
+            let mut input = std::io::stdin();
+            let mut byte = [0_u8; 1];
+            loop {
+                match input.read(&mut byte) {
+                    Ok(0) => std::process::exit(74),
+                    Ok(_) => std::process::exit(75),
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => std::process::exit(76),
+                }
+            }
+        })
+        .map(|_| ())
+        .map_err(|_| LinuxRunnerError::new("USTE_BM01_SAMPLE_WATCHDOG"))
+}
+
+fn sample_with_observer(
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+    query_deadline_enforced: bool,
+    observer: &mut dyn QueryObserver,
 ) -> Result<LinuxSamplingReport, LinuxRunnerError> {
     let bundle = read_oracle_bundle(bundle_file)?;
     validate_bundle(&bundle, profile)?;
@@ -372,8 +491,12 @@ pub fn sample(
         .expect("validated open has a frontier")
         .get();
     let materializer = Materializer::new(profile);
-    let (warmup_successes, warmup_visit_limits, warmup_result_limits) =
-        run_warmup(&mut opened, materializer, bundle.warmup().expectations())?;
+    let (warmup_successes, warmup_visit_limits, warmup_result_limits) = run_warmup(
+        &mut opened,
+        materializer,
+        bundle.warmup().expectations(),
+        observer,
+    )?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
@@ -383,9 +506,11 @@ pub fn sample(
             bundle.measured().expectations(),
             plan,
             ordinal,
+            observer,
         )?);
     }
     Ok(LinuxSamplingReport {
+        query_deadline_enforced,
         entities: profile.entities(),
         relationships: profile.relationships(),
         frontier,
@@ -403,13 +528,14 @@ fn run_warmup(
     opened: &mut Opened,
     materializer: Materializer,
     expectations: &[OracleExpectation],
+    observer: &mut dyn QueryObserver,
 ) -> Result<(usize, usize, usize), LinuxRunnerError> {
     let mut successes = 0;
     let mut visit_limits = 0;
     let mut result_limits = 0;
     for expected in expectations {
         clear_cache(opened)?;
-        let execution = execute_expected(opened, materializer, expected)?;
+        let execution = execute_expected(opened, materializer, expected, observer)?;
         if execution.query_elapsed > QUERY_DEADLINE {
             return Err(LinuxRunnerError::new("USTE_BM01_QUERY_DEADLINE"));
         }
@@ -428,6 +554,7 @@ fn run_sample(
     expectations: &[OracleExpectation],
     plan: SamplingPlan,
     ordinal: usize,
+    observer: &mut dyn QueryObserver,
 ) -> Result<SampleReport, LinuxRunnerError> {
     let started = Instant::now();
     let mut rounds = 0_usize;
@@ -447,7 +574,7 @@ fn run_sample(
                     return Err(LinuxRunnerError::new("USTE_BM01_SAMPLE_OBSERVATIONS"));
                 }
                 let before = index_report(opened)?;
-                let execution = execute_expected(opened, materializer, expected)?;
+                let execution = execute_expected(opened, materializer, expected, observer)?;
                 if execution.query_elapsed > QUERY_DEADLINE {
                     return Err(LinuxRunnerError::new("USTE_BM01_QUERY_DEADLINE"));
                 }
@@ -504,7 +631,9 @@ fn execute_expected(
     opened: &mut Opened,
     materializer: Materializer,
     expected: &OracleExpectation,
+    observer: &mut dyn QueryObserver,
 ) -> Result<ValidatedExecution, LinuxRunnerError> {
+    observer.query_started()?;
     let started = Instant::now();
     let actual = execute_query(
         &opened.coordinator,
@@ -516,6 +645,7 @@ fn execute_expected(
         expected.query,
     );
     let query_elapsed = started.elapsed();
+    observer.query_finished()?;
     let outcome = match (expected.outcome, actual) {
         (
             OracleExpectedOutcome::Output {
@@ -668,7 +798,7 @@ fn percentile(sorted: &[u128], percentile: usize) -> u128 {
 fn read_oracle_bundle(path: &Path) -> Result<OracleBundle, LinuxRunnerError> {
     let mut file = File::open(path).map_err(|_| LinuxRunnerError::new("USTE_BM01_ORACLE_OPEN"))?;
     let mut input = String::new();
-    file.by_ref()
+    Read::by_ref(&mut file)
         .take(
             u64::try_from(crate::MAX_ORACLE_BUNDLE_BYTES + 1)
                 .expect("oracle bundle bound fits u64"),
@@ -761,7 +891,8 @@ mod tests {
             fragments_visited: 9,
             result_bytes: 10,
         };
-        let report = LinuxSamplingReport {
+        let report_value = LinuxSamplingReport {
+            query_deadline_enforced: false,
             entities: 20,
             relationships: 200,
             frontier: 4,
@@ -805,8 +936,8 @@ mod tests {
                     p99_nanoseconds: 20,
                 }],
             }],
-        }
-        .to_json();
+        };
+        let report = report_value.to_json();
         assert!(report.contains("\"query_deadline_enforced\":false"));
         assert!(report.contains("\"query_deadline_postchecked\":true"));
         assert!(report.contains("\"class\":\"all\""));
@@ -814,6 +945,14 @@ mod tests {
         assert!(report.contains("\"successful_visits\":13"));
         assert!(report.contains("\"process_peak_rss_kib\":16"));
         assert!(!report.contains('/'));
+
+        let mut supervised = report_value;
+        supervised.query_deadline_enforced = true;
+        supervised.entities = Bm01Profile::qualifying().entities();
+        let supervised = supervised.to_json();
+        assert!(supervised.contains("\"query_deadline_enforced\":true"));
+        assert!(supervised.contains("qualification-candidate-environment-unverified"));
+        assert!(!supervised.contains("deadline-and-environment-unverified"));
     }
 
     #[test]

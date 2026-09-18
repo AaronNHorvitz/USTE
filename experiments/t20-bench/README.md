@@ -68,10 +68,12 @@ and immediately retained-cache pair. It keeps success and typed-refusal latency 
 separate by depth and topology, plus all-topology groups for budget evaluation. Exact scale has no
 lowering flags and always selects five complete samples of at least 60 seconds; scaled profiles run
 one complete development round. The 30-second limit is rejected after a query returns, but the
-current synchronous read cannot preempt a hung call. The report therefore withholds budget
-evaluation and discloses uncontrolled host caches and full-memory graph state. Only the engine call
-is timed; oracle validation is outside that interval, and successful-work/index counters are
-reported separately for empty and retained USTE cache states.
+documented CLI also runs a parent supervisor that kills and reaps its worker when an engine call
+does not return within that limit. One worker remains alive across the campaign, preserving retained
+cache state. The report still withholds budget evaluation and discloses uncontrolled host caches
+and full-memory graph state. Only the engine call is timed; marker I/O and oracle validation are
+outside that interval, and successful-work/index counters are reported separately for empty and
+retained USTE cache states.
 
 `linux-create-crash-probe --pause-after-revision REVISION` is an explicit process-loss harness.
 It admits only a nonzero, nonfinal frontier, flushes a content-free readiness marker after that
@@ -99,6 +101,6 @@ returning a truncated answer.
   there is no native multi-hop engine request yet.
 - `qualification: qualifying-fixture-size` describes only exact fixture dimensions. It is not a
   performance or release claim.
-- BM-01 still needs the exact sampler campaign under the accepted host reservation, a preemptive
-  query deadline and removal of the full-memory graph boundary. BM-06 and streaming
+- BM-01 still needs the exact sampler campaign under the accepted host reservation and removal of
+  the full-memory graph boundary. BM-06 and streaming
   larger-than-memory recovery are outside this fixture increment.

@@ -137,6 +137,12 @@ and disclose that deadline enforcement, host-cache control and the full-memory g
 unresolved. Oracle validation is outside the engine-call latency interval; successful work and
 authenticated index/cache deltas are attributed separately to each USTE cache state.
 
+Decision 0047 makes the documented CLI deadline preemptive without creating a process per query.
+One worker emits flushed start/finish markers around engine calls; its parent kills and reaps it if
+finish is absent after 30 seconds. The same worker retains USTE cache state across each pair. The
+closed protocol and kill path are tested, while host-cache control, exact reserved-host evidence and
+the full-memory graph boundary remain unresolved qualification inputs.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

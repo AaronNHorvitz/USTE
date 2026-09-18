@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 27 isolated t20-bench tests passed (2 exact-profile release tests ignored
+# 262 workspace tests and 31 isolated t20-bench tests passed (2 exact-profile release tests ignored
 # in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
@@ -192,6 +192,12 @@ round in 1,725 ms. It reported 5,788 KiB current RSS, 264,916 KiB process-lifeti
 This is nonqualifying functional evidence: host caches were uncontrolled, graph state remained
 full-memory and the synchronous query API only permits a post-return 30-second check.
 
+Decision 0047 adds a persistent-worker parent supervisor around that synchronous API. Flushed
+markers bracket only the engine call; the parent kills and reaps the exact child if finish is absent
+after 30 seconds. A release-built 20/200 Btrfs CLI smoke preserved the complete warm-up and paired
+round, set deadline enforcement true, completed the sample in 1,758 ms and retained the 2,815/zero
+empty/retained page-read attribution. The direct library path remains labeled unsupervised.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the
@@ -204,6 +210,6 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 27 isolated T-20 fixture/engine/
+docs, strict clippy/rustdoc, the storage publication model, and 31 isolated T-20 fixture/engine/
 Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
 acceptance commands and ignored by the debug suite.

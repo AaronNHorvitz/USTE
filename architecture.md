@@ -279,6 +279,14 @@ then retained cache, while latency populations remain separate by typed outcome,
 class. Host caches and full-memory recovery stay explicit, and the synchronous query boundary can
 only post-check—not preempt—the 30-second deadline, so the runner does not self-certify BM-01.
 
+Decision 0047 supersedes that deadline limitation for the CLI without changing cache semantics.
+A parent observes flushed start/finish markers around each engine call in one persistent worker and
+kills/reaps the worker after 30 seconds. Marker I/O and oracle verification remain outside latency;
+the persistent worker preserves the immediately retained USTE cache execution. Direct library
+sampling remains explicitly unsupervised. A lifetime pipe ties the worker to the supervisor even if
+the parent dies; parent-side ownership verifies kill/reap and validates report counts before marking
+deadline enforcement true.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

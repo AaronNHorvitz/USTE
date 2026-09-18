@@ -23,6 +23,7 @@ fn run() -> Result<(), String> {
             | "linux-open"
             | "linux-query"
             | "linux-sample"
+            | "linux-sample-worker"
     );
     if command != "manifest"
         && command != "oracle-summary"
@@ -108,6 +109,18 @@ fn run() -> Result<(), String> {
         {
             let root = root.ok_or("--root is required")?;
             let password_file = password_file.ok_or("--password-file is required")?;
+            if command == "linux-sample-worker" {
+                uste_t20_bench::linux_runner::start_parent_watchdog()
+                    .map_err(|error| error.code().to_owned())?;
+                uste_t20_bench::linux_runner::sample_worker(
+                    &root,
+                    &password_file,
+                    &oracle_file.ok_or("--oracle-file is required")?,
+                    profile,
+                )
+                .map_err(|error| error.code().to_owned())?;
+                return Ok(());
+            }
             let report = match command.as_str() {
                 "linux-create" => {
                     uste_t20_bench::linux_runner::create(&root, &password_file, profile)
@@ -135,13 +148,17 @@ fn run() -> Result<(), String> {
                     profile,
                 )
                 .map(|report| report.to_json()),
-                "linux-sample" => uste_t20_bench::linux_runner::sample(
-                    &root,
-                    &password_file,
-                    &oracle_file.ok_or("--oracle-file is required")?,
-                    profile,
-                )
-                .map(|report| report.to_json()),
+                "linux-sample" => {
+                    let executable = env::current_exe()
+                        .map_err(|_| "cannot resolve current benchmark executable")?;
+                    uste_t20_bench::linux_runner::supervise_sample(
+                        &executable,
+                        &root,
+                        &password_file,
+                        &oracle_file.ok_or("--oracle-file is required")?,
+                        profile,
+                    )
+                }
                 _ => unreachable!("command was validated"),
             }
             .map_err(|error| error.code().to_owned())?;

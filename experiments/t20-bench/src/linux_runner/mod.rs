@@ -5,8 +5,10 @@
 
 mod credential;
 mod sampling;
+mod supervision;
 
-pub use sampling::{LinuxSamplingReport, sample};
+pub use sampling::{LinuxSamplingReport, sample, sample_worker, start_parent_watchdog};
+pub use supervision::supervise_sample;
 
 use std::{
     fmt,

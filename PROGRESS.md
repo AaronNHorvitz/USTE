@@ -22,7 +22,8 @@ Decision 0041 streams exact-profile construction through bounded transactions an
 portable-recovery open phases. Decision 0043 adds a separate bounded oracle summary and Linux
 correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume coverage. Decision
 0045 adds the independent warm-up/measured oracle bundle. Decision 0046 adds repeated paired-cache
-sampling without claiming a benchmark pass. T-20 remains
+sampling without claiming a benchmark pass. Decision 0047 adds a preemptive persistent-worker query
+deadline for the CLI. T-20 remains
 open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
@@ -424,6 +425,15 @@ unverified external distribution prerequisite.
   preempt a hung synchronous read, so no exact BM-01 budget evaluation or pass is claimed. Exact-run
   preflight found 6.2 GiB available RAM and 212 KiB free swap rather than the accepted 24-GiB
   reservation (with 998 GiB Btrfs free), so the qualifying runner was not launched or downscaled.
+- Added Decision 0047's parent/worker deadline protocol. Flushed content-free markers bracket each
+  engine call in one persistent worker; absence of finish after 30 seconds kills and reaps the exact
+  child without sacrificing retained-cache pairing. A lifetime pipe terminates the child on parent
+  death, and the parent validates typed report counts before it marks enforcement true. A real child
+  timeout test exercises kill/reap.
+- A release-built 20/200 Btrfs CLI smoke supervised all 864 warm-up/measured engine calls, completed
+  the measured round in 1,758 ms, set deadline enforcement and post-checking true, and preserved
+  2,815 empty-cache versus zero retained-cache page reads. This is still nonqualifying development
+  evidence because host reservation and the full-memory graph boundary remain unresolved.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -499,7 +509,7 @@ bash scripts/check.sh
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
 # docs=ok (104 links, 101 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 27 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
+# and 31 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
 # intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
   oracle_summary::tests::qualifying_summary_outcomes_and_digest_are_golden -- --ignored --exact
@@ -592,8 +602,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by adding a preemptive or supervised 30-second query boundary, then run the exact
-five-sample BM-01 campaign under the accepted host reservation. Replace the complete live graph publication target
+Continue T-20 by running the exact five-sample BM-01 campaign under the accepted host reservation.
+Replace the complete live graph publication target
 with a disk-backed base/overlay state and remove the full-memory recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event

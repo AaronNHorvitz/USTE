@@ -122,8 +122,9 @@ phase; exact-scale interruption and BM-06 remain unclaimed.
 Decision 0045 adds a bounded separately generated oracle bundle for the 96 warm-up and 384 measured
 queries. Decision 0046 adds repeated authorized-query sampling that excludes expected refusals
 from success percentiles, fixes five minimum-60-second samples at exact scale and pairs empty with
-retained USTE-cache executions. Next add a preemptive/supervised 30-second query boundary, run the
-exact campaign under the accepted host reservation and remove the full-memory reducer/recovery
+retained USTE-cache executions. Decision 0047 adds the external 30-second worker supervisor while
+preserving retained-cache state. Next run the exact campaign under the accepted host reservation
+and remove the full-memory reducer/recovery
 boundary; accepted host/RSS/cache evidence remains mandatory.
 
 ## Architectural decomposition
