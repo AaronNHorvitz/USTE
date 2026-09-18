@@ -896,6 +896,44 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted maintenance merge with a provisional exact-output visitor.
+    ///
+    /// Domain code may use this to validate the would-be run without materializing it, but must
+    /// keep visitor effects private until the merge returns success and must still publish a root
+    /// separately.
+    #[allow(clippy::too_many_arguments)]
+    pub fn merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .merge_index_run_visit(
+                filesystem,
+                self.scope,
+                revision,
+                index_profile,
+                family,
+                base_root,
+                limits,
+                deltas,
+                visitor,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted maintenance: atomically publish a derived root bound to the exact journal anchor.
     pub fn publish_index_root(
         &mut self,

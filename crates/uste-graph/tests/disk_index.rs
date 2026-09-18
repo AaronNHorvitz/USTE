@@ -1016,7 +1016,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
         &roots[0],
         &disk_plan,
         outcome,
-        GraphStateRootMergeLimits::uniform(merge),
+        GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
     )
     .unwrap();
 
@@ -1461,7 +1461,7 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
     let outcome = commit(&mut coordinator, &mut filesystem, 4, transaction);
     let base_read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
     let merge = IndexRunMergeLimits::new(base_read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
-    let merge_limits = GraphStateRootMergeLimits::uniform(merge);
+    let merge_limits = GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap();
     let mut wrong_outcome = outcome;
     wrong_outcome.result_digest[0] ^= 1;
     assert!(matches!(
@@ -1485,7 +1485,21 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
             base,
             &plan,
             outcome,
-            GraphStateRootMergeLimits::uniform(undersized_merge),
+            GraphStateRootMergeLimits::uniform(undersized_merge, 2 * 1024 * 1024).unwrap(),
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::Storage(uste_storage::journal::StorageError::ResourceLimit)
+        ))
+    ));
+    let history_limited = GraphStateRootMergeLimits::uniform(merge, 1).unwrap();
+    assert!(matches!(
+        publish_graph_state_root_delta(
+            &mut coordinator,
+            &mut filesystem,
+            base,
+            &plan,
+            outcome,
+            history_limited,
         ),
         Err(GraphDiskError::Transaction(
             uste_txn::TransactionError::Storage(uste_storage::journal::StorageError::ResourceLimit)

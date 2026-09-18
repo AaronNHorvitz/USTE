@@ -1184,6 +1184,55 @@ where
         )
     }
 
+    /// Authenticated bounded merge that provisionally visits each exact output entry.
+    ///
+    /// The visitor cannot publish its effects: the returned run remains invisible until a
+    /// separately validated root is published, and any terminal merge failure rejects the visit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<MergedIndexRun, StorageError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        if let Some(root) = base_root
+            && self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
+        {
+            return Err(StorageError::InvalidState);
+        }
+        index::merge_run_visit(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &mut self.vault,
+            &mut self.identity_entropy,
+            scope,
+            revision,
+            index_profile,
+            family,
+            base_root,
+            limits,
+            deltas,
+            visitor,
+        )
+    }
+
     /// Atomically publish an optional two-slot derived root at the exact current certificate.
     /// The root cannot create, advance or roll back a committed journal revision.
     pub fn publish_index_root(
@@ -3171,8 +3220,9 @@ mod tests {
             2 * 1024 * 1024,
         )
         .unwrap();
+        let mut provisional = Vec::new();
         let merged = store
-            .merge_index_run(
+            .merge_index_run_visit(
                 &mut filesystem,
                 scope,
                 second.revision,
@@ -3186,6 +3236,10 @@ mod tests {
                     IndexDelta::new(b"gamma".to_vec(), Some(b"three".to_vec()), None),
                     IndexDelta::new(b"zeta".to_vec(), None, Some(b"last".to_vec())),
                 ],
+                &mut |key, value| {
+                    provisional.push((key.to_vec(), value.to_vec()));
+                    Ok(())
+                },
             )
             .unwrap();
         assert_eq!(merged.report.base.entries, 3);
@@ -3236,6 +3290,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(read.entries, 4);
+        assert_eq!(provisional, observed);
         assert_eq!(
             observed,
             [

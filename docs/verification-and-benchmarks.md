@@ -143,6 +143,12 @@ finish is absent after 30 seconds. The same worker retains USTE cache state acro
 closed protocol and kill path are tested, while host-cache control, exact reserved-host evidence and
 the full-memory graph boundary remain unresolved qualification inputs.
 
+Decision 0048 makes proof-derived terminal-root publication independent of a complete postcommit
+snapshot. Tests must compare its streamed canonical digest, family counts and reconstructed state
+with the full-state oracle, reject exact-minus-bound failures without root visibility and preserve
+the journal commit across restart. This narrows the write-path memory proof only; benchmark reports
+must still disclose the full-memory live reducer, coordinator metadata, admission and recovery.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

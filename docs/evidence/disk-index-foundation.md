@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 31 isolated t20-bench tests passed (2 exact-profile release tests ignored
+# 263 workspace tests and 31 isolated t20-bench tests passed (2 exact-profile release tests ignored
 # in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
@@ -198,6 +198,15 @@ after 30 seconds. A release-built 20/200 Btrfs CLI smoke preserved the complete 
 round, set deadline enforcement true, completed the sample in 1,758 ms and retained the 2,815/zero
 empty/retained page-read attribution. The direct library path remains labeled unsupervised.
 
+Decision 0048 removes the complete snapshot from proof-derived postcommit root publication. The
+authenticated merge provisionally visits its exact ordered output; graph validates target family
+counts and reproduces the existing canonical logical-state digest from the emitted primary entries
+while validating secondary framing/count constraints, with one caller-bounded record-history
+buffer. Wrong outcomes, undersized merge/history budgets and
+restart after failed publication expose no target root; adequate retry produces a root equivalent
+to the independent full-state projection. The live reducer, root admission, coordinator metadata
+and recovery remain full-memory boundaries.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the
@@ -209,7 +218,7 @@ reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo`
 The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition blocks only a qualifying
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
-The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
+The full `bash scripts/check.sh` gate passed after the latest extension: 263 workspace tests, all
 docs, strict clippy/rustdoc, the storage publication model, and 31 isolated T-20 fixture/engine/
 Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
 acceptance commands and ignored by the debug suite.

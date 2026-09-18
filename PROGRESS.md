@@ -23,7 +23,8 @@ portable-recovery open phases. Decision 0043 adds a separate bounded oracle summ
 correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume coverage. Decision
 0045 adds the independent warm-up/measured oracle bundle. Decision 0046 adds repeated paired-cache
 sampling without claiming a benchmark pass. Decision 0047 adds a preemptive persistent-worker query
-deadline for the CLI. T-20 remains
+deadline for the CLI. Decision 0048 removes the complete snapshot from proof-derived terminal-root
+publication. T-20 remains
 open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
@@ -347,6 +348,18 @@ unverified external distribution prerequisite.
   and reconstructs the same graph through ordinary journal replay after storage restart.
   Live publication, independent postcommit validation and recovery are still full-memory; no T-20
   or benchmark completion is claimed.
+- Added Decision 0048 and a provisional exact-output visitor to the authenticated run merge. The
+  graph publisher now validates proof-derived target counts and reproduces the existing canonical
+  logical-state digest from the actual merged current/history/policy entries without acquiring the
+  complete live snapshot. Only one record's history frames are retained, under a required caller
+  budget.
+- Storage proves the provisional output equals a later authenticated read. Graph unit coverage
+  pins the streamed digest to the canonical reducer digest, rejects malformed secondary-family
+  entries/counts and rejects a one-byte history budget.
+  The end-to-end terminal-root fixture rejects wrong outcomes, undersized merge/history budgets and
+  partial visibility across restart, then proves proof-only and full-state roots reconstruct to the
+  same graph. This removes postcommit full-state validation, not the live reducer or recovery
+  boundaries; T-20 and BM-01/BM-06 remain open.
 - Added Decision 0039 and a synchronized runtime for every admitted authorized graph root. Its
   privileged report now includes cumulative decrypted-cache occupancy/events, completed authorized
   reads/raw operations, authenticated pages, fragments and logical result bytes. The counters are
@@ -505,10 +518,10 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
-# uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 263 workspace tests including 77 uste-storage, 13
+# uste-crypto, 41 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (104 links, 101 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# docs=ok (108 links, 105 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
 # and 31 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
 # intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
@@ -572,11 +585,13 @@ remaining mixed workload have not passed.
   deltas, but graph-only closure still scans the complete borrowed catalog/job map. Reverse dependencies add an
   in-memory structure with no accepted aggregate/per-target fanout cap.
   The bounded scratch merge and graph terminal planner can rewrite and cross-check all eight
-  families for one revision without collecting base runs, but the live base/overlay lifecycle and
-  semantic validator remain fully memory-resident. The explicit-I/O preparation proof now supports
+  families for one revision without collecting base runs. Proof-derived publication now validates
+  actual merged outputs and the canonical digest with one caller-bounded history bucket rather than
+  scanning the complete reducer, but the live base/overlay lifecycle and root admission remain
+  memory-resident. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
-  The coordinator's live publication target, root semantic validator and recovery remain fully
+  The coordinator's live publication target, coordinator metadata and recovery remain fully
   memory-resident.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
@@ -603,8 +618,9 @@ remaining mixed workload have not passed.
 ## Next dependency-permitted work
 
 Continue T-20 by running the exact five-sample BM-01 campaign under the accepted host reservation.
-Replace the complete live graph publication target
-with a disk-backed base/overlay state and remove the full-memory recovery boundary. Run exact
+Add streaming semantic admission for an authenticated graph disk base, then replace the complete
+live graph publication target with a disk-backed base/overlay state and remove the full-memory
+coordinator/recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event
 protocol. Then return to T-19's

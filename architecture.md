@@ -232,6 +232,15 @@ revision and current base before the ordinary journal append/publish sequence. N
 reducer currently opts into external preparation, and live publication/replay still use the
 complete graph state.
 
+Decision 0048 removes the complete graph from the terminal-root publication validator. Storage
+provisionally visits each exact merge output while its run remains unrooted; graph checks the
+proof-derived target family counts and streams the existing canonical logical-state digest over
+the emitted current/history/policy entries. Only one record's history frames are retained, under a
+required caller bound. Terminal merge authentication and root publication still occur after the
+authoritative journal outcome. The live reducer, coordinator maps, root admission and recovery are
+unchanged full-memory boundaries; this is the inductive base-plus-delta publication proof, not yet
+the persistent base/overlay state.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

@@ -95,6 +95,12 @@ snapshot access. Decision 0038 lets that proof-backed result enter the authorita
 only after reducer verification binds exact request bytes, target revision and current base. Live
 publication, postcommit validation and recovery remain full-memory.
 
+Decision 0048 removes the postcommit full-snapshot comparison from proof-derived terminal-root
+publication. Exact merge outputs reproduce the existing logical-state digest and target family
+counts with only one explicitly bounded history bucket retained. Next add streaming disk-base
+semantic admission, then a persistent base/overlay reducer and coordinator-metadata path; live
+state, admission and recovery remain full-memory until those increments land.
+
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
 only to a currently `ManageSchema`-authorized operator with an issuer-bound root capability. The

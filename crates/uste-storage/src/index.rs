@@ -1356,6 +1356,48 @@ where
     I: EntropySource,
     T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
 {
+    merge_run_visit(
+        filesystem,
+        context,
+        vault,
+        identity_entropy,
+        scope,
+        revision,
+        index_profile,
+        family,
+        base_root,
+        limits,
+        deltas,
+        &mut |_, _| Ok(()),
+    )
+}
+
+/// Merge while provisionally visiting every exact output entry before it is encrypted.
+///
+/// Visitor effects must remain private until this function returns successfully: a later source
+/// authentication, output write, or sync failure can still reject the provisional output.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn merge_run_visit<F, W, E, I, T>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &mut KeyVault<W, E>,
+    identity_entropy: &mut I,
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    index_profile: [u8; 32],
+    family: u8,
+    base_root: Option<&RecoveredIndexRoot>,
+    limits: IndexRunMergeLimits,
+    deltas: T,
+    visitor: &mut IndexRunVisitor<'_>,
+) -> Result<MergedIndexRun, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+    T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+{
     if scope.database() != context.database || family == 0 {
         return Err(StorageError::InvalidState);
     }
@@ -1407,6 +1449,7 @@ where
                         limits,
                         &mut report,
                         &mut writer,
+                        visitor,
                         base.take().ok_or(StorageError::InvalidState)?,
                     )?;
                     base = base_reader
@@ -1435,6 +1478,7 @@ where
                                 limits,
                                 &mut report,
                                 &mut writer,
+                                visitor,
                                 IndexEntry {
                                     key: change.key,
                                     value,
@@ -1468,6 +1512,7 @@ where
                         limits,
                         &mut report,
                         &mut writer,
+                        visitor,
                         change,
                     )?;
                     delta = next_delta(
@@ -1491,6 +1536,7 @@ where
                     limits,
                     &mut report,
                     &mut writer,
+                    visitor,
                     base.take().ok_or(StorageError::InvalidState)?,
                 )?;
                 base = base_reader
@@ -1512,6 +1558,7 @@ where
                     limits,
                     &mut report,
                     &mut writer,
+                    visitor,
                     change,
                 )?;
                 delta = next_delta(
@@ -1586,6 +1633,7 @@ fn apply_absent_delta<F, W, E, I>(
     limits: IndexRunMergeLimits,
     report: &mut IndexRunMergeReport,
     writer: &mut Option<RunWriter<F>>,
+    visitor: &mut IndexRunVisitor<'_>,
     delta: IndexDelta,
 ) -> Result<(), StorageError>
 where
@@ -1611,6 +1659,7 @@ where
         limits,
         report,
         writer,
+        visitor,
         IndexEntry {
             key: delta.key,
             value,
@@ -1631,6 +1680,7 @@ fn emit_merged_entry<F, W, E, I>(
     limits: IndexRunMergeLimits,
     report: &mut IndexRunMergeReport,
     writer: &mut Option<RunWriter<F>>,
+    visitor: &mut IndexRunVisitor<'_>,
     entry: IndexEntry,
 ) -> Result<(), StorageError>
 where
@@ -1657,6 +1707,7 @@ where
         .checked_add(logical_bytes)
         .filter(|bytes| *bytes <= limits.maximum_output_logical_bytes)
         .ok_or(StorageError::ResourceLimit)?;
+    visitor(&entry.key, &entry.value)?;
     if writer.is_none() {
         let object_id = random_nonzero_id(identity_entropy)?;
         let file = filesystem.create_new(context.directory, &run_name(object_id)?)?;

@@ -173,6 +173,13 @@ authoritative coordinator can commit it without repeating complete-state prepara
 independent postcommit validation and recovery still use the complete live reducer;
 larger-than-memory recovery and qualification remain open.
 
+Decision 0048 removes the complete live reducer from proof-derived postcommit root validation.
+The authenticated merge exposes a provisional ordered-output visitor; graph publication checks
+proof-derived family counts and reproduces the existing canonical logical-state digest from the
+actual merged primary entries under an explicit one-history-bucket memory bound. The live reducer,
+coordinator metadata, root admission and recovery remain full-memory, so T-20 and BM-01/BM-06 stay
+open.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

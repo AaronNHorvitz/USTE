@@ -30,9 +30,16 @@ use crate::{
     GraphTransaction, NewAssertion, NewRecord, NewRelationship, Operation, Predicate, Record,
     decode_stored_record, encode_stored_record,
     state::{
-        MAX_GRAPH_CHECKPOINT_BYTES, PreparedGraph, ReverseReference,
-        prepare_from_complete_disk_proofs, record_reverse_references, try_visit_record_references,
-        validate_request_limits, visit_record_references,
+        MAX_GRAPH_CHECKPOINT_BYTES, PreparedGraph, REVERSE_KIND_ASSERTION, REVERSE_KIND_ENTITY,
+        REVERSE_KIND_RELATIONSHIP, REVERSE_ROLE_ASSERTION_OBJECT, REVERSE_ROLE_ASSERTION_SUBJECT,
+        REVERSE_ROLE_CORRECTION_OF, REVERSE_ROLE_ENTITY_PROPERTY, REVERSE_ROLE_EVIDENCE,
+        REVERSE_ROLE_RELATIONSHIP_FROM, REVERSE_ROLE_RELATIONSHIP_PROPERTY,
+        REVERSE_ROLE_RELATIONSHIP_TO, REVERSE_STATE_ACCEPTED, REVERSE_STATE_ACTIVE,
+        REVERSE_STATE_DELETED, REVERSE_STATE_DISPUTED, REVERSE_STATE_EXPIRED,
+        REVERSE_STATE_PROPOSED, REVERSE_STATE_REJECTED, REVERSE_STATE_RETRACTED,
+        REVERSE_STATE_SUPERSEDED, ReverseReference, prepare_from_complete_disk_proofs,
+        record_reverse_references, try_visit_record_references, validate_request_limits,
+        visit_record_references,
     },
 };
 
@@ -179,6 +186,7 @@ pub struct GraphStateRootDelta {
     base_revision: CommitRevision,
     revision: CommitRevision,
     result_digest: [u8; 32],
+    target_counts: [u64; 8],
     families: [Vec<IndexDelta>; FAMILY_COUNT as usize],
     deltas: u64,
     logical_bytes: u64,
@@ -223,23 +231,39 @@ impl GraphStateRootDelta {
     }
 }
 
-/// Per-family storage merge budgets in graph-state family order 1 through 8.
+/// Per-family storage merge budgets in graph-state family order 1 through 8, plus the explicit
+/// bound for one record's canonical history framing buffer during output validation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GraphStateRootMergeLimits {
     families: [IndexRunMergeLimits; FAMILY_COUNT as usize],
+    maximum_history_group_logical_bytes: u64,
 }
 
 impl GraphStateRootMergeLimits {
-    #[must_use]
-    pub const fn new(families: [IndexRunMergeLimits; FAMILY_COUNT as usize]) -> Self {
-        Self { families }
+    pub const fn new(
+        families: [IndexRunMergeLimits; FAMILY_COUNT as usize],
+        maximum_history_group_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        if maximum_history_group_logical_bytes == 0
+            || maximum_history_group_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES
+            || maximum_history_group_logical_bytes > usize::MAX as u64
+        {
+            return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(Self {
+            families,
+            maximum_history_group_logical_bytes,
+        })
     }
 
-    #[must_use]
-    pub const fn uniform(limit: IndexRunMergeLimits) -> Self {
-        Self {
-            families: [limit; FAMILY_COUNT as usize],
-        }
+    pub const fn uniform(
+        limit: IndexRunMergeLimits,
+        maximum_history_group_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        Self::new(
+            [limit; FAMILY_COUNT as usize],
+            maximum_history_group_logical_bytes,
+        )
     }
 }
 
@@ -1381,8 +1405,8 @@ where
 /// Derive exact bounded terminal-family changes from an authenticated disk preparation proof.
 ///
 /// This borrows the proof-backed reducer result and performs no filesystem, coordinator, cache, or
-/// key-vault access. The resulting plan remains subject to the same postcommit full-state
-/// validation as plans prepared from the live reducer.
+/// key-vault access. The resulting plan carries exact target counts used by bounded postcommit
+/// output-stream validation; publication does not reacquire a complete graph snapshot.
 pub fn prepare_graph_state_root_delta_from_disk(
     prepared: &DiskPreparedGraph,
     limits: GraphStateDeltaLimits,
@@ -1422,10 +1446,11 @@ where
 
 /// Merge a previously prepared graph-state plan after its transaction has durably committed.
 ///
-/// All merged runs remain invisible until their exact descriptors have been compared with the
-/// live reducer and a certificate-bound root is atomically published. An error never rolls back or
-/// weakens the already-authoritative journal commit. An in-process caller retaining the borrowed
-/// plan may retry; after process loss, rebuild the cache from recovered live state.
+/// All merged runs remain invisible until their exact entries have reproduced the canonical graph
+/// digest and their descriptors match the proof-derived target counts, after which one
+/// certificate-bound root is atomically published. An error never rolls back or weakens the
+/// already-authoritative journal commit. An in-process caller retaining the borrowed plan may
+/// retry; after process loss, rebuild the cache from recovered live state.
 pub fn publish_graph_state_root_delta<F, W, E, I>(
     coordinator: &mut CommitCoordinator<GraphState, F, W, E, I>,
     filesystem: &mut F,
@@ -1448,28 +1473,25 @@ where
         return Err(GraphDiskError::RootStateMismatch);
     }
 
-    let snapshot = coordinator
-        .reducer_state_for_checkpoint()?
-        .current_snapshot();
-    if snapshot.scope() != plan.scope || snapshot.revision() != Some(plan.revision) {
-        return Err(GraphDiskError::RootStateMismatch);
-    }
     let (anchor_revision, certificate_digest) = coordinator
         .checkpoint_anchor()?
         .ok_or(GraphDiskError::RootStateMismatch)?;
     if anchor_revision != plan.revision {
         return Err(GraphDiskError::RootStateMismatch);
     }
-    let logical_state_digest = GraphState::logical_state_digest(snapshot)
-        .map_err(|_| GraphDiskError::RootStateMismatch)?;
-    let expected = expected_runs(snapshot, plan.revision)?;
 
     let mut report = GraphStateRootMergeReport::default();
-    let mut runs = Vec::with_capacity(expected.len());
+    let mut runs = Vec::with_capacity(FAMILY_COUNT as usize);
+    let mut validator = MergedGraphStateValidator::new(
+        plan.scope,
+        plan.revision,
+        plan.target_counts,
+        limits.maximum_history_group_logical_bytes,
+    )?;
     for (index, deltas) in plan.families.iter().enumerate() {
         let family = u8::try_from(index + 1).map_err(|_| GraphDiskError::IndexCorrupt)?;
         let base_has_family = base.root.runs().any(|run| run.family() == family);
-        let merged = coordinator.merge_index_run(
+        let merged = coordinator.merge_index_run_visit(
             filesystem,
             plan.revision,
             GRAPH_STATE_PROFILE_V1,
@@ -1477,14 +1499,16 @@ where
             base_has_family.then_some(&base.root),
             limits.families[index],
             deltas.iter().cloned().map(Ok),
+            &mut |key, value| validator.observe(family, key, value),
         )?;
-        let expected_run = expected.iter().find(|run| run.family == family).copied();
-        match (merged.run, expected_run) {
-            (Some(run), Some(expected_run)) if expected_run.matches(&run) => {
+        validator.finish_family(family)?;
+        let expected_entries = target_family_entries(plan.target_counts, family)?;
+        match (merged.run, expected_entries) {
+            (Some(run), expected) if expected != 0 && run.entry_count() == expected => {
                 runs.push(run);
                 report.runs = checked_sum(report.runs, 1)?;
             }
-            (None, None) => {}
+            (None, 0) => {}
             _ => return Err(GraphDiskError::IndexCorrupt),
         }
         add_merge_report(&mut report, &merged.report)?;
@@ -1492,6 +1516,7 @@ where
     if report.deltas != plan.deltas || report.delta_logical_bytes != plan.logical_bytes {
         return Err(GraphDiskError::IndexCorrupt);
     }
+    let logical_state_digest = validator.finish()?;
 
     let root = coordinator.publish_index_root(
         filesystem,
@@ -1506,6 +1531,375 @@ where
         &runs,
     )?;
     Ok((root, report))
+}
+
+fn target_family_entries(counts: [u64; 8], family: u8) -> Result<u64, GraphDiskError> {
+    match family {
+        FAMILY_METADATA => Ok(1),
+        FAMILY_CURRENT_RECORD..=FAMILY_REVERSE => {
+            Ok(counts[usize::from(family - FAMILY_CURRENT_RECORD)])
+        }
+        FAMILY_POLICY => counts[6]
+            .checked_add(counts[7])
+            .ok_or(GraphDiskError::IndexCorrupt),
+        _ => Err(GraphDiskError::IndexCorrupt),
+    }
+}
+
+/// Provisional semantic observer for the exact entries emitted by all eight family merges.
+///
+/// The history framing requires its version count before its values. One record-local group is
+/// therefore retained under an explicit bound; memory never scales with the complete base.
+struct MergedGraphStateValidator {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    counts: [u64; 8],
+    next_family: u8,
+    digest: Sha256,
+    metadata_seen: u64,
+    current_seen: u64,
+    history_seen: u64,
+    history_groups: u64,
+    history_group_id: Option<[u8; 16]>,
+    history_group_versions: u64,
+    history_group_bytes: Vec<u8>,
+    maximum_history_group_logical_bytes: u64,
+    secondary_seen: [u64; 4],
+    policy_current_seen: bool,
+    policy_history_seen: u64,
+}
+
+impl MergedGraphStateValidator {
+    fn new(
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        counts: [u64; 8],
+        maximum_history_group_logical_bytes: u64,
+    ) -> Result<Self, GraphDiskError> {
+        if counts[7] > 1
+            || (counts[6] != 0 && counts[7] != 1)
+            || maximum_history_group_logical_bytes == 0
+            || maximum_history_group_logical_bytes > MAX_INDEX_RUN_LOGICAL_BYTES
+            || maximum_history_group_logical_bytes > usize::MAX as u64
+        {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        let mut digest = Sha256::new();
+        digest.update(b"USTE-GRAPH-LOGICAL-STATE-V1\0");
+        digest.update(scope.database().as_bytes());
+        digest.update(scope.namespace().as_bytes());
+        digest.update(revision.get().to_be_bytes());
+        digest.update(counts[0].to_be_bytes());
+        Ok(Self {
+            scope,
+            revision,
+            counts,
+            next_family: FAMILY_METADATA,
+            digest,
+            metadata_seen: 0,
+            current_seen: 0,
+            history_seen: 0,
+            history_groups: 0,
+            history_group_id: None,
+            history_group_versions: 0,
+            history_group_bytes: Vec::new(),
+            maximum_history_group_logical_bytes,
+            secondary_seen: [0; 4],
+            policy_current_seen: false,
+            policy_history_seen: 0,
+        })
+    }
+
+    fn observe(&mut self, family: u8, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        if family != self.next_family {
+            return Err(StorageError::IntegrityFailure);
+        }
+        match family {
+            FAMILY_METADATA => self.observe_metadata(key, value),
+            FAMILY_CURRENT_RECORD => self.observe_current(key, value),
+            FAMILY_RECORD_HISTORY => self.observe_history(key, value),
+            FAMILY_OUTGOING..=FAMILY_REVERSE => self.observe_secondary(family, key, value),
+            FAMILY_POLICY => self.observe_policy(key, value),
+            _ => Err(StorageError::IntegrityFailure),
+        }
+    }
+
+    fn finish_family(&mut self, family: u8) -> Result<(), GraphDiskError> {
+        if family != self.next_family {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        match family {
+            FAMILY_METADATA if self.metadata_seen == 1 => {}
+            FAMILY_CURRENT_RECORD if self.current_seen == self.counts[0] => {
+                // Every admitted graph record owns one nonempty history bucket.
+                self.digest.update(self.counts[0].to_be_bytes());
+            }
+            FAMILY_RECORD_HISTORY => {
+                self.flush_history_group()
+                    .map_err(GraphDiskError::Storage)?;
+                if self.history_seen != self.counts[1] || self.history_groups != self.counts[0] {
+                    return Err(GraphDiskError::IndexCorrupt);
+                }
+            }
+            FAMILY_OUTGOING..=FAMILY_REVERSE => {
+                let index = usize::from(family - FAMILY_OUTGOING);
+                if self.secondary_seen[index] != self.counts[index + 2] {
+                    return Err(GraphDiskError::IndexCorrupt);
+                }
+            }
+            FAMILY_POLICY => {
+                if self.counts[7] == 0 {
+                    if self.policy_current_seen || self.policy_history_seen != 0 {
+                        return Err(GraphDiskError::IndexCorrupt);
+                    }
+                    let absent = encode_result_policy(None)
+                        .map_err(|error| GraphDiskError::Storage(codec_storage_error(error)))?;
+                    update_graph_digest_frame(&mut self.digest, &absent)
+                        .map_err(GraphDiskError::Storage)?;
+                    self.digest.update(0_u64.to_be_bytes());
+                } else if !self.policy_current_seen || self.policy_history_seen != self.counts[6] {
+                    return Err(GraphDiskError::IndexCorrupt);
+                }
+            }
+            _ => return Err(GraphDiskError::IndexCorrupt),
+        }
+        self.next_family = self
+            .next_family
+            .checked_add(1)
+            .ok_or(GraphDiskError::IndexCorrupt)?;
+        Ok(())
+    }
+
+    fn finish(self) -> Result<[u8; 32], GraphDiskError> {
+        if self.next_family != FAMILY_COUNT + 1 {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        Ok(self.digest.finalize().into())
+    }
+
+    fn observe_metadata(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        if self.metadata_seen != 0
+            || key != b"graph-state-v1"
+            || value != metadata_value_from_counts(self.revision, self.counts)
+        {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.metadata_seen = 1;
+        Ok(())
+    }
+
+    fn observe_current(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        let id = record_key(self.scope, key)?;
+        let record = decode_stored_record(value).map_err(codec_storage_error)?;
+        if record.id() != id || record.modified_revision() > self.revision {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.digest.update(key);
+        update_graph_digest_frame(&mut self.digest, value)?;
+        self.current_seen = self
+            .current_seen
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        Ok(())
+    }
+
+    fn observe_history(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        if key.len() != 24 {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let id = record_key(self.scope, &key[..16])?;
+        let recorded = CommitRevision::new(read_u64_be(&key[16..])?)
+            .map_err(|_| StorageError::IntegrityFailure)?;
+        let record = decode_stored_record(value).map_err(codec_storage_error)?;
+        if record.id() != id || record.modified_revision() != recorded || recorded > self.revision {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let raw_id: [u8; 16] = key[..16]
+            .try_into()
+            .map_err(|_| StorageError::IntegrityFailure)?;
+        if self
+            .history_group_id
+            .is_some_and(|current| current != raw_id)
+        {
+            self.flush_history_group()?;
+        }
+        if self.history_group_id.is_none() {
+            self.history_group_id = Some(raw_id);
+        }
+        let frame_bytes = 8_u64
+            .checked_add(u64::try_from(value.len()).map_err(|_| StorageError::ResourceLimit)?)
+            .ok_or(StorageError::ResourceLimit)?;
+        let next = u64::try_from(self.history_group_bytes.len())
+            .map_err(|_| StorageError::ResourceLimit)?
+            .checked_add(frame_bytes)
+            .ok_or(StorageError::ResourceLimit)?;
+        if next > self.maximum_history_group_logical_bytes {
+            return Err(StorageError::ResourceLimit);
+        }
+        self.history_group_bytes
+            .try_reserve(usize::try_from(frame_bytes).map_err(|_| StorageError::ResourceLimit)?)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        self.history_group_bytes.extend_from_slice(
+            &u64::try_from(value.len())
+                .map_err(|_| StorageError::ResourceLimit)?
+                .to_be_bytes(),
+        );
+        self.history_group_bytes.extend_from_slice(value);
+        self.history_group_versions = self
+            .history_group_versions
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        self.history_seen = self
+            .history_seen
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        Ok(())
+    }
+
+    fn observe_secondary(
+        &mut self,
+        family: u8,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<(), StorageError> {
+        if key.len() != 32 {
+            return Err(StorageError::IntegrityFailure);
+        }
+        record_key(self.scope, &key[..16])?;
+        record_key(self.scope, &key[16..])?;
+        match family {
+            FAMILY_OUTGOING | FAMILY_INCOMING => {
+                record_key(self.scope, value)?;
+            }
+            FAMILY_PROVENANCE if value.is_empty() => {}
+            FAMILY_REVERSE => self.validate_reverse_value(value)?,
+            _ => return Err(StorageError::IntegrityFailure),
+        }
+        let index = usize::from(family - FAMILY_OUTGOING);
+        self.secondary_seen[index] = self.secondary_seen[index]
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        Ok(())
+    }
+
+    fn validate_reverse_value(&self, value: &[u8]) -> Result<(), StorageError> {
+        if value.len() != 24 || value[20..] != [0; 4] {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let kind = value[0];
+        let state = value[1];
+        let roles = u16::from_be_bytes(
+            value[2..4]
+                .try_into()
+                .map_err(|_| StorageError::IntegrityFailure)?,
+        );
+        let allowed_roles = match kind {
+            REVERSE_KIND_ENTITY
+                if matches!(state, REVERSE_STATE_ACTIVE | REVERSE_STATE_DELETED) =>
+            {
+                REVERSE_ROLE_ENTITY_PROPERTY
+            }
+            REVERSE_KIND_ASSERTION if valid_reverse_claim_state(state) => {
+                REVERSE_ROLE_ASSERTION_SUBJECT
+                    | REVERSE_ROLE_ASSERTION_OBJECT
+                    | REVERSE_ROLE_EVIDENCE
+                    | REVERSE_ROLE_CORRECTION_OF
+            }
+            REVERSE_KIND_RELATIONSHIP if valid_reverse_claim_state(state) => {
+                REVERSE_ROLE_RELATIONSHIP_FROM
+                    | REVERSE_ROLE_RELATIONSHIP_TO
+                    | REVERSE_ROLE_RELATIONSHIP_PROPERTY
+                    | REVERSE_ROLE_EVIDENCE
+                    | REVERSE_ROLE_CORRECTION_OF
+            }
+            _ => return Err(StorageError::IntegrityFailure),
+        };
+        if roles == 0 || roles & !allowed_roles != 0 {
+            return Err(StorageError::IntegrityFailure);
+        }
+        crate::RecordVersion::new(read_u64_be(&value[4..12])?)
+            .map_err(|_| StorageError::IntegrityFailure)?;
+        let owner_revision = CommitRevision::new(read_u64_be(&value[12..20])?)
+            .map_err(|_| StorageError::IntegrityFailure)?;
+        if owner_revision > self.revision {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(())
+    }
+
+    fn flush_history_group(&mut self) -> Result<(), StorageError> {
+        let Some(id) = self.history_group_id.take() else {
+            return Ok(());
+        };
+        if self.history_group_versions == 0 {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.digest.update(id);
+        self.digest
+            .update(self.history_group_versions.to_be_bytes());
+        self.digest.update(&self.history_group_bytes);
+        self.history_group_versions = 0;
+        self.history_group_bytes.clear();
+        self.history_groups = self
+            .history_groups
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        Ok(())
+    }
+
+    fn observe_policy(&mut self, key: &[u8], value: &[u8]) -> Result<(), StorageError> {
+        let policy = decode_result_policy(value)
+            .map_err(codec_storage_error)?
+            .ok_or(StorageError::IntegrityFailure)?;
+        if policy.scope() != self.scope {
+            return Err(StorageError::IntegrityFailure);
+        }
+        match key {
+            [0] if self.counts[7] == 1 && !self.policy_current_seen => {
+                update_graph_digest_frame(&mut self.digest, value)?;
+                self.digest.update(self.counts[6].to_be_bytes());
+                self.policy_current_seen = true;
+            }
+            [1, revision @ ..] if revision.len() == 8 && self.policy_current_seen => {
+                let revision = CommitRevision::new(read_u64_be(revision)?)
+                    .map_err(|_| StorageError::IntegrityFailure)?;
+                if revision > self.revision {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                self.digest.update(revision.get().to_be_bytes());
+                update_graph_digest_frame(&mut self.digest, value)?;
+                self.policy_history_seen = self
+                    .policy_history_seen
+                    .checked_add(1)
+                    .ok_or(StorageError::ResourceLimit)?;
+            }
+            _ => return Err(StorageError::IntegrityFailure),
+        }
+        Ok(())
+    }
+}
+
+const fn valid_reverse_claim_state(state: u8) -> bool {
+    matches!(
+        state,
+        REVERSE_STATE_PROPOSED
+            | REVERSE_STATE_ACCEPTED
+            | REVERSE_STATE_REJECTED
+            | REVERSE_STATE_DISPUTED
+            | REVERSE_STATE_SUPERSEDED
+            | REVERSE_STATE_RETRACTED
+            | REVERSE_STATE_EXPIRED
+    )
+}
+
+fn update_graph_digest_frame(digest: &mut Sha256, value: &[u8]) -> Result<(), StorageError> {
+    digest.update(
+        u64::try_from(value.len())
+            .map_err(|_| StorageError::ResourceLimit)?
+            .to_be_bytes(),
+    );
+    digest.update(value);
+    Ok(())
 }
 
 type DeltaMap = BTreeMap<Vec<u8>, (Option<Vec<u8>>, Option<Vec<u8>>)>;
@@ -1718,6 +2112,7 @@ fn build_graph_state_root_delta_from_base(
             .ok_or(GraphDiskError::RootStateMismatch)?,
         revision: prepared.revision,
         result_digest: prepared.result_digest,
+        target_counts,
         families: encoded_families,
         deltas,
         logical_bytes,
@@ -2996,6 +3391,25 @@ mod tests {
             .unwrap()
     }
 
+    fn validator_before(snapshot: &GraphSnapshot, target_family: u8) -> MergedGraphStateValidator {
+        let revision = snapshot.revision().unwrap();
+        let mut validator = MergedGraphStateValidator::new(
+            scope(),
+            revision,
+            metadata_counts(snapshot).unwrap(),
+            2 * 1024 * 1024,
+        )
+        .unwrap();
+        for family in FAMILY_METADATA..target_family {
+            for entry in family_entries(snapshot, revision, family).unwrap() {
+                let entry = entry.unwrap();
+                validator.observe(family, &entry.key, &entry.value).unwrap();
+            }
+            validator.finish_family(family).unwrap();
+        }
+        validator
+    }
+
     fn hex(bytes: &[u8]) -> String {
         bytes.iter().map(|byte| format!("{byte:02x}")).collect()
     }
@@ -3126,6 +3540,98 @@ mod tests {
                 "d7057241aaa6cfb400566303603cae6fa553053fad96ab516ced8c93637ac8ff",
                 "27273b10d66f68ad64d24bf5baa321a444c76dca20c14ae07d6b6e62eac85d59",
             ]
+        );
+    }
+
+    #[test]
+    fn merged_output_stream_reproduces_canonical_digest_under_record_local_bound() {
+        let (snapshot, _) = canonical_fixture();
+        let revision = snapshot.revision().unwrap();
+        let counts = metadata_counts(&snapshot).unwrap();
+        let mut validator =
+            MergedGraphStateValidator::new(scope(), revision, counts, 2 * 1024 * 1024).unwrap();
+        for family in FAMILY_METADATA..=FAMILY_COUNT {
+            for entry in family_entries(&snapshot, revision, family).unwrap() {
+                let entry = entry.unwrap();
+                validator.observe(family, &entry.key, &entry.value).unwrap();
+            }
+            validator.finish_family(family).unwrap();
+        }
+        assert_eq!(
+            validator.finish().unwrap(),
+            GraphState::logical_state_digest(&snapshot).unwrap()
+        );
+
+        let mut bounded = MergedGraphStateValidator::new(scope(), revision, counts, 1).unwrap();
+        for family in FAMILY_METADATA..FAMILY_RECORD_HISTORY {
+            for entry in family_entries(&snapshot, revision, family).unwrap() {
+                let entry = entry.unwrap();
+                bounded.observe(family, &entry.key, &entry.value).unwrap();
+            }
+            bounded.finish_family(family).unwrap();
+        }
+        let history = family_entries(&snapshot, revision, FAMILY_RECORD_HISTORY)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            bounded.observe(FAMILY_RECORD_HISTORY, &history.key, &history.value),
+            Err(StorageError::ResourceLimit)
+        );
+    }
+
+    #[test]
+    fn merged_output_stream_rejects_malformed_secondary_entries_and_count_mismatch() {
+        let (snapshot, _) = canonical_fixture();
+
+        let mut outgoing = entries(&snapshot, FAMILY_OUTGOING).remove(0);
+        outgoing.key.pop();
+        assert_eq!(
+            validator_before(&snapshot, FAMILY_OUTGOING).observe(
+                FAMILY_OUTGOING,
+                &outgoing.key,
+                &outgoing.value,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+
+        let mut incoming = entries(&snapshot, FAMILY_INCOMING).remove(0);
+        incoming.value.pop();
+        assert_eq!(
+            validator_before(&snapshot, FAMILY_INCOMING).observe(
+                FAMILY_INCOMING,
+                &incoming.key,
+                &incoming.value,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+
+        let mut provenance = entries(&snapshot, FAMILY_PROVENANCE).remove(0);
+        provenance.value.push(1);
+        assert_eq!(
+            validator_before(&snapshot, FAMILY_PROVENANCE).observe(
+                FAMILY_PROVENANCE,
+                &provenance.key,
+                &provenance.value,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+
+        let mut reverse = entries(&snapshot, FAMILY_REVERSE).remove(0);
+        reverse.value[2..4].copy_from_slice(&REVERSE_ROLE_ENTITY_PROPERTY.to_be_bytes());
+        assert_eq!(
+            validator_before(&snapshot, FAMILY_REVERSE).observe(
+                FAMILY_REVERSE,
+                &reverse.key,
+                &reverse.value,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+
+        assert_eq!(
+            validator_before(&snapshot, FAMILY_OUTGOING).finish_family(FAMILY_OUTGOING),
+            Err(GraphDiskError::IndexCorrupt)
         );
     }
 
