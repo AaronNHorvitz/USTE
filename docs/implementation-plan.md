@@ -119,8 +119,9 @@ resume. Decision 0043 adds a separately generated content-free oracle summary an
 correctness phase with exact output/typed-limit matching, RSS and authenticated index counters.
 Decision 0044 adds real process-loss/resume coverage at every incomplete 20/200 materialization
 phase; exact-scale interruption and BM-06 remain unclaimed.
-Next add repeated authorized-query sampling that separates the 299 exact-profile successes from 85
-expected result-limit refusals; exact scale and accepted host/RSS/cache evidence remain mandatory.
+Decision 0045 adds a bounded separately generated oracle bundle for the 96 warm-up and 384 measured
+queries. Next add repeated authorized-query sampling that excludes expected refusals from success
+percentiles; exact scale and accepted host/RSS/cache evidence remain mandatory.
 
 ## Architectural decomposition
 

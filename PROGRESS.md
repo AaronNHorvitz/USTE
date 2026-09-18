@@ -21,7 +21,8 @@ Decision 0041 streams exact-profile construction through bounded transactions an
 212-revision plan. Decision 0042 adds resumable Linux/Btrfs materialization and authenticated
 portable-recovery open phases. Decision 0043 adds a separate bounded oracle summary and Linux
 correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume coverage. None is a
-benchmark result. T-20 remains open pending a disk-backed live publication target,
+benchmark result. Decision 0045 adds the independent warm-up/measured oracle bundle. T-20 remains
+open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -405,6 +406,11 @@ unverified external distribution prerequisite.
   certificate-tail or ignored journal bytes, and each fresh open admitted that result. This is
   actual process-loss prefix evidence, not exact-scale duration, intra-transaction fault coverage
   or BM-06 qualification.
+- Added Decision 0045 and `bm01-oracle-bundle-v1`, constructed outside the future sampler from one
+  independent oracle. Bounded canonical sections contain 96 disjoint warm-up expectations and the
+  unchanged 384 measured expectations. Exact scale pins warm-up outcomes at 74 successes, zero
+  visit limits and 22 expected result limits, with bundle digest
+  `d52869f24d635476f86374813e754be364d0d2df470544b71221c24b96145fae`.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -479,12 +485,15 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (103 links, 100 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 21 isolated T-20 fixture/engine/Linux-runner tests pass; one exact-profile oracle test is
-# intentionally ignored in debug and executed under the release-profile acceptance command
+# docs=ok (104 links, 101 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 23 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
+# intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
   oracle_summary::tests::qualifying_summary_outcomes_and_digest_are_golden -- --ignored --exact
 # 1 passed in 5.40 s; exact 299/0/85 outcome split, accepted digest and round-trip
+cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
+  oracle_bundle::tests::qualifying_bundle_outcomes_and_digests_are_golden -- --ignored --exact
+# 1 passed in 7.84 s; exact warm-up/measured splits, all accepted digests and round-trip
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
@@ -571,8 +580,8 @@ remaining mixed workload have not passed.
 ## Next dependency-permitted work
 
 Continue T-20 by adding repeated authorized-query sampling to the Linux/Btrfs runner, with the 299
-exact-profile successes separated from the 85 expected result-limit refusals. Replace the complete
-live graph publication target
+exact-profile successes separated from the 85 expected result-limit refusals and the 96-query
+warm-up excluded from measured populations. Replace the complete live graph publication target
 with a disk-backed base/overlay state and remove the full-memory recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event

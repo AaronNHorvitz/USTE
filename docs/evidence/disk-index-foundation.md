@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 21 isolated t20-bench tests passed (1 exact-profile release test ignored
+# 262 workspace tests and 23 isolated t20-bench tests passed (2 exact-profile release tests ignored
 # in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
@@ -174,6 +174,12 @@ one current root, zero repaired certificate-tail bytes and zero ignored uncommit
 fresh `linux-open` processes admitted the same result. These cover all incomplete phases of the
 20/200 plan, not exact-scale duration or intra-transaction byte boundaries.
 
+Decision 0045 adds the separate `bm01-oracle-bundle-v1` prerequisite for repeated sampling. Its
+bounded nested summaries preserve the existing measured digest while adding 96 disjoint warm-up
+expectations. The exact warm-up split is 74 successful outputs, zero visit limits and 22 expected
+result limits; the accepted combined digest is
+`d52869f24d635476f86374813e754be364d0d2df470544b71221c24b96145fae`.
+
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
 65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
@@ -181,6 +187,6 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 21 isolated T-20 fixture/engine/
-Linux-runner tests passed; one exact-profile oracle test is reserved for the release-profile
-acceptance command and ignored by the debug suite.
+docs, strict clippy/rustdoc, the storage publication model, and 23 isolated T-20 fixture/engine/
+Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
+acceptance commands and ignored by the debug suite.

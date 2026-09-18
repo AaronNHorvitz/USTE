@@ -3,16 +3,21 @@
 use std::fmt::Write;
 
 use crate::{
-    Bm01Profile, Oracle, OracleError, OracleLimits, OracleOutput, QuerySpec, engine_mapping_digest,
-    measured_queries, query_digest,
+    Bm01Profile, Oracle, OracleError, OracleLimits, OracleOutput, QuerySet, QuerySpec,
+    engine_mapping_digest, measured_queries, query_digest, warmup_queries,
 };
 
 pub const ORACLE_SUMMARY_PROFILE: &str = "bm01-oracle-summary-v1";
+pub const WARMUP_SUMMARY_PROFILE: &str = "bm01-warmup-summary-v1";
 pub const RESULT_SIZE_PROFILE: &str = "bm01-result-v1";
 pub const MAX_ORACLE_SUMMARY_BYTES: usize = 256 * 1024;
 pub const QUALIFYING_ORACLE_SUMMARY_DIGEST: [u8; 32] = [
     94, 156, 184, 18, 0, 178, 1, 106, 180, 112, 65, 144, 33, 86, 30, 10, 48, 78, 30, 177, 214, 97,
     14, 6, 51, 179, 89, 37, 178, 125, 244, 2,
+];
+pub const QUALIFYING_WARMUP_SUMMARY_DIGEST: [u8; 32] = [
+    103, 210, 56, 116, 224, 78, 245, 88, 227, 17, 241, 216, 0, 97, 128, 178, 90, 37, 72, 28, 66,
+    120, 139, 5, 242, 222, 177, 98, 113, 85, 227, 18,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,6 +61,7 @@ struct OutputFields {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OracleSummary {
     profile: Bm01Profile,
+    query_set: QuerySet,
     expectations: Vec<OracleExpectation>,
     digest: [u8; 32],
 }
@@ -63,8 +69,22 @@ pub struct OracleSummary {
 impl OracleSummary {
     pub fn build(profile: Bm01Profile) -> Result<Self, String> {
         let oracle = Oracle::build(profile).map_err(debug)?;
-        let mut expectations = Vec::with_capacity(measured_queries(profile).len());
-        for query in measured_queries(profile) {
+        Self::build_with_oracle(profile, QuerySet::Measured, &oracle)
+    }
+
+    pub fn build_warmup(profile: Bm01Profile) -> Result<Self, String> {
+        let oracle = Oracle::build(profile).map_err(debug)?;
+        Self::build_with_oracle(profile, QuerySet::Warmup, &oracle)
+    }
+
+    pub(crate) fn build_with_oracle(
+        profile: Bm01Profile,
+        query_set: QuerySet,
+        oracle: &Oracle,
+    ) -> Result<Self, String> {
+        let queries = queries(profile, query_set);
+        let mut expectations = Vec::with_capacity(queries.len());
+        for query in queries {
             let outcome = match oracle.expand(query, OracleLimits::default()) {
                 Ok(output) => expectation(&output)?,
                 Err(OracleError::VisitLimit) => OracleExpectedOutcome::VisitLimit,
@@ -73,9 +93,10 @@ impl OracleSummary {
             };
             expectations.push(OracleExpectation { query, outcome });
         }
-        let digest = summary_digest(profile, &expectations);
+        let digest = summary_digest(profile, query_set, &expectations);
         Ok(Self {
             profile,
+            query_set,
             expectations,
             digest,
         })
@@ -84,6 +105,11 @@ impl OracleSummary {
     #[must_use]
     pub fn profile(&self) -> Bm01Profile {
         self.profile
+    }
+
+    #[must_use]
+    pub fn query_set(&self) -> QuerySet {
+        self.query_set
     }
 
     #[must_use]
@@ -99,7 +125,7 @@ impl OracleSummary {
     #[must_use]
     pub fn to_tsv(&self) -> String {
         let mut output = String::new();
-        writeln!(&mut output, "schema\t{ORACLE_SUMMARY_PROFILE}").unwrap();
+        writeln!(&mut output, "schema\t{}", summary_profile(self.query_set)).unwrap();
         writeln!(&mut output, "result_size_profile\t{RESULT_SIZE_PROFILE}").unwrap();
         writeln!(&mut output, "entities\t{}", self.profile.entities()).unwrap();
         writeln!(
@@ -116,8 +142,9 @@ impl OracleSummary {
         .unwrap();
         writeln!(
             &mut output,
-            "measured_query_digest\t{}",
-            hex(&query_digest(self.profile, crate::QuerySet::Measured))
+            "{}_query_digest\t{}",
+            query_set_name(self.query_set),
+            hex(&query_digest(self.profile, self.query_set))
         )
         .unwrap();
         writeln!(&mut output, "queries\t{}", self.expectations.len()).unwrap();
@@ -166,7 +193,15 @@ impl OracleSummary {
             return Err("invalid oracle summary envelope".into());
         }
         let mut lines = input.lines();
-        expect_pair(&mut lines, "schema", ORACLE_SUMMARY_PROFILE)?;
+        let (schema_key, schema_value) = pair(&mut lines)?;
+        if schema_key != "schema" {
+            return Err("oracle summary header mismatch".into());
+        }
+        let query_set = match schema_value {
+            ORACLE_SUMMARY_PROFILE => QuerySet::Measured,
+            WARMUP_SUMMARY_PROFILE => QuerySet::Warmup,
+            _ => return Err("oracle summary header mismatch".into()),
+        };
         expect_pair(&mut lines, "result_size_profile", RESULT_SIZE_PROFILE)?;
         let entities = parse_pair_u64(&mut lines, "entities")?;
         let relationships = parse_pair_u64(&mut lines, "relationships")?;
@@ -178,12 +213,13 @@ impl OracleSummary {
         if mapping != engine_mapping_digest(profile) {
             return Err("oracle summary engine mapping mismatch".into());
         }
-        let queries_digest = parse_pair_digest(&mut lines, "measured_query_digest")?;
-        if queries_digest != query_digest(profile, crate::QuerySet::Measured) {
+        let query_digest_key = format!("{}_query_digest", query_set_name(query_set));
+        let queries_digest = parse_pair_digest(&mut lines, &query_digest_key)?;
+        if queries_digest != query_digest(profile, query_set) {
             return Err("oracle summary query corpus mismatch".into());
         }
         let count = parse_pair_usize(&mut lines, "queries")?;
-        let queries = measured_queries(profile);
+        let queries = queries(profile, query_set);
         if count != queries.len() {
             return Err("oracle summary query count mismatch".into());
         }
@@ -225,14 +261,36 @@ impl OracleSummary {
             expectations.push(OracleExpectation { query, outcome });
         }
         let digest = parse_pair_digest(&mut lines, "summary_digest")?;
-        if lines.next().is_some() || digest != summary_digest(profile, &expectations) {
+        if lines.next().is_some() || digest != summary_digest(profile, query_set, &expectations) {
             return Err("oracle summary digest mismatch".into());
         }
         Ok(Self {
             profile,
+            query_set,
             expectations,
             digest,
         })
+    }
+}
+
+fn queries(profile: Bm01Profile, query_set: QuerySet) -> Vec<QuerySpec> {
+    match query_set {
+        QuerySet::Measured => measured_queries(profile),
+        QuerySet::Warmup => warmup_queries(profile),
+    }
+}
+
+const fn summary_profile(query_set: QuerySet) -> &'static str {
+    match query_set {
+        QuerySet::Measured => ORACLE_SUMMARY_PROFILE,
+        QuerySet::Warmup => WARMUP_SUMMARY_PROFILE,
+    }
+}
+
+const fn query_set_name(query_set: QuerySet) -> &'static str {
+    match query_set {
+        QuerySet::Measured => "measured",
+        QuerySet::Warmup => "warmup",
     }
 }
 
@@ -265,10 +323,17 @@ pub(crate) fn logical_result_bytes(output: &OracleOutput) -> Result<u64, String>
         .ok_or_else(|| "logical result size overflow".into())
 }
 
-fn summary_digest(profile: Bm01Profile, entries: &[OracleExpectation]) -> [u8; 32] {
-    let mut digest = blake3::Hasher::new_derive_key("USTE BM-01 oracle-summary-v1");
+fn summary_digest(
+    profile: Bm01Profile,
+    query_set: QuerySet,
+    entries: &[OracleExpectation],
+) -> [u8; 32] {
+    let mut digest = match query_set {
+        QuerySet::Measured => blake3::Hasher::new_derive_key("USTE BM-01 oracle-summary-v1"),
+        QuerySet::Warmup => blake3::Hasher::new_derive_key("USTE BM-01 warmup-summary-v1"),
+    };
     digest.update(&engine_mapping_digest(profile));
-    digest.update(&query_digest(profile, crate::QuerySet::Measured));
+    digest.update(&query_digest(profile, query_set));
     digest.update(&(entries.len() as u64).to_be_bytes());
     for entry in entries {
         digest.update(&[

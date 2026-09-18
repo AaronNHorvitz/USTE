@@ -268,6 +268,11 @@ probe. The probe flushes a content-free marker and parks so a parent can SIGKILL
 owner; normal resume then replays and idempotently fills the missing deterministic suffix. It adds
 no write authority and does not weaken journal certification or root admission.
 
+Decision 0045 packages independently derived warm-up and measured expectations without giving the
+sampler an oracle implementation. Canonical bounded section lengths and nested plus aggregate
+digests bind both disjoint query corpora. Limit refusals stay typed outcomes rather than successful
+results, preserving later latency-population separation.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

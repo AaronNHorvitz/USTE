@@ -1,6 +1,8 @@
 use std::{env, path::PathBuf, process::ExitCode};
 
-use uste_t20_bench::{Bm01Manifest, Bm01Profile, OracleSummary, verify_development_profile};
+use uste_t20_bench::{
+    Bm01Manifest, Bm01Profile, OracleBundle, OracleSummary, verify_development_profile,
+};
 
 fn run() -> Result<(), String> {
     let mut arguments = env::args_os().skip(1);
@@ -19,6 +21,7 @@ fn run() -> Result<(), String> {
     );
     if command != "manifest"
         && command != "oracle-summary"
+        && command != "oracle-bundle"
         && command != "engine-check"
         && !linux_command
     {
@@ -78,6 +81,8 @@ fn run() -> Result<(), String> {
         print!("{}", Bm01Manifest::build(profile).to_json());
     } else if command == "oracle-summary" {
         print!("{}", OracleSummary::build(profile)?.to_tsv());
+    } else if command == "oracle-bundle" {
+        print!("{}", OracleBundle::build(profile)?.to_tsv());
     } else if command == "engine-check" {
         let report = verify_development_profile(profile)?;
         println!(
@@ -147,7 +152,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     println!(
-        "usage: uste-t20-bench <manifest|oracle-summary|engine-check> [--entities COUNT]\n\
+        "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check> [--entities COUNT]\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
@@ -156,6 +161,7 @@ fn print_usage() {
          --oracle-file FILE [--entities COUNT]\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
          oracle-summary emits content-free expectations for a separate query process;\n\
+         oracle-bundle emits disjoint warm-up plus measured expectations for sampling;\n\
          engine-check accepts at most 1000 entities and is always nonqualifying;\n\
          Linux phases require an existing Btrfs directory and owner-only password file"
     );

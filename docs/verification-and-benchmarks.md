@@ -123,6 +123,11 @@ Decision 0044 supplies a real-process durable-prefix recovery probe. The 20/200 
 after SIGKILL at each of its three incomplete frontiers, but this is recovery correctness only;
 exact-scale recovery duration and BM-06's independent 10-million-event trials remain required.
 
+Decision 0045 adds the bounded `bm01-oracle-bundle-v1`: 96 independently checked warm-up queries
+with roots disjoint from the unchanged 384 measured corpus. Exact scale pins warm-up outcomes at
+74 successful outputs and 22 expected result-limit refusals. The combined digest binds both
+sections, but no timing occurs until the subsequent sampler phase.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

@@ -129,6 +129,8 @@ cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --
 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
   oracle-summary [--entities 100000] > ORACLE
 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  oracle-bundle [--entities 100000] > ORACLE_BUNDLE
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
   linux-query --root ROOT --password-file PASSWORD --oracle-file ORACLE [--entities 100000]
 ~~~
 
@@ -142,6 +144,10 @@ query phase performs one correctness pass against a separately generated content
 diagnostic timing is not the required repeated cold/warm benchmark and does not establish
 bounded-memory behavior. The exact corpus has 299 successful outputs and 85 expected result-cap
 refusals; later latency evidence must keep those populations separate.
+
+The bundle additionally carries 96 independently checked, disjoint warm-up queries (74 outputs and
+22 expected result-cap refusals) for the forthcoming repeated sampler. Generating the bundle does
+not itself perform or qualify a benchmark.
 
 ## Delivery
 

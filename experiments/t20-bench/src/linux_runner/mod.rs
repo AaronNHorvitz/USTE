@@ -36,7 +36,7 @@ use uste_types::{IdempotencyKey, TransactionId, UtcInstant, Value};
 
 use crate::{
     Bm01Profile, Materializer, OracleExpectedOutcome, OracleSummary,
-    QUALIFYING_ORACLE_SUMMARY_DIGEST,
+    QUALIFYING_ORACLE_SUMMARY_DIGEST, QuerySet,
     engine::{
         EngineQueryError, PRINCIPAL, benchmark_policy, entity_ref, evidence_ref, execute_query,
         kernel, relationship_ref, scope, text,
@@ -394,13 +394,7 @@ pub fn query_correctness(
     profile: Bm01Profile,
 ) -> Result<LinuxQueryReport, LinuxRunnerError> {
     let summary = read_oracle_summary(oracle_file)?;
-    if summary.profile() != profile {
-        return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_PROFILE"));
-    }
-    if profile == Bm01Profile::qualifying() && summary.digest() != QUALIFYING_ORACLE_SUMMARY_DIGEST
-    {
-        return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_ACCEPTANCE"));
-    }
+    validate_measured_summary(&summary, profile)?;
     let mut opened = open_completed(root, password_file, profile)?;
     let before = opened
         .coordinator
@@ -519,6 +513,23 @@ pub fn query_correctness(
         output_digest: *aggregate.finalize().as_bytes(),
         cache_report,
     })
+}
+
+fn validate_measured_summary(
+    summary: &OracleSummary,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    if summary.profile() != profile {
+        return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_PROFILE"));
+    }
+    if summary.query_set() != QuerySet::Measured {
+        return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_QUERY_SET"));
+    }
+    if profile == Bm01Profile::qualifying() && summary.digest() != QUALIFYING_ORACLE_SUMMARY_DIGEST
+    {
+        return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_ACCEPTANCE"));
+    }
+    Ok(())
 }
 
 fn open_completed(
@@ -1068,9 +1079,9 @@ fn system_utc(now: SystemTime) -> Result<UtcInstant, AdapterError> {
 mod tests {
     use super::{
         LinuxQueryReport, LinuxRunReport, cache_delta, crash_probe_marker, create_crash_probe,
-        percentile, status_value_kib, system_utc,
+        percentile, status_value_kib, system_utc, validate_measured_summary,
     };
-    use crate::Bm01Profile;
+    use crate::{Bm01Profile, OracleSummary};
     use std::path::Path;
     use std::time::{Duration, UNIX_EPOCH};
     use uste_graph::GraphIndexCacheReport;
@@ -1191,6 +1202,27 @@ mod tests {
         assert_eq!(delta.misses, 20);
         assert_eq!(delta.result_bytes, 80);
         assert!(cache_delta(after, before).is_err());
+    }
+
+    #[test]
+    fn query_correctness_rejects_wrong_profile_and_warmup_oracles() {
+        let profile = Bm01Profile::new(20).unwrap();
+        let other_profile = Bm01Profile::new(30).unwrap();
+        let measured = OracleSummary::build(profile).unwrap();
+        let warmup = OracleSummary::build_warmup(profile).unwrap();
+
+        assert_eq!(
+            validate_measured_summary(&measured, other_profile)
+                .unwrap_err()
+                .code(),
+            "USTE_BM01_ORACLE_PROFILE"
+        );
+        assert_eq!(
+            validate_measured_summary(&warmup, profile)
+                .unwrap_err()
+                .code(),
+            "USTE_BM01_ORACLE_QUERY_SET"
+        );
     }
 
     #[test]

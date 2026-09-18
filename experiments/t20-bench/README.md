@@ -28,6 +28,7 @@ From this directory:
 cargo run --release --locked --offline -- manifest
 cargo run --release --locked --offline -- manifest --entities 1000
 cargo run --release --locked --offline -- oracle-summary --entities 20 > ORACLE
+cargo run --release --locked --offline -- oracle-bundle --entities 20 > ORACLE_BUNDLE
 cargo run --release --locked --offline -- engine-check --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
@@ -53,6 +54,12 @@ digests and exact output or limit outcomes without record identifiers. At exact 
 Btrfs database, clears USTE's page cache before each authorized traversal and checks exact outcome
 equivalence. Its single-pass timings/RSS/counters are correctness diagnostics and the JSON still
 sets `engine_benchmark:false`.
+
+`oracle-bundle` uses one independent oracle construction to emit both the 96 disjoint warm-up
+expectations and the measured section. Exact byte lengths, per-section digests and a combined
+digest make substitution or truncation fail closed. At qualifying scale the warm-up section has 74
+successful outputs and 22 expected result-limit refusals; it is groundwork for repeated sampling,
+not benchmark evidence.
 
 `linux-create-crash-probe --pause-after-revision REVISION` is an explicit process-loss harness.
 It admits only a nonzero, nonfinal frontier, flushes a content-free readiness marker after that
