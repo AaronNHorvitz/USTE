@@ -263,6 +263,11 @@ the same production adapter. Per-query USTE cache clearing and authenticated cou
 explicit, while host caches and full-memory recovery remain disclosed uncontrolled boundaries.
 One-pass diagnostics are not qualifying latency evidence.
 
+Decision 0044 makes the materializer's postcommit frontier observable only to an explicit crash
+probe. The probe flushes a content-free marker and parks so a parent can SIGKILL the live exclusive
+owner; normal resume then replays and idempotently fills the missing deterministic suffix. It adds
+no write authority and does not weaken journal certification or root admission.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the

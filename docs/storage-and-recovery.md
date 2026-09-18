@@ -261,6 +261,11 @@ It admits a bounded external oracle summary, clears the USTE page cache between 
 reports authenticated disk/cache work plus process RSS. This does not alter the recovery format or
 remove the full-memory graph replay/root-validation boundary; host caches remain uncontrolled.
 
+Decision 0044 adds a benchmark-specific process-loss seam after successful durable commits. A
+child flushes a content-free frontier marker and parks while retaining ownership; an external
+harness SIGKILLs it and a new process uses ordinary portable recovery/idempotent resume. This does
+not alter journal format, certification, recovery rules or consumer APIs.
+
 Bound cache size, merge fan-in, query scratch space, snapshots/reader pins, and compaction
 backlog. Include allocator/RSS measurements: logical cache accounting alone is insufficient.
 Materialized summaries record covered revisions and invalidation dependencies. Corrections

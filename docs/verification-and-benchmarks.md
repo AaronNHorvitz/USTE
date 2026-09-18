@@ -119,6 +119,10 @@ the oracle's output or typed refusal, but host caches remain uncontrolled and th
 memory-resident. Its one-pass aggregate timing includes expected refusals, is diagnostic only and
 sets `engine_benchmark:false`; qualifying repeated cold/warm success samples remain required.
 
+Decision 0044 supplies a real-process durable-prefix recovery probe. The 20/200 Btrfs plan resumes
+after SIGKILL at each of its three incomplete frontiers, but this is recovery correctness only;
+exact-scale recovery duration and BM-06's independent 10-million-event trials remain required.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

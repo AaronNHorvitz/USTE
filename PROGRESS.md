@@ -20,7 +20,8 @@ capped, nonqualifying production-engine equivalence driver to the pinned fixture
 Decision 0041 streams exact-profile construction through bounded transactions and pins its
 212-revision plan. Decision 0042 adds resumable Linux/Btrfs materialization and authenticated
 portable-recovery open phases. Decision 0043 adds a separate bounded oracle summary and Linux
-correctness-query phase. None is a benchmark result. T-20 remains open pending a disk-backed live publication target,
+correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume coverage. None is a
+benchmark result. T-20 remains open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -381,8 +382,8 @@ unverified external distribution prerequisite.
   then reopened revision 4/root count 1 again. Aggregate phase times were 399/396/357/344 ms. A
   same-frontier 30/300 open was rejected by its authenticated profile binding. This is
   nonqualifying platform/recovery evidence, not BM-01 query timing or a host-cold result.
-  Interrupted-prefix process-loss recovery remains unexecuted; retries are limited by the fixed
-  30-day idempotency-outcome retention.
+  This initial smoke covered only completed-frontier retry; Decision 0044 below adds small-profile
+  interrupted-prefix process loss. Retries remain limited by the fixed 30-day outcome retention.
 - Added Decision 0043, `bm01-oracle-summary-v1` and `bm01-result-v1`. A separate process now emits
   at most 256 KiB of canonical, content-free expectations bound to the engine mapping and measured
   corpus. The exact accepted profile pins 299 successful outputs, zero visit-limit outcomes, 85
@@ -396,6 +397,14 @@ unverified external distribution prerequisite.
   It reported an 891 ms query phase, 2.430/4.892/4.955 ms p50/p95/p99, 5,660 KiB current RSS and
   265,104 KiB peak RSS. The host caches were uncontrolled and graph state remained full-memory;
   `engine_benchmark:false` is preserved and no BM-01 pass is claimed.
+- Added Decision 0044 and `linux-create-crash-probe`. It admits only incomplete frontiers, flushes a
+  content-free readiness marker after the selected commit returns durable, and parks so an external
+  harness can SIGKILL the exact process before ordinary portable recovery/resume.
+- Release-built Btrfs children were SIGKILLed after revisions 1, 2 and 3, covering every incomplete
+  phase of the 20/200 plan. Each fresh resume completed revision 4/root count 1 with zero repaired
+  certificate-tail or ignored journal bytes, and each fresh open admitted that result. This is
+  actual process-loss prefix evidence, not exact-scale duration, intra-transaction fault coverage
+  or BM-06 qualification.
 - Pinned `bm01-materialization-v1` with the exact accepted 100k-entity/1m-relationship uniform,
   distributed-hub and ring fixture, typed IDs, disjoint measured/warm-up query corpora and an
   independent adjacency-array BFS oracle. Golden digests are checked, but the manifest says
@@ -470,8 +479,8 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 262 workspace tests including 77 uste-storage, 13
 # uste-crypto, 40 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (102 links, 99 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
-# and 20 isolated T-20 fixture/engine/Linux-runner tests pass; one exact-profile oracle test is
+# docs=ok (103 links, 100 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# and 21 isolated T-20 fixture/engine/Linux-runner tests pass; one exact-profile oracle test is
 # intentionally ignored in debug and executed under the release-profile acceptance command
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
   oracle_summary::tests::qualifying_summary_outcomes_and_digest_are_golden -- --ignored --exact
@@ -562,8 +571,8 @@ remaining mixed workload have not passed.
 ## Next dependency-permitted work
 
 Continue T-20 by adding repeated authorized-query sampling to the Linux/Btrfs runner, with the 299
-exact-profile successes separated from the 85 expected result-limit refusals, and add interrupted-
-prefix materialization recovery. Replace the complete live graph publication target
+exact-profile successes separated from the 85 expected result-limit refusals. Replace the complete
+live graph publication target
 with a disk-backed base/overlay state and remove the full-memory recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and
 define/run BM-06's 10-million-event

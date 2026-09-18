@@ -41,11 +41,11 @@ retried transaction's actual revision and the final authorized read-view revisio
 ## Consequences and limits
 
 The deterministic batch identity is designed to make an interrupted materialization retryable
-within the fixed 30-day retention interval without collecting the workload in memory. The current
-real-filesystem evidence covers a completed-frontier retry only: a Btrfs 20/200 smoke demonstrated
-create, independent open, idempotent resume at the same revision and a second open. Interrupted-
-prefix process-loss evidence remains required. This is development evidence, not BM-01 performance
-evidence.
+within the fixed 30-day retention interval without collecting the workload in memory. This
+decision's original real-filesystem evidence covered a completed-frontier retry: a Btrfs 20/200
+smoke demonstrated create, independent open, idempotent resume at the same revision and a second
+open. Decision 0044 subsequently exercises real SIGKILL at every incomplete small-profile phase.
+This remains development evidence, not BM-01 performance evidence.
 
 Root publication/admission and authorized views still clone or validate complete graph state and
 warm host caches. The runner therefore does not claim larger-than-memory behavior or a host-cold

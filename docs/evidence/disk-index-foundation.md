@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 20 isolated t20-bench tests passed (1 exact-profile release test ignored
+# 262 workspace tests and 21 isolated t20-bench tests passed (1 exact-profile release test ignored
 # in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
@@ -151,8 +151,8 @@ revision 4 and reopened the same frontier/root again. Create reported 399 ms; th
 resume reported 396 ms, 357 ms and 344 ms on the reference host. An attempted same-frontier open as
 30/300 failed with the fixed `USTE_BM01_PROFILE_BINDING` code. These aggregate phase times are not
 query latency, were not sampled repeatedly and are explicitly nonqualifying.
-Interrupted-prefix process-loss coverage has not yet run; this evidence covers a completed-frontier
-retry only.
+That initial evidence covered a completed-frontier retry only; Decision 0044 below subsequently
+adds interrupted-prefix process-loss coverage at small scale.
 
 Decision 0043 adds `bm01-oracle-summary-v1` generation outside the Linux query process and a
 `linux-query` correctness phase. The summary is bounded to 256 KiB, binds the engine mapping and
@@ -167,6 +167,13 @@ A release-built 20/200 Btrfs smoke matched all 384 outputs after revision-4 reco
 265,104 KiB peak RSS. Host caches were uncontrolled and graph state was full-memory. The report
 therefore states `engine_benchmark:false`; these are diagnostics, not BM-01 evidence.
 
+Decision 0044 adds an externally killed durable-prefix probe. Release-built Btrfs children parked
+after revisions 1, 2 and 3 only after flushing a content-free marker; the harness SIGKILLed each
+exact child. Fresh `linux-resume` processes recovered and completed every prefix to revision 4 with
+one current root, zero repaired certificate-tail bytes and zero ignored uncommitted journal bytes;
+fresh `linux-open` processes admitted the same result. These cover all incomplete phases of the
+20/200 plan, not exact-scale duration or intra-transaction byte boundaries.
+
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
 65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
@@ -174,6 +181,6 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 20 isolated T-20 fixture/engine/
+docs, strict clippy/rustdoc, the storage publication model, and 21 isolated T-20 fixture/engine/
 Linux-runner tests passed; one exact-profile oracle test is reserved for the release-profile
 acceptance command and ignored by the debug suite.

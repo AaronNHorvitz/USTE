@@ -54,6 +54,12 @@ Btrfs database, clears USTE's page cache before each authorized traversal and ch
 equivalence. Its single-pass timings/RSS/counters are correctness diagnostics and the JSON still
 sets `engine_benchmark:false`.
 
+`linux-create-crash-probe --pause-after-revision REVISION` is an explicit process-loss harness.
+It admits only a nonzero, nonfinal frontier, flushes a content-free readiness marker after that
+transaction is durable, and parks until an external parent SIGKILLs the exact process. A subsequent
+`linux-resume` must recover the prefix and finish the deterministic suffix. Do not use the probe as
+an ordinary database creator.
+
 ## Oracle semantics
 
 The oracle constructs independent outgoing and incoming adjacency arrays. For each depth level it

@@ -253,7 +253,8 @@ pub fn create(
         GraphState::new(scope()),
     )
     .map_err(|_| LinuxRunnerError::new("USTE_BM01_DATABASE_CREATE"))?;
-    let (mut coordinator, principal, frontier) = materialize(raw, &mut filesystem, profile)?;
+    let (mut coordinator, principal, frontier) =
+        materialize(raw, &mut filesystem, profile, &mut |_| Ok(()))?;
     let roots = ensure_current_root(&mut coordinator, &mut filesystem, &principal)?;
     Ok(report(
         "create",
@@ -264,6 +265,63 @@ pub fn create(
         0,
         started.elapsed(),
     ))
+}
+
+/// Creates a durable prefix, announces its frontier, then waits to be killed by an external
+/// process-loss harness. This command never returns after reaching a valid requested frontier.
+pub fn create_crash_probe(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    pause_after_revision: u64,
+) -> Result<LinuxRunReport, LinuxRunnerError> {
+    use std::io::Write as _;
+
+    let final_revision = materialization_revision_count(profile);
+    if pause_after_revision == 0 || pause_after_revision >= final_revision {
+        return Err(LinuxRunnerError::new("USTE_BM01_CRASH_PROBE_REVISION"));
+    }
+    let mut filesystem = open_filesystem(root)?;
+    let password = credential::read_password(password_file)?;
+    let mut adapter = PortableRecoveryAdapter::new(password);
+    let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
+        .map_err(|_| LinuxRunnerError::new("USTE_BM01_KEY_CREATE"))?;
+    let raw = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        retention()?,
+        database_name()?,
+        vault,
+        OsEntropy,
+        GraphState::new(scope()),
+    )
+    .map_err(|_| LinuxRunnerError::new("USTE_BM01_DATABASE_CREATE"))?;
+    let mut observer = |revision| {
+        if revision == pause_after_revision {
+            let marker = crash_probe_marker(revision, final_revision);
+            let mut output = std::io::stdout().lock();
+            writeln!(output, "{marker}")
+                .and_then(|()| output.flush())
+                .map_err(|_| LinuxRunnerError::new("USTE_BM01_CRASH_PROBE_SIGNAL"))?;
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok(())
+    };
+    let _ = materialize(raw, &mut filesystem, profile, &mut observer)?;
+    Err(LinuxRunnerError::new("USTE_BM01_CRASH_PROBE_MISSED"))
+}
+
+fn crash_probe_marker(frontier: u64, planned_frontier: u64) -> String {
+    format!(
+        concat!(
+            "{{\"schema\":\"bm01-linux-crash-probe-v1\",",
+            "\"engine_benchmark\":false,\"phase\":\"durable-prefix-paused\",",
+            "\"frontier\":{},\"planned_frontier\":{}}}"
+        ),
+        frontier, planned_frontier,
+    )
 }
 
 pub fn resume(
@@ -293,7 +351,8 @@ pub fn resume(
     {
         return Err(LinuxRunnerError::new("USTE_BM01_FRONTIER_MISMATCH"));
     }
-    let (mut coordinator, principal, frontier) = materialize(raw, &mut filesystem, profile)?;
+    let (mut coordinator, principal, frontier) =
+        materialize(raw, &mut filesystem, profile, &mut |_| Ok(()))?;
     let roots = ensure_current_root(&mut coordinator, &mut filesystem, &principal)?;
     Ok(report(
         "resume",
@@ -526,6 +585,7 @@ fn materialize(
     mut raw: LinuxRaw,
     filesystem: &mut LinuxFileSystem,
     profile: Bm01Profile,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
 ) -> Result<(LinuxCoordinator, AuthenticatedPrincipal, u64), LinuxRunnerError> {
     let policy =
         benchmark_policy(scope()).map_err(|_| LinuxRunnerError::new("USTE_BM01_POLICY_PROFILE"))?;
@@ -555,6 +615,7 @@ fn materialize(
     if install_outcome.revision.get() != 1 {
         return Err(LinuxRunnerError::new("USTE_BM01_REVISION_MISMATCH"));
     }
+    observer(1)?;
 
     let policy_kernel =
         kernel(policy).map_err(|_| LinuxRunnerError::new("USTE_BM01_POLICY_PROFILE"))?;
@@ -570,6 +631,7 @@ fn materialize(
         &principal,
         &mut clock,
         &mut sequence,
+        observer,
         core::iter::once(Ok(Operation::Create {
             expected: Expected::Absent,
             record: NewRecord::Evidence(NewEvidence {
@@ -598,6 +660,7 @@ fn materialize(
         &principal,
         &mut clock,
         &mut sequence,
+        observer,
         (0..profile.relationships()).map(|ordinal| {
             let edge = materializer.edge(ordinal);
             Ok(Operation::Create {
@@ -625,6 +688,7 @@ fn materialize(
         &principal,
         &mut clock,
         &mut sequence,
+        observer,
         (0..profile.relationships()).map(|ordinal| {
             Ok(Operation::ActOnRelationship {
                 target: relationship_ref(scope(), materializer, ordinal),
@@ -658,6 +722,7 @@ fn commit_batches<I>(
     principal: &AuthenticatedPrincipal,
     clock: &mut SystemClock,
     sequence: &mut u64,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
     operations: I,
 ) -> Result<(), LinuxRunnerError>
 where
@@ -670,6 +735,7 @@ where
             let full =
                 core::mem::replace(&mut batch, Vec::with_capacity(MAX_TRANSACTION_OPERATIONS));
             commit_batch(coordinator, filesystem, principal, clock, *sequence, full)?;
+            observer(*sequence)?;
             *sequence = sequence
                 .checked_add(1)
                 .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SEQUENCE"))?;
@@ -677,6 +743,7 @@ where
     }
     if !batch.is_empty() {
         commit_batch(coordinator, filesystem, principal, clock, *sequence, batch)?;
+        observer(*sequence)?;
         *sequence = sequence
             .checked_add(1)
             .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SEQUENCE"))?;
@@ -1000,8 +1067,11 @@ fn system_utc(now: SystemTime) -> Result<UtcInstant, AdapterError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        LinuxQueryReport, LinuxRunReport, cache_delta, percentile, status_value_kib, system_utc,
+        LinuxQueryReport, LinuxRunReport, cache_delta, crash_probe_marker, create_crash_probe,
+        percentile, status_value_kib, system_utc,
     };
+    use crate::Bm01Profile;
+    use std::path::Path;
     use std::time::{Duration, UNIX_EPOCH};
     use uste_graph::GraphIndexCacheReport;
 
@@ -1121,5 +1191,26 @@ mod tests {
         assert_eq!(delta.misses, 20);
         assert_eq!(delta.result_bytes, 80);
         assert!(cache_delta(after, before).is_err());
+    }
+
+    #[test]
+    fn crash_probe_rejects_nonprefixes_before_io_and_marker_is_content_free() {
+        let profile = Bm01Profile::new(20).unwrap();
+        for revision in [0, 4, u64::MAX] {
+            let error = create_crash_probe(
+                Path::new("unused-root"),
+                Path::new("unused-password"),
+                profile,
+                revision,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "USTE_BM01_CRASH_PROBE_REVISION");
+        }
+        let marker = crash_probe_marker(2, 4);
+        assert_eq!(
+            marker,
+            "{\"schema\":\"bm01-linux-crash-probe-v1\",\"engine_benchmark\":false,\"phase\":\"durable-prefix-paused\",\"frontier\":2,\"planned_frontier\":4}"
+        );
+        assert!(!marker.contains('/'));
     }
 }

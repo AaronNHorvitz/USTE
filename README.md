@@ -132,6 +132,10 @@ cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --
   linux-query --root ROOT --password-file PASSWORD --oracle-file ORACLE [--entities 100000]
 ~~~
 
+Recovery testing additionally provides `linux-create-crash-probe --pause-after-revision REVISION`.
+It deliberately parks after flushing a nonfinal durable frontier so an external harness can
+SIGKILL that exact process and then run `linux-resume`; it is not a normal creation command.
+
 Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate. Reports
 currently set `engine_benchmark:false`: materialization/recovery phases validate storage, and the
 query phase performs one correctness pass against a separately generated content-free oracle. Its

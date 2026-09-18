@@ -15,7 +15,7 @@ fn run() -> Result<(), String> {
     }
     let linux_command = matches!(
         command.as_str(),
-        "linux-create" | "linux-resume" | "linux-open" | "linux-query"
+        "linux-create" | "linux-create-crash-probe" | "linux-resume" | "linux-open" | "linux-query"
     );
     if command != "manifest"
         && command != "oracle-summary"
@@ -28,6 +28,7 @@ fn run() -> Result<(), String> {
     let mut root = None::<PathBuf>;
     let mut password_file = None::<PathBuf>;
     let mut oracle_file = None::<PathBuf>;
+    let mut pause_after_revision = None::<u64>;
     while let Some(argument) = arguments.next() {
         match argument.to_str() {
             Some("--entities") => {
@@ -53,6 +54,17 @@ fn run() -> Result<(), String> {
                 oracle_file = Some(PathBuf::from(
                     arguments.next().ok_or("--oracle-file requires a value")?,
                 ));
+            }
+            Some("--pause-after-revision") => {
+                pause_after_revision = Some(
+                    arguments
+                        .next()
+                        .ok_or("--pause-after-revision requires a value")?
+                        .into_string()
+                        .map_err(|_| "--pause-after-revision must be UTF-8")?
+                        .parse()
+                        .map_err(|_| "--pause-after-revision must be an unsigned integer")?,
+                );
             }
             Some("--help" | "-h") => {
                 print_usage();
@@ -91,6 +103,13 @@ fn run() -> Result<(), String> {
                     uste_t20_bench::linux_runner::create(&root, &password_file, profile)
                         .map(|report| report.to_json())
                 }
+                "linux-create-crash-probe" => uste_t20_bench::linux_runner::create_crash_probe(
+                    &root,
+                    &password_file,
+                    profile,
+                    pause_after_revision.ok_or("--pause-after-revision is required")?,
+                )
+                .map(|report| report.to_json()),
                 "linux-resume" => {
                     uste_t20_bench::linux_runner::resume(&root, &password_file, profile)
                         .map(|report| report.to_json())
@@ -113,7 +132,13 @@ fn run() -> Result<(), String> {
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = (root, password_file, oracle_file, profile);
+            let _ = (
+                root,
+                password_file,
+                oracle_file,
+                pause_after_revision,
+                profile,
+            );
             return Err("linux runner requires x86_64 Linux".into());
         }
     }
@@ -125,6 +150,8 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|engine-check> [--entities COUNT]\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
+         uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
+         --pause-after-revision REVISION [--entities COUNT]\n\
          uste-t20-bench linux-query --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
