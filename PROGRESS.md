@@ -38,9 +38,10 @@ Decision 0050 adds the resumable cursor and predecessor proof needed for cold ad
 Decision 0052 replaces the complete graph in the warm authoritative write loop with one admitted
 base and one bounded pending terminal-root plan. Decision 0053 reopens that state at an authenticated
 journal frontier as either the ready base or exactly one revalidated pending suffix, without
-reconstructing `GraphState`. T-20 remains open pending bounded discovery/scrub, disk-backed
-coordinator metadata, larger-than-memory recovery and qualifying
-BM-01/BM-06 results. Review was
+reconstructing `GraphState`. Decision 0059 at `8885da4` removes the hidden absolute-maximum root
+pre-scrub from graph recovery: fixed manifest discovery now precedes one caller-bounded semantic
+scan. T-20 remains open pending disk-backed coordinator metadata, larger-than-memory qualification
+and qualifying BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
@@ -50,6 +51,16 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Advanced T-20 at `8885da4` with Decision 0059. Graph root discovery now authenticates only two
+  fixed manifests and journal anchors before caller-selected cursor budgets apply; it no longer
+  scans every run twice or allocates the default scrub cache before recovery limits. A same-length
+  corrupt run remains provisional and fails cursor/admission validation. The publication overwrite
+  path deliberately retains its complete scrub to protect the sole good fallback.
+- Sequential 4 GiB-cgroup verification passed 43 graph, 77 storage and 28 transaction tests,
+  including complete storage crash matrices, plus warnings-denied clippy. The complete repository
+  gate also passed with 132 documentation links, 129 active IDs, 152 definitions, the 68-task graph
+  and 31 passed/2 exact-profile-ignored scaled T-20 tests. No BM-01/BM-06 campaign ran because host
+  swap remains saturated and the coordinator-metadata boundary is not yet honest.
 - Completed T-68/M1 at `b9689f3` plus Decision 0058 evidence. A real child acknowledged memory
   revision 4, was SIGKILLed and recovered the exact citation in a fresh process. Wrong password and
   committed-certificate mutation fail closed. Existing no-space publication matrices, pilot query
@@ -732,8 +743,8 @@ has adequate memory headroom.
 
 After M1's verified handoff, resume the following preserved full-product work:
 
-Continue T-20 by bounding candidate discovery/initial scrub, then move coordinator retry,
-transaction and blob-owner metadata off the full in-memory journal replay path. Extend bounded
+Continue T-20 by moving coordinator retry, transaction and blob-owner metadata off the full
+in-memory journal replay path. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's

@@ -130,8 +130,10 @@ publication target with one admitted base and one request-bounded pending plan. 
 retry survives the representation handoff, distinct progress is blocked while the base is stale,
 and failed root publication remains retryable. Decision 0053 recovers ready at the frontier or
 rebuilds exactly one pending suffix from the authenticated final request, then independently
-reopens and rebinds it while replaying coordinator metadata only. Next bound discovery/initial
-scrub and move coordinator maps/origin replay to disk-backed or bounded streaming state before
+reopens and rebinds it while replaying coordinator metadata only. Decision 0059 separates bounded
+authenticated manifest discovery from the compatibility full-scrub path: graph recovery applies
+caller-selected run-cursor limits before any run page is read and performs only the semantic scan.
+Next move coordinator maps/origin replay to disk-backed or bounded streaming state before
 qualifying BM-06.
 
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized

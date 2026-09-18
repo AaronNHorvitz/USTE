@@ -5,6 +5,8 @@ Date: 2026-09-17
 Status: accepted as a bounded T-20 recovery increment. T-20 remains open because candidate
 discovery/initial scrub and coordinator maps remain memory-resident, metadata is replayed from the
 journal origin, only zero or one suffix is supported, and BM-01/BM-06 are unqualified.
+Decision 0059 subsequently removes the hidden discovery/initial-scrub pre-scan; the other listed
+boundaries remain.
 
 ## Context
 

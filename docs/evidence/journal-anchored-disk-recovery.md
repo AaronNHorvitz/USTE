@@ -32,6 +32,8 @@ cargo clippy -p uste-txn -p uste-graph --all-targets --locked -- -D warnings
 ## Deliberate boundary
 
 Only zero or one suffix is accepted. Coordinator maps remain complete in memory and journal
-metadata is replayed from the origin. Candidate discovery and initial scrub are not yet resumably
-caller-bounded. If neither frontier nor predecessor root admits, callers must use the explicit
-complete-state fallback. No BM-01/BM-06 or larger-than-memory end-to-end result is claimed.
+metadata is replayed from the origin. Decision 0059 subsequently makes root-manifest discovery
+fixed-size and applies caller-selected cursor bounds before run pages are read; it does not change
+the metadata boundary or serialize a partial semantic scan. If neither frontier nor predecessor
+root admits, callers must use the explicit complete-state fallback. No BM-01/BM-06 or larger-than-
+memory end-to-end result is claimed.

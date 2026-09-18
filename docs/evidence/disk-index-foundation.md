@@ -233,8 +233,15 @@ Decision 0053 reopens that state without complete `GraphState` replay. The authe
 journal group plus an admitted frontier/predecessor root reconstructs zero or one suffix; a second
 open rechecks the base certificate and complete group identity, rebuilds coordinator maps and only
 then publishes pending state. Wrong preparation and append races fail closed. Coordinator maps,
-journal-origin metadata replay and discovery/initial scrub remain memory-resident/unbounded T-20
-work.
+journal-origin metadata replay and discovery/initial scrub remained memory-resident/unbounded T-20
+work at that commit.
+
+Decision 0059 removes that hidden discovery scrub from graph recovery. It authenticates only the
+two fixed root manifests before caller limits apply, then relies on the existing complete bounded
+run cursors and semantic admission as the single run scan. Corrupt run bytes remain provisional and
+fail closed before a disk base is returned. The compatibility publication path retains its complete
+fallback scrub; coordinator metadata and qualifying scale remain T-20 work. See
+[`bounded-root-manifest-discovery.md`](bounded-root-manifest-discovery.md).
 
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
