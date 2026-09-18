@@ -915,6 +915,146 @@ where
         self.frontier
     }
 
+    /// Visit an inclusive committed range with explicit group and encrypted-byte budgets.
+    ///
+    /// The byte budget counts certificates and group envelopes, not fixed-size segment headers
+    /// or independently format-bounded inventories. Blob payload bytes are not reread here.
+    /// Each certificate must match this exclusively owned store's authenticated anchor before
+    /// its group is exposed. The callback may perform index I/O through `filesystem`; it cannot
+    /// mutate this journal. State produced by callbacks is provisional until the complete call
+    /// succeeds (a later read, budget, authentication or callback failure can reject the range).
+    /// This retains only one group/inventory, but does not remove the store's anchor/blob maps.
+    pub fn visit_committed_range<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        mut visitor: V,
+    ) -> Result<(), StorageError>
+    where
+        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        if self.poisoned || first > last || self.frontier.is_none_or(|end| last > end) {
+            return Err(StorageError::IntegrityFailure);
+        }
+        if last.get() - first.get() + 1 > maximum_groups {
+            return Err(StorageError::ResourceLimit);
+        }
+        let mut remaining = maximum_encoded_bytes;
+        for sequence in first.get()..=last.get() {
+            let revision =
+                CommitRevision::new(sequence).map_err(|_| StorageError::IntegrityFailure)?;
+            remaining = remaining
+                .checked_sub(SMALL_ENVELOPE_BYTES)
+                .ok_or(StorageError::ResourceLimit)?;
+            let offset = sequence
+                .checked_mul(SMALL_ENVELOPE_BYTES)
+                .ok_or(StorageError::ResourceLimit)?;
+            let encoded = read_bounded(
+                filesystem,
+                &self.certificate_file,
+                offset,
+                SMALL_ENVELOPE_BYTES,
+            )?;
+            let certificate_digest = sha256(&encoded);
+            if self.certificate_anchors.get(&revision) != Some(&certificate_digest) {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let certificate = decode_certificate(
+                &self.vault,
+                self.database,
+                self.epoch,
+                self.certificate_log_id,
+                self.writer,
+                revision,
+                &encoded,
+            )?;
+            if certificate.revision != sequence || certificate.group_sequence != sequence {
+                return Err(StorageError::IntegrityFailure);
+            }
+            validate_group_encoded_length(certificate.group_length)?;
+            remaining = remaining
+                .checked_sub(certificate.group_length)
+                .ok_or(StorageError::ResourceLimit)?;
+            let file = filesystem
+                .open_existing(
+                    &self.database_directory,
+                    &segment_name(certificate.segment_id)?,
+                )
+                .map_err(recovery_adapter_error)?;
+            verify_segment_header(
+                filesystem,
+                &self.vault,
+                &file,
+                self.database,
+                self.epoch,
+                certificate.segment_id,
+                self.writer,
+            )?;
+            let end = certificate
+                .group_offset
+                .checked_add(certificate.group_length)
+                .ok_or(StorageError::IntegrityFailure)?;
+            if end > JOURNAL_SEGMENT_LIMIT || filesystem.metadata(&file)?.len < end {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let encoded_group = read_bounded(
+                filesystem,
+                &file,
+                certificate.group_offset,
+                certificate.group_length,
+            )?;
+            if sha256(&encoded_group) != certificate.group_digest {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let envelope =
+                EncryptedEnvelope::decode(&encoded_group).map_err(committed_crypto_error)?;
+            let plaintext = self
+                .vault
+                .decrypt(
+                    segment_context(
+                        self.database,
+                        self.epoch,
+                        certificate.segment_id,
+                        self.writer,
+                        sequence,
+                    ),
+                    &envelope,
+                )
+                .map_err(committed_crypto_error)?;
+            let inventory = if certificate.blob_inventory_digest == EMPTY_BLOB_INVENTORY_DIGEST {
+                None
+            } else {
+                // Inventory size is independently format-bounded. Blob payloads were verified
+                // at open/commit; this metadata visitor does not reread payload bytes.
+                Some(load_blob_inventory(
+                    filesystem,
+                    &self.vault,
+                    &self.database_directory,
+                    self.database,
+                    self.epoch,
+                    self.writer,
+                    certificate.blob_inventory_digest,
+                    false,
+                )?)
+            };
+            visitor(
+                filesystem,
+                RecoveredGroup {
+                    revision,
+                    certificate_digest,
+                    encoded_group: plaintext.as_slice(),
+                    blob_inventory_digest: certificate.blob_inventory_digest,
+                    blob_inventory: inventory.as_ref(),
+                    logical_event_digest: certificate.logical_event_digest,
+                },
+            )?;
+        }
+        Ok(())
+    }
+
     /// Exact authenticated journal anchor required for publishing a cache at the current frontier.
     #[must_use]
     pub const fn checkpoint_anchor(&self) -> Option<(CommitRevision, [u8; 32])> {
@@ -5179,6 +5319,106 @@ mod tests {
             ]
         );
         assert_eq!(store.frontier().map(CommitRevision::get), Some(2));
+        let mut ranged = Vec::new();
+        store
+            .visit_committed_range(
+                &mut filesystem,
+                second.revision,
+                second.revision,
+                1,
+                1_000_000,
+                |filesystem, group| {
+                    // Explicit I/O is available without releasing journal ownership.
+                    filesystem.metadata(&store.certificate_file)?;
+                    ranged.push((group.revision.get(), group.encoded_group.to_vec()));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(ranged, vec![(2, vec![0, 1, 2, 0xff, 0, 3])]);
+        for (groups, bytes) in [(0, 1_000_000), (1, 0), (1, SMALL_ENVELOPE_BYTES)] {
+            assert_eq!(
+                store.visit_committed_range(
+                    &mut filesystem,
+                    second.revision,
+                    second.revision,
+                    groups,
+                    bytes,
+                    |_, _| panic!("budget rejection precedes callback"),
+                ),
+                Err(StorageError::ResourceLimit)
+            );
+        }
+        assert_eq!(
+            store.visit_committed_range(
+                &mut filesystem,
+                second.revision,
+                first.revision,
+                2,
+                1_000_000,
+                |_, _| panic!("invalid range"),
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert_eq!(
+            store.visit_committed_range(
+                &mut filesystem,
+                first.revision,
+                second.revision,
+                2,
+                1_000_000,
+                |_, _| Err(StorageError::ResourceLimit),
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        filesystem
+            .test_mutate_file(
+                &store.database_directory,
+                &entry("CERTIFICATES"),
+                usize::try_from(2 * SMALL_ENVELOPE_BYTES).unwrap() + 127,
+            )
+            .unwrap();
+        let mut provisional = 0;
+        assert_eq!(
+            store.visit_committed_range(
+                &mut filesystem,
+                first.revision,
+                second.revision,
+                2,
+                1_000_000,
+                |_, _| {
+                    provisional += 1;
+                    Ok(())
+                },
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert_eq!(provisional, 1, "earlier callbacks must remain provisional");
+        filesystem
+            .test_mutate_file(
+                &store.database_directory,
+                &entry("CERTIFICATES"),
+                usize::try_from(2 * SMALL_ENVELOPE_BYTES).unwrap() + 127,
+            )
+            .unwrap();
+        filesystem
+            .test_mutate_file(
+                &store.database_directory,
+                &segment_name(store.current_segment_id).unwrap(),
+                usize::try_from(store.current_segment_offset - 1).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store.visit_committed_range(
+                &mut filesystem,
+                second.revision,
+                second.revision,
+                1,
+                1_000_000,
+                |_, _| panic!("corrupt group must not be exposed"),
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
     }
 
     #[test]

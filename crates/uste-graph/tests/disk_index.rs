@@ -2263,6 +2263,34 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     )
     .unwrap();
     assert_eq!(storage_report.frontier.unwrap().get(), 2);
+    let mut streamed_revisions = Vec::new();
+    recovery
+        .visit_transactions(
+            &mut filesystem,
+            CommitRevision::FIRST,
+            CommitRevision::new(2).unwrap(),
+            2,
+            1_000_000,
+            |filesystem, transaction| {
+                // Derived-index reads and journal validation share one exclusive recovery owner.
+                recovery
+                    .load_index_root_manifests(
+                        filesystem,
+                        uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    uste_graph::decode_transaction(transaction.canonical_request())
+                        .unwrap()
+                        .scope(),
+                    scope()
+                );
+                streamed_revisions.push(transaction.revision().get());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(streamed_revisions, vec![1, 2]);
     let graph_candidates =
         load_graph_state_root_candidates_for_recovery(&recovery, &mut filesystem).unwrap();
     let graph_candidate = graph_candidates

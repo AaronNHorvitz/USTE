@@ -37,4 +37,27 @@ cargo clippy -p uste-txn -p uste-replay --all-targets --locked --offline -- -D w
 # passed
 ~~~
 
-No BM-01/BM-06, T-20 closure, consumer API or production qualification follows from this increment.
+## Journal-correspondence admission extension
+
+`AuthenticatedIndexRecovery::visit_transactions` now supports inclusive revision ranges while
+retaining one canonical request/inventory at a time. It uses the exclusively owned storage
+journal's authenticated certificate anchors, rereads and authenticates each certificate and
+group, and permits explicit index I/O from the callback. Results remain provisional until the
+entire visit succeeds. Group count is checked before I/O; cumulative encrypted certificate/group
+bytes are separately admitted before their reads. Fixed-size segment headers and independently
+format-bounded inventories are outside that byte counter; payload bytes are not reread.
+
+Cold transaction-index admission first authenticates the complete bounded run and canonical
+entry shapes, then checks every journal transaction with an exact bounded disk lookup. The run
+count must equal the root revision. Because each expected value includes its unique journal
+revision, repeated transaction IDs cannot satisfy two revisions; exact cardinality excludes
+additional entries. No retry/transaction comparator map is constructed. The last certificate
+must match the root anchor. Old roots can be admitted as old bases, never silently as the current
+frontier. This proves transaction correspondence only, not the reducer digest, retry-key
+uniqueness or first-owner semantics of a complete coordinator base.
+
+Storage still retains certificate/blob metadata maps. The existing live coordinator and its
+alternate live-map admission API are unchanged. Disk-base pairing, first-owner validation,
+bounded mutation overlays and full suffix installation remain subsequent work.
+
+No BM-01/BM-06, T-20 closure, consumer API or production qualification follows from these increments.

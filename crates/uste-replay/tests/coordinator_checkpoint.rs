@@ -722,6 +722,80 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         .is_err(),
         "authenticated but wrong principal must not be admitted"
     );
+    let good_generation = root.generation();
+    drop(recovered);
+    filesystem.restart().unwrap();
+    let (recovery, _) = uste_txn::AuthenticatedIndexRecovery::open(
+        &mut filesystem,
+        &name,
+        scope,
+        CounterEntropy::new(24_000),
+        CounterEntropy::new(25_000),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    let admission_limits = uste_txn::CoordinatorTransactionAdmissionLimits {
+        run: uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+        lookup: lookup_limits,
+        maximum_groups: 2,
+        maximum_encoded_bytes: 1_000_000,
+    };
+    let candidates = recovery
+        .load_index_root_manifests(
+            &mut filesystem,
+            uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+        )
+        .unwrap();
+    assert_eq!(candidates.len(), 2);
+    for candidate in candidates {
+        let good = candidate.generation() == good_generation;
+        let result = uste_txn::admit_coordinator_transaction_index_for_recovery(
+            &recovery,
+            &mut filesystem,
+            candidate,
+            admission_limits,
+            &mut transaction_cache,
+        );
+        assert_eq!(
+            result.is_ok(),
+            good,
+            "journal correspondence is independent of coordinator maps"
+        );
+    }
+    for limited in [
+        uste_txn::CoordinatorTransactionAdmissionLimits {
+            maximum_groups: 1,
+            ..admission_limits
+        },
+        uste_txn::CoordinatorTransactionAdmissionLimits {
+            maximum_encoded_bytes: 1,
+            ..admission_limits
+        },
+        uste_txn::CoordinatorTransactionAdmissionLimits {
+            lookup: uste_storage::IndexGetLimits::new(16, 135).unwrap(),
+            ..admission_limits
+        },
+    ] {
+        let candidate = recovery
+            .load_index_root_manifests(
+                &mut filesystem,
+                uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            )
+            .unwrap()
+            .into_iter()
+            .find(|root| root.generation() == good_generation)
+            .unwrap();
+        assert!(
+            uste_txn::admit_coordinator_transaction_index_for_recovery(
+                &recovery,
+                &mut filesystem,
+                candidate,
+                limited,
+                &mut transaction_cache,
+            )
+            .is_err()
+        );
+    }
 }
 
 #[test]

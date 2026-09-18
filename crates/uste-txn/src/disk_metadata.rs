@@ -44,11 +44,107 @@ pub const COORDINATOR_TRANSACTION_PROFILE_V1: [u8; 32] = [
     0x8b, 0xfb, 0xe9, 0xc6, 0xc1, 0x84, 0x62, 0x88, 0x7a, 0x51, 0x3b, 0xee, 0x63, 0x0d, 0x79, 0xce,
 ];
 
-/// Privileged transaction lookup index validated against a live coordinator at one certificate.
-/// This is not a consumer authorization capability or a cold-recovery admission token.
+/// Privileged transaction lookup index validated against coordinator metadata or the journal.
+/// This is not a consumer authorization capability or admission of a complete coordinator base.
 #[derive(Debug)]
 pub struct CoordinatorTransactionIndex {
     root: RecoveredIndexRoot,
+}
+
+/// Independent bounds for full-run authentication and journal-to-index correspondence.
+#[derive(Clone, Copy, Debug)]
+pub struct CoordinatorTransactionAdmissionLimits {
+    pub run: IndexRunReadLimits,
+    pub lookup: uste_storage::IndexGetLimits,
+    pub maximum_groups: u64,
+    pub maximum_encoded_bytes: u64,
+}
+
+/// Admit a transaction-ID root directly against the authenticated journal, without constructing
+/// retry or transaction maps. Every journal revision must have exactly one matching index entry;
+/// the full run is authenticated first so counts cannot hide extra or missing entries. This
+/// validates transaction correspondence only: graph state, retry keys and first owners still
+/// require independent admission. Storage's journal anchor/blob maps remain memory-resident.
+pub fn admit_coordinator_transaction_index_for_recovery<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    root: RecoveredIndexRoot,
+    limits: CoordinatorTransactionAdmissionLimits,
+    cache: &mut uste_storage::PageCache,
+) -> Result<CoordinatorTransactionIndex, TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if root.scope() != recovery.scope()
+        || root.index_profile() != &COORDINATOR_TRANSACTION_PROFILE_V1
+        || root.runs().len() != 1
+        || root
+            .runs()
+            .next()
+            .is_none_or(|run| run.family() != 1 || run.entry_count() != root.revision().get())
+    {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    if root.revision().get() > limits.maximum_groups {
+        return Err(TransactionError::ResourceLimit);
+    }
+    recovery.visit_index_run(filesystem, &root, 1, limits.run, &mut |key, value| {
+        if key.len() != 16 || value.len() != 136 {
+            return Err(StorageError::IntegrityFailure);
+        }
+        let mut retry_key = [0; OUTCOME_KEY_BYTES];
+        retry_key[..32].copy_from_slice(&value[..32]);
+        let (_, _, outcome) = decode_outcome(&retry_key, &value[32..], root.revision())?;
+        if outcome.transaction_id.as_bytes() != key {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(())
+    })?;
+    recovery.visit_transactions(
+        filesystem,
+        CommitRevision::FIRST,
+        root.revision(),
+        limits.maximum_groups,
+        limits.maximum_encoded_bytes,
+        |filesystem, transaction| {
+            if transaction.revision == root.revision()
+                && &transaction.certificate_digest != root.certificate_digest()
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let expected = encode_outcome(
+                transaction.principal,
+                transaction.idempotency_key,
+                transaction.outcome,
+            )?;
+            let (value, _) = recovery
+                .index_get_bounded(
+                    filesystem,
+                    &root,
+                    1,
+                    transaction.outcome.transaction_id.as_bytes(),
+                    limits.lookup,
+                    cache,
+                )
+                .map_err(|error| match error {
+                    TransactionError::Storage(error) => error,
+                    TransactionError::ResourceLimit => StorageError::ResourceLimit,
+                    _ => StorageError::IntegrityFailure,
+                })?;
+            let value = value.ok_or(StorageError::IntegrityFailure)?;
+            if value.len() != 136
+                || value[..32] != transaction.principal.as_bytes()
+                || value[32..] != expected.value
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            Ok(())
+        },
+    )?;
+    Ok(CoordinatorTransactionIndex { root })
 }
 
 impl CoordinatorTransactionIndex {

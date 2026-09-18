@@ -51,6 +51,31 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added authenticated inclusive journal-range visitation with preflight group admission,
+  cumulative certificate/group-envelope byte admission and one-group/inventory retention.
+  Every reread certificate must match the exclusively owned journal's authenticated anchor;
+  group bytes, segment header and inventory are authenticated again. Callbacks have explicit
+  filesystem access for disk-index correspondence checks and must discard provisional work on
+  any later error. Inventory format caps remain separate from the envelope-byte budget; blob
+  payloads are not reread. The transaction wrapper validates canonical groups and scope without
+  constructing coordinator maps. Storage's anchor/blob maps remain memory-resident, so this is
+  not larger-than-memory recovery or completed multi-revision graph suffix recovery.
+- Extended Decision 0060 with direct cold transaction-index admission: authenticate the complete
+  run, require exact revision cardinality, then compare every entry to streamed journal outcomes
+  with bounded lookups. No coordinator comparator maps are built. Restart tests admit the exact
+  root, reject an authenticated wrong principal and enforce group/byte/result budgets. Existing
+  metadata, consumer interfaces and pinned M1 implementation are unchanged.
+- Verification on parent `8f47f1b` plus this increment, all under
+  `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M`,
+  `CARGO_BUILD_JOBS=1`, `--locked --offline` and `-- --test-threads=1`:
+  `cargo test -p uste-storage` passed 59 unit and 18 integration tests (including real process
+  loss); `cargo test -p uste-graph --test disk_index` passed 5; `cargo test -p uste-replay
+  --test coordinator_checkpoint` passed 3. After adding the range-specific group-corruption
+  regression, `cargo test -p uste-storage exact_groups_replay_in_order_and_ownership_is_exclusive`
+  passed again. Strict all-target clippy passed for storage/txn/graph and separately replay.
+  Documentation/task-graph checks passed; headroom at the second run was 9.4 GiB RAM and 1.1 GiB
+  swap. These capped tests are not BM qualification.
+
 - Added [Decision 0060](docs/decisions/0060-coordinator-transaction-index.md): a separate encrypted
   transaction-ID ordering with certificate binding, exact bounded raw lookup, stale-frontier
   refusal and complete bounded re-admission against recovered coordinator metadata. The current
@@ -768,8 +793,9 @@ headroom; the resumed preflight showed 4.1 GiB available RAM and 112 KiB free sw
 
 Continue T-20 by moving coordinator retry, transaction and blob-owner metadata off the full
 in-memory journal replay path. Decision 0060 supplies the missing transaction-ID disk ordering;
-next replace its in-memory admission comparator with authenticated journal/disk correspondence
-and combine the retry, transaction and owner indexes into an admitted disk metadata base.
+its cold admission now uses authenticated journal/disk correspondence without a coordinator
+comparator map. Next combine retry, transaction and owner indexes into an admitted disk metadata
+base, including exact first-owner proofs, and replace live maps with bounded mutation overlays.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host

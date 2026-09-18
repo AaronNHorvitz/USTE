@@ -206,6 +206,36 @@ where
         self.scope
     }
 
+    /// Stream canonical transactions from an authenticated inclusive journal range, retaining
+    /// one request/inventory at a time. Callbacks may use this recovery owner's explicit-I/O
+    /// index APIs. Their results remain provisional until the entire range succeeds.
+    ///
+    /// The byte budget covers encrypted certificates/groups; inventory sizes have independent
+    /// format caps. This does not yet remove storage's certificate and blob metadata maps.
+    pub fn visit_transactions<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        mut visitor: V,
+    ) -> Result<(), TransactionError>
+    where
+        V: FnMut(&mut F, RecoveredFrontierTransaction) -> Result<(), StorageError>,
+    {
+        self.journal
+            .visit_committed_range(
+                filesystem,
+                first,
+                last,
+                maximum_groups,
+                maximum_encoded_bytes,
+                |filesystem, group| visitor(filesystem, capture_group(self.scope, group)?),
+            )
+            .map_err(map_open_error)
+    }
+
     /// Load storage-authenticated derived roots for trusted recovery code.
     pub fn load_index_roots(
         &self,
