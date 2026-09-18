@@ -7,6 +7,13 @@ use super::*;
 /// equivalent independently admitted full anchor). Pending/unpublished domain states must fail.
 pub trait DiskCoordinatorState: TransactionState {
     fn validate_metadata_base(&self, root: &RecoveredIndexRoot) -> Result<(), ApplyError>;
+
+    /// Bind current ready domain state to the journal frontier for metadata-only publication.
+    /// No complete snapshot may be constructed merely to answer this method.
+    fn metadata_publication_input(
+        &self,
+        anchor: (CommitRevision, [u8; 32]),
+    ) -> Result<IndexRootInput, ApplyError>;
 }
 
 /// Bounds for rebuilding only post-base coordinator metadata and replaying ordinary reducers.
@@ -38,6 +45,7 @@ where
     inner: CommitCoordinator<S, F, W, E, I>,
     base: CoordinatorDiskBase,
     overlay_limits: CoordinatorRecoveryLimits,
+    rebase_required: bool,
 }
 
 impl<S, F, W, E, I> DiskCommitCoordinator<S, F, W, E, I>
@@ -87,6 +95,7 @@ where
             inner,
             base,
             overlay_limits,
+            rebase_required: false,
         })
     }
 
@@ -227,6 +236,16 @@ where
                 },
             )?;
         }
+        let mut rebase_required = false;
+        for profile in [
+            COORDINATOR_METADATA_PROFILE_V1,
+            COORDINATOR_TRANSACTION_PROFILE_V1,
+        ] {
+            rebase_required |= recovery
+                .load_index_root_manifests(filesystem, profile)?
+                .iter()
+                .any(|root| root.revision() > base.metadata.revision());
+        }
         let inner = CommitCoordinator {
             scope: recovery.scope(),
             retention,
@@ -242,6 +261,7 @@ where
             inner,
             base,
             overlay_limits: limits.overlay,
+            rebase_required,
         })
     }
 
@@ -257,6 +277,47 @@ where
             self.inner.outcomes.len(),
             self.inner.committed_blob_owners.len(),
         )
+    }
+
+    /// Stream the admitted base plus bounded overlays into current-revision metadata roots.
+    /// The old base and all overlays remain installed until both root publications succeed.
+    pub fn rebase_metadata(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorMetadataRebaseLimits,
+    ) -> Result<(), TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
+        if self.inner.outcomes.is_empty() && !self.rebase_required {
+            return Ok(());
+        }
+        self.rebase_required = true;
+        let next =
+            disk_metadata::publish_overlay_base(&mut self.inner, filesystem, &self.base, limits)?;
+        self.base = next;
+        self.inner.outcomes.clear();
+        self.inner.transactions.clear();
+        self.inner.committed_blob_owners.clear();
+        self.rebase_required = false;
+        Ok(())
+    }
+
+    /// New writes wait for a partial rebase to finish; exact retries remain available.
+    pub fn rebase_required(&self) -> bool {
+        self.rebase_required
+    }
+
+    fn admitted_overlay_limits(&self) -> CoordinatorRecoveryLimits {
+        if self.rebase_required {
+            CoordinatorRecoveryLimits {
+                maximum_outcomes: 0,
+                maximum_blob_owners: 0,
+            }
+        } else {
+            self.overlay_limits
+        }
     }
 
     pub fn start_blob_upload(
@@ -309,6 +370,7 @@ where
         lookup: IndexGetLimits,
         cache: &mut PageCache,
     ) -> Result<TransactionOutcome, TransactionError> {
+        let overlay = self.admitted_overlay_limits();
         self.inner.commit_with_preparation(
             filesystem,
             request,
@@ -316,7 +378,7 @@ where
             cancellation,
             Some(DiskCommitMetadata {
                 base: &self.base,
-                overlay: self.overlay_limits,
+                overlay,
                 lookup,
                 cache,
             }),
@@ -340,6 +402,7 @@ where
     where
         S: ExternallyPreparedTransactionState,
     {
+        let overlay = self.admitted_overlay_limits();
         self.inner.commit_with_preparation(
             filesystem,
             request,
@@ -347,7 +410,7 @@ where
             cancellation,
             Some(DiskCommitMetadata {
                 base: &self.base,
-                overlay: self.overlay_limits,
+                overlay,
                 lookup,
                 cache,
             }),

@@ -18,7 +18,7 @@ pub use authorized::{
 pub use disk_metadata::{
     COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, CoordinatorMetadataCandidate,
-    CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
+    CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport, CoordinatorMetadataRebaseLimits,
     CoordinatorTransactionAdmissionLimits, CoordinatorTransactionIndex,
     admit_coordinator_disk_base, admit_coordinator_transaction_index_for_recovery,
     load_coordinator_metadata_candidates, load_coordinator_metadata_candidates_for_recovery,

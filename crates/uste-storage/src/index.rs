@@ -913,6 +913,47 @@ where
     Ok(candidates.into_iter().map(|(_, root)| root).collect())
 }
 
+/// Finish durability of an exact discovered root without rotating either root slot. A previous
+/// failed publication may have left authenticated but unsynced bytes visible in this process.
+pub(crate) fn resync_root<F, W, E>(
+    filesystem: &mut F,
+    context: IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    limits: IndexRunReadLimits,
+) -> Result<(), StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let candidates =
+        load_manifest_candidates(filesystem, &context, vault, root.scope, root.index_profile)?;
+    validate_candidate_generations(&candidates)?;
+    let (slot, _) = candidates
+        .into_iter()
+        .find(|(_, candidate)| candidate == root)
+        .ok_or(StorageError::IntegrityFailure)?;
+    for run in root.runs() {
+        visit_run(
+            filesystem,
+            &context,
+            vault,
+            root,
+            run.family,
+            limits,
+            &mut |_, _| Ok(()),
+        )?;
+        let file = filesystem.open_existing(context.directory, &run_name(run.object_id)?)?;
+        filesystem.sync_all(&file)?;
+    }
+    let name = root_name(vault, &context, root.scope, root.index_profile, slot)?;
+    let file = filesystem.open_existing(context.directory, &name)?;
+    filesystem.sync_all(&file)?;
+    filesystem.sync_directory(context.directory)?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn get<F, W, E>(
     filesystem: &mut F,

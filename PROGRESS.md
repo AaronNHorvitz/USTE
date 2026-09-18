@@ -51,6 +51,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0063](docs/decisions/0063-coordinator-metadata-rebase.md) adds streaming insertion-only
+  metadata rebase, exact output checks and overlay release only after both current roots succeed.
+  A matching partial root is reauthenticated and resynchronized without slot rotation. Pending
+  rebase blocks new writes (including after restart) while permitting exact retries; advancing a
+  legacy writer beyond an intermediate partial root requires explicit cache rebuild, not deletion
+  of the pinned pair. The compatibility overwrite-selection scrub remains a bounded-publication
+  gap. First-owner read amplification and storage metadata maps also remain open.
+- Focused rebase verification passed 48 error/crash-before/crash-after cases covering run/root
+  syncs, directory syncs and root writes, plus one repeated partial-pair failure. Same-process
+  retries resynchronize previously visible unsynced roots; cold reopen installs the new pair
+  with empty overlays and permits another commit. Existing/new owners and merge-limit refusal
+  are covered. An initial test failure exposed reset synthetic entropy colliding with surviving
+  scratch object IDs; the fixture now supplies fresh deterministic entropy per simulated process.
+  No production entropy or acceptance requirement was weakened.
+- Rebase verification on parent `267dce2` plus this increment, one Cargo job/test thread under
+  `MemoryHigh=3G MemoryMax=4G MemorySwapMax=512M`: `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed 5; the same test flags
+  with `-p uste-graph --test disk_index` passed 5, `-p uste-txn` passed 29 and `-p uste-storage`
+  passed 59 unit plus 18 integration tests. Strict all-target clippy passed for
+  storage/txn/replay/graph. Documentation/task-graph checks passed. Preflight: 11 GiB available
+  RAM and 207 MiB free swap. No qualifying benchmark was attempted.
+
 - Added the disk coordinator's 13-case commit fault matrix: cold metadata-read failure and
   error/crash-before/crash-after at group/certificate writes and data-sync boundaries. Each fault
   is required to fire. Tests verify prepublication read errors do not poison the old state,
@@ -821,11 +843,14 @@ remaining mixed workload have not passed.
   without complete graph-map reconstruction. The warm live reducer now advances that base with
   one bounded pending plan and no complete graph map. Journal-anchored restart recovers either that
   ready base or one exact pending suffix without `GraphState`. Decision 0059 bounds graph manifest
-  discovery before run scanning; the coordinator's retry/transaction/blob-owner maps still replay
-  from journal origin into memory. The explicit-I/O preparation proof now supports
+  discovery before run scanning. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
-  Recovery of those coordinator maps remains fully memory-resident.
+  The legacy coordinator still replays complete metadata maps; Decisions 0060–0063 add a separate
+  disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
+  metadata rebase. Its disk-graph suffix path and authorization facade are not yet complete.
+  Storage's own certificate/blob collections remain memory-resident, first-owner admission is
+  read-amplified, and new-root publication still uses the compatibility overwrite-selection scrub.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
@@ -864,7 +889,8 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery is implemented; next extend the disk-graph external
-preparation/recovery path, add disk-aware authorization and metadata rebase, and replace per-owner
+preparation/recovery path, add disk-aware authorization and bounded root-publication admission,
+and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,

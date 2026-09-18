@@ -1480,6 +1480,33 @@ where
             .collect())
     }
 
+    /// Reauthenticate and resynchronize an existing root without replacing either root slot.
+    /// Limits apply separately to each run; the number of runs is bounded by the root format.
+    pub fn resync_index_root_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        limits: IndexRunReadLimits,
+    ) -> Result<(), StorageError> {
+        if self.poisoned
+            || self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
+        {
+            return Err(StorageError::InvalidState);
+        }
+        index::resync_root(
+            filesystem,
+            IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            limits,
+        )
+    }
+
     /// Exact key lookup in one family of an authenticated derived root.
     pub fn index_get(
         &self,

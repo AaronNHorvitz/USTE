@@ -46,12 +46,17 @@ fn reopen_fault_disk_counter(
     name: &EntryName,
     state: CounterState,
 ) -> (FaultDiskCounter, u64) {
+    let base_revision = state.revision.unwrap();
+    // Recovery must get fresh entropy after each simulated process restart, including when a
+    // previous process left immutable scratch objects behind.
+    static NEXT_ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(100_000);
+    let entropy = NEXT_ENTROPY.fetch_add(10_000, std::sync::atomic::Ordering::Relaxed);
     let (recovery, report) = uste_txn::AuthenticatedIndexRecovery::open(
         filesystem,
         name,
         state.scope,
-        CounterEntropy::new(90_000),
-        CounterEntropy::new(91_000),
+        CounterEntropy::new(entropy),
+        CounterEntropy::new(entropy + 5_000),
         &mut TestKeyAdapter,
     )
     .unwrap();
@@ -60,7 +65,9 @@ fn reopen_fault_disk_counter(
     let transaction_root = recovery
         .load_index_root_manifests(filesystem, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
         .unwrap()
-        .remove(0);
+        .into_iter()
+        .find(|root| root.revision() == base_revision)
+        .unwrap();
     let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
         &recovery,
         filesystem,
@@ -68,7 +75,7 @@ fn reopen_fault_disk_counter(
         uste_txn::CoordinatorTransactionAdmissionLimits {
             run: uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
             lookup,
-            maximum_groups: 1,
+            maximum_groups: base_revision.get(),
             maximum_encoded_bytes: 1_000_000,
         },
         &mut cache,
@@ -79,16 +86,25 @@ fn reopen_fault_disk_counter(
             &recovery, filesystem,
         )
         .unwrap()
-        .remove(0);
+        .into_iter()
+        .find(|candidate| candidate.revision() == base_revision)
+        .unwrap();
     let base = uste_txn::admit_coordinator_disk_base(
         &recovery,
         filesystem,
         candidate,
         transactions,
         uste_txn::CoordinatorDiskAdmissionLimits {
-            metadata: CoordinatorMetadataLoadLimits::new(1, 0, 2, 16, 4096).unwrap(),
+            metadata: CoordinatorMetadataLoadLimits::new(
+                base_revision.get(),
+                0,
+                base_revision.get() + 1,
+                16,
+                4096,
+            )
+            .unwrap(),
             lookup,
-            maximum_total_journal_groups: 1,
+            maximum_total_journal_groups: base_revision.get(),
             maximum_encoded_bytes_per_pass: 1_000_000,
         },
         &mut cache,
@@ -241,6 +257,240 @@ fn disk_coordinator_commit_faults_preserve_base_and_exact_suffix() {
         assert_eq!(retry.revision.get(), 2);
         assert_eq!(disk.state().unwrap().value, 12);
         assert_eq!(disk.overlay_counts(), (1, 0));
+        let base_state = disk.state().unwrap().clone();
+        if operation == Operation::ReadAt {
+            let mut limited = metadata_rebase_limits();
+            limited.merge =
+                uste_storage::IndexRunMergeLimits::new(limited.reuse, 10, 4096, 1, 4096).unwrap();
+            assert!(matches!(
+                disk.rebase_metadata(&mut filesystem, limited),
+                Err(TransactionError::Storage(
+                    uste_storage::journal::StorageError::ResourceLimit
+                ))
+            ));
+            assert_eq!(disk.overlay_counts(), (1, 0));
+            assert!(disk.rebase_required());
+        }
+        disk.rebase_metadata(&mut filesystem, metadata_rebase_limits())
+            .unwrap();
+        assert_eq!(disk.overlay_counts(), (0, 0));
+        assert!(!disk.rebase_required());
+        assert_eq!(
+            disk.commit(
+                &mut filesystem,
+                request(2, &second),
+                &mut clock,
+                &NeverCancel,
+                lookup,
+                &mut cache
+            )
+            .unwrap(),
+            retry
+        );
+        drop(disk);
+        filesystem.restart().unwrap();
+        let (mut disk, frontier) = reopen_fault_disk_counter(&mut filesystem, &name, base_state);
+        assert_eq!(frontier, 2);
+        assert_eq!(disk.overlay_counts(), (0, 0));
+        disk.commit(
+            &mut filesystem,
+            request(3, &first),
+            &mut clock,
+            &NeverCancel,
+            lookup,
+            &mut cache,
+        )
+        .unwrap();
+        assert_eq!(disk.state().unwrap().value, 17);
+    }
+}
+
+fn metadata_rebase_limits() -> uste_txn::CoordinatorMetadataRebaseLimits {
+    let read = uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap();
+    uste_txn::CoordinatorMetadataRebaseLimits {
+        merge: uste_storage::IndexRunMergeLimits::new(read, 10, 4096, 10, 4096).unwrap(),
+        reuse: read,
+    }
+}
+
+#[test]
+fn disk_metadata_rebase_failures_preserve_pinned_pair_and_resynchronize_retries() {
+    use uste_storage::fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation};
+    let boundaries = (1..=5)
+        .map(|n| (Operation::SyncAll, n))
+        .chain((1..=7).map(|n| (Operation::SyncDirectory, n)))
+        .chain((4..=7).map(|n| (Operation::WriteAt, n)));
+    for (operation, occurrence) in boundaries {
+        for action in [
+            FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+            FaultAction::CrashBefore,
+            FaultAction::CrashAfter,
+        ] {
+            let scope = scope();
+            let name = EntryName::new("disk-metadata-rebase-faults").unwrap();
+            let mut filesystem =
+                FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+            let vault = KeyVault::create(
+                scope.database(),
+                &mut TestKeyAdapter,
+                CounterEntropy::new(82_000),
+            )
+            .unwrap();
+            let mut coordinator = CommitCoordinator::create(
+                &mut filesystem,
+                scope,
+                RetentionDays::new(30).unwrap(),
+                name.clone(),
+                vault,
+                CounterEntropy::new(83_000),
+                CounterState::new(scope),
+            )
+            .unwrap();
+            let first = 5_u64.to_be_bytes();
+            let second = 7_u64.to_be_bytes();
+            let mut clock = TestClock(20);
+            coordinator
+                .commit(
+                    &mut filesystem,
+                    request(1, &first),
+                    &mut clock,
+                    &NeverCancel,
+                )
+                .unwrap();
+            let base_state = coordinator.read_view().unwrap().state().clone();
+            publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+            uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem)
+                .unwrap();
+            drop(coordinator);
+            filesystem.restart().unwrap();
+            let (mut disk, _) =
+                reopen_fault_disk_counter(&mut filesystem, &name, base_state.clone());
+            let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+            let mut cache = uste_storage::PageCache::new(64 * 1024).unwrap();
+            let outcome = disk
+                .commit(
+                    &mut filesystem,
+                    request(2, &second),
+                    &mut clock,
+                    &NeverCancel,
+                    lookup,
+                    &mut cache,
+                )
+                .unwrap();
+            let current_state = disk.state().unwrap().clone();
+            filesystem
+                .arm(
+                    FaultPlan::new([FaultPoint {
+                        operation,
+                        occurrence,
+                        action,
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+            assert!(
+                disk.rebase_metadata(&mut filesystem, metadata_rebase_limits())
+                    .is_err(),
+                "{operation:?}/{occurrence}/{action:?}"
+            );
+            assert_eq!(filesystem.pending_faults(), 0);
+            assert!(disk.rebase_required());
+            assert_eq!(disk.overlay_counts(), (1, 0));
+            assert_eq!(
+                disk.state().unwrap().value,
+                12,
+                "cache failure does not invalidate certified state"
+            );
+            if !filesystem.is_crashed() {
+                assert!(matches!(
+                    disk.commit(
+                        &mut filesystem,
+                        request(3, &first),
+                        &mut clock,
+                        &NeverCancel,
+                        lookup,
+                        &mut cache
+                    ),
+                    Err(TransactionError::ResourceLimit)
+                ));
+                assert_eq!(
+                    disk.commit(
+                        &mut filesystem,
+                        request(2, &second),
+                        &mut clock,
+                        &NeverCancel,
+                        lookup,
+                        &mut cache
+                    )
+                    .unwrap(),
+                    outcome
+                );
+            }
+            if operation == Operation::SyncAll
+                && occurrence == 5
+                && action == FaultAction::Error(uste_storage::AdapterErrorKind::Io)
+            {
+                // Repeat a partial-pair failure without a restart; the pinned old pair must not
+                // be rotated away by publishing another equivalent metadata generation.
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    disk.rebase_metadata(&mut filesystem, metadata_rebase_limits())
+                        .is_err()
+                );
+                assert_eq!(filesystem.pending_faults(), 0);
+                drop(disk);
+                filesystem.restart().unwrap();
+                (disk, _) = reopen_fault_disk_counter(&mut filesystem, &name, base_state.clone());
+                assert!(disk.rebase_required());
+            } else if filesystem.is_crashed() {
+                drop(disk);
+                filesystem.restart().unwrap();
+                (disk, _) = reopen_fault_disk_counter(&mut filesystem, &name, base_state.clone());
+            }
+            disk.rebase_metadata(&mut filesystem, metadata_rebase_limits())
+                .unwrap_or_else(|error| {
+                    panic!("rebase retry {operation:?}/{occurrence}/{action:?}: {error:?}")
+                });
+            assert_eq!(disk.overlay_counts(), (0, 0));
+            assert!(!disk.rebase_required());
+            drop(disk);
+            filesystem.restart().unwrap();
+            let (mut disk, frontier) =
+                reopen_fault_disk_counter(&mut filesystem, &name, current_state);
+            assert_eq!(frontier, 2);
+            assert_eq!(disk.overlay_counts(), (0, 0));
+            assert_eq!(
+                disk.commit(
+                    &mut filesystem,
+                    request(2, &second),
+                    &mut clock,
+                    &NeverCancel,
+                    lookup,
+                    &mut cache
+                )
+                .unwrap(),
+                outcome
+            );
+            disk.commit(
+                &mut filesystem,
+                request(3, &first),
+                &mut clock,
+                &NeverCancel,
+                lookup,
+                &mut cache,
+            )
+            .unwrap();
+            assert_eq!(disk.state().unwrap().value, 17);
+        }
     }
 }
 
@@ -256,6 +506,24 @@ impl CounterState {
 }
 
 impl uste_txn::DiskCoordinatorState for CounterState {
+    fn metadata_publication_input(
+        &self,
+        anchor: (CommitRevision, [u8; 32]),
+    ) -> Result<IndexRootInput, ApplyError> {
+        if self.revision != Some(anchor.0) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(IndexRootInput {
+            scope: self.scope,
+            revision: anchor.0,
+            certificate_digest: anchor.1,
+            reducer_profile: Self::REDUCER_PROFILE,
+            logical_state_digest: Self::logical_state_digest(self)
+                .map_err(|_| ApplyError::Conflict)?,
+            index_profile: COORDINATOR_METADATA_PROFILE_V1,
+        })
+    }
+
     fn validate_metadata_base(
         &self,
         root: &uste_storage::RecoveredIndexRoot,
@@ -1515,6 +1783,37 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
                     )
                     .unwrap(),
                 Some(PrincipalDigest::from_bytes([4; 32]))
+            );
+            recovered
+                .rebase_metadata(&mut filesystem, metadata_rebase_limits())
+                .unwrap();
+            assert_eq!(recovered.overlay_counts(), (0, 0));
+            assert_eq!(
+                recovered
+                    .committed_blob_owner(
+                        &mut filesystem,
+                        new_reference,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                Some(PrincipalDigest::from_bytes([4; 32]))
+            );
+            assert_eq!(
+                recovered
+                    .commit(
+                        &mut filesystem,
+                        TransactionRequest {
+                            blob_inventory: Some(&new_inventory),
+                            ..request(4, &third_bytes)
+                        },
+                        &mut clock,
+                        &NeverCancel,
+                        lookup_limits,
+                        &mut transaction_cache,
+                    )
+                    .unwrap(),
+                fourth
             );
         }
     }

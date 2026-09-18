@@ -2062,6 +2062,24 @@ impl JournalAnchoredTransactionState for GraphDiskLiveState {
 }
 
 impl uste_txn::DiskCoordinatorState for GraphDiskLiveState {
+    fn metadata_publication_input(
+        &self,
+        anchor: (CommitRevision, [u8; 32]),
+    ) -> Result<IndexRootInput, ApplyError> {
+        let root = &self.base.root.root;
+        if self.pending.is_some() || anchor != (root.revision(), *root.certificate_digest()) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(IndexRootInput {
+            scope: root.scope(),
+            revision: anchor.0,
+            certificate_digest: anchor.1,
+            reducer_profile: *root.reducer_profile(),
+            logical_state_digest: *root.logical_state_digest(),
+            index_profile: uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+        })
+    }
+
     fn validate_metadata_base(&self, root: &RecoveredIndexRoot) -> Result<(), ApplyError> {
         if self.pending.is_some() || self.base.anchor() != root.anchor() {
             return Err(ApplyError::Conflict);

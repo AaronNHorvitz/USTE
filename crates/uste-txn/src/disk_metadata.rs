@@ -6,9 +6,12 @@
 use std::collections::BTreeMap;
 
 mod admission;
+mod rebase;
 pub use admission::{
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, admit_coordinator_disk_base,
 };
+pub use rebase::CoordinatorMetadataRebaseLimits;
+pub(crate) use rebase::publish_overlay_base;
 
 use uste_crypto::EntropySource;
 use uste_storage::{
