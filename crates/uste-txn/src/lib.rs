@@ -952,6 +952,27 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted maintenance: atomically publish and return the exact recovered root handle.
+    ///
+    /// Callers must complete domain validation first; this bypasses only a redundant manifest
+    /// rediscovery read, not certificate or durable-publication checks.
+    pub fn publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_index_root_recovered(filesystem, input, runs)
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted maintenance: load roots on this journal's authenticated certificate chain.
     pub fn load_index_roots(
         &self,

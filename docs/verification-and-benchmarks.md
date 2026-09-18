@@ -149,6 +149,11 @@ with the full-state oracle, reject exact-minus-bound failures without root visib
 the journal commit across restart. This narrows the write-path memory proof only; benchmark reports
 must still disclose the full-memory live reducer, coordinator metadata, admission and recovery.
 
+Decision 0049 additionally verifies that the terminally admitted root handle can drive the next
+bounded disk preparation after filesystem/coordinator reopen without full-snapshot rediscovery.
+This is retained-handle continuity only; benchmark and recovery claims must not describe it as cold
+semantic admission or process-independent recovery.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

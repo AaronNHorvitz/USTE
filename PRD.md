@@ -180,6 +180,12 @@ actual merged primary entries under an explicit one-history-bucket memory bound.
 coordinator metadata, root admission and recovery remain full-memory, so T-20 and BM-01/BM-06 stay
 open.
 
+Decision 0049 preserves that terminally validated root as an opaque admitted handle. Consecutive
+disk-backed preparations can use it directly without rediscovering the root through a complete
+live-snapshot comparison, including after a coordinator/filesystem reopen when the caller retained
+the handle. Cold candidate admission and process recovery still require the planned streaming
+cursor/predecessor work and do not inherit this warm-handoff proof.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

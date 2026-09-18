@@ -1021,10 +1021,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     .unwrap();
 
     let revision_two = coordinator.read_view().unwrap().state().clone();
-    let revision_two_roots =
-        load_graph_state_roots(&coordinator, &mut filesystem, &revision_two).unwrap();
-    assert_eq!(revision_two_roots.len(), 1);
-    assert_eq!(revision_two_roots[0].generation(), delta_root.generation);
+    assert_eq!(delta_root.revision(), CommitRevision::new(2).unwrap());
     drop(coordinator);
     filesystem.restart().unwrap();
     let (reopened, recovery) = CommitCoordinator::open(
@@ -1056,7 +1053,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
         load_graph_disk_preparation_view(
             &coordinator,
             &mut filesystem,
-            &revision_two_roots[0],
+            &delta_root,
             transition.clone(),
             GraphDiskPreparationLimits::new(3, 8, 8, 8, 1024 * 1024).unwrap(),
             &mut transition_limit_cache,
@@ -1069,7 +1066,7 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
     let transition_view = load_graph_disk_preparation_view(
         &coordinator,
         &mut filesystem,
-        &revision_two_roots[0],
+        &delta_root,
         transition.clone(),
         limits,
         &mut transition_cache,
@@ -1550,7 +1547,7 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
         merge_limits,
     )
     .unwrap();
-    assert_eq!(delta_publication.revision, target_revision);
+    assert_eq!(delta_publication.revision(), target_revision);
     assert_eq!(report.runs, 6);
     assert!(report.base_entries > 0);
     assert!(report.replacements > 0);
@@ -1580,7 +1577,7 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
     let target = coordinator.read_view().unwrap().state().clone();
     let delta_roots = load_graph_state_roots(&coordinator, &mut filesystem, &target).unwrap();
     assert_eq!(delta_roots.len(), 1);
-    assert_eq!(delta_roots[0].generation(), delta_publication.generation);
+    assert_eq!(delta_roots[0].generation(), delta_publication.generation());
     let full_publication =
         publish_graph_state_root(&mut coordinator, &mut filesystem, &target).unwrap();
     let equivalent_roots = load_graph_state_roots(&coordinator, &mut filesystem, &target).unwrap();
@@ -1588,7 +1585,7 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
     assert!(
         equivalent_roots
             .iter()
-            .any(|root| root.generation() == delta_publication.generation)
+            .any(|root| root.generation() == delta_publication.generation())
     );
     assert!(
         equivalent_roots
@@ -1599,7 +1596,7 @@ fn graph_state_delta_root_matches_full_projection_and_reconstructs() {
     let candidates = load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
     let delta_candidate = candidates
         .iter()
-        .find(|candidate| candidate.generation() == delta_publication.generation)
+        .find(|candidate| candidate.generation() == delta_publication.generation())
         .unwrap();
     let (reconstructed, reconstruction) = reconstruct_graph_state_candidate(
         &coordinator,

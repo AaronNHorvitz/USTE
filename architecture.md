@@ -241,6 +241,12 @@ authoritative journal outcome. The live reducer, coordinator maps, root admissio
 unchanged full-memory boundaries; this is the inductive base-plus-delta publication proof, not yet
 the persistent base/overlay state.
 
+Decision 0049 retains the exact manifest-backed root handle returned by that successful terminal
+publication and passes it out as the opaque admitted graph root. This removes a complete-snapshot
+rediscovery between consecutive proof-backed transactions without weakening certificate, scope,
+run-binding or page-authentication checks. It is deliberately not cold admission: a lost handle
+still requires streaming semantic proof before disk state can replace full-map reconstruction.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

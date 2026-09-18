@@ -207,6 +207,11 @@ restart after failed publication expose no target root; adequate retry produces 
 to the independent full-state projection. The live reducer, root admission, coordinator metadata
 and recovery remain full-memory boundaries.
 
+Decision 0049 keeps the resulting admitted root handle instead of reducing it to a numeric
+publication receipt. The next bounded disk preparation can use that handle directly after
+filesystem/coordinator reopen, without a full-snapshot root rediscovery. This does not admit a cold
+candidate after handle loss; resumable streaming and predecessor lookup remain required.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the

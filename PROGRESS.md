@@ -24,7 +24,7 @@ correctness-query phase. Decision 0044 adds real durable-prefix SIGKILL/resume c
 0045 adds the independent warm-up/measured oracle bundle. Decision 0046 adds repeated paired-cache
 sampling without claiming a benchmark pass. Decision 0047 adds a preemptive persistent-worker query
 deadline for the CLI. Decision 0048 removes the complete snapshot from proof-derived terminal-root
-publication. T-20 remains
+publication. Decision 0049 returns that admitted root directly for the next disk preparation. T-20 remains
 open pending a disk-backed live publication target,
 larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
@@ -360,6 +360,11 @@ unverified external distribution prerequisite.
   partial visibility across restart, then proves proof-only and full-state roots reconstruct to the
   same graph. This removes postcommit full-state validation, not the live reducer or recovery
   boundaries; T-20 and BM-01/BM-06 remain open.
+- Added Decision 0049. Successful proof-only publication now returns the exact manifest-backed
+  `DerivedGraphStateRoot` after terminal validation, rather than discarding it to a numeric receipt.
+  The disk-preparation fixture carries that handle across filesystem/coordinator reopen and uses it
+  for the next bounded proof without a complete-snapshot root rediscovery. Cold candidate admission
+  still requires a resumable authenticated cursor and bounded predecessor lookup.
 - Added Decision 0039 and a synchronized runtime for every admitted authorized graph root. Its
   privileged report now includes cumulative decrypted-cache occupancy/events, completed authorized
   reads/raw operations, authenticated pages, fragments and logical result bytes. The counters are
@@ -521,7 +526,7 @@ bash scripts/check.sh
 # workspace format/clippy/test/doc pass; 263 workspace tests including 77 uste-storage, 13
 # uste-crypto, 41 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (108 links, 105 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# docs=ok (110 links, 107 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
 # and 31 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
 # intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
@@ -618,7 +623,8 @@ remaining mixed workload have not passed.
 ## Next dependency-permitted work
 
 Continue T-20 by running the exact five-sample BM-01 campaign under the accepted host reservation.
-Add streaming semantic admission for an authenticated graph disk base, then replace the complete
+Add the resumable authenticated run cursor and bounded predecessor lookup required for streaming
+semantic admission of a graph disk base, then replace the complete
 live graph publication target with a disk-backed base/overlay state and remove the full-memory
 coordinator/recovery boundary. Run exact
 BM-01 under the accepted 24 GiB reservation and

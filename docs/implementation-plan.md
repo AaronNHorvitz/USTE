@@ -101,6 +101,11 @@ counts with only one explicitly bounded history bucket retained. Next add stream
 semantic admission, then a persistent base/overlay reducer and coordinator-metadata path; live
 state, admission and recovery remain full-memory until those increments land.
 
+Decision 0049 returns the terminally validated root as the next opaque disk-base handle, removing
+the full-snapshot rediscovery step between consecutive proof-backed transactions. Cold admission
+still needs a resumable authenticated run cursor and predecessor lookup so historical/reference
+semantics can be checked with bounded memory before the live base/overlay reducer is introduced.
+
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
 only to a currently `ManageSchema`-authorized operator with an issuer-bound root capability. The

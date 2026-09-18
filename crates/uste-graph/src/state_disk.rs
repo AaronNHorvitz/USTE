@@ -64,8 +64,8 @@ pub struct DerivedGraphStateRoot {
 
 /// Authenticated, journal-anchored root that has not yet been semantically reconstructed.
 ///
-/// This is intentionally distinct from `DerivedGraphStateRoot`, whose bytes have already been
-/// compared with a live reducer snapshot.
+/// This is intentionally distinct from `DerivedGraphStateRoot`, which has already been admitted
+/// either against a live reducer snapshot or by proof-derived terminal output validation.
 pub struct GraphStateRootCandidate {
     root: RecoveredIndexRoot,
 }
@@ -1450,7 +1450,9 @@ where
 /// digest and their descriptors match the proof-derived target counts, after which one
 /// certificate-bound root is atomically published. An error never rolls back or weakens the
 /// already-authoritative journal commit. An in-process caller retaining the borrowed plan may
-/// retry; after process loss, rebuild the cache from recovered live state.
+/// retry. Success returns the authenticated, semantically admitted root handle directly, without
+/// a live-snapshot comparison; cold discovery after process loss remains a separate admission
+/// operation.
 pub fn publish_graph_state_root_delta<F, W, E, I>(
     coordinator: &mut CommitCoordinator<GraphState, F, W, E, I>,
     filesystem: &mut F,
@@ -1458,7 +1460,7 @@ pub fn publish_graph_state_root_delta<F, W, E, I>(
     plan: &GraphStateRootDelta,
     outcome: TransactionOutcome,
     limits: GraphStateRootMergeLimits,
-) -> Result<(DurableIndexRoot, GraphStateRootMergeReport), GraphDiskError>
+) -> Result<(DerivedGraphStateRoot, GraphStateRootMergeReport), GraphDiskError>
 where
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
@@ -1518,7 +1520,7 @@ where
     }
     let logical_state_digest = validator.finish()?;
 
-    let root = coordinator.publish_index_root(
+    let root = coordinator.publish_index_root_recovered(
         filesystem,
         IndexRootInput {
             scope: plan.scope,
@@ -1530,7 +1532,7 @@ where
         },
         &runs,
     )?;
-    Ok((root, report))
+    Ok((DerivedGraphStateRoot { root }, report))
 }
 
 fn target_family_entries(counts: [u64; 8], family: u8) -> Result<u64, GraphDiskError> {

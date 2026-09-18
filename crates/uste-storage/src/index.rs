@@ -695,6 +695,10 @@ where
     Ok(descriptor)
 }
 
+/// Publish a root and return the exact authenticated handle assembled into its durable manifest.
+///
+/// This avoids a fallible post-publication rediscovery read for callers that already performed
+/// terminal semantic validation before publication.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn publish_root<F, W, E, I>(
     filesystem: &mut F,
@@ -703,7 +707,7 @@ pub(crate) fn publish_root<F, W, E, I>(
     identity_entropy: &mut I,
     input: IndexRootInput,
     runs: &[IndexRunDescriptor],
-) -> Result<DurableIndexRoot, StorageError>
+) -> Result<RecoveredIndexRoot, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -771,9 +775,15 @@ where
     filesystem.set_len(&file, ROOT_FILE_BYTES)?;
     filesystem.sync_all(&file)?;
     filesystem.sync_directory(context.directory)?;
-    Ok(DurableIndexRoot {
+    Ok(RecoveredIndexRoot {
+        scope: input.scope,
         revision: input.revision,
         generation,
+        certificate_digest: input.certificate_digest,
+        reducer_profile: input.reducer_profile,
+        logical_state_digest: input.logical_state_digest,
+        index_profile: input.index_profile,
+        runs: runs.to_vec(),
     })
 }
 

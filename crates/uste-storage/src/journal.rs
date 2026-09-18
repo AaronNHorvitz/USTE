@@ -1241,6 +1241,23 @@ where
         input: IndexRootInput,
         runs: &[IndexRunDescriptor],
     ) -> Result<DurableIndexRoot, StorageError> {
+        let root = self.publish_index_root_recovered(filesystem, input, runs)?;
+        Ok(DurableIndexRoot {
+            revision: root.revision(),
+            generation: root.generation(),
+        })
+    }
+
+    /// Atomically publish a derived root and return the exact manifest-backed recovered handle.
+    ///
+    /// The handle is not semantic authority by itself; callers must finish domain validation
+    /// before invoking this method and keep it private to that successful publication flow.
+    pub fn publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, StorageError> {
         if self.poisoned
             || self.frontier != Some(input.revision)
             || self.previous_certificate_digest != input.certificate_digest
