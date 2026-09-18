@@ -40,6 +40,14 @@ systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512
 
 ## Deliberate boundary
 
+The resumed increment also routes both coordinator metadata discovery owners through provisional
+manifests. Seed reconstruction still validates metadata shape, reads all declared families under
+`CoordinatorMetadataLoadLimits`, rejects duplicate transaction identities and only returns after
+terminal authentication. Focused verification passed all three `uste-replay` coordinator checkpoint
+tests (including malformed metadata, budget refusals and suffix replay) and warnings-denied
+`uste-txn` clippy under the same 4 GiB cgroup. This removes the metadata discovery pre-scan but
+does not remove reconstruction's complete maps.
+
 The graph admission operation restarts rather than checkpointing a partially consumed semantic
 scan after process loss. Root publication retains its complete fallback scrub. Coordinator retry,
 transaction and blob-owner maps still replay from the journal origin into memory, and only zero or

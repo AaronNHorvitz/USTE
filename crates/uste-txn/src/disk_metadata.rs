@@ -155,7 +155,7 @@ where
         filesystem: &mut F,
         profile: [u8; 32],
     ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
-        self.load_index_roots(filesystem, profile)
+        self.load_index_root_manifests(filesystem, profile)
     }
 
     fn reader_visit_run(
@@ -186,7 +186,7 @@ where
         filesystem: &mut F,
         profile: [u8; 32],
     ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
-        self.load_index_roots(filesystem, profile)
+        self.load_index_root_manifests(filesystem, profile)
     }
 
     fn reader_visit_run(
@@ -332,6 +332,8 @@ where
         .map_err(TransactionError::Storage)
 }
 
+/// Discover provisional certificate-bound manifests without scanning metadata runs.
+/// Reconstruction authenticates every run under caller-selected limits before returning a seed.
 pub fn load_coordinator_metadata_candidates<S, F, W, E, I>(
     coordinator: &CommitCoordinator<S, F, W, E, I>,
     filesystem: &mut F,
@@ -346,6 +348,7 @@ where
     load_candidates::<S, F, _>(coordinator, filesystem)
 }
 
+/// Recovery-owner form of bounded provisional metadata-manifest discovery.
 pub fn load_coordinator_metadata_candidates_for_recovery<S, F, W, E, I>(
     recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
     filesystem: &mut F,

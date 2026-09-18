@@ -51,6 +51,14 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Resumed after the capacity interruption and pushed `8885da4`/`808f2fd` without rewriting history.
+  Confirmed the M1 pin's lock digest and unchanged pilot sources against Decision 0058, and
+  reconciled obsolete T-64 next-step instructions with completed T-63–T-68 status.
+- Extended bounded manifest discovery to both coordinator metadata owners. The existing seed
+  reconstruction continues to authenticate all families and enforce caller budgets before return.
+  `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p uste-replay --test coordinator_checkpoint
+  --locked --offline` passed all 3 cases; strict `uste-txn --all-targets` clippy passed. Both ran
+  sequentially under `MemoryHigh=3G`, `MemoryMax=4G`, `MemorySwapMax=512M`.
 - Advanced T-20 at `8885da4` with Decision 0059. Graph root discovery now authenticates only two
   fixed manifests and journal anchors before caller-selected cursor budgets apply; it no longer
   scans every run twice or allocates the default scrub cache before recovery limits. A same-length
@@ -706,8 +714,9 @@ remaining mixed workload have not passed.
   scanning the complete reducer. Cold semantic admission now returns a bounded `GraphDiskBase`
   without complete graph-map reconstruction. The warm live reducer now advances that base with
   one bounded pending plan and no complete graph map. Journal-anchored restart recovers either that
-  ready base or one exact pending suffix without `GraphState`, but discovery/initial scrub and the
-  coordinator's retry/transaction/blob-owner maps still replay from journal origin into memory. The explicit-I/O preparation proof now supports
+  ready base or one exact pending suffix without `GraphState`. Decision 0059 bounds graph manifest
+  discovery before run scanning; the coordinator's retry/transaction/blob-owner maps still replay
+  from journal origin into memory. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
   Recovery of those coordinator maps remains fully memory-resident.
@@ -735,13 +744,12 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-T-63 is complete at the exact `7393def` baseline with Decision 0055 and executable limits.
-Continue T-64 by implementing durable source/fact admission and consumer-outbox upload
-reconciliation so new bounded ingestion works after reopen without quota leakage. Then execute
-T-65–T-68 in order. Do not launch a large benchmark campaign until M1 is qualified and the host
-has adequate memory headroom.
-
-After M1's verified handoff, resume the following preserved full-product work:
+T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
+exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and
+unchanged pilot sources, and the complete gate at `8885da4` included the pilot recovery tests.
+The two interruption-pending commits `8885da4` and `808f2fd` are now pushed to origin.
+Continue the preserved full-product work below. Large benchmarks still require adequate host
+headroom; the resumed preflight showed 4.1 GiB available RAM and 112 KiB free swap.
 
 Continue T-20 by moving coordinator retry, transaction and blob-owner metadata off the full
 in-memory journal replay path. Extend bounded

@@ -27,11 +27,11 @@ asset-price records, alongside agent memory. T-28/T-54/T-56 own the offline exam
 account, provider password/token or trading implementation is required by these tasks.
 This clarification preserves task IDs, dependencies and completed R0 evidence.
 
-## Next priority — M1 experimental local memory pilot
+## Completed early delivery — M1 experimental local memory pilot
 
 [Decision 0054](docs/decisions/0054-memory-first-delivery.md) adds this earlier delivery
 checkpoint without changing existing R0–R4 dependencies or accepting failed benchmarks.
-Execute T-63–T-68 next in dependency order, then resume T-20/T-19 and the complete roadmap.
+T-63–T-68 were executed in dependency order; current work resumes T-20/T-19 and the complete roadmap.
 A full-product goal continues after M1; an explicitly M1-only goal ends at verified T-68.
 [The milestone contract](docs/memory-first-milestone.md) owns the detailed exit cases.
 T-63 through T-68 and M1 are complete. Resume T-20, then T-19 and the unchanged full roadmap.
