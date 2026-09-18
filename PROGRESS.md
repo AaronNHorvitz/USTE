@@ -51,6 +51,13 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added [Decision 0060](docs/decisions/0060-coordinator-transaction-index.md): a separate encrypted
+  transaction-ID ordering with certificate binding, exact bounded raw lookup, stale-frontier
+  refusal and complete bounded re-admission against recovered coordinator metadata. The current
+  comparator and coordinator remain memory-resident; T-20 remains open. Focused checkpoint tests
+  cover missing IDs, byte/entry budgets, exact outcomes and an authenticated wrong principal.
+  Verification uses one job/thread and the established 4 GiB cgroup. The host preflight showed
+  about 10 GiB available RAM and 1.1 GiB free swap; no qualifying benchmark was launched.
 - Added `CoordinatorRecoveryLimits` and `open_journal_anchored_prepared_bounded`: callers can
   cap retained outcomes and first blob owners before coordinator map insertion during recovery.
   Duplicate blob inventory use consumes no additional owner slot. Refusal returns no coordinator
@@ -760,9 +767,10 @@ Continue the preserved full-product work below. Large benchmarks still require a
 headroom; the resumed preflight showed 4.1 GiB available RAM and 112 KiB free swap.
 
 Continue T-20 by moving coordinator retry, transaction and blob-owner metadata off the full
-in-memory journal replay path. The v1 metadata root has retry and blob-owner families but no
-transaction-ID lookup family; introduce and validate that disk lookup contract before replacing
-the live maps. Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
+in-memory journal replay path. Decision 0060 supplies the missing transaction-ID disk ordering;
+next replace its in-memory admission comparator with authenticated journal/disk correspondence
+and combine the retry, transaction and owner indexes into an admitted disk metadata base.
+Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's

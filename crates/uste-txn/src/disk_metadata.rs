@@ -38,6 +38,207 @@ const METADATA_LOGICAL_BYTES: u64 = METADATA_KEY.len() as u64 + METADATA_VALUE_B
 const OUTCOME_LOGICAL_BYTES: u64 = OUTCOME_KEY_BYTES as u64 + OUTCOME_VALUE_BYTES as u64;
 const OWNER_LOGICAL_BYTES: u64 = OWNER_KEY_BYTES as u64 + OWNER_VALUE_BYTES as u64;
 
+/// SHA-256 of `USTE coordinator-transaction-v1`; a separate optional index profile.
+pub const COORDINATOR_TRANSACTION_PROFILE_V1: [u8; 32] = [
+    0xd7, 0x8e, 0x78, 0xaf, 0x45, 0xef, 0xd9, 0xc5, 0xa3, 0xa0, 0x61, 0x23, 0x95, 0x47, 0xcf, 0xfd,
+    0x8b, 0xfb, 0xe9, 0xc6, 0xc1, 0x84, 0x62, 0x88, 0x7a, 0x51, 0x3b, 0xee, 0x63, 0x0d, 0x79, 0xce,
+];
+
+/// Privileged transaction lookup index validated against a live coordinator at one certificate.
+/// This is not a consumer authorization capability or a cold-recovery admission token.
+#[derive(Debug)]
+pub struct CoordinatorTransactionIndex {
+    root: RecoveredIndexRoot,
+}
+
+impl CoordinatorTransactionIndex {
+    pub fn anchor(&self) -> IndexRootAnchor {
+        self.root.anchor()
+    }
+
+    /// Exact raw lookup with explicit I/O limits. Expiry and principal authorization remain the
+    /// responsibility of the trusted coordinator caller. A changed frontier fails before I/O.
+    pub fn lookup<S, F, W, E, I>(
+        &self,
+        coordinator: &CommitCoordinator<S, F, W, E, I>,
+        filesystem: &mut F,
+        transaction_id: TransactionId,
+        limits: uste_storage::IndexGetLimits,
+        cache: &mut uste_storage::PageCache,
+    ) -> Result<Option<(PrincipalDigest, TransactionOutcome)>, TransactionError>
+    where
+        S: TransactionState,
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        if coordinator.scope != self.root.scope()
+            || coordinator.checkpoint_anchor()?
+                != Some((self.root.revision(), *self.root.certificate_digest()))
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let (value, _) = coordinator.index_get_bounded(
+            filesystem,
+            &self.root,
+            1,
+            transaction_id.as_bytes(),
+            limits,
+            cache,
+        )?;
+        value
+            .map(|value| {
+                if value.len() != 136 {
+                    return Err(TransactionError::IntegrityFailure);
+                }
+                let mut retry_key = [0_u8; OUTCOME_KEY_BYTES];
+                retry_key[..32].copy_from_slice(&value[..32]);
+                let (principal, _, outcome) =
+                    decode_outcome(&retry_key, &value[32..], self.root.revision())
+                        .map_err(TransactionError::Storage)?;
+                if outcome.transaction_id != transaction_id {
+                    return Err(TransactionError::IntegrityFailure);
+                }
+                Ok((principal, outcome))
+            })
+            .transpose()
+    }
+}
+
+/// Stream the transaction-ID ordering into a separate certificate-paired immutable index.
+pub fn publish_coordinator_transaction_index<S, F, W, E, I>(
+    coordinator: &mut CommitCoordinator<S, F, W, E, I>,
+    filesystem: &mut F,
+) -> Result<CoordinatorTransactionIndex, TransactionError>
+where
+    S: CheckpointState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let (revision, certificate_digest) = coordinator
+        .checkpoint_anchor()?
+        .ok_or(TransactionError::InvalidRequest)?;
+    if coordinator.state.current_checkpoint_scope() != coordinator.scope
+        || coordinator.state.current_checkpoint_revision() != Some(revision)
+        || coordinator.outcomes.is_empty()
+        || coordinator.outcomes.len() != coordinator.transactions.len()
+        || coordinator.outcomes.iter().any(|(key, outcome)| {
+            outcome.revision > revision
+                || coordinator.transactions.get(&outcome.transaction_id)
+                    != Some(&(key.principal, *outcome))
+        })
+    {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    let logical_state_digest = coordinator
+        .state
+        .current_logical_state_digest()
+        .map_err(checkpoint_error)?;
+    let entries = coordinator
+        .transactions
+        .iter()
+        .map(|(id, (principal, outcome))| {
+            let encoded =
+                encode_outcome(*principal, IdempotencyKey::from_bytes([0; 16]), *outcome)?;
+            let mut value = Vec::with_capacity(136);
+            value.extend_from_slice(&principal.as_bytes());
+            value.extend_from_slice(&encoded.value);
+            Ok(IndexEntry {
+                key: id.as_bytes().to_vec(),
+                value,
+            })
+        });
+    let run = coordinator
+        .journal
+        .publish_index_run_fallible(
+            filesystem,
+            coordinator.scope,
+            revision,
+            COORDINATOR_TRANSACTION_PROFILE_V1,
+            1,
+            entries,
+        )
+        .map_err(TransactionError::Storage)?;
+    let root = coordinator
+        .journal
+        .publish_index_root_recovered(
+            filesystem,
+            IndexRootInput {
+                scope: coordinator.scope,
+                revision,
+                certificate_digest,
+                reducer_profile: S::REDUCER_PROFILE,
+                logical_state_digest,
+                index_profile: COORDINATOR_TRANSACTION_PROFILE_V1,
+            },
+            &[run],
+        )
+        .map_err(TransactionError::Storage)?;
+    Ok(CoordinatorTransactionIndex { root })
+}
+
+/// Re-admit current transaction indexes against independently recovered coordinator metadata.
+/// The run scan is bounded and retains one entry, but the comparator is still memory-resident.
+pub fn load_coordinator_transaction_indexes<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
+    filesystem: &mut F,
+    limits: IndexRunReadLimits,
+) -> Result<Vec<CoordinatorTransactionIndex>, TransactionError>
+where
+    S: CheckpointState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let anchor = coordinator
+        .checkpoint_anchor()?
+        .ok_or(TransactionError::InvalidRequest)?;
+    let digest = coordinator
+        .state
+        .current_logical_state_digest()
+        .map_err(checkpoint_error)?;
+    let mut admitted = Vec::new();
+    for root in
+        coordinator.load_index_root_manifests(filesystem, COORDINATOR_TRANSACTION_PROFILE_V1)?
+    {
+        if (root.revision(), *root.certificate_digest()) != anchor
+            || root.reducer_profile() != &S::REDUCER_PROFILE
+            || root.logical_state_digest() != &digest
+        {
+            continue;
+        }
+        if root.runs().len() != 1
+            || root.runs().next().is_none_or(|run| {
+                run.family() != 1 || run.entry_count() != coordinator.transactions.len() as u64
+            })
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        coordinator.visit_index_run(filesystem, &root, 1, limits, &mut |key, value| {
+            if key.len() != 16 || value.len() != 136 {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let id = TransactionId::from_bytes(read_array(key)?);
+            let mut retry_key = [0; OUTCOME_KEY_BYTES];
+            retry_key[..32].copy_from_slice(&value[..32]);
+            let (principal, _, outcome) =
+                decode_outcome(&retry_key, &value[32..], root.revision())?;
+            if outcome.transaction_id != id
+                || coordinator.transactions.get(&id) != Some(&(principal, outcome))
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            Ok(())
+        })?;
+        admitted.push(CoordinatorTransactionIndex { root });
+    }
+    Ok(admitted)
+}
+
 pub struct CoordinatorMetadataCandidate {
     root: RecoveredIndexRoot,
 }

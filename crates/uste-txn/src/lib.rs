@@ -16,9 +16,11 @@ pub use authorized::{
     MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
 };
 pub use disk_metadata::{
-    COORDINATOR_METADATA_PROFILE_V1, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
-    CoordinatorMetadataLoadReport, load_coordinator_metadata_candidates,
-    load_coordinator_metadata_candidates_for_recovery, publish_coordinator_metadata_root,
+    COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
+    CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
+    CoordinatorTransactionIndex, load_coordinator_metadata_candidates,
+    load_coordinator_metadata_candidates_for_recovery, load_coordinator_transaction_indexes,
+    publish_coordinator_metadata_root, publish_coordinator_transaction_index,
     reconstruct_coordinator_metadata_seed, reconstruct_coordinator_metadata_seed_for_recovery,
 };
 pub use index_recovery::{

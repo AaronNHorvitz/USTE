@@ -425,6 +425,47 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         )
         .unwrap();
     let checkpoint_state = coordinator.read_view().unwrap().state().clone();
+    let transaction_index =
+        uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
+    let (principal, _, expected_outcome) = coordinator.checkpoint_outcomes().next().unwrap();
+    let mut transaction_cache = uste_storage::PageCache::new(64 * 1024).unwrap();
+    let lookup_limits = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+    assert_eq!(
+        transaction_index
+            .lookup(
+                &coordinator,
+                &mut filesystem,
+                expected_outcome.transaction_id,
+                lookup_limits,
+                &mut transaction_cache,
+            )
+            .unwrap(),
+        Some((principal, expected_outcome))
+    );
+    assert_eq!(
+        transaction_index
+            .lookup(
+                &coordinator,
+                &mut filesystem,
+                TransactionId::from_bytes([0xee; 16]),
+                lookup_limits,
+                &mut transaction_cache,
+            )
+            .unwrap(),
+        None
+    );
+    assert!(matches!(
+        transaction_index.lookup(
+            &coordinator,
+            &mut filesystem,
+            expected_outcome.transaction_id,
+            uste_storage::IndexGetLimits::new(16, 135).unwrap(),
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
     let publication = publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
     let candidates = load_coordinator_metadata_candidates(&coordinator, &mut filesystem).unwrap();
     let candidate = candidates
@@ -555,6 +596,16 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
             &NeverCancel,
         )
         .unwrap();
+    assert!(matches!(
+        transaction_index.lookup(
+            &coordinator,
+            &mut filesystem,
+            expected_outcome.transaction_id,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
     drop(coordinator);
     filesystem.restart().unwrap();
     let (recovered, recovery) = CommitCoordinator::open_seeded(
@@ -574,6 +625,103 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
     assert_eq!(state.prepare_calls_since_decode, 2);
     assert_eq!(recovered.checkpoint_outcomes().len(), 2);
     assert_eq!(recovered.committed_blob_owners().count(), 1);
+    // The retained root is at revision one: admission must not present it as revision two.
+    assert!(
+        uste_txn::load_coordinator_transaction_indexes(
+            &recovered,
+            &mut filesystem,
+            uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+        )
+        .unwrap()
+        .is_empty()
+    );
+    let mut recovered = recovered;
+    uste_txn::publish_coordinator_transaction_index(&mut recovered, &mut filesystem).unwrap();
+    let indexes = uste_txn::load_coordinator_transaction_indexes(
+        &recovered,
+        &mut filesystem,
+        uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(indexes.len(), 1);
+    assert!(matches!(
+        uste_txn::load_coordinator_transaction_indexes(
+            &recovered,
+            &mut filesystem,
+            uste_storage::IndexRunReadLimits::new(16, 1, 4096).unwrap(),
+        ),
+        Err(TransactionError::Storage(
+            uste_storage::journal::StorageError::ResourceLimit
+        ))
+    ));
+    assert_eq!(
+        indexes[0]
+            .lookup(
+                &recovered,
+                &mut filesystem,
+                expected_outcome.transaction_id,
+                lookup_limits,
+                &mut transaction_cache,
+            )
+            .unwrap(),
+        Some((principal, expected_outcome))
+    );
+    let root = recovered
+        .load_index_root_manifests(
+            &mut filesystem,
+            uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+        )
+        .unwrap()
+        .remove(0);
+    let mut entries = Vec::new();
+    recovered
+        .visit_index_run(
+            &mut filesystem,
+            &root,
+            1,
+            uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+            &mut |key, value| {
+                entries.push(IndexEntry {
+                    key: key.to_vec(),
+                    value: value.to_vec(),
+                });
+                Ok(())
+            },
+        )
+        .unwrap();
+    entries[0].value[0] ^= 1;
+    let wrong = recovered
+        .publish_index_run(
+            &mut filesystem,
+            root.revision(),
+            uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            1,
+            entries,
+        )
+        .unwrap();
+    recovered
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope,
+                revision: root.revision(),
+                certificate_digest: *root.certificate_digest(),
+                reducer_profile: *root.reducer_profile(),
+                logical_state_digest: *root.logical_state_digest(),
+                index_profile: uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            },
+            &[wrong],
+        )
+        .unwrap();
+    assert!(
+        uste_txn::load_coordinator_transaction_indexes(
+            &recovered,
+            &mut filesystem,
+            uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+        )
+        .is_err(),
+        "authenticated but wrong principal must not be admitted"
+    );
 }
 
 #[test]
