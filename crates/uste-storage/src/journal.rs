@@ -27,10 +27,10 @@ use crate::{
         DurableCheckpoint, RecoveredCheckpoint,
     },
     index::{
-        self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexReadStats,
-        IndexRootInput, IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits,
-        IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScanEntry, IndexScrubReport,
-        MergedIndexRun, PageCache, RecoveredIndexRoot,
+        self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexPredecessor,
+        IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor,
+        IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
+        IndexScanEntry, IndexScrubReport, MergedIndexRun, PageCache, RecoveredIndexRoot,
     },
     read_exact_at, write_all_at,
 };
@@ -1335,6 +1335,39 @@ where
         )
     }
 
+    /// Authenticated greatest key with `prefix` at or before `upper_bound`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::get_predecessor(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            prefix,
+            upper_bound,
+            limits,
+            cache,
+        )
+    }
+
     /// Bounded ordered prefix scan in one family of an authenticated derived root.
     #[allow(clippy::too_many_arguments)]
     pub fn index_scan_prefix(
@@ -1433,6 +1466,71 @@ where
             limits,
             visitor,
         )
+    }
+
+    /// Open an opaque resumable cursor over one authenticated complete run.
+    ///
+    /// Returned entries are provisional until `next_index_run_entry` returns `None` and
+    /// `finish_index_run_cursor` succeeds. The cursor owns no filesystem borrow between calls.
+    pub fn open_index_run_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, StorageError> {
+        self.validate_index_cursor_root(root)?;
+        index::open_run_cursor(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            limits,
+        )
+    }
+
+    /// Advance one resumable authenticated run cursor by one complete entry.
+    pub fn next_index_run_entry(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, StorageError> {
+        self.validate_index_cursor_root(cursor.root())?;
+        index::next_run_entry(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            cursor,
+        )
+    }
+
+    /// Consume an exhausted cursor and release its terminal authentication report.
+    pub fn finish_index_run_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, StorageError> {
+        self.validate_index_cursor_root(cursor.root())?;
+        index::finish_run_cursor(cursor)
+    }
+
+    fn validate_index_cursor_root(&self, root: &RecoveredIndexRoot) -> Result<(), StorageError> {
+        if root.scope().database() != self.database
+            || self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
+        {
+            return Err(StorageError::InvalidState);
+        }
+        Ok(())
     }
 
     /// Stream-authenticate and logically rehash every run without exceeding the page-cache bound.
@@ -2804,6 +2902,10 @@ mod tests {
                         value: large.clone(),
                     },
                     IndexEntry {
+                        key: b"betz".to_vec(),
+                        value: b"ok".to_vec(),
+                    },
+                    IndexEntry {
                         key: b"gamma".to_vec(),
                         value: b"tail".to_vec(),
                     },
@@ -2858,6 +2960,108 @@ mod tests {
         assert!(cache.accounted_bytes() <= cache.budget());
         assert!(cache.evictions() > 0);
 
+        let predecessor_limits = IndexPredecessorLimits::new(32, large.len() + 16).unwrap();
+        let between = store
+            .index_get_predecessor(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"b",
+                b"betay",
+                predecessor_limits,
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(
+            between.entry,
+            Some(IndexScanEntry {
+                key: b"beta".to_vec(),
+                value: large.clone(),
+            })
+        );
+        assert_eq!(
+            between.stats.result_bytes,
+            u64::try_from(large.len() + 4).unwrap()
+        );
+        let final_small = store
+            .index_get_predecessor(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"b",
+                b"betz",
+                IndexPredecessorLimits::new(32, 16).unwrap(),
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(
+            final_small.entry,
+            Some(IndexScanEntry {
+                key: b"betz".to_vec(),
+                value: b"ok".to_vec(),
+            })
+        );
+        assert!(
+            store
+                .index_get_predecessor(
+                    &mut filesystem,
+                    &roots[0],
+                    1,
+                    b"b",
+                    b"ba",
+                    predecessor_limits,
+                    &mut cache,
+                )
+                .unwrap()
+                .entry
+                .is_none()
+        );
+        assert_eq!(
+            store.index_get_predecessor(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"b",
+                b"alpha",
+                predecessor_limits,
+                &mut cache,
+            ),
+            Err(StorageError::InvalidState)
+        );
+        assert_eq!(
+            store.index_get_predecessor(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"b",
+                b"beta",
+                IndexPredecessorLimits::new(32, large.len() + 3).unwrap(),
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            store.index_get_predecessor(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"b",
+                b"beta",
+                IndexPredecessorLimits::new(1, large.len() + 16).unwrap(),
+                &mut cache,
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            IndexPredecessorLimits::new(0, 1),
+            Err(StorageError::ResourceLimit)
+        );
+        assert!(IndexPredecessorLimits::new(index::MAX_INDEX_PREDECESSOR_PAGE_VISITS, 1).is_ok());
+        assert_eq!(
+            IndexPredecessorLimits::new(index::MAX_INDEX_PREDECESSOR_PAGE_VISITS + 1, 1),
+            Err(StorageError::ResourceLimit)
+        );
+
         let scan = store
             .index_scan_prefix(&mut filesystem, &roots[0], 1, b"g", 1, 64, &mut cache)
             .unwrap();
@@ -2900,7 +3104,7 @@ mod tests {
         assert_eq!(collected, comparison.entries);
         assert_eq!(visit_stats, comparison.stats);
 
-        let logical_bytes = u64::try_from(large.len() + 18).unwrap();
+        let logical_bytes = u64::try_from(large.len() + 24).unwrap();
         let mut full_run_entries = Vec::new();
         filesystem.test_reset_open_existing_calls();
         let full_run_report = store
@@ -2908,7 +3112,7 @@ mod tests {
                 &mut filesystem,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
                 &mut |key, value| {
                     full_run_entries.push(IndexScanEntry {
                         key: key.to_vec(),
@@ -2931,23 +3135,73 @@ mod tests {
                     value: large.clone(),
                 },
                 IndexScanEntry {
+                    key: b"betz".to_vec(),
+                    value: b"ok".to_vec(),
+                },
+                IndexScanEntry {
                     key: b"gamma".to_vec(),
                     value: b"tail".to_vec(),
                 },
             ]
         );
-        assert_eq!(full_run_report.entries, 3);
+        assert_eq!(full_run_report.entries, 4);
         assert_eq!(full_run_report.logical_bytes, logical_bytes);
         assert_eq!(full_run_report.stats.result_bytes, logical_bytes);
         assert_eq!(full_run_report.stats.pages_read, run.page_count());
         assert_eq!(full_run_report.stats.cache_hits, 0);
+
+        let cursor_limits = IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap();
+        let unfinished = store
+            .open_index_run_cursor(&mut filesystem, &roots[0], 1, cursor_limits)
+            .unwrap();
+        assert_eq!(
+            store.finish_index_run_cursor(unfinished),
+            Err(StorageError::InvalidState)
+        );
+        let mut cursor = store
+            .open_index_run_cursor(&mut filesystem, &roots[0], 1, cursor_limits)
+            .unwrap();
+        assert!(!format!("{cursor:?}").contains("alpha"));
+        let mut cursor_entries = Vec::new();
+        let first = store
+            .next_index_run_entry(&mut filesystem, &mut cursor)
+            .unwrap()
+            .unwrap();
+        cursor_entries.push(IndexScanEntry {
+            key: first.key,
+            value: first.value,
+        });
+        let mut interleaved_cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        let (interleaved, _) = store
+            .index_get(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"gamma",
+                &mut interleaved_cache,
+            )
+            .unwrap();
+        assert_eq!(interleaved.as_deref(), Some(b"tail".as_slice()));
+        while let Some(entry) = store
+            .next_index_run_entry(&mut filesystem, &mut cursor)
+            .unwrap()
+        {
+            cursor_entries.push(IndexScanEntry {
+                key: entry.key,
+                value: entry.value,
+            });
+        }
+        let cursor_report = store.finish_index_run_cursor(cursor).unwrap();
+        assert_eq!(cursor_entries, full_run_entries);
+        assert_eq!(cursor_report, full_run_report);
+
         let mut failed_visits = 0_u64;
         assert_eq!(
             store.visit_index_run(
                 &mut filesystem,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
                 &mut |_, _| {
                     failed_visits += 1;
                     Err(StorageError::InvalidState)
@@ -2963,7 +3217,7 @@ mod tests {
                 &mut filesystem,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 2, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
                 &mut |_, _| {
                     full_run_visits += 1;
                     Ok(())
@@ -2977,7 +3231,7 @@ mod tests {
                 &mut filesystem,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, 5).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, 5).unwrap(),
                 &mut |_, _| {
                     full_run_visits += 1;
                     Ok(())
@@ -3045,7 +3299,7 @@ mod tests {
             .scrub_index_root(&mut filesystem, &roots[0], &mut cache)
             .unwrap();
         assert_eq!(scrubbed.runs, 1);
-        assert_eq!(scrubbed.entries, 3);
+        assert_eq!(scrubbed.entries, 4);
         assert_eq!(scrubbed.pages, run.page_count());
 
         let root_directory = store.database_directory;
@@ -3091,7 +3345,7 @@ mod tests {
                 &mut late_damaged_run,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
                 &mut |_, _| {
                     late_damaged_visits += 1;
                     Ok(())
@@ -3100,6 +3354,43 @@ mod tests {
             Err(StorageError::IntegrityFailure)
         );
         assert_eq!(late_damaged_visits, 1);
+        let mut late_damaged_cursor = store
+            .open_index_run_cursor(
+                &mut late_damaged_run,
+                &roots[0],
+                1,
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .next_index_run_entry(&mut late_damaged_run, &mut late_damaged_cursor)
+                .unwrap()
+                .unwrap()
+                .key,
+            b"alpha"
+        );
+        assert_eq!(
+            store.next_index_run_entry(&mut late_damaged_run, &mut late_damaged_cursor),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert_eq!(
+            store.finish_index_run_cursor(late_damaged_cursor),
+            Err(StorageError::InvalidState)
+        );
+        let mut damaged_predecessor_cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        assert_eq!(
+            store.index_get_predecessor(
+                &mut late_damaged_run,
+                &roots[0],
+                1,
+                b"b",
+                b"beta",
+                predecessor_limits,
+                &mut damaged_predecessor_cache,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
         let mut damaged_run = filesystem.clone();
         damaged_run
             .test_mutate_file(&root_directory, &run_name, 100)
@@ -3116,7 +3407,7 @@ mod tests {
                 &mut damaged_run,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
                 &mut |_, _| {
                     damaged_visits += 1;
                     Ok(())
@@ -3125,6 +3416,19 @@ mod tests {
             Err(StorageError::IntegrityFailure)
         );
         assert_eq!(damaged_visits, 0);
+        let mut damaged_preceding_cache = PageCache::new(index::INDEX_PAGE_BYTES * 2).unwrap();
+        assert_eq!(
+            store.index_get_predecessor(
+                &mut damaged_run,
+                &roots[0],
+                1,
+                b"b",
+                b"betz",
+                predecessor_limits,
+                &mut damaged_preceding_cache,
+            ),
+            Err(StorageError::IntegrityFailure)
+        );
         let mut appended_run = filesystem.clone();
         appended_run
             .test_append_file(&root_directory, &run_name, b"trailing")
@@ -3140,11 +3444,20 @@ mod tests {
                 &mut appended_run,
                 &roots[0],
                 1,
-                IndexRunReadLimits::new(run.page_count(), 3, logical_bytes).unwrap(),
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
                 &mut |_, _| Ok(()),
             ),
             Err(StorageError::IntegrityFailure)
         );
+        assert!(matches!(
+            store.open_index_run_cursor(
+                &mut appended_run,
+                &roots[0],
+                1,
+                IndexRunReadLimits::new(run.page_count(), 4, logical_bytes).unwrap(),
+            ),
+            Err(StorageError::IntegrityFailure)
+        ));
     }
 
     #[test]

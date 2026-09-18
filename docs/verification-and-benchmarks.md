@@ -154,6 +154,11 @@ bounded disk preparation after filesystem/coordinator reopen without full-snapsh
 This is retained-handle continuity only; benchmark and recovery claims must not describe it as cold
 semantic admission or process-independent recovery.
 
+Decision 0050 verifies the cold-admission I/O prerequisites separately: cursor output/report must
+equal the complete-run visitor, early/corrupt/incomplete cursors must never finish, and predecessor
+proofs must cover exact, between, absent, fragmented, corrupted and exact-minus-limit cases. A
+large earlier prefix match must not consume the final predecessor's result budget.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

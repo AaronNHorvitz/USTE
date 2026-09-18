@@ -186,6 +186,12 @@ live-snapshot comparison, including after a coordinator/filesystem reopen when t
 the handle. Cold candidate admission and process recovery still require the planned streaming
 cursor/predecessor work and do not inherit this warm-handoff proof.
 
+Decision 0050 adds those underlying storage proofs: an opaque resumable authenticated run cursor
+that releases the filesystem borrow between entries, plus a bounded greatest-prefix-key-at-or-
+before lookup for historical reference resolution. Terminal cursor reports require full run
+authentication, and predecessor values use a two-pass one-value bound. Graph semantic admission
+and a cold `GraphDiskBase` remain the next T-20 increment.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

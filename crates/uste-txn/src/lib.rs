@@ -31,10 +31,10 @@ pub use uste_policy::PrincipalDigest;
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, CheckpointInput,
     CheckpointStreamCandidate, CheckpointStreamInput, Clock, DurableCheckpoint, DurableIndexRoot,
-    EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexReadStats, IndexRootInput,
-    IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport,
-    IndexRunVisitor, IndexScan, IndexScrubReport, MergedIndexRun, OwnershipFileSystem, PageCache,
-    RecoveredCheckpoint, RecoveredIndexRoot,
+    EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexPredecessor, IndexPredecessorLimits,
+    IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor, IndexRunMergeLimits,
+    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan, IndexScrubReport,
+    MergedIndexRun, OwnershipFileSystem, PageCache, RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -1004,6 +1004,29 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted authenticated predecessor lookup for recovery/domain semantic proofs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted raw bounded prefix scan. Consumer-facing callers must authorize before expansion.
     #[allow(clippy::too_many_arguments)]
     pub fn index_scan_prefix(
@@ -1050,6 +1073,58 @@ where
         }
         self.journal
             .visit_index_run(filesystem, root, family, limits, visitor)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: open a resumable authenticated complete-run cursor.
+    pub fn open_index_run_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .open_index_run_cursor(filesystem, root, family, limits)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: advance a resumable cursor by one complete entry.
+    pub fn next_index_run_entry(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if cursor.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .next_index_run_entry(filesystem, cursor)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted maintenance: consume an exhausted cursor and release its terminal report.
+    pub fn finish_index_run_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if cursor.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .finish_index_run_cursor(cursor)
             .map_err(TransactionError::Storage)
     }
 

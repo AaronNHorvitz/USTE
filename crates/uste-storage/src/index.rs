@@ -31,6 +31,10 @@ pub const MAX_INDEX_SCAN_RESULTS: usize = 1_000_000;
 pub const MAX_INDEX_RESULT_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_INDEX_RUN_LOGICAL_BYTES: u64 = MAX_INDEX_PAGES_PER_RUN * INDEX_PAGE_BYTES as u64;
 pub const MAX_INDEX_DELTA_LOGICAL_BYTES: u64 = MAX_INDEX_RUN_LOGICAL_BYTES * 2;
+// Three full-run passes cover fragment-start backtracking, key selection and selected-value
+// assembly. The additive allowance covers the binary-search path (at most 25 visits at the
+// admitted run ceiling) and the repeated boundary page, including the one-page-run case.
+pub const MAX_INDEX_PREDECESSOR_PAGE_VISITS: u64 = MAX_INDEX_PAGES_PER_RUN * 3 + 64;
 
 const PAGE_HEADER_BYTES: usize = 80;
 const FRAGMENT_HEADER_BYTES: usize = 16;
@@ -332,6 +336,48 @@ pub struct IndexReadStats {
 pub struct IndexScan {
     pub entries: Vec<IndexScanEntry>,
     pub stats: IndexReadStats,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IndexPredecessor {
+    pub entry: Option<IndexScanEntry>,
+    pub stats: IndexReadStats,
+}
+
+/// Per-operation work bounds for an authenticated greatest-key-at-or-before lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexPredecessorLimits {
+    maximum_page_visits: u64,
+    maximum_result_bytes: usize,
+}
+
+impl IndexPredecessorLimits {
+    pub const fn new(
+        maximum_page_visits: u64,
+        maximum_result_bytes: usize,
+    ) -> Result<Self, StorageError> {
+        if maximum_page_visits == 0
+            || maximum_page_visits > MAX_INDEX_PREDECESSOR_PAGE_VISITS
+            || maximum_result_bytes == 0
+            || maximum_result_bytes > MAX_INDEX_KEY_BYTES + MAX_INDEX_VALUE_BYTES
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Self {
+            maximum_page_visits,
+            maximum_result_bytes,
+        })
+    }
+
+    #[must_use]
+    pub const fn maximum_page_visits(self) -> u64 {
+        self.maximum_page_visits
+    }
+
+    #[must_use]
+    pub const fn maximum_result_bytes(self) -> usize {
+        self.maximum_result_bytes
+    }
 }
 
 /// Explicit work bounds for a privileged, complete immutable-run read.
@@ -879,6 +925,238 @@ where
     }
 }
 
+/// Return the greatest complete key with `prefix` that is at or before `upper_bound`.
+///
+/// This is an authenticated point proof, not a capped prefix scan. It retains at most one value
+/// and visits only the binary-search path plus the adjacent/fragment-spanning pages required to
+/// prove the predecessor. Page visits and returned bytes are explicitly bounded.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn get_predecessor<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    prefix: &[u8],
+    upper_bound: &[u8],
+    limits: IndexPredecessorLimits,
+    cache: &mut PageCache,
+) -> Result<IndexPredecessor, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    validate_read(root, context, prefix)?;
+    validate_read(root, context, upper_bound)?;
+    if !upper_bound.starts_with(prefix) {
+        return Err(StorageError::InvalidState);
+    }
+    let run = root.run(family)?;
+    let mut stats = IndexReadStats::default();
+    let mut page_visits = 0_u64;
+
+    let mut low = 0_u64;
+    let mut high = run.page_count;
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let page = load_predecessor_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            middle,
+            limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
+        )?;
+        let parsed = ParsedPage::new(page, root, run, middle)?;
+        if parsed.last_key()? < upper_bound {
+            low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
+        } else {
+            high = middle;
+        }
+    }
+    let probe = if low < run.page_count {
+        low
+    } else {
+        run.page_count
+            .checked_sub(1)
+            .ok_or(StorageError::IntegrityFailure)?
+    };
+    let mut start = probe.saturating_sub(1);
+    loop {
+        let page = load_predecessor_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            start,
+            limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
+        )?;
+        let parsed = ParsedPage::new(page, root, run, start)?;
+        let first = parsed
+            .fragments()
+            .next()
+            .ok_or(StorageError::IntegrityFailure)??;
+        if first.offset == 0 || start == 0 {
+            break;
+        }
+        start = start.checked_sub(1).ok_or(StorageError::IntegrityFailure)?;
+    }
+
+    // First pass proves the terminal matching key without retaining any value. This prevents an
+    // earlier large match from consuming the result budget or coexisting with the final value.
+    let mut candidate_key = None;
+    let mut scan_key = Vec::new();
+    let mut scan_total = None;
+    let mut scan_offset = 0_usize;
+    let mut page_index = start;
+    let mut finished = false;
+    while page_index < run.page_count && !finished {
+        let page = load_predecessor_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            page_index,
+            limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
+        )?;
+        let parsed = ParsedPage::new(page, root, run, page_index)?;
+        for fragment in parsed.fragments() {
+            let fragment = fragment?;
+            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+            if scan_total.is_some() && scan_key.as_slice() != fragment.key {
+                return Err(StorageError::IntegrityFailure);
+            }
+            if fragment.key > upper_bound {
+                if scan_total.is_some() {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                finished = true;
+                break;
+            }
+            if !fragment.key.starts_with(prefix) {
+                continue;
+            }
+            if scan_total.is_none() {
+                if fragment.offset != 0 {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                scan_key.extend_from_slice(fragment.key);
+                scan_total = Some(fragment.total_len);
+                scan_offset = 0;
+            }
+            if scan_key.as_slice() != fragment.key
+                || scan_total != Some(fragment.total_len)
+                || scan_offset != fragment.offset
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            scan_offset = scan_offset
+                .checked_add(fragment.value.len())
+                .filter(|offset| *offset <= fragment.total_len)
+                .ok_or(StorageError::IntegrityFailure)?;
+            if scan_offset == fragment.total_len {
+                candidate_key = Some(core::mem::take(&mut scan_key));
+                scan_total = None;
+                scan_offset = 0;
+            }
+        }
+        page_index = page_index
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+    }
+    if scan_total.is_some() {
+        return Err(StorageError::IntegrityFailure);
+    }
+
+    let Some(mut candidate_key) = candidate_key else {
+        return Ok(IndexPredecessor { entry: None, stats });
+    };
+    let mut current_value = Vec::new();
+    let mut expected_total = None;
+    let mut selected = None;
+    page_index = start;
+    while page_index < run.page_count && selected.is_none() {
+        let page = load_predecessor_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            page_index,
+            limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
+        )?;
+        let parsed = ParsedPage::new(page, root, run, page_index)?;
+        for fragment in parsed.fragments() {
+            let fragment = fragment?;
+            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+            match fragment.key.cmp(candidate_key.as_slice()) {
+                core::cmp::Ordering::Less => continue,
+                core::cmp::Ordering::Greater => {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                core::cmp::Ordering::Equal => {}
+            }
+            if expected_total.is_none() {
+                if fragment.offset != 0 {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                let result_bytes = candidate_key
+                    .len()
+                    .checked_add(fragment.total_len)
+                    .ok_or(StorageError::ResourceLimit)?;
+                if result_bytes > limits.maximum_result_bytes {
+                    return Err(StorageError::ResourceLimit);
+                }
+                expected_total = Some(fragment.total_len);
+                current_value
+                    .try_reserve_exact(fragment.total_len)
+                    .map_err(|_| StorageError::ResourceLimit)?;
+            }
+            if expected_total != Some(fragment.total_len) || current_value.len() != fragment.offset
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            current_value.extend_from_slice(fragment.value);
+            if current_value.len() == fragment.total_len {
+                stats.result_bytes = u64::try_from(candidate_key.len() + current_value.len())
+                    .map_err(|_| StorageError::ResourceLimit)?;
+                selected = Some(IndexScanEntry {
+                    key: core::mem::take(&mut candidate_key),
+                    value: core::mem::take(&mut current_value),
+                });
+                expected_total = None;
+                break;
+            }
+        }
+        page_index = page_index
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+    }
+    if selected.is_none() || expected_total.is_some() {
+        return Err(StorageError::IntegrityFailure);
+    }
+    Ok(IndexPredecessor {
+        entry: selected,
+        stats,
+    })
+}
+
 pub(crate) fn scrub<F, W, E>(
     filesystem: &mut F,
     context: &IndexContext<'_, F::Directory>,
@@ -991,7 +1269,11 @@ where
 
 /// Single-handle authenticated cursor used by both full-run visitors and bounded scratch merges.
 /// Entries returned before `report` succeeds remain provisional.
-struct RunReader<F>
+/// Opaque authenticated cursor over one immutable index run.
+///
+/// Entries returned by `JournalStore` remain provisional until the cursor is exhausted and
+/// explicitly finished. Dropping a cursor early produces no terminal authentication report.
+pub struct IndexRunCursor<F>
 where
     F: FileSystem,
 {
@@ -1016,10 +1298,35 @@ where
     finished: bool,
 }
 
-impl<F> RunReader<F>
+impl<F> core::fmt::Debug for IndexRunCursor<F>
 where
     F: FileSystem,
 {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("IndexRunCursor")
+            .field("root", &"[REDACTED]")
+            .field("family", &self.run.family)
+            .field("entries_seen", &self.entries)
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl<F> IndexRunCursor<F>
+where
+    F: FileSystem,
+{
+    #[must_use]
+    pub const fn scope(&self) -> NamespaceRef {
+        self.root.scope
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.root.revision
+    }
+
     fn open<W, E>(
         filesystem: &mut F,
         context: &IndexContext<'_, F::Directory>,
@@ -1313,6 +1620,50 @@ where
             stats: self.stats.clone(),
         })
     }
+
+    pub(crate) const fn root(&self) -> &RecoveredIndexRoot {
+        &self.root
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn open_run_cursor<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    limits: IndexRunReadLimits,
+) -> Result<IndexRunCursor<F>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    IndexRunCursor::open(filesystem, context, vault, root, family, limits)
+}
+
+pub(crate) fn next_run_entry<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    cursor: &mut IndexRunCursor<F>,
+) -> Result<Option<IndexEntry>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    cursor.next(filesystem, context, vault)
+}
+
+pub(crate) fn finish_run_cursor<F>(
+    cursor: IndexRunCursor<F>,
+) -> Result<IndexRunReadReport, StorageError>
+where
+    F: FileSystem,
+{
+    cursor.report()
 }
 
 /// Visit one complete immutable run in canonical key order while re-authenticating every page
@@ -1335,7 +1686,7 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    let mut reader = RunReader::open(filesystem, context, vault, root, family, limits)?;
+    let mut reader = open_run_cursor(filesystem, context, vault, root, family, limits)?;
     while let Some(entry) = reader.next(filesystem, context, vault)? {
         visitor(&entry.key, &entry.value)?;
     }
@@ -1418,7 +1769,7 @@ where
     }
 
     let mut base_reader = match base_root {
-        Some(root) => Some(RunReader::open(
+        Some(root) => Some(IndexRunCursor::open(
             filesystem,
             context,
             vault,
@@ -2504,6 +2855,33 @@ where
         }
     }
     Ok((low < run.page_count).then_some(low))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_predecessor_page<'a, F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    run: &IndexRunDescriptor,
+    page_index: u64,
+    limits: IndexPredecessorLimits,
+    page_visits: &mut u64,
+    cache: &'a mut PageCache,
+    stats: &mut IndexReadStats,
+) -> Result<&'a [u8], StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    *page_visits = page_visits
+        .checked_add(1)
+        .filter(|visits| *visits <= limits.maximum_page_visits)
+        .ok_or(StorageError::ResourceLimit)?;
+    load_page(
+        filesystem, context, vault, root, run, page_index, cache, stats,
+    )
 }
 
 const fn filesystem_context<'a, D>(context: &'a IndexContext<'_, D>) -> &'a IndexContext<'a, D> {

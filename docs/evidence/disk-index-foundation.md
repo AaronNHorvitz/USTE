@@ -212,6 +212,12 @@ publication receipt. The next bounded disk preparation can use that handle direc
 filesystem/coordinator reopen, without a full-snapshot root rediscovery. This does not admit a cold
 candidate after handle loss; resumable streaming and predecessor lookup remain required.
 
+Decision 0050 adds that resumable authenticated cursor and bounded predecessor proof through both
+live-coordinator and recovery owners. The cursor permits interleaved proof I/O but releases a
+terminal report only after complete run authentication. The two-pass predecessor retains only a
+key during selection and only the selected value during assembly, with explicit page/result caps.
+Graph semantic admission remains open.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the

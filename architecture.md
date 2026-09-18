@@ -247,6 +247,13 @@ rediscovery between consecutive proof-backed transactions without weakening cert
 run-binding or page-authentication checks. It is deliberately not cold admission: a lost handle
 still requires streaming semantic proof before disk state can replace full-map reconstruction.
 
+Decision 0050 exposes the immutable-run reader as an opaque resumable cursor through live and
+recovery owners. Each advance owns no lasting filesystem borrow; only exhaustion plus explicit
+finish releases the run's count/order/digest/length report. A separate bounded predecessor proof
+finds the greatest prefix key at or before a revision key without consumer scan caps and assembles
+only the selected value. These are the authenticated I/O capabilities for cold graph admission,
+not semantic admission or journal authority themselves.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

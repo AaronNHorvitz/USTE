@@ -106,6 +106,11 @@ the full-snapshot rediscovery step between consecutive proof-backed transactions
 still needs a resumable authenticated run cursor and predecessor lookup so historical/reference
 semantics can be checked with bounded memory before the live base/overlay reducer is introduced.
 
+Decision 0050 supplies that cursor and predecessor layer. Next extract iterator-oriented graph
+shape/transition/reference requirements shared with in-memory reconstruction, then admit one cold
+candidate by exhausting all family cursors, resolving historical references with predecessor
+proofs and matching the authenticated canonical digest before returning `GraphDiskBase`.
+
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
 only to a currently `ManageSchema`-authorized operator with an issuer-bound root capability. The
