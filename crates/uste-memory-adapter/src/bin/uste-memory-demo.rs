@@ -7,6 +7,7 @@ use std::{
     io::Write,
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use uste_crypto::RecoveryPassword;
@@ -41,8 +42,118 @@ fn main() -> Result<(), Box<dyn Error>> {
         [command, root] if command == "crash-probe" => crash_probe(Path::new(root)),
         [command, root] if command == "verify-crash" => verify_crash(Path::new(root), false),
         [command, root] if command == "verify-wrong-key" => verify_crash(Path::new(root), true),
-        _ => Err("usage: uste-memory-demo [crash-probe|verify-crash|verify-wrong-key] ROOT".into()),
+        [command, root] if command == "measure" => measure(Path::new(root)),
+        _ => Err(
+            "usage: uste-memory-demo [crash-probe|verify-crash|verify-wrong-key|measure] ROOT"
+                .into(),
+        ),
     }
+}
+
+fn measure(root: &Path) -> Result<(), Box<dyn Error>> {
+    if !root.is_dir() || fs::read_dir(root)?.next().is_some() {
+        return Err("ROOT must be an existing empty directory".into());
+    }
+    let source = SourceVersionId {
+        source: record(10),
+        version: 1,
+    };
+    let bytes = vec![0x5a; 1024 * 1024];
+    let consumer_root = root.join("consumer-authority");
+    let engine_root = root.join("uste-derived-index");
+    fs::DirBuilder::new().mode(0o700).create(&consumer_root)?;
+    fs::DirBuilder::new().mode(0o700).create(&engine_root)?;
+    File::open(root)?.sync_all()?;
+    let mut authority = DiskAuthority::create(&consumer_root, scope(), source, &bytes)?;
+    let config = LocalAdapterConfig {
+        root: engine_root,
+        database_name: EntryName::new("memory-demo")?,
+        scope: scope(),
+        filesystem_profile: LinuxFilesystemProfile::Btrfs,
+    };
+    let (policy, principal) = policy_and_principal(scope())?;
+    let mut adapter = LocalMemoryAdapter::create(
+        &config,
+        password()?,
+        policy,
+        principal,
+        &mut authority,
+        operation(1),
+    )?;
+    let ingest_started = Instant::now();
+    adapter.ingest_source(
+        &mut authority,
+        source,
+        SourceEncoding::Opaque,
+        None,
+        operation(2),
+    )?;
+    let ingest_elapsed = ingest_started.elapsed();
+    adapter.put_fact(
+        FactInput {
+            id: record(20),
+            subject: "pilot".to_owned(),
+            predicate: "measurement".to_owned(),
+            value: "bounded".to_owned(),
+            links: Vec::new(),
+            source,
+            locator: SourceLocator::ByteRange { start: 0, end: 1 },
+            source_event_time: None,
+        },
+        operation(3),
+    )?;
+    adapter.complete_rebuild(operation(4))?;
+    let query = MemoryReadRequest::GetFact {
+        authority_generation: 1,
+        fact: record(20),
+        knowledge: KnowledgeAt::Current,
+        maximum_output_bytes: 4096,
+    };
+    for _ in 0..100 {
+        let _ = adapter.query(&query, &uste_txn::NeverCancel)?;
+    }
+    let mut latencies = Vec::with_capacity(1_000);
+    for _ in 0..1_000 {
+        let started = Instant::now();
+        let _ = adapter.query(&query, &uste_txn::NeverCancel)?;
+        latencies.push(started.elapsed().as_micros());
+    }
+    latencies.sort_unstable();
+    drop(adapter);
+
+    let cold_started = Instant::now();
+    let mut authority = DiskAuthority::open(&consumer_root, source)?;
+    let (policy, principal) = policy_and_principal(scope())?;
+    let mut adapter =
+        LocalMemoryAdapter::open(&config, password()?, policy, principal, &mut authority)?;
+    let cold_millis = cold_started.elapsed().as_millis();
+    if !matches!(
+        adapter.query(&query, &uste_txn::NeverCancel)?,
+        MemoryReadOutput::Fact(_)
+    ) {
+        return Err("measurement recovery query mismatch".into());
+    }
+    let nanos = ingest_elapsed.as_nanos();
+    let ingest_bytes_per_second = (bytes.len() as u128)
+        .checked_mul(1_000_000_000)
+        .ok_or("throughput overflow")?
+        .checked_div(nanos)
+        .unwrap_or(u128::MAX);
+    println!(
+        concat!(
+            "M1_MEASURE schema=memory-pilot-measure-v1 source_bytes={} ",
+            "ingest_bytes_per_second={} cold_recovery_millis={} ",
+            "warm_query_p50_micros={} warm_query_p95_micros={} warm_query_p99_micros={} ",
+            "warm_samples=1000"
+        ),
+        bytes.len(),
+        ingest_bytes_per_second,
+        cold_millis,
+        latencies[499],
+        latencies[949],
+        latencies[989],
+    );
+    Ok(())
 }
 
 fn crash_probe(root: &Path) -> Result<(), Box<dyn Error>> {
