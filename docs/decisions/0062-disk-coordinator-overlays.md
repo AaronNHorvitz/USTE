@@ -53,3 +53,15 @@ reducer failure drops the entire provisional state and overlays. This path suppo
 or intermediate graph-root handling needed for multi-revision `GraphDiskLiveState` recovery.
 No fallback materializes a graph map. The generic suffix capability does not close that graph gap,
 the disk-specific crash/fault matrix, authorization, rebase or large-scale qualification.
+
+## Commit fault regression coverage
+
+The disk coordinator now has a 13-case deterministic regression matrix: error/crash-before/
+crash-after at each of two group/certificate writes and two data-sync boundaries, plus a cold
+metadata-read error before publication. Every injected point must fire. A read error leaves the
+base state usable and the overlay empty. Any publication error produces `OutcomeUnknown`, denies
+state/outcome reads and exposes no new overlay. Restart from the disk base restores exactly the
+old frontier or the new certified frontier; an exact retry then yields revision two once. The
+new frontier is required specifically for crash-after certificate sync, never guessed from a
+lost response. These memory-filesystem crash cases do not simulate power loss or replace real
+process/filesystem qualification. Rebase and disk-graph recovery fault matrices remain open.

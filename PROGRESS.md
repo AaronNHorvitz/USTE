@@ -51,6 +51,18 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added the disk coordinator's 13-case commit fault matrix: cold metadata-read failure and
+  error/crash-before/crash-after at group/certificate writes and data-sync boundaries. Each fault
+  is required to fire. Tests verify prepublication read errors do not poison the old state,
+  publication errors deny reads with `OutcomeUnknown`, no provisional overlay escapes, restart
+  restores the exact old/new certified frontier, and retry applies the transaction exactly once.
+  These are deterministic model faults, not physical power-loss qualification.
+- Fault verification on parent `169a718`: `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed all 4 tests (the new test
+  exercises 13 injected cases); strict all-target replay clippy passed. One Cargo job/test thread
+  and the existing 4 GiB cgroup remained in effect. Preflight: about 10 GiB available RAM but only
+  556 KiB swap free. Documentation/task-graph checks passed; no benchmark was attempted.
+
 - Decision 0062 now includes authenticated multi-revision suffix replay for ordinary reducers.
   It revalidates the historical base against the current journal owner, admits suffix cardinality,
   streams canonical requests with cumulative byte limits, checks base/overlay collisions and

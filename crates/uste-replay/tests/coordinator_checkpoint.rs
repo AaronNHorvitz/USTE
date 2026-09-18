@@ -33,6 +33,217 @@ impl uste_txn::Cancellation for AlwaysCancel {
     }
 }
 
+type FaultDiskCounter = uste_txn::DiskCommitCoordinator<
+    CounterState,
+    uste_storage::fault::FaultFileSystem<MemoryFileSystem>,
+    TestEnvelope,
+    CounterEntropy,
+    CounterEntropy,
+>;
+
+fn reopen_fault_disk_counter(
+    filesystem: &mut uste_storage::fault::FaultFileSystem<MemoryFileSystem>,
+    name: &EntryName,
+    state: CounterState,
+) -> (FaultDiskCounter, u64) {
+    let (recovery, report) = uste_txn::AuthenticatedIndexRecovery::open(
+        filesystem,
+        name,
+        state.scope,
+        CounterEntropy::new(90_000),
+        CounterEntropy::new(91_000),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    let mut cache = uste_storage::PageCache::new(64 * 1024).unwrap();
+    let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+    let transaction_root = recovery
+        .load_index_root_manifests(filesystem, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+        .unwrap()
+        .remove(0);
+    let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
+        &recovery,
+        filesystem,
+        transaction_root,
+        uste_txn::CoordinatorTransactionAdmissionLimits {
+            run: uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+            lookup,
+            maximum_groups: 1,
+            maximum_encoded_bytes: 1_000_000,
+        },
+        &mut cache,
+    )
+    .unwrap();
+    let candidate =
+        uste_txn::load_coordinator_metadata_candidates_for_recovery::<CounterState, _, _, _, _>(
+            &recovery, filesystem,
+        )
+        .unwrap()
+        .remove(0);
+    let base = uste_txn::admit_coordinator_disk_base(
+        &recovery,
+        filesystem,
+        candidate,
+        transactions,
+        uste_txn::CoordinatorDiskAdmissionLimits {
+            metadata: CoordinatorMetadataLoadLimits::new(1, 0, 2, 16, 4096).unwrap(),
+            lookup,
+            maximum_total_journal_groups: 1,
+            maximum_encoded_bytes_per_pass: 1_000_000,
+        },
+        &mut cache,
+    )
+    .unwrap();
+    let coordinator = uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
+        recovery,
+        filesystem,
+        base,
+        state,
+        RetentionDays::new(30).unwrap(),
+        uste_txn::DiskCoordinatorRecoveryLimits {
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(2, 0).unwrap(),
+            lookup,
+            maximum_encoded_bytes: 1_000_000,
+        },
+        &mut cache,
+    )
+    .unwrap();
+    (coordinator, report.frontier.unwrap().get())
+}
+
+#[test]
+fn disk_coordinator_commit_faults_preserve_base_and_exact_suffix() {
+    use uste_storage::fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation};
+    let mut cases = Vec::new();
+    for operation in [Operation::WriteAt, Operation::SyncData] {
+        for occurrence in [1, 2] {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                cases.push((operation, occurrence, action));
+            }
+        }
+    }
+    cases.push((
+        Operation::ReadAt,
+        1,
+        FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+    ));
+    for (operation, occurrence, action) in cases {
+        let scope = scope();
+        let name = EntryName::new("disk-coordinator-faults").unwrap();
+        let mut filesystem =
+            FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+        let vault = KeyVault::create(
+            scope.database(),
+            &mut TestKeyAdapter,
+            CounterEntropy::new(80_000),
+        )
+        .unwrap();
+        let mut coordinator = CommitCoordinator::create(
+            &mut filesystem,
+            scope,
+            RetentionDays::new(30).unwrap(),
+            name.clone(),
+            vault,
+            CounterEntropy::new(81_000),
+            CounterState::new(scope),
+        )
+        .unwrap();
+        let first = 5_u64.to_be_bytes();
+        let second = 7_u64.to_be_bytes();
+        let mut clock = TestClock(20);
+        coordinator
+            .commit(
+                &mut filesystem,
+                request(1, &first),
+                &mut clock,
+                &NeverCancel,
+            )
+            .unwrap();
+        let base_state = coordinator.read_view().unwrap().state().clone();
+        publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+        uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
+        drop(coordinator);
+        filesystem.restart().unwrap();
+        let (mut disk, frontier) =
+            reopen_fault_disk_counter(&mut filesystem, &name, base_state.clone());
+        assert_eq!(frontier, 1);
+        filesystem
+            .arm(
+                FaultPlan::new([FaultPoint {
+                    operation,
+                    occurrence,
+                    action,
+                }])
+                .unwrap(),
+            )
+            .unwrap();
+        let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+        let mut cache = uste_storage::PageCache::new(64 * 1024).unwrap();
+        let error = disk
+            .commit(
+                &mut filesystem,
+                request(2, &second),
+                &mut clock,
+                &NeverCancel,
+                lookup,
+                &mut cache,
+            )
+            .unwrap_err();
+        assert_eq!(filesystem.pending_faults(), 0, "fault must actually fire");
+        if operation == Operation::ReadAt {
+            assert!(matches!(error, TransactionError::Storage(_)));
+            assert_eq!(disk.state().unwrap().value, 5);
+        } else {
+            assert_eq!(error, TransactionError::OutcomeUnknown);
+            assert!(matches!(
+                disk.state(),
+                Err(TransactionError::OutcomeUnknown)
+            ));
+            assert!(matches!(
+                disk.outcome(
+                    &mut filesystem,
+                    PrincipalDigest::from_bytes([1; 32]),
+                    IdempotencyKey::from_bytes([1; 16]),
+                    UtcInstant::new(20, 0).unwrap(),
+                    lookup,
+                    &mut cache
+                ),
+                Err(TransactionError::OutcomeUnknown)
+            ));
+        }
+        assert_eq!(disk.overlay_counts(), (0, 0));
+        drop(disk);
+        filesystem.restart().unwrap();
+        let (mut disk, frontier) = reopen_fault_disk_counter(&mut filesystem, &name, base_state);
+        let committed = operation == Operation::SyncData
+            && occurrence == 2
+            && action == FaultAction::CrashAfter;
+        assert_eq!(
+            frontier,
+            if committed { 2 } else { 1 },
+            "{operation:?}/{occurrence}/{action:?}"
+        );
+        assert_eq!(disk.state().unwrap().value, if committed { 12 } else { 5 });
+        let retry = disk
+            .commit(
+                &mut filesystem,
+                request(2, &second),
+                &mut clock,
+                &NeverCancel,
+                lookup,
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(retry.revision.get(), 2);
+        assert_eq!(disk.state().unwrap().value, 12);
+        assert_eq!(disk.overlay_counts(), (1, 0));
+    }
+}
+
 impl CounterState {
     const fn new(scope: NamespaceRef) -> Self {
         Self {
