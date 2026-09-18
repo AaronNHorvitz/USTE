@@ -6,5 +6,16 @@
 #![forbid(unsafe_code)]
 
 mod profile;
+mod query;
+mod state;
 
 pub use profile::{PILOT_PROFILE, PilotProfile, PilotProfileError};
+pub use query::{
+    Citation, EventTimeFilter, FactView, KnowledgeAt, MemoryReadError, MemoryReadOutput,
+    MemoryReadRequest, SearchResults,
+};
+pub use state::{
+    FactInput, FactRecord, FactTerminal, MemoryCodecError, MemoryMutation, MemoryState,
+    MemoryTransaction, OPAQUE_MEDIA_TYPE, SourceLocator, SourceVersionId, SourceVersionInput,
+    SourceVersionRecord, TEXT_MEDIA_TYPE, decode_transaction, encode_transaction,
+};

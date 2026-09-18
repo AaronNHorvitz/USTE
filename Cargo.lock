@@ -533,6 +533,7 @@ name = "uste-memory"
 version = "0.1.0"
 dependencies = [
  "sha2",
+ "uste-crypto",
  "uste-policy",
  "uste-storage",
  "uste-txn",

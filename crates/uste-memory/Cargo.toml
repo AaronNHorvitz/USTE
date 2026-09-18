@@ -15,5 +15,8 @@ uste-storage = { path = "../uste-storage", version = "=0.1.0" }
 uste-txn = { path = "../uste-txn", version = "=0.1.0" }
 uste-types = { path = "../uste-types", version = "=0.1.0" }
 
+[dev-dependencies]
+uste-crypto = { path = "../uste-crypto", version = "=0.1.0" }
+
 [lints]
 workspace = true

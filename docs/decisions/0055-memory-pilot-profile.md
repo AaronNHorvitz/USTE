@@ -32,6 +32,7 @@ The executable constants live in `uste_memory::PILOT_PROFILE`:
 | One source version | 1 MiB |
 | Trusted exact UTF-8 text per source | 64 KiB |
 | One fact field | 4 KiB |
+| Explicit links per fact | 8 |
 | Canonical transaction request | 128 KiB |
 | Logical in-memory state | 16 MiB |
 | Staged uploads / staged bytes | 8 / 2 MiB |

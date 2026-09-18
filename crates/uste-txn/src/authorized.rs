@@ -12,7 +12,7 @@ use uste_policy::{
 };
 use uste_storage::{
     BlobId, BlobInventory, BlobReference, BlobUpload, BlobUploadToken, Clock, OwnershipFileSystem,
-    journal::{DurableKeyEnvelope, RecoveryReport},
+    journal::{DurableKeyEnvelope, RecoveryReport, StorageError},
 };
 use uste_types::{IdempotencyKey, NamespaceRef, TransactionId};
 
@@ -451,6 +451,26 @@ where
     where
         S: AuthorizedReadState<ReadRequest = R>,
     {
+        self.read_cancellable(principal, view, request, &crate::NeverCancel)
+    }
+
+    /// Policy-authorized read with cooperative cancellation before dispatch and while reducer
+    /// candidates are authorized. Reducers must route every result candidate through the supplied
+    /// authorization callback, so cancellation cannot return a partial result as if it were
+    /// complete.
+    pub fn read_cancellable<R>(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        view: &AuthorizedReadView<S::Snapshot>,
+        request: &R,
+        cancellation: &impl Cancellation,
+    ) -> Result<S::ReadOutput, AuthorizedReadError<S::ReadError>>
+    where
+        S: AuthorizedReadState<ReadRequest = R>,
+    {
+        if cancellation.is_cancelled() {
+            return Err(cancelled_read());
+        }
         if self.inner.is_uncertain() {
             return Err(AuthorizedReadError::Authorization(
                 AuthorizedError::Transaction(TransactionError::OutcomeUnknown),
@@ -469,6 +489,9 @@ where
             .map_err(map_requirement_error)
             .map_err(AuthorizedReadError::Authorization)?;
         for requirement in requirements.iter() {
+            if cancellation.is_cancelled() {
+                return Err(cancelled_read());
+            }
             if requirement.target.scope() != self.scope() {
                 return Err(AuthorizedReadError::Authorization(
                     AuthorizedError::Unauthorized,
@@ -479,12 +502,22 @@ where
                 .map_err(AuthorizedError::from)
                 .map_err(AuthorizedReadError::Authorization)?;
         }
-        let mut authorize_candidate = |action: Action, target: Target| {
-            target.scope() == self.scope()
-                && self.policy.authorize(principal, action, target).is_ok()
+        let mut cancelled = false;
+        let result = {
+            let mut authorize_candidate = |action: Action, target: Target| {
+                if cancellation.is_cancelled() {
+                    cancelled = true;
+                    return false;
+                }
+                target.scope() == self.scope()
+                    && self.policy.authorize(principal, action, target).is_ok()
+            };
+            S::read_authorized(&view.inner.state, request, &mut authorize_candidate)
         };
-        S::read_authorized(&view.inner.state, request, &mut authorize_candidate)
-            .map_err(AuthorizedReadError::Domain)
+        if cancelled || cancellation.is_cancelled() {
+            return Err(cancelled_read());
+        }
+        result.map_err(AuthorizedReadError::Domain)
     }
 
     /// Policy-authorized maintenance entry point for the reducer's current derived-index
@@ -691,6 +724,56 @@ where
             ledger: Arc::clone(&self.ledger),
             active_handle: true,
         })
+    }
+
+    /// Enable new uploads after a trusted derived-index adapter reconciles its complete durable
+    /// upload outbox following reopen.
+    ///
+    /// The adapter must durably record every token before writing staging bytes and pass that
+    /// complete set here. Each token must now be committed, durably aborted, or have no durable
+    /// bytes. A resumable uncommitted token keeps the coordinator closed to new uploads. This is a
+    /// bounded recovery protocol, not filesystem-wide orphan enumeration or garbage collection.
+    pub fn complete_recovered_upload_reconciliation(
+        &mut self,
+        filesystem: &mut F,
+        principal: &AuthenticatedPrincipal,
+        complete_outbox: &[BlobUploadToken],
+    ) -> Result<(), AuthorizedError> {
+        self.authorize(principal, Action::ManageSchema)?;
+        self.authorize(principal, Action::ResumeUpload)?;
+        let maximum_outbox = usize::try_from(self.quotas(principal)?.max_live_uploads())
+            .map_err(|_| AuthorizedError::ResourceLimit)?;
+        if complete_outbox.len() > MAX_STAGED_UPLOAD_RESERVATIONS
+            || complete_outbox.len() > maximum_outbox
+            || !self.lock_ledger()?.staged.is_empty()
+        {
+            return Err(AuthorizedError::ResourceLimit);
+        }
+        let mut tokens = complete_outbox.to_vec();
+        tokens.sort_unstable_by_key(|token| token.upload_id());
+        if tokens.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(AuthorizedError::IntegrityFailure);
+        }
+        for token in tokens {
+            if token.scope() != self.scope() {
+                return Err(AuthorizedError::Unauthorized);
+            }
+            if self
+                .inner
+                .committed_blob_owners()
+                .any(|(reference, _)| reference.id() == token.blob_id())
+            {
+                continue;
+            }
+            match self.inner.resume_blob_upload(filesystem, token) {
+                Ok(upload) if !upload.has_durable_resume_evidence() => {}
+                Ok(_) => return Err(AuthorizedError::ResourceLimit),
+                Err(TransactionError::Storage(StorageError::InvalidState)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        self.allow_new_uploads = true;
+        Ok(())
     }
 
     pub fn resume_blob_upload(
@@ -1164,4 +1247,8 @@ const fn map_requirement_error(error: ApplyError) -> AuthorizedError {
         ApplyError::ResourceLimit => TransactionError::ResourceLimit,
         ApplyError::UnsupportedPredicate => TransactionError::UnsupportedPredicate,
     })
+}
+
+const fn cancelled_read<E>() -> AuthorizedReadError<E> {
+    AuthorizedReadError::Authorization(AuthorizedError::Transaction(TransactionError::Cancelled))
 }

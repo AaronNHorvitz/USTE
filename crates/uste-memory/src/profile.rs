@@ -12,6 +12,7 @@ pub struct PilotProfile {
     pub maximum_source_bytes_per_version: u64,
     pub maximum_text_bytes_per_version: usize,
     pub maximum_fact_field_bytes: usize,
+    pub maximum_fact_links: usize,
     pub maximum_request_bytes: usize,
     pub maximum_logical_state_bytes: usize,
     pub maximum_staged_uploads: usize,
@@ -38,6 +39,7 @@ pub const PILOT_PROFILE: PilotProfile = PilotProfile {
     maximum_source_bytes_per_version: 1024 * 1024,
     maximum_text_bytes_per_version: 64 * 1024,
     maximum_fact_field_bytes: 4 * 1024,
+    maximum_fact_links: 8,
     maximum_request_bytes: 128 * 1024,
     maximum_logical_state_bytes: 16 * 1024 * 1024,
     maximum_staged_uploads: 8,
@@ -71,6 +73,7 @@ impl PilotProfile {
             || self.maximum_text_bytes_per_version == 0
             || self.maximum_text_bytes_per_version as u64 > self.maximum_source_bytes_per_version
             || self.maximum_fact_field_bytes == 0
+            || self.maximum_fact_links == 0
             || self.maximum_request_bytes == 0
             || self.maximum_request_bytes > self.maximum_logical_state_bytes
             || self.maximum_staged_uploads == 0
