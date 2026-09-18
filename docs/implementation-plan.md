@@ -128,9 +128,11 @@ derived family and matching the canonical digest. The returned `GraphDiskBase` d
 preparation without complete graph-map reconstruction. Decision 0052 replaces the warm live graph
 publication target with one admitted base and one request-bounded pending plan. Exact journal
 retry survives the representation handoff, distinct progress is blocked while the base is stale,
-and failed root publication remains retryable. Next make pending state/coordinator metadata and
-suffix recovery durable without full `GraphState` replay, then bound discovery/initial scrub;
-current coordinator/recovery maps remain memory-resident meanwhile.
+and failed root publication remains retryable. Decision 0053 recovers ready at the frontier or
+rebuilds exactly one pending suffix from the authenticated final request, then independently
+reopens and rebinds it while replaying coordinator metadata only. Next bound discovery/initial
+scrub and move coordinator maps/origin replay to disk-backed or bounded streaming state before
+qualifying BM-06.
 
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization

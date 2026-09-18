@@ -21,7 +21,9 @@ pub use disk_metadata::{
     load_coordinator_metadata_candidates_for_recovery, publish_coordinator_metadata_root,
     reconstruct_coordinator_metadata_seed, reconstruct_coordinator_metadata_seed_for_recovery,
 };
-pub use index_recovery::AuthenticatedIndexRecovery;
+pub use index_recovery::{
+    AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredPreparedSuffix,
+};
 
 use std::collections::BTreeMap;
 
@@ -191,6 +193,11 @@ pub trait ExternallyPreparedTransactionState: TransactionState {
         revision: CommitRevision,
         prepared: &Self::Prepared,
     ) -> Result<(), ApplyError>;
+}
+
+/// Ready-state anchor required to recover at most one externally prepared journal suffix.
+pub trait JournalAnchoredTransactionState: ExternallyPreparedTransactionState {
+    fn journal_base_anchor(&self) -> Result<(NamespaceRef, CommitRevision, [u8; 32]), ApplyError>;
 }
 
 /// Source-owned proof that another reducer representation is logically equivalent at the exact
@@ -837,6 +844,136 @@ where
             || report
                 .frontier
                 .is_none_or(|frontier| frontier < checkpoint_revision)
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok((
+            Self {
+                scope,
+                retention,
+                journal,
+                state,
+                outcomes,
+                transactions,
+                committed_blob_owners,
+                recovered: true,
+                uncertain: false,
+            },
+            report,
+        ))
+    }
+
+    /// Reopen from an exact reducer base and optionally install one authenticated, externally
+    /// prepared frontier suffix without reconstructing the reducer's complete prior state.
+    ///
+    /// Coordinator metadata is rebuilt from the authoritative journal. The supplied suffix was
+    /// prepared during a prior authenticated recovery pass, but is re-bound to the exact group and
+    /// revalidated by the reducer before publication. More than one revision beyond the base fails
+    /// closed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_journal_anchored_prepared<A>(
+        filesystem: &mut F,
+        final_name: &uste_storage::EntryName,
+        scope: NamespaceRef,
+        retention: RetentionDays,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        mut state: S,
+        suffix: Option<RecoveredPreparedSuffix<S::Prepared>>,
+    ) -> Result<(Self, RecoveryReport), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+        S: JournalAnchoredTransactionState,
+    {
+        let (base_scope, base_revision, base_certificate_digest) =
+            state.journal_base_anchor().map_err(map_apply_error)?;
+        if base_scope != scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let suffix_revision = suffix
+            .as_ref()
+            .map(|_| {
+                base_revision
+                    .checked_next()
+                    .map_err(|_| TransactionError::RevisionExhausted)
+            })
+            .transpose()?;
+        if suffix
+            .as_ref()
+            .is_some_and(|suffix| Some(suffix.transaction.revision) != suffix_revision)
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let expected_frontier = suffix_revision.unwrap_or(base_revision);
+        let mut suffix = suffix;
+        let mut base_seen = false;
+        let mut suffix_seen = false;
+        let mut outcomes = BTreeMap::new();
+        let mut transactions = BTreeMap::new();
+        let mut committed_blob_owners = BTreeMap::new();
+        let (journal, report) = JournalStore::open(
+            filesystem,
+            final_name,
+            scope.database(),
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            |group| {
+                let decoded = decode_recovered_group(scope, group)?;
+                if group.revision <= base_revision {
+                    if group.revision == base_revision {
+                        if group.certificate_digest != base_certificate_digest {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        base_seen = true;
+                    }
+                    record_decoded_group_metadata(
+                        &mut outcomes,
+                        &mut transactions,
+                        &mut committed_blob_owners,
+                        &decoded,
+                    )?;
+                    return Ok(());
+                }
+                if Some(group.revision) != suffix_revision || suffix_seen {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                let recovered = suffix.as_ref().ok_or(StorageError::IntegrityFailure)?;
+                if !recovered.transaction.matches(group, &decoded) {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                state
+                    .validate_external_prepared(
+                        decoded.request,
+                        decoded.blob_inventory,
+                        group.revision,
+                        &recovered.prepared,
+                    )
+                    .map_err(|_| StorageError::IntegrityFailure)?;
+                if S::result_digest(&recovered.prepared) != decoded.outcome.result_digest {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                record_decoded_group_metadata(
+                    &mut outcomes,
+                    &mut transactions,
+                    &mut committed_blob_owners,
+                    &decoded,
+                )?;
+                let prepared = suffix
+                    .take()
+                    .ok_or(StorageError::IntegrityFailure)?
+                    .prepared;
+                state.publish(prepared);
+                suffix_seen = true;
+                Ok(())
+            },
+        )
+        .map_err(map_open_error)?;
+        if !base_seen
+            || suffix.is_some()
+            || report.frontier != Some(expected_frontier)
+            || suffix_seen != suffix_revision.is_some()
         {
             return Err(TransactionError::IntegrityFailure);
         }
@@ -1748,28 +1885,51 @@ fn replay_group<S: TransactionState>(
     committed_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
     group: RecoveredGroup<'_>,
 ) -> Result<(), StorageError> {
+    let decoded = decode_recovered_group(scope, group)?;
+    let prepared = state
+        .prepare(decoded.request, decoded.blob_inventory, group.revision)
+        .map_err(|_| StorageError::IntegrityFailure)?;
+    let result = S::result_digest(&prepared);
+    if result != decoded.outcome.result_digest {
+        return Err(StorageError::IntegrityFailure);
+    }
+    record_decoded_group_metadata(outcomes, transactions, committed_blob_owners, &decoded)?;
+    state.publish(prepared);
+    Ok(())
+}
+
+fn decode_recovered_group(
+    scope: NamespaceRef,
+    group: RecoveredGroup<'_>,
+) -> Result<DecodedGroup<'_>, StorageError> {
     if sha256(group.encoded_group) != group.logical_event_digest {
         return Err(StorageError::IntegrityFailure);
     }
-    let decoded = decode_group(
+    decode_group(
         scope,
         group.encoded_group,
         group.revision,
         group.blob_inventory_digest,
         group.blob_inventory,
     )
-    .map_err(|_| StorageError::IntegrityFailure)?;
+    .map_err(|error| match error {
+        TransactionError::ResourceLimit => StorageError::ResourceLimit,
+        _ => StorageError::IntegrityFailure,
+    })
+}
+
+fn record_decoded_group_metadata(
+    outcomes: &mut BTreeMap<RetryKey, TransactionOutcome>,
+    transactions: &mut BTreeMap<TransactionId, (PrincipalDigest, TransactionOutcome)>,
+    committed_blob_owners: &mut BTreeMap<(NamespaceRef, BlobId), (BlobReference, PrincipalDigest)>,
+    decoded: &DecodedGroup<'_>,
+) -> Result<(), StorageError> {
     if outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE {
         return Err(StorageError::ResourceLimit);
     }
-    let prepared = state
-        .prepare(decoded.request, decoded.blob_inventory, group.revision)
-        .map_err(|_| StorageError::IntegrityFailure)?;
-    let result = S::result_digest(&prepared);
-    if result != decoded.outcome.result_digest
-        || outcomes
-            .insert(decoded.retry_key, decoded.outcome)
-            .is_some()
+    if outcomes
+        .insert(decoded.retry_key, decoded.outcome)
+        .is_some()
         || transactions
             .insert(
                 decoded.outcome.transaction_id,
@@ -1779,7 +1939,6 @@ fn replay_group<S: TransactionState>(
     {
         return Err(StorageError::IntegrityFailure);
     }
-    state.publish(prepared);
     if let Some(inventory) = decoded.blob_inventory {
         for reference in inventory.references() {
             committed_blob_owners

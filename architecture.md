@@ -283,6 +283,15 @@ coordinator. This removes the complete graph from the warm write loop, but the d
 checkpoint codec: pending process recovery, coordinator maps, discovery/scrub and suffix replay
 remain full-memory boundaries.
 
+Decision 0053 adds the journal-anchored recovery path for that reducer. The first authenticated
+open retains only the final bounded transaction; graph proof preparation uses an admitted frontier
+or predecessor root. After releasing the temporary owner, a second open independently verifies the
+base certificate and every captured group field, rebuilds coordinator maps from authoritative
+groups and installs zero or one reducer suffix. No checkpoint fiction or plan format is introduced.
+The graph reducer no longer requires full-map replay for this normal warm crash window, while
+coordinator maps, journal-origin metadata replay and candidate discovery/scrub remain memory/work
+boundaries.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

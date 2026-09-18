@@ -222,6 +222,13 @@ the exact next base. Representation handoff proves scope/revision/policy/digest/
 equivalence and preserves coordinator metadata. Pending crash recovery, coordinator metadata,
 candidate discovery/scrub, suffix replay and BM-01/BM-06 remain open T-20 work.
 
+Decision 0053 removes complete-graph replay from the warm crash path. Recovery retains only the
+final authenticated journal group, admits a graph root at frontier `F` or exactly `F-1`, and
+deterministically rebuilds at most one bounded pending disk commit. A second full journal open
+rebuilds coordinator metadata, verifies the base certificate and complete captured group identity,
+then revalidates the prepared result before exposing ready or pending state. Coordinator maps,
+origin-to-frontier metadata replay, discovery/initial scrub and BM-01/BM-06 remain open T-20 work.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

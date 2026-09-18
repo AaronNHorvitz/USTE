@@ -23,7 +23,8 @@ use uste_txn::{
     ApplyError, AuthenticatedIndexRecovery, Cancellation, CheckpointState, CheckpointStateError,
     CommitCoordinator, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
     CoordinatorMetadataLoadReport, CoordinatorRecoverySeed, DerivedIndexMaintenance,
-    EquivalentTransactionState, ExternallyPreparedTransactionState, PostCommitStateMaintenance,
+    EquivalentTransactionState, ExternallyPreparedTransactionState,
+    JournalAnchoredTransactionState, PostCommitStateMaintenance, RecoveredFrontierTransaction,
     TransactionError, TransactionOutcome, TransactionRequest, TransactionState,
     reconstruct_coordinator_metadata_seed_for_recovery,
 };
@@ -558,6 +559,18 @@ where
         cache: &mut PageCache,
     ) -> Result<IndexPredecessor, TransactionError>;
 
+    #[allow(clippy::too_many_arguments)]
+    fn reader_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<uste_storage::IndexScan, TransactionError>;
+
     fn reader_open_cursor(
         &self,
         filesystem: &mut F,
@@ -632,6 +645,27 @@ where
         cache: &mut PageCache,
     ) -> Result<IndexPredecessor, TransactionError> {
         self.index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+    }
+
+    fn reader_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<uste_storage::IndexScan, TransactionError> {
+        self.index_scan_prefix(
+            filesystem,
+            root,
+            family,
+            prefix,
+            maximum_results,
+            maximum_result_bytes,
+            cache,
+        )
     }
 
     fn reader_open_cursor(
@@ -713,6 +747,27 @@ where
         cache: &mut PageCache,
     ) -> Result<IndexPredecessor, TransactionError> {
         self.index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+    }
+
+    fn reader_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<uste_storage::IndexScan, TransactionError> {
+        self.index_scan_prefix(
+            filesystem,
+            root,
+            family,
+            prefix,
+            maximum_results,
+            maximum_result_bytes,
+            cache,
+        )
     }
 
     fn reader_open_cursor(
@@ -985,7 +1040,8 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    load_graph_disk_preparation_view_with_state(
+    validate_current_root(coordinator, base)?;
+    load_graph_disk_preparation_view_with_reader(
         coordinator,
         filesystem,
         base,
@@ -1013,7 +1069,8 @@ where
     let base = state
         .current_base()
         .ok_or(GraphDiskError::RootStateMismatch)?;
-    load_graph_disk_preparation_view_with_state(
+    validate_current_root(coordinator, base.admitted_root())?;
+    load_graph_disk_preparation_view_with_reader(
         coordinator,
         filesystem,
         base.admitted_root(),
@@ -1023,8 +1080,40 @@ where
     )
 }
 
-fn load_graph_disk_preparation_view_with_state<S, F, W, E, I>(
-    coordinator: &CommitCoordinator<S, F, W, E, I>,
+/// Load a bounded proof against an admitted predecessor root during authenticated recovery.
+pub fn load_graph_disk_recovery_preparation_view<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    base: &GraphDiskBase,
+    frontier: &RecoveredFrontierTransaction,
+    limits: GraphDiskPreparationLimits,
+    cache: &mut PageCache,
+) -> Result<GraphDiskPreparationView, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if frontier.blob_inventory().is_some()
+        || base.scope() != recovery.scope()
+        || base.revision().checked_next().ok() != Some(frontier.revision())
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let transaction = crate::decode_transaction(frontier.canonical_request())?;
+    load_graph_disk_preparation_view_with_reader(
+        recovery,
+        filesystem,
+        base.admitted_root(),
+        transaction,
+        limits,
+        cache,
+    )
+}
+
+fn load_graph_disk_preparation_view_with_reader<R, F>(
+    reader: &R,
     filesystem: &mut F,
     base: &DerivedGraphStateRoot,
     transaction: GraphTransaction,
@@ -1032,29 +1121,26 @@ fn load_graph_disk_preparation_view_with_state<S, F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<GraphDiskPreparationView, GraphDiskError>
 where
-    S: TransactionState,
     F: OwnershipFileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
-    I: EntropySource,
+    R: GraphStateIndexReader<F>,
 {
     validate_disk_preparation_subset(&transaction)?;
     validate_request_limits(&transaction)?;
-    if transaction.scope() != coordinator.scope() {
+    if transaction.scope() != reader.reader_scope() {
         return Err(GraphDiskError::Graph(
             crate::GraphError::TransactionScopeMismatch,
         ));
     }
     let mut report = GraphDiskPreparationReport::default();
     let mut pending = transaction_required_ids(&transaction, &mut report, &limits)?;
-    validate_current_root(coordinator, base)?;
-
     charge_logical_bytes(&mut report, &limits, b"graph-state-v1".len())?;
-    let (metadata, stats) = coordinator.index_get(
+    let (metadata, stats) = reader.reader_get_bounded(
         filesystem,
         &base.root,
         FAMILY_METADATA,
         b"graph-state-v1",
+        IndexGetLimits::new(MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_VALUE_BYTES)
+            .map_err(GraphDiskError::Storage)?,
         cache,
     )?;
     add_read_stats(&mut report, stats)?;
@@ -1067,8 +1153,15 @@ where
 
     charge_logical_bytes(&mut report, &limits, 1)?;
     let current_policy = if has_family(&base.root, FAMILY_POLICY) {
-        let (encoded, stats) =
-            coordinator.index_get(filesystem, &base.root, FAMILY_POLICY, &[0], cache)?;
+        let (encoded, stats) = reader.reader_get_bounded(
+            filesystem,
+            &base.root,
+            FAMILY_POLICY,
+            &[0],
+            IndexGetLimits::new(MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_VALUE_BYTES)
+                .map_err(GraphDiskError::Storage)?,
+            cache,
+        )?;
         add_read_stats(&mut report, stats)?;
         let encoded = encoded.ok_or(GraphDiskError::IndexCorrupt)?;
         charge_logical_bytes(&mut report, &limits, encoded.len())?;
@@ -1088,11 +1181,13 @@ where
         }
         report.record_proofs += 1;
         let proof = if has_family(&base.root, FAMILY_CURRENT_RECORD) {
-            let (encoded, stats) = coordinator.index_get(
+            let (encoded, stats) = reader.reader_get_bounded(
                 filesystem,
                 &base.root,
                 FAMILY_CURRENT_RECORD,
                 id.record().as_bytes(),
+                IndexGetLimits::new(MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_VALUE_BYTES)
+                    .map_err(GraphDiskError::Storage)?,
                 cache,
             )?;
             add_read_stats(&mut report, stats)?;
@@ -1128,7 +1223,7 @@ where
 
     let history_targets = history_proof_targets(&transaction);
     let history = load_history_proofs(
-        coordinator,
+        reader,
         filesystem,
         &base.root,
         transaction.scope(),
@@ -1139,7 +1234,7 @@ where
     )?;
     let reverse_targets = reverse_proof_targets(&transaction);
     let reverse = load_reverse_proofs(
-        coordinator,
+        reader,
         filesystem,
         &base.root,
         transaction.scope(),
@@ -1445,8 +1540,8 @@ fn reverse_proof_targets(transaction: &GraphTransaction) -> BTreeSet<RecordRef> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn load_history_proofs<S, F, W, E, I>(
-    coordinator: &CommitCoordinator<S, F, W, E, I>,
+fn load_history_proofs<R, F>(
+    reader: &R,
     filesystem: &mut F,
     root: &RecoveredIndexRoot,
     scope: NamespaceRef,
@@ -1456,18 +1551,15 @@ fn load_history_proofs<S, F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<BTreeMap<RecordRef, Vec<Record>>, GraphDiskError>
 where
-    S: TransactionState,
     F: OwnershipFileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
-    I: EntropySource,
+    R: GraphStateIndexReader<F>,
 {
     let mut output = BTreeMap::new();
     for target in targets {
         let mut versions = Vec::new();
         if has_family(root, FAMILY_RECORD_HISTORY) {
-            let scan = coordinator
-                .index_scan_prefix(
+            let scan = reader
+                .reader_scan_prefix(
                     filesystem,
                     root,
                     FAMILY_RECORD_HISTORY,
@@ -1516,8 +1608,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn load_reverse_proofs<S, F, W, E, I>(
-    coordinator: &CommitCoordinator<S, F, W, E, I>,
+fn load_reverse_proofs<R, F>(
+    reader: &R,
     filesystem: &mut F,
     root: &RecoveredIndexRoot,
     scope: NamespaceRef,
@@ -1527,18 +1619,15 @@ fn load_reverse_proofs<S, F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>, GraphDiskError>
 where
-    S: TransactionState,
     F: OwnershipFileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
-    I: EntropySource,
+    R: GraphStateIndexReader<F>,
 {
     let mut output = BTreeMap::new();
     for target in targets {
         let mut owners = BTreeMap::new();
         if has_family(root, FAMILY_REVERSE) {
-            let scan = coordinator
-                .index_scan_prefix(
+            let scan = reader
+                .reader_scan_prefix(
                     filesystem,
                     root,
                     FAMILY_REVERSE,
@@ -1956,6 +2045,19 @@ impl ExternallyPreparedTransactionState for GraphDiskLiveState {
             return Err(ApplyError::Conflict);
         }
         Ok(())
+    }
+}
+
+impl JournalAnchoredTransactionState for GraphDiskLiveState {
+    fn journal_base_anchor(&self) -> Result<(NamespaceRef, CommitRevision, [u8; 32]), ApplyError> {
+        if self.pending.is_some() {
+            return Err(ApplyError::Conflict);
+        }
+        Ok((
+            self.scope(),
+            self.base.revision(),
+            *self.base.root.root.certificate_digest(),
+        ))
     }
 }
 

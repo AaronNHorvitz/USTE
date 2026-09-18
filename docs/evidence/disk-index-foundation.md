@@ -229,6 +229,13 @@ repair. Successful streamed publication installs the next base without a complet
 pending state is not yet checkpoint-encoded; coordinator metadata, suffix recovery and discovery/
 scrub remain memory-resident.
 
+Decision 0053 reopens that state without complete `GraphState` replay. The authenticated final
+journal group plus an admitted frontier/predecessor root reconstructs zero or one suffix; a second
+open rechecks the base certificate and complete group identity, rebuilds coordinator maps and only
+then publishes pending state. Wrong preparation and append races fail closed. Coordinator maps,
+journal-origin metadata replay and discovery/initial scrub remain memory-resident/unbounded T-20
+work.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the

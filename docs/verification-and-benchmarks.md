@@ -173,6 +173,13 @@ distinct-progress and proof-load refusal while pending, failed-publication reten
 limit repair and preparation from the installed next base. Reports must disclose that pending
 process recovery and coordinator metadata remain full-memory and must not count this as BM-06.
 
+Decision 0053 verifies warm crash recovery at both root states. Tests must drop a pending process,
+rebuild the exact final request against the predecessor root, independently reopen pending, retain
+retry/stale-progress behavior, repair publication, restart again and open ready from the frontier
+root. Transaction-layer coverage must reject wrong prepared output and a discovery/open append
+race. Reports must retain the zero/one-suffix, full-memory coordinator-map, origin-replay and
+unbounded-discovery qualifications.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

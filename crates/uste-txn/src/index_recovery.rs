@@ -2,14 +2,112 @@
 
 use uste_crypto::{EntropySource, KeyAdapter};
 use uste_storage::{
-    EntryName, IndexEntry, IndexGetLimits, IndexPredecessor, IndexPredecessorLimits,
+    BlobInventory, EntryName, IndexEntry, IndexGetLimits, IndexPredecessor, IndexPredecessorLimits,
     IndexReadStats, IndexRunCursor, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor,
-    OwnershipFileSystem, PageCache, RecoveredIndexRoot,
-    journal::{DurableKeyEnvelope, JournalStore, RecoveryReport},
+    IndexScan, OwnershipFileSystem, PageCache, RecoveredIndexRoot,
+    journal::{DurableKeyEnvelope, JournalStore, RecoveredGroup, RecoveryReport, StorageError},
 };
-use uste_types::NamespaceRef;
+use uste_types::{CommitRevision, IdempotencyKey, NamespaceRef};
 
-use super::{TransactionError, map_open_error};
+use super::{
+    PrincipalDigest, TransactionError, TransactionOutcome, decode_group, map_open_error, sha256,
+};
+
+/// Opaque owned copy of the authenticated journal frontier transaction.
+///
+/// Only one bounded canonical request and inventory are retained. Construction is possible only
+/// while the storage journal is fully authenticated.
+pub struct RecoveredFrontierTransaction {
+    pub(crate) revision: CommitRevision,
+    pub(crate) certificate_digest: [u8; 32],
+    pub(crate) logical_event_digest: [u8; 32],
+    pub(crate) blob_inventory_digest: [u8; 32],
+    pub(crate) principal: PrincipalDigest,
+    pub(crate) idempotency_key: IdempotencyKey,
+    pub(crate) outcome: TransactionOutcome,
+    pub(crate) canonical_request: Vec<u8>,
+    pub(crate) blob_inventory: Option<BlobInventory>,
+}
+
+impl core::fmt::Debug for RecoveredFrontierTransaction {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("RecoveredFrontierTransaction")
+            .field("revision", &self.revision)
+            .field("certificate_digest", &"[REDACTED]")
+            .field("canonical_request", &"[REDACTED]")
+            .field("has_blob_inventory", &self.blob_inventory.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl RecoveredFrontierTransaction {
+    #[must_use]
+    pub const fn revision(&self) -> CommitRevision {
+        self.revision
+    }
+
+    #[must_use]
+    pub const fn certificate_digest(&self) -> &[u8; 32] {
+        &self.certificate_digest
+    }
+
+    #[must_use]
+    pub fn canonical_request(&self) -> &[u8] {
+        &self.canonical_request
+    }
+
+    #[must_use]
+    pub const fn blob_inventory(&self) -> Option<&BlobInventory> {
+        self.blob_inventory.as_ref()
+    }
+
+    #[must_use]
+    pub const fn outcome(&self) -> TransactionOutcome {
+        self.outcome
+    }
+
+    /// Bind a domain-prepared suffix candidate for independent journal reopen validation.
+    #[must_use]
+    pub fn bind_prepared<P>(self, prepared: P) -> RecoveredPreparedSuffix<P> {
+        RecoveredPreparedSuffix {
+            transaction: self,
+            prepared,
+        }
+    }
+
+    pub(crate) fn matches(
+        &self,
+        group: RecoveredGroup<'_>,
+        decoded: &super::DecodedGroup<'_>,
+    ) -> bool {
+        self.revision == group.revision
+            && self.certificate_digest == group.certificate_digest
+            && self.logical_event_digest == group.logical_event_digest
+            && self.blob_inventory_digest == group.blob_inventory_digest
+            && self.principal == decoded.retry_key.principal
+            && self.idempotency_key == decoded.retry_key.key
+            && self.outcome == decoded.outcome
+            && self.canonical_request == decoded.request
+            && self.blob_inventory.as_ref() == decoded.blob_inventory
+    }
+}
+
+/// Frontier transaction plus a domain-prepared change. Neither is authoritative until final open.
+pub struct RecoveredPreparedSuffix<P> {
+    pub(crate) transaction: RecoveredFrontierTransaction,
+    pub(crate) prepared: P,
+}
+
+impl<P> core::fmt::Debug for RecoveredPreparedSuffix<P> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("RecoveredPreparedSuffix")
+            .field("transaction", &self.transaction)
+            .field("prepared", &"[REDACTED]")
+            .finish()
+    }
+}
 
 /// Authenticates the complete storage journal and keeps its exclusive owner/key context alive while
 /// optional derived roots are inspected. It does not decode transaction groups or create commit
@@ -71,6 +169,36 @@ where
         )
         .map_err(map_open_error)?;
         Ok((Self { scope, journal }, report))
+    }
+
+    /// Authenticate the complete journal while retaining only its final decoded transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_frontier_transaction<A>(
+        filesystem: &mut F,
+        final_name: &EntryName,
+        scope: NamespaceRef,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+    ) -> Result<(Self, RecoveryReport, Option<RecoveredFrontierTransaction>), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+    {
+        let mut frontier = None;
+        let (journal, report) = JournalStore::open(
+            filesystem,
+            final_name,
+            scope.database(),
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            |group| {
+                frontier = Some(capture_group(scope, group)?);
+                Ok(())
+            },
+        )
+        .map_err(map_open_error)?;
+        Ok((Self { scope, journal }, report, frontier))
     }
 
     #[must_use]
@@ -145,6 +273,34 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Bounded authenticated prefix scan for recovery-domain proof loading.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, TransactionError> {
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .index_scan_prefix(
+                filesystem,
+                root,
+                family,
+                prefix,
+                maximum_results,
+                maximum_result_bytes,
+                cache,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
     /// Revalidate and visit one complete run. Visitor effects remain provisional until success.
     pub fn visit_index_run(
         &self,
@@ -204,4 +360,44 @@ where
             .finish_index_run_cursor(cursor)
             .map_err(TransactionError::Storage)
     }
+}
+
+fn capture_group(
+    scope: NamespaceRef,
+    group: RecoveredGroup<'_>,
+) -> Result<RecoveredFrontierTransaction, StorageError> {
+    if sha256(group.encoded_group) != group.logical_event_digest {
+        return Err(StorageError::IntegrityFailure);
+    }
+    let decoded = decode_group(
+        scope,
+        group.encoded_group,
+        group.revision,
+        group.blob_inventory_digest,
+        group.blob_inventory,
+    )
+    .map_err(|error| match error {
+        TransactionError::ResourceLimit => StorageError::ResourceLimit,
+        _ => StorageError::IntegrityFailure,
+    })?;
+    let mut canonical_request = Vec::new();
+    canonical_request
+        .try_reserve_exact(decoded.request.len())
+        .map_err(|_| StorageError::ResourceLimit)?;
+    canonical_request.extend_from_slice(decoded.request);
+    let blob_inventory = decoded
+        .blob_inventory
+        .map(|inventory| BlobInventory::new(scope, inventory.references().iter().copied()))
+        .transpose()?;
+    Ok(RecoveredFrontierTransaction {
+        revision: group.revision,
+        certificate_digest: group.certificate_digest,
+        logical_event_digest: group.logical_event_digest,
+        blob_inventory_digest: group.blob_inventory_digest,
+        principal: decoded.retry_key.principal,
+        idempotency_key: decoded.retry_key.key,
+        outcome: decoded.outcome,
+        canonical_request,
+        blob_inventory,
+    })
 }

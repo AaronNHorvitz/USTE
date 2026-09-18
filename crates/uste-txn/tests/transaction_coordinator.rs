@@ -10,11 +10,13 @@ use uste_storage::{
     memory::MemoryFileSystem,
 };
 use uste_txn::{
-    ApplyError, Cancellation, CommitCoordinator, NeverCancel, PrincipalDigest, RetentionDays,
-    TransactionError, TransactionRequest, TransactionState,
+    ApplyError, AuthenticatedIndexRecovery, Cancellation, CommitCoordinator,
+    ExternallyPreparedTransactionState, JournalAnchoredTransactionState, NeverCancel,
+    PrincipalDigest, RetentionDays, TransactionError, TransactionRequest, TransactionState,
 };
 use uste_types::{
-    DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, TransactionId, UtcInstant,
+    CommitRevision, DatabaseId, IdempotencyKey, NamespaceId, NamespaceRef, TransactionId,
+    UtcInstant,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -28,7 +30,7 @@ impl TransactionState for CounterState {
         &self,
         canonical_request: &[u8],
         _blob_inventory: Option<&BlobInventory>,
-        _revision: uste_types::CommitRevision,
+        _revision: CommitRevision,
     ) -> Result<Self::Prepared, ApplyError> {
         if canonical_request.len() != 16 {
             return Err(ApplyError::InvalidRequest);
@@ -53,6 +55,70 @@ impl TransactionState for CounterState {
 
     fn snapshot(&self) -> Self::Snapshot {
         self.clone()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AnchoredCounterState {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    certificate_digest: [u8; 32],
+    value: i64,
+}
+
+impl TransactionState for AnchoredCounterState {
+    type Prepared = i64;
+    type Snapshot = Self;
+
+    fn prepare(
+        &self,
+        _canonical_request: &[u8],
+        _blob_inventory: Option<&BlobInventory>,
+        _revision: CommitRevision,
+    ) -> Result<Self::Prepared, ApplyError> {
+        Err(ApplyError::InvalidRequest)
+    }
+
+    fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
+        CounterState::result_digest(prepared)
+    }
+
+    fn publish(&mut self, prepared: Self::Prepared) {
+        self.value = prepared;
+        self.revision = self.revision.checked_next().unwrap();
+    }
+
+    fn snapshot(&self) -> Self::Snapshot {
+        self.clone()
+    }
+}
+
+impl ExternallyPreparedTransactionState for AnchoredCounterState {
+    fn validate_external_prepared(
+        &self,
+        canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
+        revision: CommitRevision,
+        prepared: &Self::Prepared,
+    ) -> Result<(), ApplyError> {
+        if blob_inventory.is_some()
+            || self.revision.checked_next().ok() != Some(revision)
+            || canonical_request.len() != 16
+        {
+            return Err(ApplyError::InvalidRequest);
+        }
+        let expected = i64::from_be_bytes(canonical_request[..8].try_into().unwrap());
+        let delta = i64::from_be_bytes(canonical_request[8..].try_into().unwrap());
+        if expected != self.value || expected.checked_add(delta) != Some(*prepared) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+impl JournalAnchoredTransactionState for AnchoredCounterState {
+    fn journal_base_anchor(&self) -> Result<(NamespaceRef, CommitRevision, [u8; 32]), ApplyError> {
+        Ok((self.scope, self.revision, self.certificate_digest))
     }
 }
 
@@ -139,6 +205,175 @@ fn equal_and_rolling_back_wall_samples_never_order_or_merge_commits() {
     .unwrap();
     assert_eq!(report.frontier.unwrap().get(), 3);
     assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(3));
+}
+
+#[test]
+fn journal_anchored_external_suffix_is_reauthenticated_before_recovery() {
+    let scope = scope();
+    let mut filesystem = MemoryFileSystem::default();
+    let name = EntryName::new("anchored-external-recovery").unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        name.clone(),
+        create_vault(scope.database(), 93),
+        CounterEntropy(94),
+        CounterState::default(),
+    )
+    .unwrap();
+    let first_bytes = mutation(0, 5);
+    coordinator
+        .commit(
+            &mut filesystem,
+            request(1, 11, &first_bytes),
+            &mut clock(1),
+            &NeverCancel,
+        )
+        .unwrap();
+    let (base_revision, base_certificate_digest) =
+        coordinator.checkpoint_anchor().unwrap().unwrap();
+    let second_bytes = mutation(5, 2);
+    let second = coordinator
+        .commit(
+            &mut filesystem,
+            request(2, 12, &second_bytes),
+            &mut clock(2),
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(coordinator);
+    filesystem.restart().unwrap();
+
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+        &mut filesystem,
+        &name,
+        scope,
+        CounterEntropy(95),
+        CounterEntropy(96),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    let wrong = frontier.unwrap().bind_prepared(8_i64);
+    drop(recovery);
+    assert!(matches!(
+        CommitCoordinator::open_journal_anchored_prepared(
+            &mut filesystem,
+            &name,
+            scope,
+            RetentionDays::new(30).unwrap(),
+            CounterEntropy(97),
+            CounterEntropy(98),
+            &mut TestKeyAdapter,
+            AnchoredCounterState {
+                scope,
+                revision: base_revision,
+                certificate_digest: base_certificate_digest,
+                value: 5,
+            },
+            Some(wrong),
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
+
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+        &mut filesystem,
+        &name,
+        scope,
+        CounterEntropy(99),
+        CounterEntropy(100),
+        &mut TestKeyAdapter,
+    )
+    .unwrap();
+    let suffix = frontier.unwrap().bind_prepared(7_i64);
+    drop(recovery);
+    let (mut recovered, report) = CommitCoordinator::open_journal_anchored_prepared(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(101),
+        CounterEntropy(102),
+        &mut TestKeyAdapter,
+        AnchoredCounterState {
+            scope,
+            revision: base_revision,
+            certificate_digest: base_certificate_digest,
+            value: 5,
+        },
+        Some(suffix),
+    )
+    .unwrap();
+    assert_eq!(report.frontier, Some(second.revision));
+    assert_eq!(recovered.read_view().unwrap().state().value, 7);
+    assert_eq!(
+        recovered
+            .commit_prepared(
+                &mut filesystem,
+                request(2, 12, &second_bytes),
+                7,
+                &mut clock(3),
+                &NeverCancel,
+            )
+            .unwrap(),
+        second
+    );
+
+    drop(recovered);
+    filesystem.restart().unwrap();
+    let (recovery, _, captured_second) =
+        AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut filesystem,
+            &name,
+            scope,
+            CounterEntropy(103),
+            CounterEntropy(104),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+    drop(recovery);
+    let (mut advanced, _) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(105),
+        CounterEntropy(106),
+        &mut TestKeyAdapter,
+        CounterState::default(),
+    )
+    .unwrap();
+    let third_bytes = mutation(7, 1);
+    advanced
+        .commit(
+            &mut filesystem,
+            request(3, 13, &third_bytes),
+            &mut clock(4),
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(advanced);
+    filesystem.restart().unwrap();
+    let raced_suffix = captured_second.unwrap().bind_prepared(7_i64);
+    assert!(matches!(
+        CommitCoordinator::open_journal_anchored_prepared(
+            &mut filesystem,
+            &name,
+            scope,
+            RetentionDays::new(30).unwrap(),
+            CounterEntropy(107),
+            CounterEntropy(108),
+            &mut TestKeyAdapter,
+            AnchoredCounterState {
+                scope,
+                revision: base_revision,
+                certificate_digest: base_certificate_digest,
+                value: 5,
+            },
+            Some(raced_suffix),
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
 }
 
 #[test]

@@ -11,8 +11,9 @@ use uste_graph::{
     commit_graph_disk_live_prepared, commit_graph_disk_prepared, disk_adjacent_ids, disk_record,
     disk_supported_ids, encode_stored_record, encode_transaction, load_current_graph_index_roots,
     load_graph_disk_live_preparation_view, load_graph_disk_preparation_view,
-    load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
-    load_graph_state_roots, prepare_graph_disk_commit, prepare_graph_state_root_delta,
+    load_graph_disk_recovery_preparation_view, load_graph_state_root_candidates,
+    load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
+    prepare_graph_disk_commit, prepare_graph_state_root_delta,
     prepare_graph_state_root_delta_from_disk, publish_current_graph_index,
     publish_graph_disk_live_base, publish_graph_state_root, publish_graph_state_root_delta,
     reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate, scrub_current_graph_index,
@@ -1497,7 +1498,7 @@ fn warm_disk_state_blocks_stale_progress_and_repairs_failed_publication() {
         &mut filesystem,
         scope(),
         RetentionDays::new(30).unwrap(),
-        name,
+        name.clone(),
         create_vault(scope().database(), 25_000),
         CounterEntropy(26_000),
         GraphState::new(scope()),
@@ -1586,6 +1587,81 @@ fn warm_disk_state_blocks_stale_progress_and_repairs_failed_publication() {
             .is_pending()
     );
 
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (recovery, recovery_report, frontier) =
+        AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut filesystem,
+            &name,
+            scope(),
+            CounterEntropy(27_000),
+            CounterEntropy(28_000),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+    assert_eq!(
+        recovery_report.frontier,
+        Some(CommitRevision::new(2).unwrap())
+    );
+    let frontier = frontier.unwrap();
+    assert_eq!(frontier.outcome(), outcome);
+    let recovery_transaction =
+        uste_graph::decode_transaction(frontier.canonical_request()).unwrap();
+    assert_eq!(recovery_transaction, transaction);
+    let recovery_candidates =
+        load_graph_state_root_candidates_for_recovery(&recovery, &mut filesystem).unwrap();
+    let recovery_candidate = recovery_candidates
+        .iter()
+        .find(|candidate| candidate.revision() == CommitRevision::FIRST)
+        .unwrap();
+    let mut recovery_admission_cache = PageCache::new(1024 * 1024).unwrap();
+    let (recovery_base, _) = admit_graph_disk_base_candidate_for_recovery(
+        &recovery,
+        &mut filesystem,
+        recovery_candidate,
+        admission_limits(),
+        &mut recovery_admission_cache,
+    )
+    .unwrap();
+    let mut recovery_proof_cache = PageCache::new(1024 * 1024).unwrap();
+    let recovery_prepared = load_graph_disk_recovery_preparation_view(
+        &recovery,
+        &mut filesystem,
+        &recovery_base,
+        &frontier,
+        proof_limits,
+        &mut recovery_proof_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    let recovery_prepared = prepare_graph_disk_commit(
+        recovery_prepared,
+        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let suffix = frontier.bind_prepared(recovery_prepared);
+    drop(recovery);
+    let (mut coordinator, reopened_report) = CommitCoordinator::open_journal_anchored_prepared(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(29_000),
+        CounterEntropy(30_000),
+        &mut TestKeyAdapter,
+        GraphDiskLiveState::new(recovery_base),
+        Some(suffix),
+    )
+    .unwrap();
+    assert_eq!(reopened_report.frontier, Some(outcome.revision));
+    assert!(
+        coordinator
+            .reducer_state_for_checkpoint()
+            .unwrap()
+            .is_pending()
+    );
+
     let retry = commit_graph_disk_live_prepared(
         &mut coordinator,
         &mut filesystem,
@@ -1661,6 +1737,55 @@ fn warm_disk_state_blocks_stale_progress_and_repairs_failed_publication() {
     .unwrap();
     assert_eq!(root.revision(), CommitRevision::new(2).unwrap());
     assert!(report.runs > 0);
+    assert!(
+        !coordinator
+            .reducer_state_for_checkpoint()
+            .unwrap()
+            .is_pending()
+    );
+
+    drop(coordinator);
+    filesystem.restart().unwrap();
+    let (ready_recovery, ready_report, _) =
+        AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut filesystem,
+            &name,
+            scope(),
+            CounterEntropy(31_000),
+            CounterEntropy(32_000),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+    assert_eq!(ready_report.frontier, Some(outcome.revision));
+    let ready_candidates =
+        load_graph_state_root_candidates_for_recovery(&ready_recovery, &mut filesystem).unwrap();
+    let ready_candidate = ready_candidates
+        .iter()
+        .find(|candidate| candidate.revision() == outcome.revision)
+        .unwrap();
+    let mut ready_admission_cache = PageCache::new(1024 * 1024).unwrap();
+    let (ready_base, _) = admit_graph_disk_base_candidate_for_recovery(
+        &ready_recovery,
+        &mut filesystem,
+        ready_candidate,
+        admission_limits(),
+        &mut ready_admission_cache,
+    )
+    .unwrap();
+    drop(ready_recovery);
+    let (coordinator, reopened_ready_report) = CommitCoordinator::open_journal_anchored_prepared(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(33_000),
+        CounterEntropy(34_000),
+        &mut TestKeyAdapter,
+        GraphDiskLiveState::new(ready_base),
+        None,
+    )
+    .unwrap();
+    assert_eq!(reopened_ready_report.frontier, Some(outcome.revision));
     assert!(
         !coordinator
             .reducer_state_for_checkpoint()

@@ -212,6 +212,15 @@ certificate/count/policy result installs the next base, and failures remain retr
 is intentionally not checkpoint-decodable: a pending crash still requires complete journal replay,
 and coordinator metadata/discovery/suffix recovery remain later T-20 work.
 
+Decision 0053 handles the ordinary zero/one-suffix crash window without that checkpoint codec. A
+temporary authenticated owner retains only the final decoded group and supports bounded recovery
+proof I/O. If the best admitted graph root is at frontier it opens ready; if exactly one revision
+behind, the canonical final request deterministically rebuilds the pending plan. A separate final
+journal open compares the exact base certificate and captured group, rebuilds coordinator metadata
+and revalidates the prepared output before publication. Additional suffixes or an intervening
+append fail closed. Coordinator maps and origin replay remain memory-resident; discovery/initial
+scrub still use absolute carrier bounds.
+
 Decision 0032 adds an authenticated bounded merge from one optional base run and sorted exact
 before/after deltas into one unpublished encrypted run. Present before-values must match byte-for-
 byte, absent before-values require absence and absent after-values are tombstones. The merge holds a

@@ -28,8 +28,10 @@ publication. Decision 0049 returns that admitted root directly for the next disk
 Decision 0050 adds the resumable cursor and predecessor proof needed for cold admission. Decision
 0051 uses them to semantically admit a cold `GraphDiskBase` without rebuilding complete graph maps.
 Decision 0052 replaces the complete graph in the warm authoritative write loop with one admitted
-base and one bounded pending terminal-root plan. T-20 remains open pending durable pending-state/
-coordinator recovery, bounded discovery/scrub, larger-than-memory recovery and qualifying
+base and one bounded pending terminal-root plan. Decision 0053 reopens that state at an authenticated
+journal frontier as either the ready base or exactly one revalidated pending suffix, without
+reconstructing `GraphState`. T-20 remains open pending bounded discovery/scrub, disk-backed
+coordinator metadata, larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
@@ -392,9 +394,16 @@ unverified external distribution prerequisite.
   A disjoint derived-index capability streams terminal publication without journal append access;
   a failed one-byte history bound leaves the plan pending, and adequate retry installs the exact
   next base and permits the next bounded proof.
-- The warm reducer deliberately has no checkpoint codec. Process loss with pending work still
-  recovers through complete `GraphState` replay; coordinator metadata, suffix replay and bounded
-  discovery/scrub remain T-20 work. No BM-01/BM-06 result is claimed.
+- Added Decision 0053. Authenticated recovery retains one opaque final-journal transaction while
+  independently validating the complete journal; the final coordinator open accepts only the
+  exact admitted base or its one exact successor, revalidates the external graph preparation and
+  durable outcome, and rejects mismatches, multi-revision gaps and concurrent journal advancement.
+- Graph recovery decodes the captured canonical request internally and reconstructs only its
+  caller-bounded current/history/reverse proof closure. Restart coverage reopens a pending suffix,
+  preserves exact retry while blocking distinct progress, survives a bounded publication failure,
+  installs the recovered root and then proves a ready-root restart. Focused agent review found no
+  high- or medium-severity issue. Coordinator maps still replay from journal origin and bounded
+  discovery/scrub remain T-20 work; no BM-01/BM-06 result is claimed.
 - Added Decision 0039 and a synchronized runtime for every admitted authorized graph root. Its
   privileged report now includes cumulative decrypted-cache occupancy/events, completed authorized
   reads/raw operations, authenticated pages, fragments and logical result bytes. The counters are
@@ -624,12 +633,12 @@ remaining mixed workload have not passed.
   actual merged outputs and the canonical digest with one caller-bounded history bucket rather than
   scanning the complete reducer. Cold semantic admission now returns a bounded `GraphDiskBase`
   without complete graph-map reconstruction. The warm live reducer now advances that base with
-  one bounded pending plan and no complete graph map, but discovery/initial scrub, coordinator
-  metadata and pending/suffix recovery remain memory-resident. The explicit-I/O preparation proof now supports
+  one bounded pending plan and no complete graph map. Journal-anchored restart recovers either that
+  ready base or one exact pending suffix without `GraphState`, but discovery/initial scrub and the
+  coordinator's retry/transaction/blob-owner maps still replay from journal origin into memory. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
-  The coordinator's retry/transaction/blob-owner metadata and recovery remain fully memory-
-  resident.
+  Recovery of those coordinator maps remains fully memory-resident.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
@@ -663,9 +672,9 @@ the host has adequate memory headroom; qualify M1 under recorded caps first.
 
 After M1's verified handoff, resume the following preserved full-product work:
 
-Continue T-20 by making the warm reducer's pending plan and coordinator metadata recoverable
-without complete `GraphState` replay, then stream the recovery suffix into bounded disk state.
-Bound candidate discovery/initial scrub as part of that recovery path. Run the exact five-sample BM-01 campaign under the accepted host
+Continue T-20 by bounding candidate discovery/initial scrub, then move coordinator retry,
+transaction and blob-owner metadata off the full in-memory journal replay path. Extend bounded
+suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
