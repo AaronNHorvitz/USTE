@@ -73,8 +73,19 @@ fails rather than falling back to an unsandboxed worker.
 
 ## Runnable synthetic example
 
-The generator streams without retaining the corpus in memory. This three-record example has
-a pinned logical digest:
+Run the bounded encrypted M1 consumer demonstration offline on an empty Btrfs directory:
+
+~~~bash
+CARGO_NET_OFFLINE=true scripts/run_memory_pilot_demo.sh
+~~~
+
+See [the M1 demo guide](memory-pilot-demo.md) for expected output, retained artifacts, rollback and
+limits. It uses synthetic source bytes and a fixed demo-only password; never copy that credential or
+place personal data in the pilot.
+
+The graph generator below streams without retaining the corpus in memory.
+
+This three-record example has a pinned logical digest:
 
 ~~~bash
 SEED=8f41d0a52b40f13f4a77bc3beae2026a8bc42ad48d12ce53d92e29f612111001

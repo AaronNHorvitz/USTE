@@ -47,7 +47,8 @@ See [application use cases](docs/application-use-cases.md).
 ## Proposed Rust workspace
 
 The workspace now implements `uste-types`, `uste-time`, `uste-policy`, `uste-crypto`,
-`uste-storage`, `uste-txn`, `uste-graph`, `uste-replay` and the independent `uste-testkit`; later
+`uste-storage`, `uste-txn`, `uste-graph`, `uste-replay`, `uste-memory`,
+`uste-memory-adapter` and the independent `uste-testkit`; later
 rows remain planned component boundaries, not claims of implemented directories or a fixed public
 API.
 
@@ -67,6 +68,8 @@ API.
 | uste-sim | Branches, model identity, virtual clock, pure simulation scheduling |
 | uste-physics | Pure bounded kinematics/contact models under pinned numerical profiles |
 | uste-ingest | Implemented R1 typed atomic batch/job ledger; later mapping/CLI orchestration through normal transaction authority |
+| uste-memory | Bounded M1 source/fact projection, citations and fail-closed generation lifecycle |
+| uste-memory-adapter | Restricted embedded Linux consumer boundary and synthetic offline demo |
 | uste-api | Consumer API and generic integration adapter contracts |
 | uste-cli / uste-service | Operations and authenticated local IPC |
 | uste-testkit | Independent reference model, adversarial fixtures, fault simulation |
@@ -158,6 +161,13 @@ budgets and cancellation occur inside the mandatory facade. Revocation invalidat
 durable generation change remains unservable through interrupted recovery until exact reimport and
 completion. This remains a capped replayed projection; it neither exposes raw blobs to consumers nor
 proves physical erasure or larger-than-memory behavior.
+
+Decision 0057 adds the restricted embedded `uste-memory-adapter`. One mutable owner binds the real
+Linux writer lock, recovery key, policy principal, namespace and consumer approval generation. A
+consumer-owned versioned outbox is durable before staging; restart resumes the stable idempotent
+request and verifies the complete authoritative source digest before clearing it. Citation bytes are
+read only inside an already-authorized operation. The synthetic consumer and derived index use
+separate filesystem roots. No IPC or consumer-specific runtime integration is implied.
 
 Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
 revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,

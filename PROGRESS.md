@@ -2,11 +2,12 @@
 
 Updated: 2026-09-18 · Branch: `codex/uste-implementation`
 
-Latest completed task is T-66. Decision 0055 selects verified recovery commit `7393def` and freezes
+Latest completed task is T-67. Decision 0055 selects verified recovery commit `7393def` and freezes
 the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Implementation
 commit `97537e5` adds durable source/fact admission, bounded authorized retrieval, exact citations,
-corrections, revocation and fail-closed rebuild under Decision 0056. T-67's generic adapter and
-offline demonstration are next; all T-68 process-fault and measurement qualification remains open.
+corrections, revocation and fail-closed rebuild under Decision 0056. Commit `a07bdec` adds the
+Decision 0057 restricted embedded Linux adapter, consumer-owned versioned source/outbox contract
+and runnable offline demo. All T-68 process-fault, measurement and exact handoff work remains open.
 Branch history
 through the current handoff adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
@@ -47,6 +48,17 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Completed T-67 at `a07bdec` with `uste-memory-adapter`. One mutable embedded adapter owns the
+  Linux/Btrfs writer, key, scope, policy principal and authority generation; it returns only bounded
+  owned results. The consumer remains authoritative for immutable source bytes and a strict
+  version-1 upload outbox that is durable before staging and cleared after an exact idempotent commit.
+- Added `scripts/run_memory_pilot_demo.sh` and a separate-root synthetic consumer. The real encrypted
+  Btrfs run reached generation 2/revision 11 after exact ingest/citation, competing-owner refusal,
+  reopen, correction/history, contradiction, revocation and rebuild. Adapter tests reject unknown
+  checkpoint versions/scope/duplicates and warnings-denied clippy passes. The complete capped
+  repository check passes with 127 documentation links/124 active IDs/152 definitions, the 68-task
+  graph, and 31 passed/2 qualifying-only ignored scaled T-20 cases. No IPC, cloud, model, provider
+  credential, AgentMage change or authoritative migration is included.
 - Completed T-64 at `97537e5`: canonical `UMEM` 1.0 transactions now admit immutable exact-text or
   opaque source versions, evidence-bound facts, corrections, contradictions, retractions and source
   revocation through the existing encrypted blob/journal/policy path. Retry returns the same durable

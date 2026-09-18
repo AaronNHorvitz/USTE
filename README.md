@@ -16,21 +16,23 @@ An item can link to a price record without USTE fetching that price from an exte
 **Status: R0 design ready; the T-08–T-18/T-45/T-48/T-49 correctness foundation now includes the
 workspace, encrypted journal/transactions/blobs, authorization, evidence graph, replay/checkpoints,
 pinned time, spatial schemas, atomic typed import contracts and an encrypted disk-backed current-
-graph index. T-63–T-66 have verified the bounded M1 baseline and added durable source-backed
-writes, cited bounded retrieval, corrections, revocation and fail-closed rebuild.** There is no general database executable, supported content parser, security
+graph index. T-63–T-67 have verified the bounded M1 baseline, durable source-backed writes,
+cited bounded retrieval, corrections, revocation, fail-closed rebuild and a restricted local Rust
+consumer demo.** There is no general database executable, supported content parser, security
 certification, or production release yet. One T-15 component benchmark is recorded and misses its
 throughput target. The features below are requirements unless explicitly identified as implemented.
 
 ## Next delivery milestone: local memory pilot
 
 The current implementation priority is **M1: a bounded, experimental local memory backend**.
-Its durable source/fact reducer, restricted query semantics and fail-closed lifecycle are verified;
-T-67 must now make that core runnable through a generic Rust consumer adapter and offline demo,
-then T-68 must run every acceptance/fault/measurement case. The consumer keeps its existing store
+Its durable source/fact reducer, restricted query semantics, fail-closed lifecycle and generic
+embedded adapter are verified; T-68 must now run every acceptance/fault/measurement case and issue
+the exact-version handoff. The consumer keeps its existing store
 authoritative and can disable/rebuild the derived index. Synthetic data only until the applicable
 lifecycle gates pass.
 
 See the [memory-first milestone](docs/memory-first-milestone.md) and tasks T-63–T-68.
+[Run the synthetic offline demo](docs/memory-pilot-demo.md) on the admitted Linux/Btrfs profile.
 This does not close R1/R2, lower existing benchmarks, or remove spatial indexes, navigation,
 physics, rich content, or production hardening from the full roadmap.
 
