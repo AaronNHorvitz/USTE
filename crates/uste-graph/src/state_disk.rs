@@ -9,20 +9,23 @@ use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_policy::NamespacePolicy;
 use uste_storage::{
-    Clock, DurableIndexRoot, IndexDelta, IndexEntry, IndexGetLimits, IndexPredecessor,
-    IndexPredecessorLimits, IndexReadStats, IndexRootAnchor, IndexRootInput, IndexRunCursor,
-    IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport, IndexRunReadLimits,
-    IndexRunReadReport, IndexRunVisitor, IndexScrubReport, MAX_INDEX_DELTA_LOGICAL_BYTES,
-    MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_PAGES_PER_RUN,
-    MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUN_LOGICAL_BYTES, MAX_INDEX_SCAN_RESULTS,
-    MAX_INDEX_VALUE_BYTES, OwnershipFileSystem, PageCache, RecoveredIndexRoot,
+    BlobInventory, Clock, DurableIndexRoot, IndexDelta, IndexEntry, IndexGetLimits,
+    IndexPredecessor, IndexPredecessorLimits, IndexReadStats, IndexRootAnchor, IndexRootInput,
+    IndexRunCursor, IndexRunDescriptor, IndexRunMergeLimits, IndexRunMergeReport,
+    IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScrubReport,
+    MAX_INDEX_DELTA_LOGICAL_BYTES, MAX_INDEX_ENTRIES_PER_RUN, MAX_INDEX_GET_PAGE_VISITS,
+    MAX_INDEX_PAGES_PER_RUN, MAX_INDEX_RESULT_BYTES, MAX_INDEX_RUN_LOGICAL_BYTES,
+    MAX_INDEX_SCAN_RESULTS, MAX_INDEX_VALUE_BYTES, OwnershipFileSystem, PageCache,
+    RecoveredIndexRoot,
     journal::{DurableKeyEnvelope, StorageError},
 };
 use uste_txn::{
-    AuthenticatedIndexRecovery, Cancellation, CheckpointState, CheckpointStateError,
+    ApplyError, AuthenticatedIndexRecovery, Cancellation, CheckpointState, CheckpointStateError,
     CommitCoordinator, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
-    CoordinatorMetadataLoadReport, CoordinatorRecoverySeed, TransactionError, TransactionOutcome,
-    TransactionRequest, reconstruct_coordinator_metadata_seed_for_recovery,
+    CoordinatorMetadataLoadReport, CoordinatorRecoverySeed, DerivedIndexMaintenance,
+    EquivalentTransactionState, ExternallyPreparedTransactionState, PostCommitStateMaintenance,
+    TransactionError, TransactionOutcome, TransactionRequest, TransactionState,
+    reconstruct_coordinator_metadata_seed_for_recovery,
 };
 use uste_types::{CommitRevision, NamespaceRef, RecordId, RecordRef, Value};
 
@@ -229,6 +232,33 @@ pub struct GraphDiskBase {
     current_policy: Option<NamespacePolicy>,
 }
 
+/// Warm live graph reducer backed by one admitted terminal disk root.
+///
+/// At most one durably committed, request-bounded root plan may be pending. A pending state is
+/// repair-only until its terminal root is published and installed.
+pub struct GraphDiskLiveState {
+    base: GraphDiskBase,
+    pending: Option<GraphDiskPending>,
+}
+
+struct GraphDiskPending {
+    plan: GraphStateRootDelta,
+    target_policy: Option<NamespacePolicy>,
+}
+
+/// Metadata-only snapshot for representation equivalence and coordinator health checks.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GraphDiskLiveSnapshot {
+    scope: NamespaceRef,
+    revision: CommitRevision,
+    logical_state_digest: Option<[u8; 32]>,
+}
+
+/// Opaque, already-published terminal base installed through coordinator maintenance.
+pub struct GraphDiskLivePublication {
+    base: GraphDiskBase,
+}
+
 impl core::fmt::Debug for GraphDiskBase {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -281,6 +311,70 @@ impl GraphDiskBase {
     }
 }
 
+impl core::fmt::Debug for GraphDiskLiveState {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphDiskLiveState")
+            .field("scope", &"[REDACTED]")
+            .field("revision", &self.revision())
+            .field("pending", &self.pending.is_some())
+            .finish()
+    }
+}
+
+impl GraphDiskLiveState {
+    #[must_use]
+    pub const fn new(base: GraphDiskBase) -> Self {
+        Self {
+            base,
+            pending: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn scope(&self) -> NamespaceRef {
+        self.base.scope()
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> CommitRevision {
+        self.pending
+            .as_ref()
+            .map_or_else(|| self.base.revision(), |pending| pending.plan.revision)
+    }
+
+    #[must_use]
+    pub const fn is_pending(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// The current usable base. A pending journal revision deliberately hides the stale root.
+    #[must_use]
+    pub const fn current_base(&self) -> Option<&GraphDiskBase> {
+        if self.pending.is_none() {
+            Some(&self.base)
+        } else {
+            None
+        }
+    }
+
+    fn pending_publication(
+        &self,
+        outcome: TransactionOutcome,
+    ) -> Result<(&GraphDiskBase, &GraphDiskPending), GraphDiskError> {
+        let pending = self
+            .pending
+            .as_ref()
+            .ok_or(GraphDiskError::RootStateMismatch)?;
+        if outcome.revision != pending.plan.revision
+            || outcome.result_digest != pending.plan.result_digest
+        {
+            return Err(GraphDiskError::RootStateMismatch);
+        }
+        Ok((&self.base, pending))
+    }
+}
+
 /// Aggregate bounds for retaining one transaction's exact graph-state family deltas.
 ///
 /// The budget is debited while family maps are formed. The preceding graph transaction prepare
@@ -312,6 +406,7 @@ impl GraphStateDeltaLimits {
 }
 
 /// Opaque, bounded exact family changes prepared against one journal-certified graph revision.
+#[derive(Clone)]
 pub struct GraphStateRootDelta {
     scope: NamespaceRef,
     base_anchor: IndexRootAnchor,
@@ -483,8 +578,9 @@ where
     ) -> Result<IndexRunReadReport, TransactionError>;
 }
 
-impl<F, W, E, I> GraphStateIndexReader<F> for CommitCoordinator<GraphState, F, W, E, I>
+impl<S, F, W, E, I> GraphStateIndexReader<F> for CommitCoordinator<S, F, W, E, I>
 where
+    S: TransactionState,
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
     E: EntropySource,
@@ -810,6 +906,7 @@ impl GraphDiskPreparationView {
 }
 
 /// Opaque reducer result produced from a disk preparation proof.
+#[derive(Clone)]
 pub struct DiskPreparedGraph {
     prepared: PreparedGraph,
     base_anchor: IndexRootAnchor,
@@ -852,6 +949,24 @@ impl DiskPreparedGraph {
     }
 }
 
+/// Opaque proof-prepared commit bundle owned by the warm disk reducer after journal publication.
+#[derive(Clone)]
+pub struct GraphDiskCommit {
+    prepared: DiskPreparedGraph,
+    plan: GraphStateRootDelta,
+}
+
+impl core::fmt::Debug for GraphDiskCommit {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("GraphDiskCommit")
+            .field("base_revision", &self.plan.base_revision)
+            .field("revision", &self.plan.revision)
+            .field("deltas", &self.plan.deltas)
+            .finish()
+    }
+}
+
 /// Load a bounded authenticated proof for a current-state graph transaction.
 ///
 /// Current exact lookups plus complete bounded history/reverse prefix scans occur only in this
@@ -865,6 +980,59 @@ pub fn load_graph_disk_preparation_view<F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<GraphDiskPreparationView, GraphDiskError>
 where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    load_graph_disk_preparation_view_with_state(
+        coordinator,
+        filesystem,
+        base,
+        transaction,
+        limits,
+        cache,
+    )
+}
+
+/// Load a proof against the exact ready base owned by a warm disk-backed coordinator.
+pub fn load_graph_disk_live_preparation_view<F, W, E, I>(
+    coordinator: &CommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    transaction: GraphTransaction,
+    limits: GraphDiskPreparationLimits,
+    cache: &mut PageCache,
+) -> Result<GraphDiskPreparationView, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let state = coordinator.reducer_state_for_checkpoint()?;
+    let base = state
+        .current_base()
+        .ok_or(GraphDiskError::RootStateMismatch)?;
+    load_graph_disk_preparation_view_with_state(
+        coordinator,
+        filesystem,
+        base.admitted_root(),
+        transaction,
+        limits,
+        cache,
+    )
+}
+
+fn load_graph_disk_preparation_view_with_state<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
+    filesystem: &mut F,
+    base: &DerivedGraphStateRoot,
+    transaction: GraphTransaction,
+    limits: GraphDiskPreparationLimits,
+    cache: &mut PageCache,
+) -> Result<GraphDiskPreparationView, GraphDiskError>
+where
+    S: TransactionState,
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
     E: EntropySource,
@@ -1277,8 +1445,8 @@ fn reverse_proof_targets(transaction: &GraphTransaction) -> BTreeSet<RecordRef> 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn load_history_proofs<F, W, E, I>(
-    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+fn load_history_proofs<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
     filesystem: &mut F,
     root: &RecoveredIndexRoot,
     scope: NamespaceRef,
@@ -1288,6 +1456,7 @@ fn load_history_proofs<F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<BTreeMap<RecordRef, Vec<Record>>, GraphDiskError>
 where
+    S: TransactionState,
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
     E: EntropySource,
@@ -1347,8 +1516,8 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn load_reverse_proofs<F, W, E, I>(
-    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+fn load_reverse_proofs<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
     filesystem: &mut F,
     root: &RecoveredIndexRoot,
     scope: NamespaceRef,
@@ -1358,6 +1527,7 @@ fn load_reverse_proofs<F, W, E, I>(
     cache: &mut PageCache,
 ) -> Result<BTreeMap<RecordRef, BTreeMap<RecordRef, ReverseReference>>, GraphDiskError>
 where
+    S: TransactionState,
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
     E: EntropySource,
@@ -1693,6 +1863,164 @@ pub fn prepare_graph_state_root_delta_from_disk(
     )
 }
 
+/// Bind one proof-prepared graph change to its exact bounded terminal-root plan.
+pub fn prepare_graph_disk_commit(
+    prepared: DiskPreparedGraph,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphDiskCommit, GraphDiskError> {
+    let plan = prepare_graph_state_root_delta_from_disk(&prepared, limits)?;
+    Ok(GraphDiskCommit { prepared, plan })
+}
+
+impl GraphDiskLiveState {
+    fn can_publish(&self, prepared: &GraphDiskCommit) -> bool {
+        self.pending.is_none()
+            && prepared.prepared.base_anchor == self.base.anchor()
+            && prepared.prepared.base_counts == self.base.state_counts()
+            && prepared.prepared.base_policy.as_ref() == self.base.namespace_policy()
+            && prepared.prepared.prepared.scope == self.base.scope()
+            && prepared.prepared.prepared.base_revision == Some(self.base.revision())
+            && prepared.prepared.prepared.base_policy_version
+                == self.base.namespace_policy().map(NamespacePolicy::version)
+            && prepared.plan.scope == self.base.scope()
+            && prepared.plan.base_anchor == self.base.anchor()
+            && prepared.plan.base_revision == self.base.revision()
+            && prepared.plan.revision == prepared.prepared.prepared.revision
+            && prepared.plan.result_digest == prepared.prepared.prepared.result_digest
+    }
+}
+
+impl TransactionState for GraphDiskLiveState {
+    type Prepared = GraphDiskCommit;
+    type Snapshot = GraphDiskLiveSnapshot;
+
+    fn prepare(
+        &self,
+        _canonical_request: &[u8],
+        _blob_inventory: Option<&BlobInventory>,
+        _revision: CommitRevision,
+    ) -> Result<Self::Prepared, ApplyError> {
+        Err(ApplyError::InvalidRequest)
+    }
+
+    fn result_digest(prepared: &Self::Prepared) -> [u8; 32] {
+        prepared.plan.result_digest
+    }
+
+    fn publish(&mut self, prepared: Self::Prepared) {
+        assert!(
+            self.can_publish(&prepared),
+            "disk graph commit must publish on its exact admitted base"
+        );
+        let target_policy = prepared
+            .prepared
+            .prepared
+            .policy_change
+            .clone()
+            .or(prepared.prepared.base_policy);
+        self.pending = Some(GraphDiskPending {
+            plan: prepared.plan,
+            target_policy,
+        });
+    }
+
+    fn snapshot(&self) -> Self::Snapshot {
+        GraphDiskLiveSnapshot {
+            scope: self.scope(),
+            revision: self.revision(),
+            logical_state_digest: self
+                .pending
+                .is_none()
+                .then(|| *self.base.root.root.logical_state_digest()),
+        }
+    }
+}
+
+impl ExternallyPreparedTransactionState for GraphDiskLiveState {
+    fn validate_external_prepared(
+        &self,
+        canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
+        revision: CommitRevision,
+        prepared: &Self::Prepared,
+    ) -> Result<(), ApplyError> {
+        if self.pending.is_some() {
+            return Err(ApplyError::Conflict);
+        }
+        prepared.prepared.prepared.validate_external_request(
+            canonical_request,
+            blob_inventory,
+            revision,
+        )?;
+        if !self.can_publish(prepared) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+impl EquivalentTransactionState for GraphState {
+    type Equivalent = GraphDiskLiveState;
+
+    fn validate_equivalent(
+        &self,
+        next: &GraphDiskLiveState,
+        scope: NamespaceRef,
+        anchor: Option<(CommitRevision, [u8; 32])>,
+    ) -> Result<(), ApplyError> {
+        let snapshot = self.current_snapshot();
+        let digest = GraphState::logical_state_digest(snapshot).map_err(|error| match error {
+            CheckpointStateError::ResourceLimit => ApplyError::ResourceLimit,
+            CheckpointStateError::Invalid | CheckpointStateError::UnsupportedProfile => {
+                ApplyError::Conflict
+            }
+        })?;
+        if next.pending.is_some()
+            || next.scope() != scope
+            || snapshot.scope() != scope
+            || snapshot.revision() != Some(next.base.revision())
+            || snapshot.namespace_policy() != next.base.namespace_policy()
+            || digest != *next.base.root.root.logical_state_digest()
+            || anchor
+                != Some((
+                    next.base.revision(),
+                    *next.base.root.root.certificate_digest(),
+                ))
+        {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+}
+
+impl PostCommitStateMaintenance for GraphDiskLiveState {
+    type Publication = GraphDiskLivePublication;
+
+    fn install_publication(
+        &mut self,
+        scope: NamespaceRef,
+        anchor: Option<(CommitRevision, [u8; 32])>,
+        publication: Self::Publication,
+    ) -> Result<(), ApplyError> {
+        let pending = self.pending.as_ref().ok_or(ApplyError::Conflict)?;
+        if publication.base.scope() != scope
+            || publication.base.revision() != pending.plan.revision
+            || publication.base.state_counts() != pending.plan.target_counts
+            || publication.base.namespace_policy() != pending.target_policy.as_ref()
+            || anchor
+                != Some((
+                    publication.base.revision(),
+                    *publication.base.root.root.certificate_digest(),
+                ))
+        {
+            return Err(ApplyError::Conflict);
+        }
+        self.base = publication.base;
+        self.pending = None;
+        Ok(())
+    }
+}
+
 /// Durably commit the exact graph request bound to a disk-prepared reducer change.
 ///
 /// The coordinator preserves its normal retry, cancellation, journal, and publication ordering.
@@ -1715,6 +2043,153 @@ where
     coordinator
         .commit_prepared(filesystem, request, prepared.prepared, clock, cancellation)
         .map_err(GraphDiskError::Transaction)
+}
+
+/// Durably commit one exact proof-prepared request through the warm disk-backed reducer.
+pub fn commit_graph_disk_live_prepared<F, W, E, I>(
+    coordinator: &mut CommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    request: TransactionRequest<'_>,
+    prepared: GraphDiskCommit,
+    clock: &mut impl Clock,
+    cancellation: &impl Cancellation,
+) -> Result<TransactionOutcome, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    coordinator
+        .commit_prepared(filesystem, request, prepared, clock, cancellation)
+        .map_err(GraphDiskError::Transaction)
+}
+
+trait GraphStateIndexPublisher<F>
+where
+    F: OwnershipFileSystem,
+{
+    fn graph_checkpoint_anchor(
+        &self,
+    ) -> Result<Option<(CommitRevision, [u8; 32])>, TransactionError>;
+
+    #[allow(clippy::too_many_arguments)]
+    fn graph_merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<uste_storage::MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>;
+
+    fn graph_publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, TransactionError>;
+}
+
+impl<S, F, W, E, I> GraphStateIndexPublisher<F> for CommitCoordinator<S, F, W, E, I>
+where
+    S: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    fn graph_checkpoint_anchor(
+        &self,
+    ) -> Result<Option<(CommitRevision, [u8; 32])>, TransactionError> {
+        self.checkpoint_anchor()
+    }
+
+    fn graph_merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<uste_storage::MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        self.merge_index_run_visit(
+            filesystem,
+            revision,
+            GRAPH_STATE_PROFILE_V1,
+            family,
+            base_root,
+            limits,
+            deltas,
+            visitor,
+        )
+    }
+
+    fn graph_publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        self.publish_index_root_recovered(filesystem, input, runs)
+    }
+}
+
+impl<F, W, E, I> GraphStateIndexPublisher<F> for DerivedIndexMaintenance<'_, F, W, E, I>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    fn graph_checkpoint_anchor(
+        &self,
+    ) -> Result<Option<(CommitRevision, [u8; 32])>, TransactionError> {
+        Ok(self.checkpoint_anchor())
+    }
+
+    fn graph_merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<uste_storage::MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        self.merge_index_run_visit(
+            filesystem,
+            revision,
+            GRAPH_STATE_PROFILE_V1,
+            family,
+            base_root,
+            limits,
+            deltas,
+            visitor,
+        )
+    }
+
+    fn graph_publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        self.publish_index_root_recovered(filesystem, input, runs)
+    }
 }
 
 /// Merge a previously prepared graph-state plan after its transaction has durably committed.
@@ -1740,6 +2215,63 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    publish_graph_state_root_delta_with(coordinator, filesystem, base, plan, outcome, limits)
+}
+
+/// Publish and install the pending terminal root for one warm disk-backed commit.
+///
+/// Any merge or publication error leaves the reducer pending and repair-only so the same outcome
+/// can be retried without accepting another commit against a stale base.
+pub fn publish_graph_disk_live_base<F, W, E, I>(
+    coordinator: &mut CommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    outcome: TransactionOutcome,
+    limits: GraphStateRootMergeLimits,
+) -> Result<(DerivedGraphStateRoot, GraphStateRootMergeReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let (published, report, counts, policy) = {
+        let mut maintenance = coordinator.reducer_and_index_maintenance()?;
+        let (base, pending) = maintenance.reducer.pending_publication(outcome)?;
+        let counts = pending.plan.target_counts;
+        let policy = pending.target_policy.clone();
+        let (published, report) = publish_graph_state_root_delta_with(
+            &mut maintenance.indexes,
+            filesystem,
+            base.admitted_root(),
+            &pending.plan,
+            outcome,
+            limits,
+        )?;
+        (published, report, counts, policy)
+    };
+    let installed = GraphDiskBase {
+        root: DerivedGraphStateRoot {
+            root: published.root.clone(),
+        },
+        counts,
+        current_policy: policy,
+    };
+    coordinator.install_postcommit_publication(GraphDiskLivePublication { base: installed })?;
+    Ok((published, report))
+}
+
+fn publish_graph_state_root_delta_with<P, F>(
+    publisher: &mut P,
+    filesystem: &mut F,
+    base: &DerivedGraphStateRoot,
+    plan: &GraphStateRootDelta,
+    outcome: TransactionOutcome,
+    limits: GraphStateRootMergeLimits,
+) -> Result<(DerivedGraphStateRoot, GraphStateRootMergeReport), GraphDiskError>
+where
+    P: GraphStateIndexPublisher<F>,
+    F: OwnershipFileSystem,
+{
     if base.root.anchor() != plan.base_anchor
         || base.root.revision() != plan.base_revision
         || outcome.revision != plan.revision
@@ -1748,8 +2280,8 @@ where
         return Err(GraphDiskError::RootStateMismatch);
     }
 
-    let (anchor_revision, certificate_digest) = coordinator
-        .checkpoint_anchor()?
+    let (anchor_revision, certificate_digest) = publisher
+        .graph_checkpoint_anchor()?
         .ok_or(GraphDiskError::RootStateMismatch)?;
     if anchor_revision != plan.revision {
         return Err(GraphDiskError::RootStateMismatch);
@@ -1766,10 +2298,9 @@ where
     for (index, deltas) in plan.families.iter().enumerate() {
         let family = u8::try_from(index + 1).map_err(|_| GraphDiskError::IndexCorrupt)?;
         let base_has_family = base.root.runs().any(|run| run.family() == family);
-        let merged = coordinator.merge_index_run_visit(
+        let merged = publisher.graph_merge_index_run_visit(
             filesystem,
             plan.revision,
-            GRAPH_STATE_PROFILE_V1,
             family,
             base_has_family.then_some(&base.root),
             limits.families[index],
@@ -1793,7 +2324,7 @@ where
     }
     let logical_state_digest = validator.finish()?;
 
-    let root = coordinator.publish_index_root_recovered(
+    let root = publisher.graph_publish_index_root_recovered(
         filesystem,
         IndexRootInput {
             scope: plan.scope,
@@ -4099,11 +4630,12 @@ fn checkpoint_state_disk_error(error: CheckpointStateError) -> GraphDiskError {
     }
 }
 
-fn validate_current_root<F, W, E, I>(
-    coordinator: &CommitCoordinator<GraphState, F, W, E, I>,
+fn validate_current_root<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
     root: &DerivedGraphStateRoot,
 ) -> Result<(), GraphDiskError>
 where
+    S: TransactionState,
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
     E: EntropySource,

@@ -110,9 +110,12 @@ Decision 0050 supplies that cursor and predecessor layer. Decision 0051 extracts
 history/reference requirements shared with in-memory reconstruction and admits one cold candidate
 only after exhausting all family cursors, resolving historical/current references, checking every
 derived family and matching the canonical digest. The returned `GraphDiskBase` drives bounded disk
-preparation without complete graph-map reconstruction. Next replace the live graph publication
-target with a persistent disk base/overlay and make coordinator metadata plus suffix recovery use
-that state; discovery/scrub and current coordinator/recovery maps remain memory-resident meanwhile.
+preparation without complete graph-map reconstruction. Decision 0052 replaces the warm live graph
+publication target with one admitted base and one request-bounded pending plan. Exact journal
+retry survives the representation handoff, distinct progress is blocked while the base is stale,
+and failed root publication remains retryable. Next make pending state/coordinator metadata and
+suffix recovery durable without full `GraphState` replay, then bound discovery/initial scrub;
+current coordinator/recovery maps remain memory-resident meanwhile.
 
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization

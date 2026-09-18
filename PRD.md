@@ -199,6 +199,14 @@ History groups, exact/predecessor proof work and semantic reference comparisons 
 caller limits; no complete graph map is reconstructed. Candidate discovery/scrub, the live
 coordinator/reducer, suffix replay and qualifying BM-01/BM-06 evidence remain open T-20 work.
 
+Decision 0052 replaces the warm coordinator's complete graph publication target with
+`GraphDiskLiveState`: one admitted base plus at most one request-bounded pending root plan. The
+ordinary journal commit remains authoritative; pending state hides the stale base, permits exact
+retry and repair, and rejects distinct progress until streamed terminal-root validation installs
+the exact next base. Representation handoff proves scope/revision/policy/digest/certificate
+equivalence and preserves coordinator metadata. Pending crash recovery, coordinator metadata,
+candidate discovery/scrub, suffix replay and BM-01/BM-06 remain open T-20 work.
+
 Decision 0039 makes the authorized encrypted index's userspace cache explicitly clearable and
 reports cumulative cache bytes/events plus authenticated page, fragment and result-byte work. It
 does not expose keys, plaintext or candidate identities, but its candidate-dependent counters are

@@ -27,8 +27,9 @@ deadline for the CLI. Decision 0048 removes the complete snapshot from proof-der
 publication. Decision 0049 returns that admitted root directly for the next disk preparation.
 Decision 0050 adds the resumable cursor and predecessor proof needed for cold admission. Decision
 0051 uses them to semantically admit a cold `GraphDiskBase` without rebuilding complete graph maps.
-T-20 remains open pending a disk-backed live publication target,
-larger-than-memory recovery and qualifying
+Decision 0052 replaces the complete graph in the warm authoritative write loop with one admitted
+base and one bounded pending terminal-root plan. T-20 remains open pending durable pending-state/
+coordinator recovery, bounded discovery/scrub, larger-than-memory recovery and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
@@ -383,6 +384,17 @@ unverified external distribution prerequisite.
   Iterator-oriented shared reference validation charges and resolves one requirement at a time,
   with no intermediate requirement vector. Exact-minus semantic/page/byte fixtures fail closed;
   targeted agent re-review found no remaining high- or medium-severity issue.
+- Added Decision 0052 and `GraphDiskLiveState`. A consuming, opt-in coordinator transition proves
+  the admitted base equals the complete reducer at the exact scope/revision/policy/logical-digest/
+  certificate anchor while preserving journal, retry, transaction and blob-owner state.
+- The warm reducer accepts only a disk-proof/terminal-plan bundle. After journal certification it
+  hides the stale base and blocks distinct progress while exact idempotent retry remains available.
+  A disjoint derived-index capability streams terminal publication without journal append access;
+  a failed one-byte history bound leaves the plan pending, and adequate retry installs the exact
+  next base and permits the next bounded proof.
+- The warm reducer deliberately has no checkpoint codec. Process loss with pending work still
+  recovers through complete `GraphState` replay; coordinator metadata, suffix replay and bounded
+  discovery/scrub remain T-20 work. No BM-01/BM-06 result is claimed.
 - Added Decision 0039 and a synchronized runtime for every admitted authorized graph root. Its
   privileged report now includes cumulative decrypted-cache occupancy/events, completed authorized
   reads/raw operations, authenticated pages, fragments and logical result bytes. The counters are
@@ -541,10 +553,10 @@ cargo fmt ... -- --check; rustfmt --check ...
 python3 scripts/check_task_graph.py
 # task_graph=ok tasks=62 local_implementation_gate=T-07 distribution_gate=T-62 release_gate=T-44
 bash scripts/check.sh
-# workspace format/clippy/test/doc pass; 264 workspace tests including 77 uste-storage, 13
-# uste-crypto, 42 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
+# workspace format/clippy/test/doc pass; 265 workspace tests including 77 uste-storage, 13
+# uste-crypto, 43 uste-graph, 4 uste-ingest, 34 uste-spatial, 23 uste-types, 15 uste-time,
 # 11 uste-replay, 14 uste-testkit, 4 uste-policy and 27 uste-txn tests;
-# docs=ok (114 links, 111 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
+# docs=ok (116 links, 113 active IDs, 146 definitions); task graph=ok; R0/content/fixture tests
 # and 31 isolated T-20 fixture/engine/Linux-runner tests pass; two exact-profile oracle tests are
 # intentionally ignored in debug and executed under release-profile acceptance commands
 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline \
@@ -556,11 +568,11 @@ cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked -
 cargo test -p uste-graph --test disk_index bounded_disk_preparation_supports_current_history_reverse_and_stale_roots -- --exact
 # 1 passed; exact proof-prepared commit, retry/stale/mismatch checks, root publication and restart
 cargo test -p uste-graph --test disk_index
-# 4 passed; 0 failed
+# 5 passed; 0 failed
 cargo test -p uste-txn --all-targets
 # 27 passed; 0 failed
 cargo test -p uste-graph --all-targets --locked --offline
-# 40 passed; 0 failed
+# 43 passed; 0 failed
 cargo clippy -p uste-graph --all-targets --locked --offline -- -D warnings
 # passed
 cargo test -p uste-spatial --all-targets --locked
@@ -611,12 +623,13 @@ remaining mixed workload have not passed.
   families for one revision without collecting base runs. Proof-derived publication now validates
   actual merged outputs and the canonical digest with one caller-bounded history bucket rather than
   scanning the complete reducer. Cold semantic admission now returns a bounded `GraphDiskBase`
-  without complete graph-map reconstruction, but discovery/initial scrub and the live base/overlay
-  lifecycle remain memory-resident. The explicit-I/O preparation proof now supports
+  without complete graph-map reconstruction. The warm live reducer now advances that base with
+  one bounded pending plan and no complete graph map, but discovery/initial scrub, coordinator
+  metadata and pending/suffix recovery remain memory-resident. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
-  The coordinator's live publication target, coordinator metadata and recovery remain fully
-  memory-resident.
+  The coordinator's retry/transaction/blob-owner metadata and recovery remain fully memory-
+  resident.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
@@ -641,10 +654,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Continue T-20 by replacing the complete live graph publication target with a persistent
-disk-backed base/overlay state built on the cold-admitted `GraphDiskBase`, then move coordinator
-metadata and suffix recovery off their full-memory state. Bound candidate discovery/initial scrub
-as part of that recovery path. Run the exact five-sample BM-01 campaign under the accepted host
+Continue T-20 by making the warm reducer's pending plan and coordinator metadata recoverable
+without complete `GraphState` replay, then stream the recovery suffix into bounded disk state.
+Bound candidate discovery/initial scrub as part of that recovery path. Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

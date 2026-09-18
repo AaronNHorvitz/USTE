@@ -167,6 +167,12 @@ proof-operation, semantic-reference, lookup-page and lookup-byte budgets must re
 resource limit; exact-value byte limits apply before allocation. The resulting base must work with
 the existing bounded disk-preparation path without reconstructing complete graph maps.
 
+Decision 0052 verifies the warm live transition separately. Tests must prove exact reducer/root/
+certificate equivalence at handoff, proof-bound authoritative commit, exact idempotent retry,
+distinct-progress and proof-load refusal while pending, failed-publication retention, adequate-
+limit repair and preparation from the installed next base. Reports must disclose that pending
+process recovery and coordinator metadata remain full-memory and must not count this as BM-06.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

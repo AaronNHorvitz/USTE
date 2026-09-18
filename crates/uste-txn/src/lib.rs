@@ -193,6 +193,37 @@ pub trait ExternallyPreparedTransactionState: TransactionState {
     ) -> Result<(), ApplyError>;
 }
 
+/// Source-owned proof that another reducer representation is logically equivalent at the exact
+/// current journal anchor.
+///
+/// This permits a trusted coordinator to replace an in-memory reducer with a disk-backed
+/// representation without changing journal authority, retry metadata, or transaction ownership.
+/// The authoritative source owns the implementation so an untrusted destination cannot
+/// self-attest or escape source-specific transition restrictions.
+pub trait EquivalentTransactionState: TransactionState {
+    /// The source representation's sole authorized equivalent destination.
+    type Equivalent: TransactionState;
+
+    fn validate_equivalent(
+        &self,
+        next: &Self::Equivalent,
+        scope: NamespaceRef,
+        anchor: Option<(CommitRevision, [u8; 32])>,
+    ) -> Result<(), ApplyError>;
+}
+
+/// Opt-in representation-only maintenance after a derived state root is durably published.
+pub trait PostCommitStateMaintenance: TransactionState {
+    type Publication;
+
+    fn install_publication(
+        &mut self,
+        scope: NamespaceRef,
+        anchor: Option<(CommitRevision, [u8; 32])>,
+        publication: Self::Publication,
+    ) -> Result<(), ApplyError>;
+}
+
 /// Canonical reducer state used by trusted replay/checkpoint maintenance.
 ///
 /// Derived indexes may be omitted only when decoding deterministically rebuilds and validates
@@ -517,6 +548,121 @@ where
     uncertain: bool,
 }
 
+/// Narrow mutable journal capability that can update derived indexes while the reducer is
+/// borrowed independently. It cannot append transactions or mutate coordinator retry metadata.
+pub struct DerivedIndexMaintenance<'a, F, W, E, I>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    scope: NamespaceRef,
+    journal: &'a mut JournalStore<F, W, E, I>,
+}
+
+/// Ownership-preserving rejection from a reducer representation transition.
+pub struct EquivalentStateRejection<S, T, F, W, E, I>
+where
+    S: TransactionState,
+    T: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    coordinator: CommitCoordinator<S, F, W, E, I>,
+    proposed: T,
+}
+
+pub type EquivalentStateTransitionResult<S, T, F, W, E, I> =
+    Result<CommitCoordinator<T, F, W, E, I>, Box<EquivalentStateRejection<S, T, F, W, E, I>>>;
+
+impl<S, T, F, W, E, I> EquivalentStateRejection<S, T, F, W, E, I>
+where
+    S: TransactionState,
+    T: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    #[must_use]
+    pub fn into_parts(self) -> (CommitCoordinator<S, F, W, E, I>, T) {
+        (self.coordinator, self.proposed)
+    }
+}
+
+/// Disjoint reducer and derived-index maintenance borrows.
+pub struct ReducerIndexMaintenance<'a, S, F, W, E, I>
+where
+    S: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    pub reducer: &'a S,
+    pub indexes: DerivedIndexMaintenance<'a, F, W, E, I>,
+}
+
+impl<F, W, E, I> DerivedIndexMaintenance<'_, F, W, E, I>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    #[must_use]
+    pub fn checkpoint_anchor(&self) -> Option<(CommitRevision, [u8; 32])> {
+        self.journal.checkpoint_anchor()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn merge_index_run_visit<T>(
+        &mut self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        index_profile: [u8; 32],
+        family: u8,
+        base_root: Option<&RecoveredIndexRoot>,
+        limits: IndexRunMergeLimits,
+        deltas: T,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<MergedIndexRun, TransactionError>
+    where
+        T: IntoIterator<Item = Result<IndexDelta, StorageError>>,
+    {
+        self.journal
+            .merge_index_run_visit(
+                filesystem,
+                self.scope,
+                revision,
+                index_profile,
+                family,
+                base_root,
+                limits,
+                deltas,
+                visitor,
+            )
+            .map_err(TransactionError::Storage)
+    }
+
+    pub fn publish_index_root_recovered(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_index_root_recovered(filesystem, input, runs)
+            .map_err(TransactionError::Storage)
+    }
+}
+
 impl<S, F, W, E, I> CommitCoordinator<S, F, W, E, I>
 where
     S: TransactionState,
@@ -748,6 +894,82 @@ where
         } else {
             Ok(&self.state)
         }
+    }
+
+    /// Consume this coordinator and replace only its reducer representation after an opt-in
+    /// equivalence check. Rejection returns both the authoritative coordinator and proposed state.
+    pub fn into_equivalent_state(
+        self,
+        next: S::Equivalent,
+    ) -> EquivalentStateTransitionResult<S, S::Equivalent, F, W, E, I>
+    where
+        S: EquivalentTransactionState,
+    {
+        if self.uncertain
+            || self
+                .state
+                .validate_equivalent(&next, self.scope, self.journal.checkpoint_anchor())
+                .is_err()
+        {
+            return Err(Box::new(EquivalentStateRejection {
+                coordinator: self,
+                proposed: next,
+            }));
+        }
+        let Self {
+            scope,
+            retention,
+            journal,
+            state: _,
+            outcomes,
+            transactions,
+            committed_blob_owners,
+            recovered,
+            uncertain,
+        } = self;
+        Ok(CommitCoordinator {
+            scope,
+            retention,
+            journal,
+            state: next,
+            outcomes,
+            transactions,
+            committed_blob_owners,
+            recovered,
+            uncertain,
+        })
+    }
+
+    /// Borrow the reducer and a disjoint, derived-index-only journal capability.
+    pub fn reducer_and_index_maintenance(
+        &mut self,
+    ) -> Result<ReducerIndexMaintenance<'_, S, F, W, E, I>, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        Ok(ReducerIndexMaintenance {
+            reducer: &self.state,
+            indexes: DerivedIndexMaintenance {
+                scope: self.scope,
+                journal: &mut self.journal,
+            },
+        })
+    }
+
+    /// Install an opt-in representation-only state update after derived-root publication.
+    pub fn install_postcommit_publication(
+        &mut self,
+        publication: S::Publication,
+    ) -> Result<(), TransactionError>
+    where
+        S: PostCommitStateMaintenance,
+    {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.state
+            .install_publication(self.scope, self.journal.checkpoint_anchor(), publication)
+            .map_err(map_apply_error)
     }
 
     /// Current journal certificate anchor for an optional cache publication.

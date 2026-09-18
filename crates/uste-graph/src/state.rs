@@ -538,7 +538,7 @@ fn graph_result_digest<'a>(
     digest.finalize().into()
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedGraph {
     pub(crate) scope: NamespaceRef,
     pub(crate) base_revision: Option<CommitRevision>,
@@ -554,6 +554,22 @@ impl PreparedGraph {
     #[must_use]
     pub fn change_count(&self) -> usize {
         self.changes.len()
+    }
+
+    pub(crate) fn validate_external_request(
+        &self,
+        canonical_request: &[u8],
+        blob_inventory: Option<&BlobInventory>,
+        revision: CommitRevision,
+    ) -> Result<(), ApplyError> {
+        let request_digest: [u8; 32] = Sha256::digest(canonical_request).into();
+        if blob_inventory.is_some() || self.request_digest != request_digest {
+            return Err(ApplyError::InvalidRequest);
+        }
+        if self.revision != revision {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
     }
 }
 
@@ -661,11 +677,8 @@ impl ExternallyPreparedTransactionState for GraphState {
         revision: CommitRevision,
         prepared: &Self::Prepared,
     ) -> Result<(), ApplyError> {
-        let request_digest: [u8; 32] = Sha256::digest(canonical_request).into();
-        if blob_inventory.is_some() || prepared.request_digest != request_digest {
-            return Err(ApplyError::InvalidRequest);
-        }
-        if prepared.revision != revision || !self.can_publish(prepared) {
+        prepared.validate_external_request(canonical_request, blob_inventory, revision)?;
+        if !self.can_publish(prepared) {
             return Err(ApplyError::Conflict);
         }
         Ok(())

@@ -222,6 +222,13 @@ pass under aggregate history/proof/semantic budgets. The base immediately drives
 preparation without complete-map reconstruction. The live reducer, coordinator metadata, suffix
 recovery and candidate discovery/scrub remain memory-resident.
 
+Decision 0052 installs the cold-admitted base as a warm `GraphDiskLiveState` and retains only one
+request-bounded pending plan across journal commit and root publication. Pending state blocks stale
+proofs and distinct commits, preserves exact retry, and survives a bounded validation failure for
+repair. Successful streamed publication installs the next base without a complete graph map. Its
+pending state is not yet checkpoint-encoded; coordinator metadata, suffix recovery and discovery/
+scrub remain memory-resident.
+
 The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
 and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
 transient resource condition does not block implementation and was not bypassed by shrinking the
@@ -233,7 +240,7 @@ reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo`
 The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition blocks only a qualifying
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
-The full `bash scripts/check.sh` gate passed after the latest extension: 264 workspace tests, all
+The full `bash scripts/check.sh` gate passed after the latest extension: 265 workspace tests, all
 docs, strict clippy/rustdoc, the storage publication model, and 31 isolated T-20 fixture/engine/
 Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
 acceptance commands and ignored by the debug suite.

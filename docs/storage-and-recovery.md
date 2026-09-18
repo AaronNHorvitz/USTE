@@ -203,6 +203,15 @@ proofs and releases an I/O-capability-free `GraphDiskBase` only after the canoni
 cross-family invariants match. Discovery and initial carrier scrub still use absolute storage
 maxima, while coordinator metadata, the live reducer and suffix replay remain memory-resident.
 
+Decision 0052 makes that base the warm reducer representation. A consuming transition verifies it
+against the complete reducer and current certificate without replacing the coordinator's journal,
+retry or blob-owner state. One proof-derived commit advances journal authority and leaves one
+bounded pending plan; the stale base cannot serve reads or another commit. A disjoint maintenance
+capability can merge runs and publish a root but cannot append journal data. Only the exact
+certificate/count/policy result installs the next base, and failures remain retryable. This state
+is intentionally not checkpoint-decodable: a pending crash still requires complete journal replay,
+and coordinator metadata/discovery/suffix recovery remain later T-20 work.
+
 Decision 0032 adds an authenticated bounded merge from one optional base run and sorted exact
 before/after deltas into one unpublished encrypted run. Present before-values must match byte-for-
 byte, absent before-values require absence and absent after-values are tombstones. The merge holds a

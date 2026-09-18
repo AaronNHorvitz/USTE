@@ -264,6 +264,15 @@ predecessor operations/pages/results, and each semantic reference comparison. Ca
 the live reducer/coordinator maps and recovery suffix are still memory-resident; the admitted base
 is the cold base for the next persistent overlay increment, not a second commit authority.
 
+Decision 0052 installs that base as a warm live reducer after an exact representation-equivalence
+check. The coordinator keeps journal/retry/transaction/blob-owner authority while the reducer owns
+one ready disk base or one bounded pending terminal-root plan. Certification precedes pending-state
+publication; the stale base is unavailable until a narrow derived-index capability streams,
+validates and publishes the exact next root. Failure is repair-only and exact retry remains in the
+coordinator. This removes the complete graph from the warm write loop, but the disk reducer has no
+checkpoint codec: pending process recovery, coordinator maps, discovery/scrub and suffix replay
+remain full-memory boundaries.
+
 Decision 0039 keeps benchmark observation inside that authorization boundary. Each admitted graph
 root owns a synchronized bounded decrypted-page cache plus cumulative read statistics. The
 candidate-dependent telemetry is cardinality-sensitive, so only a currently `ManageSchema`-

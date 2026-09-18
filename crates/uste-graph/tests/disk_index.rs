@@ -3,17 +3,18 @@ use uste_crypto::{
 };
 use uste_graph::{
     AdjacencyDirection, AssertionAction, DeletePolicy, DurablePolicyMutation, Expected,
-    GRAPH_STATE_PROFILE_V1, GraphDiskBaseAdmissionLimits, GraphDiskError,
+    GRAPH_STATE_PROFILE_V1, GraphDiskBaseAdmissionLimits, GraphDiskError, GraphDiskLiveState,
     GraphDiskPreparationLimits, GraphError, GraphState, GraphStateDeltaLimits,
     GraphStateLoadLimits, GraphStateRootMergeLimits, GraphTransaction, NewAssertion, NewEntity,
     NewEvidence, NewRecord, NewRelationship, Operation, Predicate, Record, ValidTime,
     admit_graph_disk_base_candidate, admit_graph_disk_base_candidate_for_recovery,
-    commit_graph_disk_prepared, disk_adjacent_ids, disk_record, disk_supported_ids,
-    encode_stored_record, encode_transaction, load_current_graph_index_roots,
-    load_graph_disk_preparation_view, load_graph_state_root_candidates,
-    load_graph_state_root_candidates_for_recovery, load_graph_state_roots,
-    prepare_graph_state_root_delta, prepare_graph_state_root_delta_from_disk,
-    publish_current_graph_index, publish_graph_state_root, publish_graph_state_root_delta,
+    commit_graph_disk_live_prepared, commit_graph_disk_prepared, disk_adjacent_ids, disk_record,
+    disk_supported_ids, encode_stored_record, encode_transaction, load_current_graph_index_roots,
+    load_graph_disk_live_preparation_view, load_graph_disk_preparation_view,
+    load_graph_state_root_candidates, load_graph_state_root_candidates_for_recovery,
+    load_graph_state_roots, prepare_graph_disk_commit, prepare_graph_state_root_delta,
+    prepare_graph_state_root_delta_from_disk, publish_current_graph_index,
+    publish_graph_disk_live_base, publish_graph_state_root, publish_graph_state_root_delta,
     reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate, scrub_current_graph_index,
     scrub_graph_state_root,
 };
@@ -1485,6 +1486,208 @@ fn bounded_disk_preparation_supports_current_history_reverse_and_stale_roots() {
         ),
         Err(GraphDiskError::RootStateMismatch)
     ));
+}
+
+#[test]
+fn warm_disk_state_blocks_stale_progress_and_repairs_failed_publication() {
+    let entity = record(0x29);
+    let mut filesystem = MemoryFileSystem::new(16 * 1024 * 1024);
+    let name = EntryName::new("graph-disk-live").unwrap();
+    let mut coordinator = CommitCoordinator::create(
+        &mut filesystem,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        name,
+        create_vault(scope().database(), 25_000),
+        CounterEntropy(26_000),
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    commit(
+        &mut coordinator,
+        &mut filesystem,
+        1,
+        GraphTransaction::new(
+            scope(),
+            vec![Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Entity(NewEntity {
+                    id: entity,
+                    entity_type: text("tracked"),
+                    schema_version: 1,
+                    properties: Value::Null,
+                }),
+            }],
+        ),
+    );
+    let snapshot = coordinator.read_view().unwrap().state().clone();
+    publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
+    let candidates = load_graph_state_root_candidates(&coordinator, &mut filesystem).unwrap();
+    let mut admission_cache = PageCache::new(1024 * 1024).unwrap();
+    let (base, _) = admit_graph_disk_base_candidate(
+        &coordinator,
+        &mut filesystem,
+        &candidates[0],
+        admission_limits(),
+        &mut admission_cache,
+    )
+    .unwrap();
+    let mut coordinator = match coordinator.into_equivalent_state(GraphDiskLiveState::new(base)) {
+        Ok(coordinator) => coordinator,
+        Err(_) => panic!("admitted root must be equivalent to its live graph state"),
+    };
+
+    let transaction = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: entity,
+            expected: Expected::Version(uste_graph::RecordVersion::FIRST),
+            properties: Value::Bool(true),
+        }],
+    );
+    let encoded = encode_transaction(&transaction).unwrap();
+    let proof_limits = GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap();
+    let mut proof_cache = PageCache::new(1024 * 1024).unwrap();
+    let prepared = load_graph_disk_live_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        transaction.clone(),
+        proof_limits,
+        &mut proof_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    let prepared = prepare_graph_disk_commit(
+        prepared,
+        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    let request = TransactionRequest {
+        principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+        idempotency_key: IdempotencyKey::from_bytes([2; 16]),
+        transaction_id: TransactionId::from_bytes([34; 16]),
+        canonical_request: &encoded,
+        blob_inventory: None,
+    };
+    let outcome = commit_graph_disk_live_prepared(
+        &mut coordinator,
+        &mut filesystem,
+        request,
+        prepared.clone(),
+        &mut clock(2),
+        &NeverCancel,
+    )
+    .unwrap();
+    assert!(
+        coordinator
+            .reducer_state_for_checkpoint()
+            .unwrap()
+            .is_pending()
+    );
+
+    let retry = commit_graph_disk_live_prepared(
+        &mut coordinator,
+        &mut filesystem,
+        request,
+        prepared.clone(),
+        &mut clock(2),
+        &NeverCancel,
+    )
+    .unwrap();
+    assert_eq!(retry, outcome);
+    assert!(matches!(
+        commit_graph_disk_live_prepared(
+            &mut coordinator,
+            &mut filesystem,
+            TransactionRequest {
+                principal: request.principal,
+                idempotency_key: IdempotencyKey::from_bytes([3; 16]),
+                transaction_id: TransactionId::from_bytes([35; 16]),
+                canonical_request: &encoded,
+                blob_inventory: None,
+            },
+            prepared,
+            &mut clock(3),
+            &NeverCancel,
+        ),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::Conflict
+        ))
+    ));
+    let mut pending_cache = PageCache::new(1024 * 1024).unwrap();
+    assert!(matches!(
+        load_graph_disk_live_preparation_view(
+            &coordinator,
+            &mut filesystem,
+            transaction.clone(),
+            proof_limits,
+            &mut pending_cache,
+        ),
+        Err(GraphDiskError::RootStateMismatch)
+    ));
+
+    let base_read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(base_read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    let failed_publication = publish_graph_disk_live_base(
+        &mut coordinator,
+        &mut filesystem,
+        outcome,
+        GraphStateRootMergeLimits::uniform(merge, 1).unwrap(),
+    );
+    assert!(
+        matches!(
+            &failed_publication,
+            Err(GraphDiskError::Transaction(
+                uste_txn::TransactionError::Storage(
+                    uste_storage::journal::StorageError::ResourceLimit
+                )
+            ))
+        ),
+        "unexpected failed-publication result: {failed_publication:?}"
+    );
+    assert!(
+        coordinator
+            .reducer_state_for_checkpoint()
+            .unwrap()
+            .is_pending()
+    );
+    let (root, report) = publish_graph_disk_live_base(
+        &mut coordinator,
+        &mut filesystem,
+        outcome,
+        GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(root.revision(), CommitRevision::new(2).unwrap());
+    assert!(report.runs > 0);
+    assert!(
+        !coordinator
+            .reducer_state_for_checkpoint()
+            .unwrap()
+            .is_pending()
+    );
+
+    let next = GraphTransaction::new(
+        scope(),
+        vec![Operation::ReplaceEntity {
+            target: entity,
+            expected: Expected::Version(uste_graph::RecordVersion::new(2).unwrap()),
+            properties: Value::Bool(false),
+        }],
+    );
+    let mut next_cache = PageCache::new(1024 * 1024).unwrap();
+    let next_prepared = load_graph_disk_live_preparation_view(
+        &coordinator,
+        &mut filesystem,
+        next,
+        proof_limits,
+        &mut next_cache,
+    )
+    .unwrap()
+    .prepare()
+    .unwrap();
+    assert_eq!(next_prepared.revision(), CommitRevision::new(3).unwrap());
 }
 
 #[test]
