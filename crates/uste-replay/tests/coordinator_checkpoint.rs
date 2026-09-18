@@ -26,6 +26,13 @@ struct CounterState {
     prepare_calls_since_decode: u64,
 }
 
+struct AlwaysCancel;
+impl uste_txn::Cancellation for AlwaysCancel {
+    fn is_cancelled(&self) -> bool {
+        true
+    }
+}
+
 impl CounterState {
     const fn new(scope: NamespaceRef) -> Self {
         Self {
@@ -34,6 +41,23 @@ impl CounterState {
             value: 0,
             prepare_calls_since_decode: 0,
         }
+    }
+}
+
+impl uste_txn::DiskCoordinatorState for CounterState {
+    fn validate_metadata_base(
+        &self,
+        root: &uste_storage::RecoveredIndexRoot,
+    ) -> Result<(), ApplyError> {
+        if root.scope() != self.scope
+            || Some(root.revision()) != self.revision
+            || root.reducer_profile() != &Self::REDUCER_PROFILE
+            || Self::logical_state_digest(self).map_err(|_| ApplyError::Conflict)?
+                != *root.logical_state_digest()
+        {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
     }
 }
 
@@ -881,6 +905,7 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         ),
         Err(TransactionError::IntegrityFailure)
     ));
+    let mut admitted_base = None;
     for maximum_total_journal_groups in [3, 4] {
         let candidates = uste_txn::load_coordinator_metadata_candidates_for_recovery::<
             CounterState,
@@ -958,9 +983,197 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
                     .unwrap(),
                     Some((reference, PrincipalDigest::from_bytes([1; 32])))
                 );
+                admitted_base = Some(base);
             }
         }
     }
+    let mut disk = uste_txn::DiskCommitCoordinator::from_admitted_base(
+        recovery,
+        admitted_base.unwrap(),
+        state,
+        RetentionDays::new(30).unwrap(),
+        uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    assert_eq!(
+        disk.commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(1, &first_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap(),
+        expected_outcome
+    );
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    assert!(matches!(
+        disk.commit(
+            &mut filesystem,
+            TransactionRequest {
+                transaction_id: expected_outcome.transaction_id,
+                ..request(3, &first_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::Conflict)
+    ));
+    let third_bytes = 9_u64.to_be_bytes();
+    let mut new_upload = disk.start_blob_upload(scope).unwrap();
+    disk.write_blob_upload(
+        &mut filesystem,
+        &mut new_upload,
+        b"new owner needs an admitted overlay slot",
+    )
+    .unwrap();
+    let new_reference = disk
+        .finish_blob_upload(&mut filesystem, &mut new_upload)
+        .unwrap();
+    let new_inventory = BlobInventory::new(scope, [new_reference]).unwrap();
+    assert!(matches!(
+        disk.commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&new_inventory),
+                ..request(3, &third_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    assert_eq!(disk.checkpoint_anchor().unwrap().unwrap().0.get(), 2);
+    assert!(matches!(
+        disk.commit(
+            &mut filesystem,
+            request(3, &third_bytes),
+            &mut clock,
+            &AlwaysCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::Cancelled)
+    ));
+    let third = disk
+        .commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(3, &third_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap();
+    assert_eq!(third.revision.get(), 3);
+    assert_eq!(
+        disk.overlay_counts(),
+        (1, 0),
+        "existing disk owner does not consume overlay capacity"
+    );
+    assert_eq!(
+        disk.commit(
+            &mut filesystem,
+            TransactionRequest {
+                blob_inventory: Some(&inventory),
+                ..request(3, &third_bytes)
+            },
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap(),
+        third
+    );
+    assert!(matches!(
+        disk.commit(
+            &mut filesystem,
+            request(4, &third_bytes),
+            &mut clock,
+            &NeverCancel,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    assert!(matches!(
+        disk.outcome(
+            &mut filesystem,
+            principal,
+            idempotency_key,
+            expected_outcome.expires_at,
+            lookup_limits,
+            &mut transaction_cache,
+        ),
+        Err(TransactionError::IdempotencyExpired)
+    ));
+    assert_eq!(disk.state().unwrap().value, 21);
+    assert_eq!(
+        disk.transaction_outcome(
+            &mut filesystem,
+            principal,
+            expected_outcome.transaction_id,
+            UtcInstant::new(20, 0).unwrap(),
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap(),
+        Some(expected_outcome)
+    );
+    assert_eq!(
+        disk.transaction_outcome(
+            &mut filesystem,
+            PrincipalDigest::from_bytes([0xee; 32]),
+            expected_outcome.transaction_id,
+            UtcInstant::new(20, 0).unwrap(),
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap(),
+        None
+    );
+    assert_eq!(
+        disk.committed_blob_owner(
+            &mut filesystem,
+            reference,
+            lookup_limits,
+            &mut transaction_cache,
+        )
+        .unwrap(),
+        Some(principal)
+    );
+    drop(disk);
+    filesystem.restart().unwrap();
+    let (recovered, _) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope,
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy::new(26_000),
+        CounterEntropy::new(27_000),
+        &mut TestKeyAdapter,
+        CounterState::new(scope),
+    )
+    .unwrap();
+    assert_eq!(recovered.read_view().unwrap().state().value, 21);
+    assert_eq!(
+        recovered.committed_blob_owner(reference),
+        Some(PrincipalDigest::from_bytes([1; 32]))
+    );
 }
 
 #[test]

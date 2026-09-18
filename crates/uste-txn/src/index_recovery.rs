@@ -121,7 +121,7 @@ where
     I: EntropySource,
 {
     scope: NamespaceRef,
-    journal: JournalStore<F, W, E, I>,
+    pub(crate) journal: JournalStore<F, W, E, I>,
 }
 
 impl<F, W, E, I> core::fmt::Debug for AuthenticatedIndexRecovery<F, W, E, I>

@@ -1,0 +1,37 @@
+# Decision 0062 — Explicit-I/O disk coordinator and bounded overlays
+
+Date: 2026-09-18
+
+Status: T-20 partial implementation; no larger-than-memory or consumer authorization qualification.
+
+Install Decision 0061's admitted metadata base in a separate `DiskCommitCoordinator`. Consume the
+exclusive `AuthenticatedIndexRecovery` owner directly without reopening or reconstructing complete
+coordinator maps. Require the exact current journal frontier and a trusted `DiskCoordinatorState`
+proof of matching domain state. `GraphDiskLiveState` checks the complete independently admitted
+anchor and refuses a pending state. Overlay maps begin empty.
+
+Reuse the existing coordinator commit implementation with an optional disk-metadata context.
+Lookups consult the overlay first, then the immutable disk base under explicit page/result limits.
+Exact retries still precede transaction-ID collision, admission and cancellation checks. Expired
+retries remain tombstones; they do not become fresh writes. Preserve journal certification before
+infallible reducer publication and outcome insertion, and preserve outcome-unknown poisoning.
+Legacy in-memory callers supply no disk context and retain their original path.
+
+Before preparation or journal writes, admit overlay outcome growth and resolve each reference's
+first owner. Existing owners from either base or overlay consume no new owner slots. New owners
+are admitted before temporary-vector allocation; after certification no disk metadata reads occur.
+The caller-selected outcome/owner overlay ceilings are bounded by the existing format maxima;
+the base plus outcome overlay also remains within the existing namespace outcome cap. Reaching
+an overlay ceiling returns `ResourceLimit` without a partial transaction. Automatic rebase/flush
+is not yet implemented and must not be implied by this bounded write path.
+
+The new coordinator offers explicit-I/O retry/transaction outcomes with principal isolation and
+expiry, first-owner queries, privileged upload operations, and the existing narrow derived-index
+maintenance and postcommit domain-publication hooks. It does not expose its internal legacy
+coordinator: that object's memory-only reads would omit the disk base. No legacy authorized view
+or authorization adapter is reused. These APIs remain trusted maintenance APIs, not consumer
+capabilities. A disk-aware authorization adapter, bounded suffix recovery, scalable first-owner
+admission, metadata rebase and disk-specific fault matrices remain required.
+
+Storage's certificate/blob metadata collections remain memory-resident. The current tests use
+small synthetic fixtures and capped processes, not BM-01/BM-06 qualification. T-20 stays open.

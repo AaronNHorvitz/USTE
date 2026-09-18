@@ -18,8 +18,8 @@ pub struct CoordinatorDiskAdmissionLimits {
 /// lookups here do not grant consumer authorization or apply current expiry/revocation policy.
 #[derive(Debug)]
 pub struct CoordinatorDiskBase {
-    metadata: RecoveredIndexRoot,
-    transactions: CoordinatorTransactionIndex,
+    pub(crate) metadata: RecoveredIndexRoot,
+    pub(crate) transactions: CoordinatorTransactionIndex,
 }
 
 impl CoordinatorDiskBase {
@@ -48,17 +48,41 @@ impl CoordinatorDiskBase {
         E: EntropySource,
         I: EntropySource,
     {
+        if recovery.scope() != self.metadata.scope() {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        self.retry_from_journal(&recovery.journal, filesystem, principal, key, limits, cache)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn retry_from_journal<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        principal: PrincipalDigest,
+        key: IdempotencyKey,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<Option<TransactionOutcome>, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
         let mut encoded_key = [0; OUTCOME_KEY_BYTES];
         encoded_key[..32].copy_from_slice(&principal.as_bytes());
         encoded_key[32..].copy_from_slice(key.as_bytes());
-        let (value, _) = recovery.index_get_bounded(
-            filesystem,
-            &self.metadata,
-            FAMILY_OUTCOME,
-            &encoded_key,
-            limits,
-            cache,
-        )?;
+        let (value, _) = journal
+            .index_get_bounded(
+                filesystem,
+                &self.metadata,
+                FAMILY_OUTCOME,
+                &encoded_key,
+                limits,
+                cache,
+            )
+            .map_err(TransactionError::Storage)?;
         value
             .map(|value| {
                 decode_outcome(&encoded_key, &value, self.metadata.revision())
@@ -86,6 +110,23 @@ impl CoordinatorDiskBase {
         if self.metadata.scope() != recovery.scope() {
             return Err(TransactionError::IntegrityFailure);
         }
+        self.owner_from_journal(&recovery.journal, filesystem, id, limits, cache)
+    }
+
+    pub(crate) fn owner_from_journal<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        id: BlobId,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<Option<(BlobReference, PrincipalDigest)>, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
         if !self
             .metadata
             .runs()
@@ -93,18 +134,62 @@ impl CoordinatorDiskBase {
         {
             return Ok(None);
         }
-        let (value, _) = recovery.index_get_bounded(
-            filesystem,
-            &self.metadata,
-            FAMILY_BLOB_OWNER,
-            &id.as_bytes(),
-            limits,
-            cache,
-        )?;
+        let (value, _) = journal
+            .index_get_bounded(
+                filesystem,
+                &self.metadata,
+                FAMILY_BLOB_OWNER,
+                &id.as_bytes(),
+                limits,
+                cache,
+            )
+            .map_err(TransactionError::Storage)?;
         value
             .map(|value| {
-                decode_owner(recovery.scope(), &id.as_bytes(), &value)
+                decode_owner(self.metadata.scope(), &id.as_bytes(), &value)
                     .map_err(TransactionError::Storage)
+            })
+            .transpose()
+    }
+
+    pub(crate) fn transaction_from_journal<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        id: TransactionId,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<Option<(PrincipalDigest, TransactionOutcome)>, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        let (value, _) = journal
+            .index_get_bounded(
+                filesystem,
+                &self.transactions.root,
+                1,
+                id.as_bytes(),
+                limits,
+                cache,
+            )
+            .map_err(TransactionError::Storage)?;
+        value
+            .map(|value| {
+                if value.len() != 136 {
+                    return Err(TransactionError::IntegrityFailure);
+                }
+                let mut key = [0; OUTCOME_KEY_BYTES];
+                key[..32].copy_from_slice(&value[..32]);
+                let (principal, _, outcome) =
+                    decode_outcome(&key, &value[32..], self.metadata.revision())
+                        .map_err(TransactionError::Storage)?;
+                if outcome.transaction_id != id {
+                    return Err(TransactionError::IntegrityFailure);
+                }
+                Ok((principal, outcome))
             })
             .transpose()
     }

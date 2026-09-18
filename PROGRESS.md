@@ -51,6 +51,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0062](docs/decisions/0062-disk-coordinator-overlays.md) installs the admitted disk
+  metadata base without coordinator-prefix maps and adds bounded live overlays. The separate
+  privileged `DiskCommitCoordinator` consumes recovery ownership at the exact frontier, requires
+  a domain-state anchor proof, and shares the existing commit ordering/durability implementation.
+  Disk retry/transaction/owner lookups have explicit I/O bounds; new owner slots are admitted
+  before temporary allocation or journal publication. Legacy authorization adapters cannot access
+  its incomplete internal overlay-only coordinator. Disk-aware authorization, metadata rebase,
+  suffix restart and scalable owner proof remain open, as do storage's own memory-resident maps.
+- Verification on parent `459d123` plus this increment, one job/thread and the established
+  3/4 GiB memory-high/max and 512 MiB swap cgroup: `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed 3;
+  `cargo test -p uste-txn --locked --offline -- --test-threads=1` passed 29;
+  `cargo test -p uste-graph --test disk_index --locked --offline -- --test-threads=1` passed 5.
+  `cargo clippy -p uste-txn -p uste-replay -p uste-graph --all-targets --locked --offline --
+  -D warnings` passed. Tests cover empty-overlay graph installation, disk and overlay retries,
+  transaction collision, principal isolation, expiry, cancellation, both overlay limits,
+  repeated first ownership and legacy restart of the new durable commit. Latest preflight:
+  9.5 GiB available RAM, 769 MiB free swap. No benchmark was attempted.
+
 - [Decision 0061](docs/decisions/0061-coordinator-disk-base-admission.md) adds a paired,
   journal-validated `CoordinatorDiskBase` retaining roots rather than coordinator maps. It proves
   exact retry outcomes, transaction ordering and first-owner/reference correspondence. Raw
@@ -814,9 +833,11 @@ Continue T-20 by moving coordinator retry, transaction and blob-owner metadata o
 in-memory journal replay path. Decision 0060 supplies the missing transaction-ID disk ordering;
 its cold admission now uses authenticated journal/disk correspondence without a coordinator
 comparator map. Decision 0061 pairs retry, transaction and owner indexes into an admitted disk
-metadata base with exact first-owner proofs and explicit read amplification. Next install that
-base into a coordinator with bounded mutation overlays instead of complete live maps, and replace
-per-owner prefix scans with scalable authenticated first-reference evidence before qualification.
+metadata base with exact first-owner proofs and explicit read amplification. That base is now
+installed by the opt-in disk coordinator with bounded mutation overlays (Decision
+0062). Next extend authenticated suffix recovery into those overlays, add disk-aware authorization
+and metadata rebase, and replace per-owner prefix scans with scalable authenticated first-reference
+evidence before qualification.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host

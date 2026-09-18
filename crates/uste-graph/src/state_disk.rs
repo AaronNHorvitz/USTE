@@ -2061,6 +2061,15 @@ impl JournalAnchoredTransactionState for GraphDiskLiveState {
     }
 }
 
+impl uste_txn::DiskCoordinatorState for GraphDiskLiveState {
+    fn validate_metadata_base(&self, root: &RecoveredIndexRoot) -> Result<(), ApplyError> {
+        if self.pending.is_some() || self.base.anchor() != root.anchor() {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+}
+
 impl EquivalentTransactionState for GraphState {
     type Equivalent = GraphDiskLiveState;
 

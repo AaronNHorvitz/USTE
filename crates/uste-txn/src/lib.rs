@@ -30,6 +30,9 @@ pub use index_recovery::{
     AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredPreparedSuffix,
 };
 
+mod disk_coordinator;
+pub use disk_coordinator::{DiskCommitCoordinator, DiskCoordinatorState};
+
 use std::collections::BTreeMap;
 
 use sha2::{Digest, Sha256};
@@ -1818,6 +1821,7 @@ where
             request,
             clock,
             cancellation,
+            None,
             |state, revision| {
                 state.prepare(request.canonical_request, request.blob_inventory, revision)
             },
@@ -1845,6 +1849,7 @@ where
             request,
             clock,
             cancellation,
+            None,
             move |state, revision| {
                 state.validate_external_prepared(
                     request.canonical_request,
@@ -1863,6 +1868,7 @@ where
         request: TransactionRequest<'_>,
         clock: &mut impl Clock,
         cancellation: &impl Cancellation,
+        mut disk: Option<disk_coordinator::DiskCommitMetadata<'_>>,
         prepare: P,
     ) -> Result<TransactionOutcome, TransactionError>
     where
@@ -1896,7 +1902,20 @@ where
             principal: request.principal,
             key: request.idempotency_key,
         };
-        if let Some(previous) = self.outcomes.get(&retry_key).copied() {
+        let mut previous = self.outcomes.get(&retry_key).copied();
+        if previous.is_none()
+            && let Some(disk) = disk.as_mut()
+        {
+            previous = disk.base.retry_from_journal(
+                &self.journal,
+                filesystem,
+                request.principal,
+                request.idempotency_key,
+                disk.lookup,
+                disk.cache,
+            )?;
+        }
+        if let Some(previous) = previous {
             if accepted_at >= previous.expires_at {
                 return Err(TransactionError::IdempotencyExpired);
             }
@@ -1911,11 +1930,89 @@ where
         if self.transactions.contains_key(&request.transaction_id) {
             return Err(TransactionError::Conflict);
         }
+        if let Some(disk) = disk.as_mut() {
+            if disk
+                .base
+                .transaction_from_journal(
+                    &self.journal,
+                    filesystem,
+                    request.transaction_id,
+                    disk.lookup,
+                    disk.cache,
+                )?
+                .is_some()
+            {
+                return Err(TransactionError::Conflict);
+            }
+            if self.outcomes.len() >= disk.overlay.maximum_outcomes
+                || disk
+                    .base
+                    .metadata
+                    .revision()
+                    .get()
+                    .checked_add(self.outcomes.len() as u64)
+                    .is_none_or(|count| count >= MAX_OUTCOMES_PER_NAMESPACE as u64)
+            {
+                return Err(TransactionError::ResourceLimit);
+            }
+        }
         if self.outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE {
             return Err(TransactionError::ResourceLimit);
         }
         if cancellation.is_cancelled() {
             return Err(TransactionError::Cancelled);
+        }
+        // Resolve first ownership and admit overlay growth before preparation or any journal
+        // write. After certification the publication path performs no disk metadata reads.
+        let mut new_owners = Vec::new();
+        if disk.is_some()
+            && let Some(inventory) = request.blob_inventory
+        {
+            for reference in inventory.references() {
+                let mut owner = self
+                    .committed_blob_owners
+                    .get(&(reference.scope(), reference.id()))
+                    .copied();
+                if owner.is_none()
+                    && let Some(disk) = disk.as_mut()
+                {
+                    owner = disk.base.owner_from_journal(
+                        &self.journal,
+                        filesystem,
+                        reference.id(),
+                        disk.lookup,
+                        disk.cache,
+                    )?;
+                }
+                if let Some((committed, _)) = owner {
+                    if committed != *reference {
+                        return Err(TransactionError::IntegrityFailure);
+                    }
+                } else {
+                    if let Some(disk) = disk.as_ref()
+                        && self
+                            .committed_blob_owners
+                            .len()
+                            .checked_add(new_owners.len())
+                            .is_none_or(|count| count >= disk.overlay.maximum_blob_owners)
+                    {
+                        return Err(TransactionError::ResourceLimit);
+                    }
+                    new_owners
+                        .try_reserve(1)
+                        .map_err(|_| TransactionError::ResourceLimit)?;
+                    new_owners.push(*reference);
+                }
+            }
+        }
+        if let Some(disk) = disk.as_ref()
+            && self
+                .committed_blob_owners
+                .len()
+                .checked_add(new_owners.len())
+                .is_none_or(|count| count > disk.overlay.maximum_blob_owners)
+        {
+            return Err(TransactionError::ResourceLimit);
         }
         let revision = match self.journal.frontier() {
             Some(revision) => revision
@@ -1960,7 +2057,15 @@ where
         self.outcomes.insert(retry_key, outcome);
         self.transactions
             .insert(request.transaction_id, (request.principal, outcome));
-        if let Some(inventory) = request.blob_inventory {
+        for reference in new_owners {
+            self.committed_blob_owners.insert(
+                (reference.scope(), reference.id()),
+                (reference, request.principal),
+            );
+        }
+        if disk.is_none()
+            && let Some(inventory) = request.blob_inventory
+        {
             for reference in inventory.references() {
                 self.committed_blob_owners
                     .entry((reference.scope(), reference.id()))

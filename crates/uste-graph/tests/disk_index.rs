@@ -2250,6 +2250,8 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     let expected = coordinator.read_view().unwrap().state().clone();
     let newer_metadata_publication =
         publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    let newer_graph_publication =
+        publish_graph_state_root(&mut coordinator, &mut filesystem, &expected).unwrap();
     uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
     drop(coordinator);
     filesystem.restart().unwrap();
@@ -2402,7 +2404,29 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     assert!(recovery_report.graph_state.runs >= 4);
     assert_eq!(recovery_report.coordinator_metadata.runs, 2);
     assert_eq!(recovery_report.coordinator_metadata.entries, 2);
-    drop(recovery);
+    let current_candidate = graph_candidates
+        .iter()
+        .find(|candidate| candidate.generation() == newer_graph_publication.generation)
+        .unwrap();
+    let (current_base, _) = admit_graph_disk_base_candidate_for_recovery(
+        &recovery,
+        &mut filesystem,
+        current_candidate,
+        admission_limits(),
+        &mut admission_cache,
+    )
+    .unwrap();
+    let disk = uste_txn::DiskCommitCoordinator::from_admitted_base(
+        recovery,
+        metadata_base,
+        GraphDiskLiveState::new(current_base),
+        RetentionDays::new(30).unwrap(),
+        uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    assert_eq!(disk.state().unwrap().revision().get(), 2);
+    drop(disk);
 
     let (recovered, seeded_report) = CommitCoordinator::open_seeded(
         &mut filesystem,
