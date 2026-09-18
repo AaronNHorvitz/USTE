@@ -120,8 +120,11 @@ correctness phase with exact output/typed-limit matching, RSS and authenticated 
 Decision 0044 adds real process-loss/resume coverage at every incomplete 20/200 materialization
 phase; exact-scale interruption and BM-06 remain unclaimed.
 Decision 0045 adds a bounded separately generated oracle bundle for the 96 warm-up and 384 measured
-queries. Next add repeated authorized-query sampling that excludes expected refusals from success
-percentiles; exact scale and accepted host/RSS/cache evidence remain mandatory.
+queries. Decision 0046 adds repeated authorized-query sampling that excludes expected refusals
+from success percentiles, fixes five minimum-60-second samples at exact scale and pairs empty with
+retained USTE-cache executions. Next add a preemptive/supervised 30-second query boundary, run the
+exact campaign under the accepted host reservation and remove the full-memory reducer/recovery
+boundary; accepted host/RSS/cache evidence remains mandatory.
 
 ## Architectural decomposition
 

@@ -32,6 +32,8 @@ cargo run --release --locked --offline -- oracle-bundle --entities 20 > ORACLE_B
 cargo run --release --locked --offline -- engine-check --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
+cargo run --release --locked --offline -- linux-sample --root ROOT \
+  --password-file PASSWORD --oracle-file ORACLE_BUNDLE --entities 20
 cargo test --locked --offline
 cargo clippy --all-targets --locked --offline -- -D warnings
 ```
@@ -61,6 +63,16 @@ digest make substitution or truncation fail closed. At qualifying scale the warm
 successful outputs and 22 expected result-limit refusals; it is groundwork for repeated sampling,
 not benchmark evidence.
 
+`linux-sample` validates the warm-up once, then executes each measured query as an empty-USTE-cache
+and immediately retained-cache pair. It keeps success and typed-refusal latency populations
+separate by depth and topology, plus all-topology groups for budget evaluation. Exact scale has no
+lowering flags and always selects five complete samples of at least 60 seconds; scaled profiles run
+one complete development round. The 30-second limit is rejected after a query returns, but the
+current synchronous read cannot preempt a hung call. The report therefore withholds budget
+evaluation and discloses uncontrolled host caches and full-memory graph state. Only the engine call
+is timed; oracle validation is outside that interval, and successful-work/index counters are
+reported separately for empty and retained USTE cache states.
+
 `linux-create-crash-probe --pause-after-revision REVISION` is an explicit process-loss harness.
 It admits only a nonzero, nonfinal frontier, flushes a content-free readiness marker after that
 transaction is durable, and parks until an external parent SIGKILLs the exact process. A subsequent
@@ -81,10 +93,12 @@ returning a truncated answer.
 
 - The development verifier uses the durable memory fault model, deterministic development entropy
   and a test key wrapper, not the Linux adapter or portable recovery profile.
-- It does not collect latency, RSS, real-filesystem I/O, result-byte or performance evidence.
+- The Linux sampler collects candidate latency, RSS, authenticated I/O and result-byte evidence,
+  but the memory-adapter verifier does not.
 - Multi-hop traversal is stable client-side composition of production one-hop authorized reads;
   there is no native multi-hop engine request yet.
 - `qualification: qualifying-fixture-size` describes only exact fixture dimensions. It is not a
   performance or release claim.
-- BM-01 still needs cold/warm authorized encrypted disk-query runs on the reference machine. BM-06
-  and streaming larger-than-memory recovery are outside this fixture increment.
+- BM-01 still needs the exact sampler campaign under the accepted host reservation, a preemptive
+  query deadline and removal of the full-memory graph boundary. BM-06 and streaming
+  larger-than-memory recovery are outside this fixture increment.

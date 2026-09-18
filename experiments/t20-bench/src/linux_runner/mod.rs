@@ -4,6 +4,9 @@
 //! emits content-free reports and keeps filesystem paths and recovery metadata out of errors.
 
 mod credential;
+mod sampling;
+
+pub use sampling::{LinuxSamplingReport, sample};
 
 use std::{
     fmt,

@@ -132,22 +132,29 @@ cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --
   oracle-bundle [--entities 100000] > ORACLE_BUNDLE
 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
   linux-query --root ROOT --password-file PASSWORD --oracle-file ORACLE [--entities 100000]
+cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- \
+  linux-sample --root ROOT --password-file PASSWORD --oracle-file ORACLE_BUNDLE \
+  [--entities 100000]
 ~~~
 
 Recovery testing additionally provides `linux-create-crash-probe --pause-after-revision REVISION`.
 It deliberately parks after flushing a nonfinal durable frontier so an external harness can
 SIGKILL that exact process and then run `linux-resume`; it is not a normal creation command.
 
-Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate. Reports
-currently set `engine_benchmark:false`: materialization/recovery phases validate storage, and the
-query phase performs one correctness pass against a separately generated content-free oracle. Its
-diagnostic timing is not the required repeated cold/warm benchmark and does not establish
-bounded-memory behavior. The exact corpus has 299 successful outputs and 85 expected result-cap
-refusals; later latency evidence must keep those populations separate.
+Only the default 100,000-entity/1,000,000-relationship shape is a qualification candidate.
+Materialization/recovery and one-pass correctness reports set `engine_benchmark:false`.
+`linux-sample` measures the production engine and sets it true, but withholds qualification and
+budget evaluation while the deadline, accepted environment and memory boundary remain unresolved.
+The exact corpus has 299 successful outputs and 85 expected result-cap refusals; latency evidence
+keeps those populations separate.
 
 The bundle additionally carries 96 independently checked, disjoint warm-up queries (74 outputs and
-22 expected result-cap refusals) for the forthcoming repeated sampler. Generating the bundle does
-not itself perform or qualify a benchmark.
+22 expected result-cap refusals). `linux-sample` validates that warm-up, then pairs empty and
+retained USTE-cache executions. Exact scale fixes five complete samples of at least 60 seconds;
+scaled development runs use one complete round. Reports keep outcome/class/depth populations
+separate, attribute successful work and index counters by USTE cache state, and disclose
+uncontrolled host caches, full-memory graph state and the non-preemptive query deadline, so the
+current runner does not yet qualify BM-01.
 
 ## Delivery
 

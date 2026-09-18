@@ -128,6 +128,15 @@ with roots disjoint from the unchanged 384 measured corpus. Exact scale pins war
 74 successful outputs and 22 expected result-limit refusals. The combined digest binds both
 sections, but no timing occurs until the subsequent sampler phase.
 
+Decision 0046 adds `linux-sample`. Exact scale has no lowering controls: one checked warm-up is
+followed by five complete measured windows of at least 60 seconds. Each query is paired empty then
+retained in USTE's cache; success and typed-refusal percentiles are separated by cache, depth and
+graph class, with all-class depth aggregates. The runner post-checks returned queries against 30
+seconds but cannot preempt a hung synchronous indexed read, so reports withhold budget evaluation
+and disclose that deadline enforcement, host-cache control and the full-memory graph boundary are
+unresolved. Oracle validation is outside the engine-call latency interval; successful work and
+authenticated index/cache deltas are attributed separately to each USTE cache state.
+
 Measure with encryption, authentication and normal durability enabled. Run isolated controls
 to explain costs, never advertise disabled-security throughput as the default.
 Data exceeding RAM must be included before claiming bounded-memory scalability.

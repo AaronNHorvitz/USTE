@@ -17,7 +17,12 @@ fn run() -> Result<(), String> {
     }
     let linux_command = matches!(
         command.as_str(),
-        "linux-create" | "linux-create-crash-probe" | "linux-resume" | "linux-open" | "linux-query"
+        "linux-create"
+            | "linux-create-crash-probe"
+            | "linux-resume"
+            | "linux-open"
+            | "linux-query"
+            | "linux-sample"
     );
     if command != "manifest"
         && command != "oracle-summary"
@@ -130,6 +135,13 @@ fn run() -> Result<(), String> {
                     profile,
                 )
                 .map(|report| report.to_json()),
+                "linux-sample" => uste_t20_bench::linux_runner::sample(
+                    &root,
+                    &password_file,
+                    &oracle_file.ok_or("--oracle-file is required")?,
+                    profile,
+                )
+                .map(|report| report.to_json()),
                 _ => unreachable!("command was validated"),
             }
             .map_err(|error| error.code().to_owned())?;
@@ -157,11 +169,13 @@ fn print_usage() {
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
          --pause-after-revision REVISION [--entities COUNT]\n\
-         uste-t20-bench linux-query --root DIR --password-file FILE \
+         uste-t20-bench <linux-query|linux-sample> --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
          oracle-summary emits content-free expectations for a separate query process;\n\
          oracle-bundle emits disjoint warm-up plus measured expectations for sampling;\n\
+         linux-sample uses one development round at scaled sizes and a fixed qualifying\n\
+         plan of one warm-up plus five samples of at least 60 seconds at exact size;\n\
          engine-check accepts at most 1000 entities and is always nonqualifying;\n\
          Linux phases require an existing Btrfs directory and owner-only password file"
     );

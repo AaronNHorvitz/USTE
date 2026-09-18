@@ -42,7 +42,7 @@ cargo clippy -p uste-crypto -p uste-storage -p uste-txn -p uste-graph \
   --all-targets --locked -- -D warnings
 # passed
 bash scripts/check.sh
-# 262 workspace tests and 23 isolated t20-bench tests passed (2 exact-profile release tests ignored
+# 262 workspace tests and 27 isolated t20-bench tests passed (2 exact-profile release tests ignored
 # in the debug suite); format, clippy, rustdoc,
 # docs/task graph, R0 vectors, storage publication model and isolated builds passed
 ~~~
@@ -180,6 +180,23 @@ expectations. The exact warm-up split is 74 successful outputs, zero visit limit
 result limits; the accepted combined digest is
 `d52869f24d635476f86374813e754be364d0d2df470544b71221c24b96145fae`.
 
+Decision 0046 adds the repeated production sampler. Qualifying scale fixes one checked warm-up and
+five complete minimum-60-second samples with no CLI lowering control. Each measured query is timed
+and checked first with an empty USTE cache and then with the retained cache; success and expected
+limit-refusal populations never mix. Reports include all-class and per-class depth percentiles,
+successful visits/logical bytes, RSS and authenticated cache/index deltas.
+
+A release-built 20/200 Btrfs smoke validated 96 warm-up queries and one full 768-execution paired
+round in 1,725 ms. It reported 5,788 KiB current RSS, 264,916 KiB process-lifetime peak RSS,
+2,815 empty-cache page reads versus zero retained-cache page reads and exact outcome matches.
+This is nonqualifying functional evidence: host caches were uncontrolled, graph state remained
+full-memory and the synchronous query API only permits a post-return 30-second check.
+
+The exact sampler was not launched: the contemporaneous preflight showed 6.2 GiB available RAM
+and 212 KiB free swap, below the accepted 24-GiB reservation, while Btrfs had 998 GiB free. This
+transient resource condition does not block implementation and was not bypassed by shrinking the
+qualifying profile.
+
 The exact production-backed run was not launched during the Decision 0039 increment because the
 reference host could not supply the accepted 24 GiB reservation: `/proc/meminfo` reported
 65,570,248 KiB total, 5,835,172 KiB available and only 13,980 KiB of 8,388,604 KiB swap free.
@@ -187,6 +204,6 @@ The Btrfs/NVMe volume had 999 GiB free. This transient host-load condition block
 measurement, not implementation, and the workload was not reduced or mislabeled as a substitute.
 
 The full `bash scripts/check.sh` gate passed after the latest extension: 262 workspace tests, all
-docs, strict clippy/rustdoc, the storage publication model, and 23 isolated T-20 fixture/engine/
+docs, strict clippy/rustdoc, the storage publication model, and 27 isolated T-20 fixture/engine/
 Linux-runner tests passed; two exact-profile oracle tests are reserved for release-profile
 acceptance commands and ignored by the debug suite.

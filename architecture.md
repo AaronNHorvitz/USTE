@@ -273,6 +273,12 @@ sampler an oracle implementation. Canonical bounded section lengths and nested p
 digests bind both disjoint query corpora. Limit refusals stay typed outcomes rather than successful
 results, preserving later latency-population separation.
 
+Decision 0046 adds the production Linux repeated sampler. Exact scale fixes one validated warm-up
+and five complete 60-second-or-longer windows. Every measured query is paired as empty USTE cache
+then retained cache, while latency populations remain separate by typed outcome, depth and graph
+class. Host caches and full-memory recovery stay explicit, and the synchronous query boundary can
+only post-check—not preempt—the 30-second deadline, so the runner does not self-certify BM-01.
+
 Checkpoint transport now also offers opaque, certificate-anchored candidates discovered through a
 bounded authentication/hash pass and a selected revalidated chunk stream. The stream may deliver
 chunks before its terminal digest result, so consumers publish only after success. This removes the
