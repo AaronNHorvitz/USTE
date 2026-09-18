@@ -443,6 +443,19 @@ fn approved_source_and_fact_retry_reopen_and_abandoned_upload_reconciliation_are
     };
     assert_eq!(event_filtered.facts.len(), 1);
     assert_eq!(event_filtered.facts[0].id, record(30));
+    let mut missing_event = current_request.clone();
+    let MemoryReadRequest::Search { event_time, .. } = &mut missing_event else {
+        unreachable!()
+    };
+    *event_time = EventTimeFilter::Missing;
+    let MemoryReadOutput::Search(missing_event) = coordinator
+        .read(&actor, &current_view, &missing_event)
+        .unwrap()
+    else {
+        panic!("missing-event search output")
+    };
+    assert_eq!(missing_event.facts.len(), 1);
+    assert_eq!(missing_event.facts[0].id, record(40));
     assert_eq!(
         coordinator
             .read_cancellable(
@@ -526,6 +539,16 @@ fn approved_source_and_fact_retry_reopen_and_abandoned_upload_reconciliation_are
     assert_eq!(report.frontier, Some(linked_outcome.revision));
     assert_eq!(
         coordinator.start_blob_upload(&reopened_actor).unwrap_err(),
+        AuthorizedError::ResourceLimit
+    );
+    assert_eq!(
+        coordinator
+            .complete_recovered_upload_reconciliation(
+                &mut filesystem,
+                &reopened_actor,
+                &[abandoned_token],
+            )
+            .unwrap_err(),
         AuthorizedError::ResourceLimit
     );
     assert_eq!(

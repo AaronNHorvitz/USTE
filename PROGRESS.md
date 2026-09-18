@@ -2,8 +2,12 @@
 
 Updated: 2026-09-18 · Branch: `codex/uste-implementation`
 
-Latest completed task is T-63. Decision 0055 selects verified recovery commit `7393def` and freezes
-the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Branch history
+Latest completed task is T-66. Decision 0055 selects verified recovery commit `7393def` and freezes
+the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Implementation
+commit `97537e5` adds durable source/fact admission, bounded authorized retrieval, exact citations,
+corrections, revocation and fail-closed rebuild under Decision 0056. T-67's generic adapter and
+offline demonstration are next; all T-68 process-fault and measurement qualification remains open.
+Branch history
 through the current handoff adds T-20's encrypted disk-index, authorized-read, bounded checkpoint transport,
 deterministic benchmark-fixture foundations, bounded graph deltas/reverse dependencies and the
 complete certificate-anchored `graph-state-v1` root plus bounded semantic reconstruction. The
@@ -43,6 +47,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Completed T-64 at `97537e5`: canonical `UMEM` 1.0 transactions now admit immutable exact-text or
+  opaque source versions, evidence-bound facts, corrections, contradictions, retractions and source
+  revocation through the existing encrypted blob/journal/policy path. Retry returns the same durable
+  outcome after reopen. A trusted complete upload outbox can reconcile committed/aborted/empty
+  staging and reopen ingestion without disabling quotas; unresolved durable staging remains closed.
+- Completed T-65 with identity, bounded lexical and one-hop reads plus exact source citation
+  resolution. The pilot explicitly supports recorded current/as-of knowledge and exact/missing
+  source-event filters only. An independent fixture oracle agrees; cross-scope and unsupported
+  queries, candidate/output budgets and cooperative cancellation fail explicitly.
+- Completed T-66 with current source-policy filtering, durable revocation, process-local stale-view
+  invalidation and consumer authority generations. Begin-rebuild durably clears/blocks the derived
+  projection, remains blocked across restart and serves only after exact reimport plus completion.
+  Decision 0056 and the core evidence state that this is read exclusion, not physical erasure.
+- Focused sequential verification under the 4 GiB/512 MiB cgroup passed 6 `uste-memory` and 28
+  `uste-txn` tests plus warnings-denied clippy. The complete `scripts/check.sh` also passed in that
+  capped scope: documentation reported 124 links/121 active IDs/152 definitions, the 68-task graph
+  passed, and the scaled T-20 experiment reported 31 passed with its two qualifying cases ignored.
+  The exact end-to-end M1 fault/measurement matrix has not run and is reserved for T-68 after the
+  T-67 executable adapter exists.
 - Recovered the unstaged Decision 0053 implementation without discarding or presuming it valid.
   Focused transaction/graph suites, warnings-denied clippy and the complete repository check passed
   before it was committed and pushed as `7393def`.

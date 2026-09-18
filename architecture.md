@@ -150,6 +150,15 @@ authorities; it does not create another commit store or qualify the disk-scale e
 authority generation must match before results can be served, and rebuild first makes the derived
 projection unservable. The source store and complete upload outbox remain consumer authority.
 
+Decision 0056 implements that boundary's canonical source/fact reducer and authorized reads.
+Immutable text or opaque source versions bind exact committed blobs; facts bind honest locators,
+corrections and explicit one-hop links. Recorded-revision queries and exact/missing source-event
+filters are distinct, while unsupported temporal/spatial predicates reject. Candidate authorization,
+budgets and cancellation occur inside the mandatory facade. Revocation invalidates old views, and a
+durable generation change remains unservable through interrupted recovery until exact reimport and
+completion. This remains a capped replayed projection; it neither exposes raw blobs to consumers nor
+proves physical erasure or larger-than-memory behavior.
+
 Decision 0019 adds `uste-graph`: strict canonical entity/evidence/assertion/relationship mutations,
 revision histories, exact corrections and deletion cascades, symmetric adjacency/provenance indexes,
 one-mutation-per-record revisions with read-stable correction targets, durable policy records and
