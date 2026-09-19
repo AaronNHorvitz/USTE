@@ -25,6 +25,9 @@ mod bounded_bootstrap;
 #[path = "support/transaction_cursor.rs"]
 mod transaction_cursor;
 
+#[path = "support/authorized_inventory.rs"]
+mod authorized_inventory;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct CounterState(i64);
 

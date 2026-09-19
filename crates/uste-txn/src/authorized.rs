@@ -1,7 +1,7 @@
 //! Mandatory policy facade over the trusted raw transaction coordinator.
 
 mod disk_uploads;
-pub use disk_uploads::{AuthorizedDiskUploads, DiskUploadUsage};
+pub use disk_uploads::{AuthorizedDiskInventoryError, AuthorizedDiskUploads, DiskUploadUsage};
 
 use std::{
     collections::BTreeMap,

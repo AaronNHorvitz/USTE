@@ -12,10 +12,11 @@ mod disk_metadata;
 mod index_recovery;
 
 pub use authorized::{
-    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedDiskUploads, AuthorizedError,
-    AuthorizedIndexRoot, AuthorizedIndexedReadState, AuthorizedReadError, AuthorizedReadState,
-    AuthorizedReadView, AuthorizedTransactionRequest, AuthorizedTransactionState, DiskUploadUsage,
-    DurablePolicyChange, MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
+    AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedDiskInventoryError,
+    AuthorizedDiskUploads, AuthorizedError, AuthorizedIndexRoot, AuthorizedIndexedReadState,
+    AuthorizedReadError, AuthorizedReadState, AuthorizedReadView, AuthorizedTransactionRequest,
+    AuthorizedTransactionState, DiskUploadUsage, DurablePolicyChange,
+    MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
 };
 pub use authorized_disk::{
     AuthorizedDiskCacheReport, AuthorizedDiskMetadata, AuthorizedDiskPolicyState,

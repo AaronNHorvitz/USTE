@@ -54,6 +54,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `ee20df7` plus this increment: [Decision 0103](docs/decisions/0103-authorized-disk-inventory-commits.md)
+  adds opt-in authorized ordinary inventory commits with exact first ownership, current target
+  permissions, bounded accounting admission and staged-to-committed charge transfer. Eight focused
+  tests pass (2.19s), including cold retry/reconciliation, six uncertain flush cases, zero-byte
+  reservations, owner-bound refusal, foreign/changed references and known-outcome policy drift.
+  Initial test module path resolution failed and was corrected with an explicit fixture path;
+  a lost terminal result was not counted and the focused gate was rerun. All commands below used
+  `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M`, one Cargo
+  job and one Rust test thread, with 36 GiB available RAM/3.9 GiB free swap at preflight:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-txn --locked --offline authorized_disk_inventory
+  -- --test-threads=1 --nocapture`; then `CARGO_BUILD_JOBS=1 cargo test -p uste-txn
+  -p uste-memory -p uste-memory-adapter --all-targets --all-features --locked --offline
+  -- --test-threads=1` passed (26 transaction integration tests, 8.06s; 13 authorization tests,
+  0.88s; M1 process tests, 30.96s; all selected unit/ingest tests). The affected existing graph
+  facade test passed (1.59s): `CARGO_BUILD_JOBS=1 cargo test -p uste-graph --test disk_index
+  --locked --offline authorized_disk_expansion_matches_reference_and_shares_all_work_budgets
+  -- --test-threads=1`. `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed (4.55s); `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-txn --no-deps --locked --offline` passed (0.96s). No benchmark qualification
+  or task completion is claimed. M1 crate sources remain identical to `b9689f3` and the lockfile
+  SHA-256 remains `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`.
+
 - Tested on pushed `fd44ca2` plus this increment: [Decision 0102](docs/decisions/0102-disk-coordinator-inventory-publication.md)
   connects ordinary/external prepared disk-coordinator commits to explicit bounded storage
   inventory publication. Shared retry/collision/first-owner admission is preserved; storage
@@ -1741,8 +1763,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0102 coordinator bridge is locally verified; implement authorized
-upload charge transfer and consumer inventory publication. Decisions
+Current action: Decision 0103 authorized upload charge transfer and generic ordinary consumer
+inventory publication are locally verified. Continue T-20 scalable accounting/native recovery
+measurement and qualifying campaign prerequisites. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

@@ -3,6 +3,9 @@ use super::*;
 use crate::{AuthorizedDiskPolicyState, DiskBlobAccountingLimits, DiskCommitCoordinator};
 use uste_storage::{IndexGetLimits, PageCache};
 
+mod inventory;
+pub use inventory::AuthorizedDiskInventoryError;
+
 /// Unknown abandoned staging is never represented as a proven zero usage.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct DiskUploadUsage {
@@ -18,7 +21,8 @@ impl core::fmt::Debug for DiskUploadUsage {
 
 /// Restricted upload capability. Every construction starts recovery-closed; trusted adapters
 /// must retain and reconcile the complete durable token outbox before permitting new uploads.
-/// No raw coordinator, committed-owner map, inventory commit or index maintenance is exposed.
+/// No raw coordinator, committed-owner map or index maintenance is exposed. Ordinary inventory
+/// commits require the separate opt-in constructor and a policy-preserving authorized reducer.
 pub struct AuthorizedDiskUploads<'a, S, F, W, E, I>
 where
     S: AuthorizedDiskPolicyState,
@@ -34,6 +38,7 @@ where
     allow_new_uploads: bool,
     accounting: DiskBlobAccountingLimits,
     cache: PageCache,
+    inventory_limits: Option<uste_storage::journal::DiskBlobAppendLimits>,
 }
 
 impl<'a, S, F, W, E, I> AuthorizedDiskUploads<'a, S, F, W, E, I>
@@ -57,6 +62,7 @@ where
             allow_new_uploads: false,
             accounting,
             cache: PageCache::new(64 * 1024).map_err(TransactionError::Storage)?,
+            inventory_limits: None,
         };
         facade.validate_policy()?;
         Ok(facade)
@@ -165,8 +171,8 @@ where
     /// Reopen new-upload admission using the trusted adapter's complete durable token outbox.
     /// Record every token durably before staging bytes. Every supplied token must be committed,
     /// durably aborted, or have no durable bytes. This does not enumerate filesystem orphans.
-    /// Finalized but uncommitted blobs remain unresolved; this staging-only capability cannot
-    /// commit their inventory or physically erase them.
+    /// Finalized but uncommitted blobs remain unresolved until an opted-in inventory commit or
+    /// later lifecycle work resolves them. Reconciliation does not physically erase them.
     pub fn complete_recovered_upload_reconciliation(
         &mut self,
         filesystem: &mut F,
