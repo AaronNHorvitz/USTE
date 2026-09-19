@@ -19,8 +19,12 @@ pub use first_reference::{
 };
 pub use rebase::CoordinatorMetadataRebaseLimits;
 pub(crate) use rebase::publish_overlay_base;
-pub(crate) use usage::bootstrap_empty_usage;
-pub use usage::{COORDINATOR_BLOB_USAGE_PROFILE_V1, CoordinatorBlobUsageLimits};
+pub use usage::{
+    COORDINATOR_BLOB_USAGE_PROFILE_V1, CoordinatorBlobUsageLimits,
+    CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,
+    MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS,
+};
+pub(crate) use usage::{bootstrap_empty_usage, rebuild_usage};
 
 use uste_crypto::EntropySource;
 use uste_storage::{

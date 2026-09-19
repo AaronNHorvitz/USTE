@@ -678,6 +678,25 @@ where
         )
     }
 
+    /// Build or replace the optional quota projection from an already admitted, fully rebased
+    /// primary owner ledger. Bounded batches and aggregate logical rewrite bytes are explicit.
+    /// No intermediate root is published; failed work cannot install partial quota totals.
+    pub fn rebuild_blob_usage_index(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorBlobUsageRebuildLimits,
+        cache: &mut PageCache,
+    ) -> Result<CoordinatorBlobUsageRebuildReport, TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
+        if self.rebase_required || !self.inner.outcomes.is_empty() {
+            return Err(TransactionError::InvalidRequest);
+        }
+        disk_metadata::rebuild_usage(&mut self.inner, filesystem, &mut self.base, limits, cache)
+    }
+
     fn rebase_metadata_internal(
         &mut self,
         filesystem: &mut F,

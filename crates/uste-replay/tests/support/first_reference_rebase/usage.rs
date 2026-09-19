@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "usage_admission.rs"]
 mod admission;
+#[path = "usage_rebuild.rs"]
+mod rebuild;
 
 pub(super) fn limits() -> uste_txn::CoordinatorBlobUsageLimits {
     uste_txn::CoordinatorBlobUsageLimits {
@@ -151,6 +153,7 @@ fn indexed_blob_usage_every_publication_fault_preserves_retry_and_restart() {
                 let result = rebase(&mut fs, &mut disk);
                 if result.is_ok() {
                     assert_eq!(operation, Operation::RemoveFile);
+                    assert!(!fs.is_crashed()); // CrashAfter on NotFound has no successful boundary.
                     cleanup_successes += 1;
                     eprintln!("quota cleanup succeeded: {operation:?}/{occurrence}/{action:?}");
                 }

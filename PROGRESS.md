@@ -58,6 +58,41 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `136ddc5` plus this increment: [Decision 0113](docs/decisions/0113-populated-base-quota-rebuild.md)
+  implements populated-base quota projection rebuild with 1–4096-owner batches, independent
+  terminal validation and no intermediate root publication. Explicit owner/batch/source/merge/
+  admission budgets and cumulative logical output include repeated immutable rewrites. Exact
+  two-owner output is 602 bytes for two batches or 389 for one; one byte less refuses. Four
+  integration tests cover cross-batch literal totals, cold admission/replacement, late certificate
+  corruption, private terminal-admission failure and 210 I/O fault attempts with exact restart.
+  Three successful optional NotFound paths consume planned CrashAfter without an actual crash.
+  The batch lower-bound unit test and existing empty/zero-byte-owner test also pass. Final focused
+  command: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  -p uste-txn -p uste-replay --locked --offline quota_rebuild -- --test-threads=1 --nocapture`
+  (four integration tests 2.55s, one unit test); txn/replay all-target/all-feature strict Clippy
+  passes (0.04s). A preceding focused run's final output was lost at context recovery and was
+  rerun only after checking that no workload remained. The normal unoptimized empty-owner test
+  also passed (0.35s) before the full gate.
+  Full serial gate in `run-p398514-i21386929.scope` exited 0 under MemoryHigh=3G, MemoryMax=4G,
+  MemorySwapMax=512M: assertion-enabled optimized workspace/all-target/all-feature tests passed
+  400 tests across 46 executables, no failures or ignores (123 storage 18.38s; 27 replay/coordinator
+  10.33s; 16 disk graph 13.19s; 31 transaction 0.32s; M1 process recovery 2.68s). Commands:
+  the focused command above with `--workspace --all-targets --all-features` replacing packages
+  and filter; `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` (51 active tests
+  43.33s and three process tests 11.86s; two unchanged exact-oracle ignores);
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (3.93s); `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (1.92s);
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked
+  --offline` (0.96s). Sampled scope peak 1,347,969,024 bytes, zero swap, not final whole-run peak.
+  `cargo fmt --all --check`, `git diff --check`, `python3 scripts/check_docs.py` (186 links)
+  and `python3 scripts/check_task_graph.py` (68 tasks) pass. M1 crate sources and Cargo.lock
+  still match `b9689f3`; no pilot restart or task completion is claimed. Preflight: 36 GiB
+  available RAM, 3.9 GiB free swap. Next: T-20 recovery/construction scaling and executable
+  BM-06 workload prerequisites; immutable-run rewrite cost and qualifying campaigns remain open.
+
 - Verified on pushed `eda0c88` plus this increment: [Decision 0112](docs/decisions/0112-authorized-indexed-blob-accounting.md)
   connects explicit indexed accounting to authorized staging, inventory commits and quota
   inspection. Missing admission refuses configuration; inspection requires current authority
@@ -113,8 +148,9 @@ unverified external distribution prerequisite.
   lookup expectation (binary search and selected access need two even with cache hits), and an
   overstrict assertion that optional cleanup faults must fail publication. The initial normal
   unoptimized extended run failed that assertion after 88.70s; the corrected test requires exact
-  successful state/restart and only permits cleanup success for RemoveFile. Actual successful
-  faults are RemoveFile occurrences 1 and 4 with CrashAfter. No production durability rule changed.
+  successful state/restart and only permits cleanup success for RemoveFile. Successful paths
+  consume planned CrashAfter at RemoveFile occurrences 1 and 4 on NotFound; no actual crash occurs.
+  No production durability rule changed.
   Focused final command under 3G/4G/512M: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
   CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
   -p uste-txn -p uste-replay --locked --offline blob_usage -- --test-threads=1 --nocapture`;

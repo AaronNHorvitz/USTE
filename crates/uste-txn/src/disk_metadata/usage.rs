@@ -2,6 +2,13 @@
 use super::*;
 use uste_storage::{IndexDelta, IndexGetLimits, PageCache};
 
+mod rebuild;
+pub(crate) use rebuild::rebuild_usage;
+pub use rebuild::{
+    CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,
+    MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS,
+};
+
 /// SHA-256 of `USTE coordinator-blob-usage-v1`.
 pub const COORDINATOR_BLOB_USAGE_PROFILE_V1: [u8; 32] = [
     0x41, 0x35, 0x99, 0x42, 0xed, 0xb3, 0x3c, 0xe8, 0x81, 0x7a, 0x23, 0x15, 0x6f, 0x04, 0x0a, 0x13,
@@ -64,8 +71,30 @@ impl CoordinatorDiskBase {
         E: EntropySource,
         I: EntropySource,
     {
-        if recovery.scope() != self.metadata.scope()
-            || root.anchor() != self.anchor()
+        if recovery.scope() != self.metadata.scope() {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let admitted =
+            self.validate_blob_usage_index(&recovery.journal, filesystem, root, limits, cache)?;
+        self.usage = Some(admitted);
+        Ok(())
+    }
+
+    fn validate_blob_usage_index<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        root: RecoveredIndexRoot,
+        limits: CoordinatorBlobUsageLimits,
+        cache: &mut PageCache,
+    ) -> Result<BlobUsageIndex, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        if root.anchor() != self.anchor()
             || root.index_profile() != &COORDINATOR_BLOB_USAGE_PROFILE_V1
         {
             return Err(TransactionError::IntegrityFailure);
@@ -76,17 +105,19 @@ impl CoordinatorDiskBase {
             return Err(TransactionError::ResourceLimit);
         }
         let mut totals = None;
-        recovery.visit_index_run(filesystem, &root, META, limits.run, &mut |key, value| {
-            if key != KEY || value.len() != 24 || totals.is_some() {
-                return Err(StorageError::IntegrityFailure);
-            }
-            totals = Some((
-                read_u64(&value[..8])?,
-                read_u64(&value[8..16])?,
-                read_u64(&value[16..])?,
-            ));
-            Ok(())
-        })?;
+        journal
+            .visit_index_run(filesystem, &root, META, limits.run, &mut |key, value| {
+                if key != KEY || value.len() != 24 || totals.is_some() {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                totals = Some((
+                    read_u64(&value[..8])?,
+                    read_u64(&value[8..16])?,
+                    read_u64(&value[16..])?,
+                ));
+                Ok(())
+            })
+            .map_err(TransactionError::Storage)?;
         let (owners, bytes, principals) = totals.ok_or(TransactionError::IntegrityFailure)?;
         if owners != self.owner_count() || principals > owners || (owners == 0) != (principals == 0)
         {
@@ -104,24 +135,30 @@ impl CoordinatorDiskBase {
         let mut seen_principals = 0;
         if owners != 0 {
             // Authenticate all aggregate entries, including otherwise unqueried extras.
-            recovery.visit_index_run(
-                filesystem,
-                &root,
-                PRINCIPALS,
-                limits.run,
-                &mut |key, value| {
-                    if key.len() != 32 || decode_pair(value)?.0 == 0 {
-                        return Err(StorageError::IntegrityFailure);
-                    }
-                    Ok(())
-                },
-            )?;
-            let mut cursor =
-                recovery.open_index_run_cursor(filesystem, &root, OWNERS, limits.run)?;
+            journal
+                .visit_index_run(
+                    filesystem,
+                    &root,
+                    PRINCIPALS,
+                    limits.run,
+                    &mut |key, value| {
+                        if key.len() != 32 || decode_pair(value)?.0 == 0 {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        Ok(())
+                    },
+                )
+                .map_err(TransactionError::Storage)?;
+            let mut cursor = journal
+                .open_index_run_cursor(filesystem, &root, OWNERS, limits.run)
+                .map_err(TransactionError::Storage)?;
             let mut current: Option<PrincipalDigest> = None;
             let mut actual = (0_u64, 0_u64);
             let mut expected = (0_u64, 0_u64);
-            while let Some(entry) = recovery.next_index_run_entry(filesystem, &mut cursor)? {
+            while let Some(entry) = journal
+                .next_index_run_entry(filesystem, &mut cursor)
+                .map_err(TransactionError::Storage)?
+            {
                 if entry.key.len() != 48 || entry.value.len() != OWNER_VALUE_BYTES {
                     return Err(TransactionError::IntegrityFailure);
                 }
@@ -129,8 +166,8 @@ impl CoordinatorDiskBase {
                     decode_owner(root.scope(), &entry.key[32..], &entry.value)
                         .map_err(TransactionError::Storage)?;
                 if entry.key[..32] != principal.as_bytes()
-                    || self.owner_at_base(
-                        recovery,
+                    || self.owner_from_journal(
+                        journal,
                         filesystem,
                         reference.id(),
                         limits.lookup,
@@ -143,14 +180,16 @@ impl CoordinatorDiskBase {
                     if current.is_some() && actual != expected {
                         return Err(TransactionError::IntegrityFailure);
                     }
-                    let (value, _) = recovery.index_get_bounded(
-                        filesystem,
-                        &root,
-                        PRINCIPALS,
-                        &principal.as_bytes(),
-                        limits.lookup,
-                        cache,
-                    )?;
+                    let (value, _) = journal
+                        .index_get_bounded(
+                            filesystem,
+                            &root,
+                            PRINCIPALS,
+                            &principal.as_bytes(),
+                            limits.lookup,
+                            cache,
+                        )
+                        .map_err(TransactionError::Storage)?;
                     expected = decode_pair(&value.ok_or(TransactionError::IntegrityFailure)?)
                         .map_err(TransactionError::Storage)?;
                     actual = (0, 0);
@@ -163,20 +202,25 @@ impl CoordinatorDiskBase {
                 total_bytes =
                     add(total_bytes, reference.byte_len()).map_err(TransactionError::Storage)?;
             }
-            if actual != expected || recovery.finish_index_run_cursor(cursor)?.entries != owners {
+            if actual != expected
+                || journal
+                    .finish_index_run_cursor(cursor)
+                    .map_err(TransactionError::Storage)?
+                    .entries
+                    != owners
+            {
                 return Err(TransactionError::IntegrityFailure);
             }
         }
         if seen_principals != principals || total_bytes != bytes {
             return Err(TransactionError::IntegrityFailure);
         }
-        self.usage = Some(BlobUsageIndex {
+        Ok(BlobUsageIndex {
             root,
             owners,
             bytes,
             principals,
-        });
-        Ok(())
+        })
     }
 
     pub(crate) fn indexed_usage<F, W, E, I>(
@@ -247,10 +291,71 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    let before = base.usage.as_ref();
+    if base.usage.as_ref().map_or(0, |index| index.owners) != base.owner_count() {
+        return Err(TransactionError::InvalidRequest);
+    }
+    let merged = merge_projection(
+        &mut coordinator.journal,
+        filesystem,
+        base.usage.as_ref(),
+        input,
+        merge.merge,
+        limits,
+        coordinator.committed_blob_owners.values(),
+        u64::MAX,
+    )?;
+    let root = rebase::publish_or_reuse(
+        coordinator,
+        filesystem,
+        IndexRootInput {
+            index_profile: COORDINATOR_BLOB_USAGE_PROFILE_V1,
+            ..input
+        },
+        &merged.runs,
+        merge.reuse,
+    )?;
+    Ok(merged.into_index(root))
+}
+
+struct MergedUsage {
+    owners: u64,
+    bytes: u64,
+    principals: u64,
+    runs: Vec<uste_storage::IndexRunDescriptor>,
+    output_bytes: u64,
+}
+
+impl MergedUsage {
+    fn into_index(self, root: RecoveredIndexRoot) -> BlobUsageIndex {
+        BlobUsageIndex {
+            root,
+            owners: self.owners,
+            bytes: self.bytes,
+            principals: self.principals,
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_projection<'a, F, W, E, I>(
+    journal: &mut uste_storage::journal::JournalStore<F, W, E, I>,
+    filesystem: &mut F,
+    before: Option<&BlobUsageIndex>,
+    input: IndexRootInput,
+    merge: uste_storage::IndexRunMergeLimits,
+    limits: CoordinatorBlobUsageLimits,
+    additions: impl ExactSizeIterator<Item = &'a (BlobReference, PrincipalDigest)>,
+    maximum_output_bytes: u64,
+) -> Result<MergedUsage, TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let owners = add(
-        base.owner_count(),
-        coordinator.committed_blob_owners.len() as u64,
+        before.map_or(0, |index| index.owners),
+        additions.len() as u64,
     )
     .map_err(TransactionError::Storage)?;
     if owners > limits.maximum_owners {
@@ -260,7 +365,10 @@ where
     let mut principals = before.map_or(0, |index| index.principals);
     let mut charges: BTreeMap<PrincipalDigest, (u64, u64)> = BTreeMap::new();
     let mut owner_deltas = BTreeMap::new();
-    for &(reference, principal) in coordinator.committed_blob_owners.values() {
+    for &(reference, principal) in additions {
+        if reference.scope() != input.scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
         bytes = add(bytes, reference.byte_len()).map_err(TransactionError::Storage)?;
         let charge = charges.entry(principal).or_default();
         charge.0 = add(charge.0, 1).map_err(TransactionError::Storage)?;
@@ -268,14 +376,15 @@ where
         let encoded = encode_owner(reference, principal).map_err(TransactionError::Storage)?;
         let mut key = principal.as_bytes().to_vec();
         key.extend_from_slice(&encoded.key);
-        owner_deltas.insert(key, encoded.value);
+        if owner_deltas.insert(key, encoded.value).is_some() {
+            return Err(TransactionError::IntegrityFailure);
+        }
     }
     let mut cache = PageCache::new(64 * 1024).map_err(TransactionError::Storage)?;
     let mut deltas = Vec::new();
     for (principal, (count, charged)) in charges {
         let previous = if let Some(index) = before.filter(|index| index.principals != 0) {
-            coordinator
-                .journal
+            journal
                 .index_get_bounded(
                     filesystem,
                     &index.root,
@@ -312,9 +421,18 @@ where
     }
     let mut metadata = pair(owners, bytes);
     metadata.extend_from_slice(&principals.to_be_bytes());
+    let output_bytes = owners
+        .checked_mul(128)
+        .and_then(|bytes| {
+            principals
+                .checked_mul(48)
+                .and_then(|part| bytes.checked_add(part))
+        })
+        .and_then(|bytes| bytes.checked_add(KEY.len() as u64 + 24))
+        .filter(|bytes| *bytes <= maximum_output_bytes)
+        .ok_or(TransactionError::ResourceLimit)?;
     let mut runs = vec![
-        coordinator
-            .journal
+        journal
             .publish_index_run(
                 filesystem,
                 input.scope,
@@ -341,8 +459,7 @@ where
                 owners,
             ),
         ] {
-            let merged = coordinator
-                .journal
+            let merged = journal
                 .merge_index_run(
                     filesystem,
                     input.scope,
@@ -352,7 +469,7 @@ where
                     before
                         .filter(|index| index.owners != 0)
                         .map(|index| &index.root),
-                    merge.merge,
+                    merge,
                     changes.into_iter().map(Ok),
                 )
                 .map_err(TransactionError::Storage)?;
@@ -363,18 +480,9 @@ where
             runs.push(run);
         }
     }
-    let root = rebase::publish_or_reuse(
-        coordinator,
-        filesystem,
-        IndexRootInput {
-            index_profile: COORDINATOR_BLOB_USAGE_PROFILE_V1,
-            ..input
-        },
-        &runs,
-        merge.reuse,
-    )?;
-    Ok(BlobUsageIndex {
-        root,
+    Ok(MergedUsage {
+        runs,
+        output_bytes,
         owners,
         bytes,
         principals,

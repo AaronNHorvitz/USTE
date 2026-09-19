@@ -143,10 +143,11 @@ before larger-than-memory/BM-06 qualification.
 Subsequent implementation preserves those qualification requirements: Decisions 0065–0073 add
 disk-aware authorization and maintained first-reference evidence; Decisions 0092–0105 extend
 private multi-revision recovery, map-free storage metadata and authorized inventory publication.
-Decisions 0111–0112 add independently admitted disk principal quota totals, bounded new-owner
-projection updates and opt-in authorized accounting without complete owner scans. Legacy paths
-remain available with their explicit memory/work limitations. Populated-base quota bootstrap,
-immutable-run rewrite amplification, complete accounting evidence and qualifying BM-01/BM-06
+Decisions 0111–0113 add independently admitted disk principal quota totals, bounded new-owner
+projection updates, opt-in authorized accounting without complete owner scans and bounded-batch
+populated-base projection rebuild with independent terminal validation. Legacy paths remain
+available with their explicit memory/work limitations. Immutable-run rewrite amplification,
+complete accounting evidence and qualifying BM-01/BM-06
 campaigns remain T-20 work, not implied acceptance from these local capabilities.
 
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized

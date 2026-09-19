@@ -222,6 +222,29 @@ fn disk_blob_usage_owner_free_bootstrap_and_zero_length_owner_survive_restart() 
             CommitRevision::FIRST
         );
     }
+    let rebuilt = disk
+        .rebuild_blob_usage_index(
+            &mut fs,
+            uste_txn::CoordinatorBlobUsageRebuildLimits {
+                source: run(),
+                admission: usage,
+                merge,
+                maximum_batch_owners: 1,
+                maximum_batches: 1,
+                maximum_merge_output_bytes: 37,
+            },
+            &mut cache(),
+        )
+        .unwrap();
+    assert_eq!(
+        (
+            rebuilt.owners,
+            rebuilt.principals,
+            rebuilt.batches,
+            rebuilt.merge_output_bytes
+        ),
+        (0, 0, 1, 37)
+    );
     drop(disk);
     fs.restart().unwrap();
     let mut disk = reopen(&mut fs, &name, base.clone());
