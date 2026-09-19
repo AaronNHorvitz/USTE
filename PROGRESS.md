@@ -58,6 +58,39 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `fa3897a` plus this increment: [Decision 0127](docs/decisions/0127-bounded-certificate-proof-windows.md)
+  authenticates fixed windows of at most 64 certificate receipts, reuses them for forward group
+  reads and selects the windowed cursor in private coordinator recovery. Every selected certificate
+  is reread against its receipt; shared byte accounting includes all acquisition reads. Existing
+  nonwindowed and resident-anchor paths remain. Seven new tests cover independent subrange proofs,
+  64/excess capacity, exact/minus-one bytes, rollover, inventories, foreign/stale owners, authentic
+  forks, after-lookahead corruption and all observed read error/crash boundaries with restart.
+  Focused scope `run-p487393-i21450076.scope` passed four storage tests/0.02s, three cursor tests/
+  0.20s and strict workspace lint/6.55s. Initial checks corrected an unnecessary qualification,
+  a path-module declaration and test-adapter rearm-before-restart ordering. The first full gate
+  `run-p488181-i21450160.scope` exposed the graph test's old exact-byte cost. Its boundary is now
+  pinned to three selected certificate/group pairs plus four proof/window certificates, rather
+  than six independent suffix-proof certificates; exact success, minus-one failure and no partial
+  publication remain mandatory. No benchmark target or admitted profile allowance was lowered.
+  Final scope `run-p490591-i21492582.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 443 tests/46 executables, no failures/ignores
+  (graph disk 24/26.75s, replay 50/112.09s, storage 128/18.63s, transaction coordinator 37/0.56s,
+  M1 process 2/2.70s). `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 58 active units/
+  45.17s, BM-01 process 3/12.10s, BM-06 CLI 2/0.50s and BM-06 process 8/73.08s; two prior
+  exact-oracle ignores unchanged. `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets
+  --all-features --locked --offline -- -D warnings` (0.31s), `CARGO_BUILD_JOBS=1 cargo clippy
+  --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings`
+  (1.80s), and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn
+  -p uste-storage --no-deps --locked --offline` (1.97s) pass. Preflight 35 GiB available RAM/
+  3.9 GiB free swap; sampled peak 447,025,152 bytes/zero swap, not final whole-run peak.
+  Formatting/whitespace, docs (201 links), task graph (68 tasks) pass. No M1 source/lock changes
+  or qualifying campaign. Next address whole-family rewrite/global digest scaling with an explicitly
+  separate versioned index design, preserving all v1 semantics and independent reference checks;
+  complete accounting and reserved-host qualification remain required. T-20/T-19 remain open.
+
 - Implemented on pushed `de67ff3` plus this increment: [Decision 0126](docs/decisions/0126-recovery-transaction-proof-reuse.md)
   retains the forward cursor's already-accounted certificate proof with its bounded transaction.
   Private staging reuses it without additional certificate reads. Both staging APIs reject a
@@ -2536,8 +2569,9 @@ Current action: T-20 remains the priority. Decisions 0108–0120, including the 
 suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
 references on that path; Decision 0124 maintains quota projections (pushed `746ca3d`). Decision
 0125 applies streamed metadata to native paired-base recovery (pushed `de67ff3`). Decision 0126
-removes duplicate staging proofs. Next add bounded certificate authentication windows for the
-forward cursor, then address immutable-family rewrite scaling and
+removes duplicate staging proofs (pushed `fa3897a`). Decision 0127 adds bounded certificate
+windows to private forward recovery. Next address immutable-family rewrite/global digest scaling
+through a separately versioned index design, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

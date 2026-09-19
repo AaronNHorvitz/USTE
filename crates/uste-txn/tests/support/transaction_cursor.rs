@@ -6,6 +6,9 @@ type Fs = FaultFileSystem<MemoryFileSystem>;
 type Recovery = AuthenticatedIndexRecovery<Fs, TestEnvelope, CounterEntropy, CounterEntropy>;
 const RANGE_BYTES: u64 = 3 * (4_161 + 4_161);
 
+#[path = "transaction_cursor/window.rs"]
+mod window;
+
 fn fixture() -> (Fs, EntryName, [TransactionOutcome; 3], BlobInventory) {
     let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let name = EntryName::new("transaction-cursor").unwrap();

@@ -586,7 +586,9 @@ fn streamed_primary_metadata_rejects_authenticated_retry_and_transaction_collisi
 
 #[test]
 fn streamed_primary_metadata_budgets_and_late_corruption_never_publish_a_partial_root() {
-    let bytes = 3 * 8322 + 6 * 4161;
+    // Three selected certificate/group pairs, one frontier proof, three backward window reads.
+    // The old three independent suffix proofs cost six certificates instead of four.
+    let bytes = 3 * 8322 + 4 * 4161;
     for (maximum, allowance) in [(2, bytes), (3, bytes - 1)] {
         let (mut fs, name, _) = fixture_with_suffix(3, 1);
         let input = prepare_source(&mut fs, &name, true, true, false);

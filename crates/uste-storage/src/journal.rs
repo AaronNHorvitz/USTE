@@ -44,7 +44,7 @@ mod certificate_proof;
 use certificate_proof::CertificateProofOwner;
 pub use certificate_proof::{
     CertificateAnchorProof, CertificateAnchorReadLimits, CertificateAnchorReadReport,
-    ProvenIndexRunCursor,
+    CertificateProofWindow, MAX_CERTIFICATE_PROOF_WINDOW, ProvenIndexRunCursor,
 };
 #[path = "journal_blob_proof.rs"]
 mod blob_proof;
@@ -408,6 +408,11 @@ where
             self.certificate_read_limits.is_none(),
             self.certificate_anchors.len(),
         )
+    }
+
+    /// Trusted configured proof-work ceiling; not consumer authorization or a memory reservation.
+    pub fn certificate_anchor_read_limits(&self) -> Option<CertificateAnchorReadLimits> {
+        self.certificate_read_limits
     }
 
     /// Authenticate both journal passes without retaining historical certificate anchors.
@@ -1189,7 +1194,33 @@ where
             maximum_groups,
             maximum_encoded_bytes,
             false,
+            None,
             visitor,
+        )
+    }
+
+    /// Read one group against already acquired exact-owner/frontier evidence. The report charges
+    /// this group's certificate and envelope, not the separately reported proof acquisition.
+    /// The selected certificate is reread and must match the proof before any group is exposed.
+    pub fn visit_proven_committed_group_report<V>(
+        &self,
+        filesystem: &mut F,
+        proof: &CertificateAnchorProof,
+        maximum_encoded_bytes: u64,
+        mut visitor: V,
+    ) -> Result<JournalRangeReadReport, StorageError>
+    where
+        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        self.visit_committed_range_ordered(
+            filesystem,
+            proof.anchor().0,
+            proof.anchor().0,
+            1,
+            maximum_encoded_bytes,
+            false,
+            Some(proof),
+            |filesystem, group, _| visitor(filesystem, group),
         )
     }
 
@@ -1218,6 +1249,7 @@ where
             maximum_groups,
             maximum_encoded_bytes,
             true,
+            None,
             |filesystem, group, _| visitor(filesystem, group),
         )
     }
@@ -1231,6 +1263,7 @@ where
         maximum_groups: u64,
         maximum_encoded_bytes: u64,
         reverse: bool,
+        proven: Option<&CertificateAnchorProof>,
         mut visitor: V,
     ) -> Result<JournalRangeReadReport, StorageError>
     where
@@ -1245,6 +1278,12 @@ where
         }
         if last.get() - first.get() + 1 > maximum_groups {
             return Err(StorageError::ResourceLimit);
+        }
+        if let Some(proof) = proven {
+            self.validate_certificate_anchor_proof(proof)?;
+            if reverse || first != last || proof.anchor().0 != first {
+                return Err(StorageError::InvalidState);
+            }
         }
         let mut remaining = maximum_encoded_bytes;
         let mut reverse_expected = if reverse {
@@ -1294,7 +1333,12 @@ where
             )?;
             let certificate_digest = sha256(&encoded);
             let mut retained_proof = None;
-            if let Some(expected) = reverse_expected {
+            if let Some(proof) = proven {
+                if certificate_digest != proof.anchor().1 {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                retained_proof = Some(proof.clone());
+            } else if let Some(expected) = reverse_expected {
                 if certificate_digest != expected {
                     return Err(StorageError::IntegrityFailure);
                 }

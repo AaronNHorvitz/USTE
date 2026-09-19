@@ -3,6 +3,7 @@ use super::*;
 mod bound_roots;
 mod retained;
 mod reverse;
+mod window;
 
 #[test]
 fn certificate_revision_lookup_matches_exact_proofs_without_preliminary_reads() {

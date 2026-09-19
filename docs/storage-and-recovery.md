@@ -158,6 +158,10 @@ Decision 0126 retains each forward cursor transaction's already-accounted owner-
 proof for private staging. Invalid bound evidence cannot fall back; unbound transactions retain
 their existing proof path. Fresh recovery still reauthenticates, and triangular forward proof
 work and immutable-family rewrites remain limitations.
+Decision 0127 adds opt-in forward certificate windows of at most 64 owner-bound receipts and uses
+them for private metadata recovery. Window acquisition and selected group rereads debit one shared
+range allowance; lookahead never bypasses selected-certificate, group or inventory authentication.
+The bounded batching reduces but does not eliminate worst-case quadratic certificate work.
 Decision 0124 adds explicit quota-preserving streaming and private genesis quota candidates, with
 exact first-owner charges and mandatory independent initial quota admission. Private optional roots
 also require rebase when primary roots are already published. Rewrite/proof amplification and

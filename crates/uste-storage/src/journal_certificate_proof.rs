@@ -1,6 +1,10 @@
 use super::*;
 use std::sync::Arc;
 
+#[path = "journal_certificate_proof/window.rs"]
+mod window;
+pub use window::{CertificateProofWindow, MAX_CERTIFICATE_PROOF_WINDOW};
+
 /// Process-local identity only; retaining it holds neither an ownership lock nor a key.
 pub(super) struct CertificateProofOwner;
 

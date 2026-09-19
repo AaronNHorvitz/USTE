@@ -266,11 +266,12 @@ where
             let first = revision
                 .checked_next()
                 .map_err(|_| TransactionError::RevisionExhausted)?;
-            let mut cursor = recovery.open_transaction_cursor(
+            let mut cursor = recovery.open_transaction_cursor_with_certificate_window(
                 first,
                 frontier.0,
                 revisions,
                 limits.maximum_encoded_bytes,
+                uste_storage::journal::MAX_CERTIFICATE_PROOF_WINDOW,
             )?;
             while let Some(transaction) =
                 recovery.next_recovered_transaction(filesystem, &mut cursor)?

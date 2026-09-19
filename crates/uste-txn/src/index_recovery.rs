@@ -156,6 +156,8 @@ pub struct TransactionRecoveryCursor {
     initial_encoded_bytes: u64,
     remaining_encoded_bytes: u64,
     completed_groups: u64,
+    certificate_window_size: u64,
+    certificate_proofs: std::vec::IntoIter<uste_storage::journal::CertificateAnchorProof>,
     failed: bool,
 }
 
@@ -563,8 +565,30 @@ where
             initial_encoded_bytes: maximum_encoded_bytes,
             remaining_encoded_bytes: maximum_encoded_bytes,
             completed_groups: 0,
+            certificate_window_size: 0,
+            certificate_proofs: Vec::new().into_iter(),
             failed: false,
         })
+    }
+
+    /// Opt-in fixed-size lookahead for disk-certificate mode. Each window is fully authenticated
+    /// before yielding its first transaction; all acquisition reads debit the same range budget.
+    /// Resident-anchor mode preserves its existing per-group behavior. No full history is kept.
+    pub fn open_transaction_cursor_with_certificate_window(
+        &self,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        window_size: u64,
+    ) -> Result<TransactionRecoveryCursor, TransactionError> {
+        if window_size == 0 || window_size > uste_storage::journal::MAX_CERTIFICATE_PROOF_WINDOW {
+            return Err(TransactionError::ResourceLimit);
+        }
+        let mut cursor =
+            self.open_transaction_cursor(first, last, maximum_groups, maximum_encoded_bytes)?;
+        cursor.certificate_window_size = window_size;
+        Ok(cursor)
     }
 
     /// Yield one completely authenticated canonical transaction and release its encrypted/read
@@ -584,10 +608,60 @@ where
             let Some(revision) = cursor.next else {
                 return Ok(None);
             };
-            let mut transaction = None;
-            let report = self
+            let proof = if let Some(limits) = self
                 .journal
-                .visit_committed_range_with_proofs_report(
+                .certificate_anchor_read_limits()
+                .filter(|_| cursor.certificate_window_size != 0)
+            {
+                if cursor.certificate_proofs.len() == 0 {
+                    let window_last = revision
+                        .get()
+                        .checked_add(cursor.certificate_window_size - 1)
+                        .ok_or(TransactionError::ResourceLimit)?
+                        .min(cursor.last.get());
+                    let window = self
+                        .journal
+                        .authenticate_certificate_window(
+                            filesystem,
+                            revision,
+                            CommitRevision::new(window_last)
+                                .map_err(|_| TransactionError::IntegrityFailure)?,
+                            limits,
+                            cursor.remaining_encoded_bytes,
+                        )
+                        .map_err(map_open_error)?;
+                    cursor.remaining_encoded_bytes = cursor
+                        .remaining_encoded_bytes
+                        .checked_sub(window.report().encoded_bytes)
+                        .ok_or(TransactionError::IntegrityFailure)?;
+                    cursor.certificate_proofs = window.into_proofs();
+                }
+                let proof = cursor
+                    .certificate_proofs
+                    .next()
+                    .ok_or(TransactionError::IntegrityFailure)?;
+                if proof.anchor().0 != revision {
+                    return Err(TransactionError::IntegrityFailure);
+                }
+                Some(proof)
+            } else {
+                None
+            };
+            let mut transaction = None;
+            let report = if let Some(proof) = proof.as_ref() {
+                self.journal.visit_proven_committed_group_report(
+                    filesystem,
+                    proof,
+                    cursor.remaining_encoded_bytes,
+                    |_, group| {
+                        let mut captured = capture_group(self.scope, group)?;
+                        captured.certificate_proof = Some(proof.clone());
+                        transaction = Some(captured);
+                        Ok(())
+                    },
+                )
+            } else {
+                self.journal.visit_committed_range_with_proofs_report(
                     filesystem,
                     revision,
                     revision,
@@ -600,7 +674,8 @@ where
                         Ok(())
                     },
                 )
-                .map_err(map_open_error)?;
+            }
+            .map_err(map_open_error)?;
             let transaction = transaction.ok_or(TransactionError::IntegrityFailure)?;
             let completed = cursor
                 .completed_groups
@@ -638,6 +713,7 @@ where
     ) -> Result<JournalRangeReadReport, TransactionError> {
         if cursor.failed
             || cursor.next.is_some()
+            || cursor.certificate_proofs.len() != 0
             || cursor.completed_groups != cursor.total_groups
             || cursor.scope != self.scope
             || self.journal.checkpoint_anchor() != Some(cursor.anchor)
