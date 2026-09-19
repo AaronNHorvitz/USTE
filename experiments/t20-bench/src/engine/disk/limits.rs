@@ -91,7 +91,10 @@ impl DiskProfileLimits {
         let mul = |a: u64, b: u64| a.checked_mul(b).ok_or("disk profile limit overflow");
         let add = |a: u64, b: u64| a.checked_add(b).ok_or("disk profile limit overflow");
         let entries = counts.into_iter().try_fold(1_u64, add)?;
-        let largest_family = *counts.iter().max().ok_or("missing fixture families")?;
+        // The same merge limits also maintain coordinator retry/transaction families. Tiny
+        // BM-06 record sets can have more commits than graph-history entries (policy included).
+        let largest_family =
+            (*counts.iter().max().ok_or("missing fixture families")?).max(add(groups, 1)?);
         let proof_bytes = |count: u64| mul(mul(count, add(count, 1)?)? / 2, 4_161);
         let prefix_bytes = add(mul(groups, MAX_CERTIFIED_GROUP)?, proof_bytes(groups)?)?;
         // This closed graph fixture prohibits blob inventories. The storage catalog therefore

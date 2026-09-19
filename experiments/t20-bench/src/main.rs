@@ -16,6 +16,49 @@ fn run() -> Result<(), String> {
         print_usage();
         return Ok(());
     }
+    if let Some(phase) = command.strip_prefix("bm06-linux-") {
+        let mut root = None;
+        let mut password = None;
+        let mut records = None;
+        while let Some(flag) = arguments.next() {
+            let value = arguments
+                .next()
+                .ok_or("BM-06 native flag requires a value")?;
+            match flag.to_str() {
+                Some("--root") if root.is_none() => root = Some(PathBuf::from(value)),
+                Some("--password-file") if password.is_none() => {
+                    password = Some(PathBuf::from(value))
+                }
+                Some("--records") if records.is_none() => {
+                    records = Some(
+                        value
+                            .into_string()
+                            .map_err(|_| "BM-06 record count must be UTF-8")?
+                            .parse::<u64>()
+                            .map_err(|_| "BM-06 record count must be unsigned")?,
+                    )
+                }
+                _ => return Err("unsupported or duplicate BM-06 native flag".into()),
+            }
+        }
+        let root = root.ok_or("BM-06 native command requires --root")?;
+        let password = password.ok_or("BM-06 native command requires --password-file")?;
+        let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(
+            records.ok_or("BM-06 native command requires --records")?,
+        )?;
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        println!(
+            "{}",
+            uste_t20_bench::linux_runner::disk::recovery::run(&root, &password, profile, phase)
+                .map_err(|error| error.to_string())?
+        );
+        #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+        {
+            let _ = (root, password, profile, phase);
+            return Err("BM-06 native runner requires x86_64 Linux".into());
+        }
+        return Ok(());
+    }
     if command == "bm06-manifest" || command == "bm06-disk-check" {
         let records = match arguments.next() {
             None => 100_000,
@@ -279,6 +322,8 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
+         uste-t20-bench bm06-linux-<create|tail|recover|open|tail-crash-probe> \
+         --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-create|linux-disk-resume|linux-disk-open> \

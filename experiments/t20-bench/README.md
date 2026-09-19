@@ -36,6 +36,25 @@ Its filesystem and credentials remain development models; JSON discloses that bo
 qualifying trials. Exact-scale admission math is tested without running that database. All larger
 profiles are rejected before filesystem/key allocation. This is not a native recovery campaign.
 
+Decision 0116 adds native development phases on Btrfs with the same two-record ceiling, OS entropy
+and the existing owner-only password-file rules. Supply an existing private root directory and
+synthetic password file; these commands create only the distinct `bm06-linux-disk-engine` database:
+
+```text
+cargo run --release --locked --offline -- bm06-linux-create --root ROOT --password-file PASSWORD --records 2
+cargo run --release --locked --offline -- bm06-linux-tail --root ROOT --password-file PASSWORD --records 2
+cargo run --release --locked --offline -- bm06-linux-recover --root ROOT --password-file PASSWORD --records 2
+cargo run --release --locked --offline -- bm06-linux-open --root ROOT --password-file PASSWORD --records 2
+```
+
+Create stops at revision 100; tail certifies 101 with intentionally uncompleted derived publication;
+recover repairs it and checks exact retry; open requires the repaired frontier. Create never
+overwrites and arbitrary-prefix creation resume remains unsupported. A failed partial directory
+is retained. Tests run `tail-crash-probe` as an owned child and SIGKILL it only after its flushed
+durable-tail marker, then recover in fresh processes. Do not launch the probe without a supervising
+parent: it waits indefinitely by design. Reports separate verified history from recovery work and
+disclose partial adapter accounting, uncontrolled host caches and zero qualifying trials.
+
 ## BM-01 materialization
 
 This standalone experiment pins `bm01-materialization-v1`. It prepares deterministic synthetic

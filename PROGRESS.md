@@ -58,6 +58,35 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `8749793` plus this increment: [Decision 0116](docs/decisions/0116-native-bm06-recovery-phases.md)
+  adds native Btrfs create/tail/recover/open phases and an owned-child durable-tail SIGKILL probe.
+  OS entropy, portable recovery, current authorization and durable flushes remain enabled; the
+  native cap is two records, checked before root/credential access. Tests verify all historical
+  payloads and record metadata, pre-tail wrong-profile refusal, live-owner exclusion, exact retry,
+  fresh-process recovery/reopen, wrong credentials, phase-frontier guards and fail-closed committed
+  certificate corruption followed by exact restored-byte recovery. Reports separate verified
+  history/revision from the final frontier and distinguish partial adapter I/O from device traffic.
+  Host caches are uncontrolled and no qualifying trial or benchmark pass is claimed.
+  The first native focused run passed the SIGKILL case but failed one-record metadata repair:
+  the 101-entry coordinator families exceeded the graph-only 100-entry merge bound. Fixed shared
+  limits to include coordinator cardinality and extended the memory-model test to both record
+  counts. BM-01 allowances and tests remain unchanged. Corrected focused gate passed seven unit
+  tests (1.86s), two CLI tests (0.49s), three native tests (10.84s), strict lint (1.12s).
+  Final `run-p411819-i21372279.scope` exited 0 under MemoryHigh=3G, MemoryMax=4G,
+  MemorySwapMax=512M: `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passes 58 active
+  unit tests (45.06s), three BM-01 process tests (11.73s), two BM-06 CLI tests (0.49s) and
+  three BM-06 native process tests including committed corruption (11.93s); two unchanged
+  exact-oracle ignores remain. `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` passes
+  (0.06s). Sampled scope peak 299,163,648 bytes, zero swap, not final whole-run peak.
+  Native formatting/whitespace, docs (189 links) and 68-task graph checks pass; production
+  workspace/M1 sources and lockfiles are unchanged. Preflight: 35 GiB available RAM, 3.9 GiB
+  free swap, 985 GiB free Btrfs space. Reproduction commands and unsupported arbitrary-prefix
+  create resume are documented in the experiment README. Next: native optional-cache and
+  torn-tail controls, resumable materialization, then remaining construction/recovery scaling
+  and reserved-host qualification. T-20/T-19 remain open; this is not a ten-million-event trial.
+
 - Verified on pushed `6cc94e7` plus this increment: [Decision 0115](docs/decisions/0115-bm06-disk-state-equivalence.md)
   connects the BM-06 workload to authorized encrypted disk-state writes and recovery. The
   `bm06-disk-check --records 2` development command is capped before filesystem/key allocation

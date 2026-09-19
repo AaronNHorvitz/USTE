@@ -25,7 +25,7 @@ pub struct RecoveryDevelopmentVerification {
     pub storage_metadata_memory_resident: bool,
 }
 
-fn recovery_policy() -> Result<NamespacePolicy, String> {
+pub(crate) fn recovery_policy() -> Result<NamespacePolicy, String> {
     let quotas = QuotaLimits::new(16 * 1024 * 1024, 0, 0, 0, 1024 * 1024).map_err(debug)?;
     let mut policy = NamespacePolicy::new(scope(), PolicyVersion::new(1).map_err(debug)?, quotas);
     policy
@@ -234,9 +234,61 @@ pub fn verify_disk_recovery(
     {
         return Err("BM-06 terminal cardinality mismatch".into());
     }
+    let verified = verify_history(&disk, &mut fs, &kernel, &principal, profile, VERSIONS)?;
+    Ok(RecoveryDevelopmentVerification {
+        records: profile.records(),
+        verified_versions: verified,
+        verified_payload_bytes: verified * PAYLOAD_BYTES as u64,
+        base_revision: admission.graph_revision,
+        recovered_revision: terminal.graph_revision,
+        storage_metadata_memory_resident: disk.certificate_anchor_residency().0
+            || disk.blob_metadata_residency().0,
+    })
+}
+
+/// Verify the complete admitted fixture prefix before a native adapter appends more events.
+/// It is bounded by the caller's profile, not an alternative authorization path.
+pub(crate) fn verify_history<F, W, E, I>(
+    disk: &DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    fs: &mut F,
+    kernel: &PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    profile: Bm06Profile,
+    versions: u64,
+) -> Result<u64, String>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if versions == 0 || versions > VERSIONS {
+        return Err("BM-06 unsupported generation frontier".into());
+    }
+    let limits = DiskProfileLimits::recovery(profile)?;
+    let base = disk
+        .state()
+        .map_err(debug)?
+        .current_base()
+        .ok_or("BM-06 pending base")?;
+    if base.revision().get() != 1 + versions * profile.batches_per_version()
+        || base.state_counts()
+            != [
+                profile.records(),
+                profile.records() * versions,
+                0,
+                0,
+                0,
+                0,
+                1,
+                1,
+            ]
+    {
+        return Err("BM-06 profile/frontier mismatch".into());
+    }
     let reader = AuthorizedDiskReader::new_with_cache_budget(
-        &disk,
-        &kernel,
+        disk,
+        kernel,
         GraphDiskReadLimits {
             current: IndexGetLimits::new(64, 16 * 1024).map_err(debug)?,
             historical: IndexPredecessorLimits::new(limits.historical_page_visits, 16 * 1024)
@@ -247,15 +299,15 @@ pub fn verify_disk_recovery(
     )
     .map_err(debug)?;
     let mut verified = 0;
-    for generation in 0..VERSIONS {
+    for generation in 0..versions {
         for record in 0..profile.records() {
             let ordinal = generation * profile.records() + record;
             let revision =
                 uste_types::CommitRevision::new(profile.event_revision(ordinal)?).map_err(debug)?;
             let actual = reader
                 .read(
-                    &mut fs,
-                    &principal,
+                    fs,
+                    principal,
                     &GraphReadRequest::RecordAt {
                         id: profile.record_ref(scope(), record)?,
                         revision,
@@ -271,6 +323,11 @@ pub fn verify_disk_recovery(
             };
             if actual.version.get() != generation + 1
                 || actual.modified_revision != revision
+                || actual.id != profile.record_ref(scope(), record)?
+                || actual.created_revision.get() != profile.event_revision(record)?
+                || actual.lifecycle != uste_graph::EntityLifecycle::Active
+                || actual.entity_type.as_str() != crate::recovery_materialization::PROFILE
+                || actual.schema_version != 1
                 || actual.properties
                     != Value::bytes(profile.payload(ordinal)?.to_vec()).map_err(debug)?
             {
@@ -279,15 +336,7 @@ pub fn verify_disk_recovery(
             verified += 1;
         }
     }
-    Ok(RecoveryDevelopmentVerification {
-        records: profile.records(),
-        verified_versions: verified,
-        verified_payload_bytes: verified * PAYLOAD_BYTES as u64,
-        base_revision: admission.graph_revision,
-        recovered_revision: terminal.graph_revision,
-        storage_metadata_memory_resident: disk.certificate_anchor_residency().0
-            || disk.blob_metadata_residency().0,
-    })
+    Ok(verified)
 }
 
 #[cfg(test)]
@@ -301,26 +350,31 @@ mod tests {
             assert_eq!(limits.groups, profile.frontier());
             assert_eq!(limits.history_group_bytes, 100 * 16 * 1024);
             assert_eq!(limits.historical_page_visits, 664);
-            assert_eq!(limits.merge_read.maximum_entries(), profile.events());
+            assert_eq!(
+                limits.merge_read.maximum_entries(),
+                profile.events().max(profile.frontier() + 1)
+            );
         }
         assert!(verify_disk_recovery(Bm06Profile::new(3).unwrap()).is_err());
         assert!(verify_disk_recovery(Bm06Profile::new(100_000).unwrap()).is_err());
     }
     #[test]
     fn bm06_disk_recovery_preserves_every_historical_payload_and_exact_frontier() {
-        let report = verify_disk_recovery(Bm06Profile::new(2).unwrap()).unwrap();
-        assert_eq!(
-            (
-                report.records,
-                report.verified_versions,
-                report.verified_payload_bytes
-            ),
-            (2, 200, 819200)
-        );
-        assert_eq!(
-            (report.base_revision, report.recovered_revision),
-            (100, 101)
-        );
-        assert!(!report.storage_metadata_memory_resident);
+        for records in [1, 2] {
+            let report = verify_disk_recovery(Bm06Profile::new(records).unwrap()).unwrap();
+            assert_eq!(
+                (
+                    report.records,
+                    report.verified_versions,
+                    report.verified_payload_bytes
+                ),
+                (records, records * 100, records * 409600)
+            );
+            assert_eq!(
+                (report.base_revision, report.recovered_revision),
+                (100, 101)
+            );
+            assert!(!report.storage_metadata_memory_resident);
+        }
     }
 }

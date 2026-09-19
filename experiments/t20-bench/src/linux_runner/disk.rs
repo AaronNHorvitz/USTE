@@ -25,6 +25,7 @@ type DiskRaw =
 mod index_work;
 mod io;
 mod query;
+pub mod recovery;
 mod sampling;
 mod storage_work;
 pub use query::query_correctness;
