@@ -228,8 +228,12 @@ Decision 0142 constructs an opt-in private packed coordinator prefix from revisi
 exactly one authenticated transaction at a time. Four explicit families retain retries,
 transaction-ID collision metadata, first owners and earliest-reference witnesses without complete
 maps. Exact absence-before updates reject collisions and existing owners are never replaced.
-Per-transaction inventory admission is explicitly capped at 512 references. This is not yet cold
-cache admission, live-coordinator installation or quota/domain pairing.
+Per-transaction inventory admission is explicitly capped at 512 references. This is not yet
+live-coordinator installation or quota/domain pairing. Decision 0143 adds read-only cold cache
+admission: full canonical family validation followed by bounded journal-to-retry/transaction and
+first-owner/witness correspondence, with exact cardinalities excluding extra entries. Per-lookup
+and aggregate lookup budgets remain separate from bounded certificate/group recovery. No prefix
+escapes on a late failure; an admitted older prefix remains explicitly historical.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

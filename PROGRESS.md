@@ -58,6 +58,30 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `a37c40c` plus this increment: [Decision 0143](docs/decisions/0143-packed-coordinator-cold-admission.md)
+  adds read-only canonical and journal-correspondence admission of the four packed coordinator
+  families. Exact retry/transaction cardinalities and per-revision comparisons exclude collisions
+  and extras. Owner/witness lookups plus the distinct-first-reference tally establish original
+  ownership without complete maps or repeated per-owner journal passes. Separate certificate,
+  family, journal and aggregate lookup limits fail closed; no partial prefix or index write escapes.
+  Five tests cover cold reconstruction, exact/minus-one budgets, seven authenticated false metadata
+  variants, malformed family shape, late certificate corruption, historical-base suffix advancement
+  and 798 read error/crash cases (84 OpenExisting, 87 Metadata, 95 ReadAt boundaries, three actions).
+  Every injected failure reopens and admits the same exact commitments. Focused scope
+  `run-p580015-i21567166.scope` passed the first four tests/13.31s and strict Clippy/6.33s.
+  Final scope `run-p580763-i21598407.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 535 tests/47 executables.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/0.29s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-txn --no-deps --locked --offline` passed/1.15s. Log:
+  `/tmp/uste-d143-workspace-verification.log`; preflight 33 GiB RAM/4.0 GiB swap; sampled peak
+  1,655,091,200 bytes/zero swap (not final peak). Formatting, diff/docs/task checks passed.
+  Native remains `42f9abb`; no qualification, M1/lockfile change or task completion. Unregistered
+  `packed/quota.rs` and Decision 0144 are excluded next-package work. Next implement packed
+  first-owner quota construction/admission, then live/domain pairing, accounting and qualification.
+
 - Implemented on pushed `b670c9c` plus this increment: [Decision 0142](docs/decisions/0142-packed-coordinator-prefix-construction.md)
   adds the opt-in four-family packed coordinator prefix: exact retry outcomes, cross-principal
   transaction-ID collision lookup, first blob owners and first-reference witnesses. Construction

@@ -1,6 +1,11 @@
 //! Inductively journal-validated private coordinator metadata. No root publication.
+mod admission;
 use super::*;
 use crate::{PackedIndexMaintenance, RecoveredFrontierTransaction};
+pub use admission::{
+    PackedCoordinatorAdmissionLimits, PackedCoordinatorAdmissionReport,
+    admit_packed_coordinator_prefix,
+};
 use uste_storage::{
     IndexDelta,
     journal::{CanonicalPackedTree, CertificateAnchorReadLimits},
