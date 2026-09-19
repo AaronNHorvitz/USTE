@@ -1010,8 +1010,24 @@ and unnecessary qualifications. Final verification under the same memory scope:
 -- --test-threads=1` and `CARGO_BUILD_JOBS=1 cargo clippy -p uste-txn -p uste-graph
 --all-targets --locked --offline -- -D warnings` exited 0. Docs/task checks passed (140 links,
 68 tasks). Last sampled cgroup peak was 638,480,384 bytes with zero swap (not a final peak).
-Next extend bounded disk reads to adjacency/provenance with shared aggregate admission and
-candidate filtering; writes and staged-upload reconciliation remain unfinished capabilities.
+Decision 0068 extends that reader to adjacency/provenance with one shared page/entry/byte/lookup
+budget, fixed by the trusted adapter. The renamed `GraphDiskReadLimits` can still disable expansion.
+The synthetic reference fixture covers self-loops, parallel edges, both directions, provenance,
+hidden references, historical permissions and cancellation. It succeeds at exactly 24 visits,
+six scanned entries, ten lookups and calculated encoded bytes; each one-less budget fails,
+including repeated populated-cache calls. Every observed cold adjacency read error refuses
+partial output and a subsequent retry matches the reference; denied expansion consumes no I/O.
+Tested baseline: `03cd200` plus the graph expansion files and Decision 0068. The next preflight
+increment was drafted in separate, unreferenced files and is explicitly excluded from this gate.
+`systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M
+bash -lc 'CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_NET_OFFLINE=true bash scripts/check.sh'`
+exited 0: workspace/all-feature formatting, lint, tests and rustdoc; docs/task graph; R0 and
+publication vectors; dependency/fixture checks; isolated T-20 driver (31 passed, two pre-existing
+exact-profile oracle tests ignored) and its strict lint. M1 SIGKILL/corruption tests remain green.
+Last sampled scope peak: 2,516,131,840 bytes, zero swap; this is not a final peak or benchmark
+qualification. Host still had 17 GiB available RAM and 1.5 GiB free swap. T-20 remains open.
+Next connect shared read-only commit admission before external disk preparation, then implement
+authorized disk commits and staged-upload reconciliation without duplicating retry/owner rules.
 
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and
@@ -1027,8 +1043,8 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-aware authorization beyond metadata and point/history
-reads (bounded adjacency/provenance, writes and upload quota/reconciliation),
+next extend disk-aware authorization beyond metadata, point/history and bounded graph
+reads (writes and upload quota/reconciliation),
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.

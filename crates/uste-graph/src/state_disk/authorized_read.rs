@@ -1,15 +1,20 @@
-//! Current/historical point reads from an admitted ready root.
+//! Bounded point/history and graph-expansion reads from an admitted ready root.
 
 use super::*;
 use crate::{GraphReadOutput, GraphReadRequest};
 use uste_policy::{Action, AuthorizationRequirements, Target};
 use uste_txn::{AuthorizedDiskReadState, AuthorizedReadState, DiskCommitCoordinator};
 
+mod expansion;
+pub use expansion::GraphDiskExpansionLimits;
+
 /// Trusted-adapter admission. Historical bytes include the 24-byte key.
+/// `None` deliberately disables graph expansion for a point-read-only capability.
 #[derive(Clone, Copy, Debug)]
-pub struct GraphDiskRecordReadLimits {
+pub struct GraphDiskReadLimits {
     pub current: IndexGetLimits,
     pub historical: IndexPredecessorLimits,
+    pub expansion: Option<GraphDiskExpansionLimits>,
 }
 
 impl<F, W, E, I> AuthorizedDiskReadState<F, W, E, I> for GraphDiskLiveState
@@ -22,7 +27,7 @@ where
     type ReadRequest = GraphReadRequest;
     type ReadOutput = GraphReadOutput;
     type ReadError = GraphDiskError;
-    type ReadLimits = GraphDiskRecordReadLimits;
+    type ReadLimits = GraphDiskReadLimits;
 
     fn read_requirements(
         request: &GraphReadRequest,
@@ -34,7 +39,7 @@ where
         coordinator: &DiskCommitCoordinator<Self, F, W, E, I>,
         filesystem: &mut F,
         request: &GraphReadRequest,
-        limits: &GraphDiskRecordReadLimits,
+        limits: &GraphDiskReadLimits,
         cache: &mut PageCache,
         authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
     ) -> Result<GraphReadOutput, GraphDiskError> {
@@ -99,7 +104,15 @@ where
                 }
             }
             GraphReadRequest::Adjacent { .. } | GraphReadRequest::SupportedBy { .. } => {
-                return Err(GraphDiskError::UnsupportedRequest);
+                return expansion::read(
+                    coordinator,
+                    filesystem,
+                    root,
+                    request,
+                    limits.expansion.ok_or(GraphDiskError::UnsupportedRequest)?,
+                    cache,
+                    authorize_candidate,
+                );
             }
         };
         Ok(GraphReadOutput::Record(crate::query::visible_record(

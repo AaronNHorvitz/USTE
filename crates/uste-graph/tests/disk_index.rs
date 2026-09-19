@@ -38,6 +38,9 @@ use uste_types::{
 #[path = "support/disk_recovery_faults.rs"]
 mod disk_recovery_faults;
 
+#[path = "support/disk_queries.rs"]
+mod disk_queries;
+
 fn scope() -> NamespaceRef {
     NamespaceRef::new(
         DatabaseId::from_bytes([0x81; 16]),
@@ -2770,7 +2773,8 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                                     &disk,
                                     &mut filesystem,
                                     &uste_graph::GraphReadRequest::Record { id: entity },
-                                    &uste_graph::GraphDiskRecordReadLimits {
+                                    &uste_graph::GraphDiskReadLimits {
+                                        expansion: None,
                                         current: uste_storage::IndexGetLimits::new(64, 4096)
                                             .unwrap(),
                                         historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
@@ -2877,7 +2881,8 @@ fn assert_authorized_disk_metadata(
     let foreign_kernel = uste_policy::PolicyKernel::new();
     let foreign = foreign_kernel.authenticate(&mut Identity, &0x90).unwrap();
     let facade = uste_txn::AuthorizedDiskMetadata::new(disk, &kernel).unwrap();
-    let read_limits = uste_graph::GraphDiskRecordReadLimits {
+    let read_limits = uste_graph::GraphDiskReadLimits {
+        expansion: None,
         current: uste_storage::IndexGetLimits::new(64, 4096).unwrap(),
         historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
     };
@@ -2984,7 +2989,7 @@ fn assert_authorized_disk_metadata(
     let tiny = uste_txn::AuthorizedDiskReader::new(
         disk,
         &kernel,
-        uste_graph::GraphDiskRecordReadLimits {
+        uste_graph::GraphDiskReadLimits {
             current: uste_storage::IndexGetLimits::new(64, 1).unwrap(),
             ..read_limits
         },

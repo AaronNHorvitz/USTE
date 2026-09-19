@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod authorized_read;
-pub use authorized_read::GraphDiskRecordReadLimits;
+pub use authorized_read::{GraphDiskExpansionLimits, GraphDiskReadLimits};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;

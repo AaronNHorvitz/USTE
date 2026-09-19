@@ -311,7 +311,8 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
     let reader = uste_txn::AuthorizedDiskReader::new(
         disk,
         &kernel,
-        uste_graph::GraphDiskRecordReadLimits {
+        uste_graph::GraphDiskReadLimits {
+            expansion: None,
             current: uste_storage::IndexGetLimits::new(64, 4096).unwrap(),
             historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
         },
