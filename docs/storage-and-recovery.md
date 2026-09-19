@@ -132,6 +132,13 @@ to rebuild. After compaction promotes a checkpoint to an authoritative baseline,
 corruption is not silently recoverable by pretending erased history still exists.
 Ciphertext identity is not the canonical logical state digest.
 
+Decision 0118 adds an opt-in origin-reconstruction building block when revision one is retained:
+reauthenticate/reduce only that bounded inventory-free transaction, stage unpublished graph and
+coordinator candidates, independently admit them, and stream the admitted suffix. Only terminal
+roots become discoverable; private metadata requires durable rebase even with an empty suffix.
+It does not support an erased authoritative prefix, lift suffix-overlay limits, automatically
+enable native cache-loss fallback or qualify larger-than-memory recovery.
+
 ## Indexing and bounded resources
 
 Decision 0025 implements the first `index-v1` slice: immutable sorted runs use exact 16 KiB

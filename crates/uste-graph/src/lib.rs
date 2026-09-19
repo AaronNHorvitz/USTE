@@ -49,5 +49,5 @@ pub use state_disk::{
     publish_graph_disk_live_base, publish_graph_state_root, publish_graph_state_root_delta,
     reconstruct_graph_recovery_seed, reconstruct_graph_state_candidate,
     reconstruct_graph_state_candidate_for_recovery, recover_graph_disk_suffix,
-    scrub_graph_state_root,
+    scrub_graph_state_root, stage_graph_genesis_root,
 };

@@ -456,7 +456,9 @@ where
             }
             recovery.finish_transaction_cursor(cursor)?;
         }
-        let mut rebase_required = false;
+        // An origin reconstruction may start from independently admitted private metadata.
+        // Even a zero-length suffix must durably publish that base before new writes proceed.
+        let mut rebase_required = base.has_unpublished_roots();
         for profile in [
             COORDINATOR_METADATA_PROFILE_V1,
             COORDINATOR_TRANSACTION_PROFILE_V1,

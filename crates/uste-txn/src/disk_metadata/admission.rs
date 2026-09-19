@@ -27,6 +27,10 @@ pub struct CoordinatorDiskBase {
 }
 
 impl CoordinatorDiskBase {
+    pub(crate) fn has_unpublished_roots(&self) -> bool {
+        self.metadata.generation() == 0 || self.transactions.root.generation() == 0
+    }
+
     pub(crate) fn owner_count(&self) -> u64 {
         self.metadata
             .runs()

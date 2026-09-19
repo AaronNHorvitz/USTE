@@ -61,6 +61,12 @@ fn bounded_bootstrap_admission_retry_owner_and_exclusive_handoff() {
         )
     };
     let (recovery, _) = open(&mut fs).unwrap();
+    assert_eq!(
+        recovery
+            .recover_inventory_free_genesis(&mut fs, CounterState::default(), 1_000_000)
+            .err(),
+        Some(TransactionError::IntegrityFailure)
+    );
     let mut coordinator = recovery
         .into_bounded_coordinator(
             &mut fs,
@@ -89,6 +95,25 @@ fn bounded_bootstrap_admission_retry_owner_and_exclusive_handoff() {
         .unwrap();
     drop(coordinator);
     fs.restart().unwrap();
+
+    let (recovery, _) = open(&mut fs).unwrap();
+    let preparations = Rc::new(Cell::new(0));
+    assert_eq!(
+        recovery
+            .recover_inventory_free_genesis(
+                &mut fs,
+                ProbeState {
+                    value: CounterState::default(),
+                    preparations: preparations.clone(),
+                    wrong_digest: false,
+                },
+                1_000_000,
+            )
+            .err(),
+        Some(TransactionError::InvalidRequest)
+    );
+    assert_eq!(preparations.get(), 0);
+    drop(recovery);
 
     for (outcomes, owners, bytes, wrong, expected_preparations) in [
         (0, 1, 1_000_000, false, 0),
@@ -215,6 +240,22 @@ fn bounded_bootstrap_reauthenticates_every_read_before_returning_a_coordinator()
     };
     let limits = CoordinatorRecoveryLimits::new(2, 0).unwrap();
     let (recovery, _) = open(&mut fs).unwrap();
+    let preparations = Rc::new(Cell::new(0));
+    assert_eq!(
+        recovery
+            .recover_inventory_free_genesis(
+                &mut fs,
+                ProbeState {
+                    value: CounterState::default(),
+                    preparations: preparations.clone(),
+                    wrong_digest: true,
+                },
+                1_000_000,
+            )
+            .err(),
+        Some(TransactionError::IntegrityFailure)
+    );
+    assert_eq!(preparations.get(), 1);
     fs.arm(FaultPlan::default()).unwrap();
     let coordinator = recovery
         .into_bounded_coordinator(
@@ -276,6 +317,12 @@ fn bounded_bootstrap_reauthenticates_every_read_before_returning_a_coordinator()
     assert_eq!(fs.read_at(&certificates, offset, &mut byte).unwrap(), 1);
     byte[0] ^= 1;
     assert_eq!(fs.write_at(&certificates, offset, &byte).unwrap(), 1);
+    assert_eq!(
+        recovery
+            .recover_inventory_free_genesis(&mut fs, CounterState::default(), 1_000_000)
+            .err(),
+        Some(TransactionError::IntegrityFailure)
+    );
     assert_eq!(
         recovery
             .into_bounded_coordinator(

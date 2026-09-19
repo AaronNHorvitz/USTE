@@ -60,6 +60,75 @@ fn open(fs: &mut Fs, name: &EntryName, scope: NamespaceRef) -> Recovery {
 }
 
 #[test]
+fn inventory_free_genesis_preserves_terminal_authority_and_reauthenticates_reads() {
+    let (mut fs, name, outcomes, _) = fixture();
+    let recovery = open(&mut fs, &name, scope());
+    assert!(
+        recovery
+            .recover_inventory_free_genesis(&mut fs, CounterState::default(), 1,)
+            .is_err()
+    );
+    assert!(
+        recovery
+            .recover_inventory_free_genesis(&mut fs, CounterState(1), RANGE_BYTES,)
+            .is_err()
+    );
+    fs.arm(FaultPlan::default()).unwrap();
+    let genesis = recovery
+        .recover_inventory_free_genesis(&mut fs, CounterState::default(), RANGE_BYTES)
+        .unwrap();
+    assert_eq!(genesis.state(), &CounterState(2));
+    assert_eq!(genesis.transaction().outcome(), outcomes[0]);
+    assert_eq!(genesis.transaction().revision(), CommitRevision::FIRST);
+    let reads = fs.operation_count(Operation::ReadAt);
+    assert!(reads > 0);
+    assert_eq!(fs.operation_count(Operation::WriteAt), 0);
+    for occurrence in 1..=reads {
+        fs.arm(
+            FaultPlan::new([FaultPoint {
+                operation: Operation::ReadAt,
+                occurrence,
+                action: FaultAction::Error(AdapterErrorKind::Io),
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            recovery
+                .recover_inventory_free_genesis(&mut fs, CounterState::default(), RANGE_BYTES,)
+                .is_err()
+        );
+        assert_eq!(fs.pending_faults(), 0);
+        assert_eq!(fs.operation_count(Operation::WriteAt), 0);
+    }
+    fs.arm(FaultPlan::default()).unwrap();
+    let mut cursor = recovery
+        .open_transaction_cursor(outcomes[2].revision, outcomes[2].revision, 1, RANGE_BYTES)
+        .unwrap();
+    assert_eq!(
+        recovery
+            .next_recovered_transaction(&mut fs, &mut cursor)
+            .unwrap()
+            .unwrap()
+            .outcome(),
+        outcomes[2]
+    );
+    recovery.finish_transaction_cursor(cursor).unwrap();
+    drop(recovery);
+    let recovery = open(&mut fs, &name, scope());
+    let coordinator = recovery
+        .into_bounded_coordinator(
+            &mut fs,
+            CounterState::default(),
+            RetentionDays::new(30).unwrap(),
+            CoordinatorRecoveryLimits::new(3, 1).unwrap(),
+            RANGE_BYTES,
+        )
+        .unwrap();
+    assert_eq!(coordinator.read_view().unwrap().state(), &CounterState(9));
+}
+
+#[test]
 fn disk_blob_recovery_captures_exact_transaction_inventory_and_streams_without_history_maps() {
     use uste_storage::journal::{
         BlobCatalogRecovery, BlobMetadataAdmissionLimits, BlobMetadataRebuildLimits,

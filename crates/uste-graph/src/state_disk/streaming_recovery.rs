@@ -4,6 +4,69 @@ use uste_txn::{
     RecoveryIndexMaintenance, RetentionDays,
 };
 
+/// Build an unpublished graph candidate from only the authenticated first transaction.
+/// The candidate still requires ordinary semantic admission. No intermediate root slots or
+/// journal bytes are changed; scratch outputs can be abandoned on any failure.
+pub fn stage_graph_genesis_root<F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    genesis: &uste_txn::RecoveredGenesis<GraphState>,
+    limits: IndexRunMergeLimits,
+) -> Result<GraphStateRootCandidate, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let snapshot = genesis.state().snapshot();
+    let transaction = genesis.transaction();
+    if snapshot.scope() != recovery.scope()
+        || snapshot.revision() != Some(CommitRevision::FIRST)
+        || transaction.revision() != CommitRevision::FIRST
+        || transaction.blob_inventory().is_some()
+    {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let expected = expected_runs(&snapshot, CommitRevision::FIRST)?;
+    let input = IndexRootInput {
+        scope: snapshot.scope(),
+        revision: CommitRevision::FIRST,
+        certificate_digest: *transaction.certificate_digest(),
+        reducer_profile: GraphState::REDUCER_PROFILE,
+        logical_state_digest: GraphState::logical_state_digest(&snapshot)
+            .map_err(|_| GraphDiskError::RootStateMismatch)?,
+        index_profile: GRAPH_STATE_PROFILE_V1,
+    };
+    let mut stage = recovery.stage_indexes_with_io(filesystem, transaction)?;
+    let mut runs = Vec::with_capacity(expected.len());
+    for expected_run in &expected {
+        let entries = family_entries(&snapshot, CommitRevision::FIRST, expected_run.family)?;
+        let deltas = entries.map(|entry| {
+            let entry = entry?;
+            IndexDelta::new(entry.key, None, Some(entry.value))
+        });
+        let merged = stage.merge_index_run_visit(
+            filesystem,
+            CommitRevision::FIRST,
+            GRAPH_STATE_PROFILE_V1,
+            expected_run.family,
+            None,
+            limits,
+            deltas,
+            &mut |_, _| Ok(()),
+        )?;
+        let run = merged.run.ok_or(GraphDiskError::IndexCorrupt)?;
+        if !expected_run.matches(&run) {
+            return Err(GraphDiskError::IndexCorrupt);
+        }
+        runs.push(run);
+    }
+    Ok(GraphStateRootCandidate {
+        root: stage.finish(input, &runs)?.read_root().clone(),
+    })
+}
+
 /// Total suffix-count admission plus explicit per-revision proof/delta/merge bounds.
 /// Maximum total domain work is the admitted revision count times the per-revision bounds;
 /// no history-sized state or set of intermediate root handles is retained.
@@ -82,6 +145,38 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    fn initial_metadata_input(
+        &self,
+        state: &GraphDiskLiveState,
+        anchor: (CommitRevision, [u8; 32]),
+    ) -> Result<IndexRootInput, ApplyError> {
+        let base = state.current_base().ok_or(ApplyError::Conflict)?;
+        let root = &base.root.root;
+        if anchor != (root.revision(), *root.certificate_digest()) {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(IndexRootInput {
+            scope: root.scope(),
+            revision: anchor.0,
+            certificate_digest: anchor.1,
+            reducer_profile: *root.reducer_profile(),
+            logical_state_digest: *root.logical_state_digest(),
+            index_profile: uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+        })
+    }
+
+    fn validate_initial_metadata_base(
+        &self,
+        state: &GraphDiskLiveState,
+        root: &RecoveredIndexRoot,
+    ) -> Result<(), ApplyError> {
+        let base = state.current_base().ok_or(ApplyError::Conflict)?;
+        if base.anchor() != root.anchor() {
+            return Err(ApplyError::Conflict);
+        }
+        Ok(())
+    }
+
     fn admit(&mut self, revisions: u64) -> Result<(), StorageError> {
         if revisions > self.limits.maximum_revisions {
             return Err(StorageError::ResourceLimit);
@@ -183,10 +278,7 @@ where
         if (root.revision(), *root.certificate_digest()) != frontier {
             return Err(StorageError::IntegrityFailure);
         }
-        if self.admitted == 0 {
-            if root.generation() == 0 {
-                return Err(StorageError::IntegrityFailure);
-            }
+        if self.admitted == 0 && root.generation() != 0 {
             return recovery
                 .resynchronize_recovered_index_root(
                     filesystem,

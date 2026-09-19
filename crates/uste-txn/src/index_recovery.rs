@@ -20,6 +20,25 @@ use super::{
 mod maintenance;
 pub use maintenance::RecoveryIndexMaintenance;
 
+/// Private reconstruction of only the first certified, inventory-free transaction.
+/// This is trusted recovery input, not current consumer state or a durable receipt. The caller
+/// supplied the genesis reducer; its memory behavior remains that reducer's responsibility.
+pub struct RecoveredGenesis<S> {
+    state: S,
+    transaction: RecoveredFrontierTransaction,
+}
+
+impl<S> RecoveredGenesis<S> {
+    /// Borrow the reconstructed first-revision reducer for bounded derived-index staging.
+    pub fn state(&self) -> &S {
+        &self.state
+    }
+
+    pub fn transaction(&self) -> &RecoveredFrontierTransaction {
+        &self.transaction
+    }
+}
+
 /// Opaque owned copy of one authenticated journal transaction, including the frontier.
 ///
 /// Only one bounded canonical request and inventory are retained. Construction is possible only
@@ -369,6 +388,43 @@ where
             recovered: true,
             uncertain: false,
         })
+    }
+
+    /// Reconstruct exactly revision one while retaining this owner's authenticated terminal
+    /// journal frontier. No transaction is appended and no historical root is published.
+    ///
+    /// This inventory-free bootstrap primitive is for origin index reconstruction, not a
+    /// fallback to full-history replay. The trusted caller supplies the exact genesis reducer.
+    /// One request is admitted by an encrypted-range byte limit before reducer preparation;
+    /// inventories are rejected rather than silently dropping first-owner metadata. The exact
+    /// reducer result digest and terminal cursor consumption must match before a value escapes.
+    pub fn recover_inventory_free_genesis<S: TransactionState>(
+        &self,
+        filesystem: &mut F,
+        mut state: S,
+        maximum_encoded_bytes: u64,
+    ) -> Result<RecoveredGenesis<S>, TransactionError> {
+        let mut cursor = self.open_transaction_cursor(
+            CommitRevision::FIRST,
+            CommitRevision::FIRST,
+            1,
+            maximum_encoded_bytes,
+        )?;
+        let transaction = self
+            .next_recovered_transaction(filesystem, &mut cursor)?
+            .ok_or(TransactionError::IntegrityFailure)?;
+        self.finish_transaction_cursor(cursor)?;
+        if transaction.blob_inventory.is_some() {
+            return Err(TransactionError::InvalidRequest);
+        }
+        let prepared = state
+            .prepare(&transaction.canonical_request, None, CommitRevision::FIRST)
+            .map_err(super::map_apply_error)?;
+        if S::result_digest(&prepared) != transaction.outcome.result_digest {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        state.publish(prepared);
+        Ok(RecoveredGenesis { state, transaction })
     }
 
     /// Stream canonical transactions from an authenticated inclusive journal range, retaining

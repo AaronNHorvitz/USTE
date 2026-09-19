@@ -58,6 +58,47 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `368521c` plus this increment: [Decision 0118](docs/decisions/0118-private-genesis-index-reconstruction.md)
+  supplies bounded first-transaction reconstruction and unpublished graph/retry/transaction-ID
+  bootstrap candidates for origin recovery. Normal semantic/journal admission remains mandatory;
+  exact-current-frontier publication and ordinary rejection of private metadata publication are
+  preserved. Initial streaming-domain hooks admit private bases without weakening terminal checks.
+  No native fallback is enabled yet and large origin metadata overlays remain explicitly bounded.
+  Initial tests exposed ordinary metadata publication correctly refusing generation-zero input;
+  the repair adds separate private initial hooks, not removal of that guard. A missing explicit
+  error conversion and warnings-denied redundant qualifications were corrected during compilation.
+  Focused scope `run-p420991-i21375957.scope` exited 0 under 3G/4G/512M, one job/thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --locked --offline
+  --test disk_index origin_graph -- --test-threads=1 --nocapture` passed both origin tests
+  (1.12s), including 171 staging error/crash attempts across 57 observed I/O occurrences.
+  `CARGO_BUILD_JOBS=1 cargo clippy -p uste-txn -p uste-graph --all-targets --locked --offline
+  -- -D warnings` passed (3.66s). The preliminary full gate `run-p421565-i21359689.scope`
+  exited 0 (403 workspace tests, 58 active native units, three BM-01 process, two BM-06 CLI and
+  seven BM-06 process tests, both strict lints and crate docs). Review then found that zero-suffix
+  metadata rebase could skip private roots. Recovery now marks private metadata as rebase-required;
+  tests require discoverable terminal graph/metadata/transaction roots and normal cold reopen.
+  Focused scope `run-p426209-i21376278.scope` passes both origin tests and 171 injections (1.17s).
+  Final corrected scope `run-p426829-i21376317.scope` exited 0 using MemoryHigh=3G,
+  MemoryMax=4G, MemorySwapMax=512M, one job/thread. Exact commands:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 403 tests across 46 executables, no failures or
+  ignores (graph disk 18/13.72s, replay 27/10.00s, storage 123/18.54s, txn 32/0.33s, M1 process
+  2/2.76s). `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 58 active units
+  (45.32s), three BM-01 process tests (11.81s), two BM-06 CLI tests (0.50s), seven BM-06 process
+  tests (55.58s); two prior exact-oracle ignores remain unchanged. Both
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (4.28s) and `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (1.39s) pass.
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn -p uste-graph --no-deps
+  --locked --offline` passes (2.05s). Sampled scope peak 1,370,214,400 bytes, zero swap, not a final
+  whole-run maximum. Preflight: 35 GiB available RAM, 3.9 GiB free swap. Formatting/whitespace,
+  docs (192 links), task graph (68 tasks) pass; M1 sources and both lockfiles unchanged.
+  Next: native bounded cache-loss integration and
+  incremental origin metadata staging/scaling; T-20 and T-19 remain open.
+
 - Implemented on pushed `19d2c36` plus this increment: [Decision 0117](docs/decisions/0117-native-bm06-prefix-resume.md)
   adds native bounded materialization resume and a supervised durable-prefix crash probe. New
   bootstrap retry/transaction identities bind the record count; legacy unbound or expired retry

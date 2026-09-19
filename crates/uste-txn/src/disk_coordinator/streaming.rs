@@ -12,6 +12,31 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Validate the initial private recovery anchor. The default requires an ordinary ready
+    /// state; a domain may admit independently validated unpublished scratch roots here only.
+    /// Terminal validation still uses the state's normal publication contract.
+    fn initial_metadata_input(
+        &self,
+        state: &S,
+        anchor: (CommitRevision, [u8; 32]),
+    ) -> Result<IndexRootInput, ApplyError>
+    where
+        S: DiskCoordinatorState,
+    {
+        state.metadata_publication_input(anchor)
+    }
+
+    fn validate_initial_metadata_base(
+        &self,
+        state: &S,
+        root: &RecoveredIndexRoot,
+    ) -> Result<(), ApplyError>
+    where
+        S: DiskCoordinatorState,
+    {
+        state.validate_metadata_base(root)
+    }
+
     /// Admit the total domain suffix before filesystem work. Per-step bounds remain mandatory.
     fn admit(&mut self, revisions: u64) -> Result<(), StorageError>;
 
@@ -69,8 +94,8 @@ where
     ) -> Result<Self, TransactionError> {
         let (scope, revision, certificate) =
             state.journal_base_anchor().map_err(map_apply_error)?;
-        let input = state
-            .metadata_publication_input((revision, certificate))
+        let input = domain
+            .initial_metadata_input(&state, (revision, certificate))
             .map_err(map_apply_error)?;
         let frontier = recovery
             .journal
@@ -92,8 +117,8 @@ where
             .map_err(map_open_error)?;
         let mut domain_base_seen = revision == base.metadata.revision();
         if domain_base_seen {
-            state
-                .validate_metadata_base(&base.metadata)
+            domain
+                .validate_initial_metadata_base(&state, &base.metadata)
                 .map_err(map_apply_error)?;
         }
         Self::recover_with_domain_replay(

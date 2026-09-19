@@ -12,6 +12,7 @@ pub use authorized_read::{GraphDiskExpansionLimits, GraphDiskReadLimits};
 pub use authorized_write::GraphDiskWritePreparationLimits;
 pub use streaming_recovery::{
     GraphDiskSuffixRecoveryLimits, GraphDiskSuffixRecoveryReport, recover_graph_disk_suffix,
+    stage_graph_genesis_root,
 };
 
 use sha2::{Digest, Sha256};
