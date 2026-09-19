@@ -21,31 +21,31 @@ use super::{LinuxRunnerError, Opened, cache_delta, hex, open_completed, process_
 
 const QUALIFYING_SAMPLES: usize = 5;
 const QUALIFYING_SAMPLE_SECONDS: u64 = 60;
-const MAX_TIMED_EXECUTIONS_PER_SAMPLE: usize = 2_000_000;
-const QUERY_DEADLINE: Duration = Duration::from_secs(30);
+pub(super) const MAX_TIMED_EXECUTIONS_PER_SAMPLE: usize = 2_000_000;
+pub(super) const QUERY_DEADLINE: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum CacheState {
+pub(super) enum CacheState {
     Empty,
     Retained,
 }
 
 impl CacheState {
-    const fn name(self) -> &'static str {
+    pub(super) const fn name(self) -> &'static str {
         match self {
             Self::Empty => "uste-empty",
             Self::Retained => "uste-retained-after-identical-query",
         }
     }
 
-    const fn code(self) -> u8 {
+    pub(super) const fn code(self) -> u8 {
         match self {
             Self::Empty => 1,
             Self::Retained => 2,
         }
     }
 
-    const fn index(self) -> usize {
+    pub(super) const fn index(self) -> usize {
         match self {
             Self::Empty => 0,
             Self::Retained => 1,
@@ -54,14 +54,14 @@ impl CacheState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum OutcomeKind {
+pub(super) enum OutcomeKind {
     Success,
     VisitLimit,
     ResultLimit,
 }
 
 impl OutcomeKind {
-    const fn name(self) -> &'static str {
+    pub(super) const fn name(self) -> &'static str {
         match self {
             Self::Success => "success",
             Self::VisitLimit => "visit-limit",
@@ -69,7 +69,7 @@ impl OutcomeKind {
         }
     }
 
-    const fn code(self) -> u8 {
+    pub(super) const fn code(self) -> u8 {
         match self {
             Self::Success => 1,
             Self::VisitLimit => 2,
@@ -79,27 +79,27 @@ impl OutcomeKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct GroupKey {
-    cache: CacheState,
-    outcome: OutcomeKind,
-    class: LatencyClass,
-    depth: u8,
+pub(super) struct GroupKey {
+    pub(super) cache: CacheState,
+    pub(super) outcome: OutcomeKind,
+    pub(super) class: LatencyClass,
+    pub(super) depth: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum LatencyClass {
+pub(super) enum LatencyClass {
     All,
     Query(QueryClass),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SamplingPlan {
-    samples: usize,
-    minimum_duration: Duration,
+pub(super) struct SamplingPlan {
+    pub(super) samples: usize,
+    pub(super) minimum_duration: Duration,
 }
 
 impl SamplingPlan {
-    fn for_profile(profile: Bm01Profile) -> Self {
+    pub(super) fn for_profile(profile: Bm01Profile) -> Self {
         if profile == Bm01Profile::qualifying() {
             Self {
                 samples: QUALIFYING_SAMPLES,
@@ -115,11 +115,11 @@ impl SamplingPlan {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ValidatedOutcome {
-    kind: OutcomeKind,
-    visits: u64,
-    logical_result_bytes: u64,
-    digest: [u8; 32],
+pub(super) struct ValidatedOutcome {
+    pub(super) kind: OutcomeKind,
+    pub(super) visits: u64,
+    pub(super) logical_result_bytes: u64,
+    pub(super) digest: [u8; 32],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -129,15 +129,15 @@ struct ValidatedExecution {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct LatencySummary {
-    cache: CacheState,
-    outcome: OutcomeKind,
-    class: LatencyClass,
-    depth: u8,
-    count: usize,
-    p50_nanoseconds: u128,
-    p95_nanoseconds: u128,
-    p99_nanoseconds: u128,
+pub(super) struct LatencySummary {
+    pub(super) cache: CacheState,
+    pub(super) outcome: OutcomeKind,
+    pub(super) class: LatencyClass,
+    pub(super) depth: u8,
+    pub(super) count: usize,
+    pub(super) p50_nanoseconds: u128,
+    pub(super) p95_nanoseconds: u128,
+    pub(super) p99_nanoseconds: u128,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -363,7 +363,7 @@ impl CacheWorkReport {
     }
 }
 
-trait QueryObserver {
+pub(super) trait QueryObserver {
     fn query_started(&mut self) -> Result<(), LinuxRunnerError>;
     fn query_finished(&mut self) -> Result<(), LinuxRunnerError>;
 }
@@ -380,12 +380,12 @@ impl QueryObserver for NoopObserver {
     }
 }
 
-struct ProtocolObserver {
+pub(super) struct ProtocolObserver {
     output: std::io::Stdout,
 }
 
 impl ProtocolObserver {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             output: std::io::stdout(),
         }
@@ -397,11 +397,11 @@ impl ProtocolObserver {
             .map_err(|_| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))
     }
 
-    fn report(&mut self, report: &str) -> Result<(), LinuxRunnerError> {
+    pub(super) fn report(&mut self, report: &str) -> Result<(), LinuxRunnerError> {
         self.line(&format!("bm01-report-v1\t{report}"))
     }
 
-    fn error(&mut self, code: &str) -> Result<(), LinuxRunnerError> {
+    pub(super) fn error(&mut self, code: &str) -> Result<(), LinuxRunnerError> {
         self.line(&format!("bm01-error-v1\t{code}"))
     }
 }
@@ -646,7 +646,18 @@ fn execute_expected(
     );
     let query_elapsed = started.elapsed();
     observer.query_finished()?;
-    let outcome = match (expected.outcome, actual) {
+    let outcome = validate_outcome(expected, actual)?;
+    Ok(ValidatedExecution {
+        outcome,
+        query_elapsed,
+    })
+}
+
+pub(super) fn validate_outcome(
+    expected: &OracleExpectation,
+    actual: Result<crate::OracleOutput, EngineQueryError>,
+) -> Result<ValidatedOutcome, LinuxRunnerError> {
+    Ok(match (expected.outcome, actual) {
         (
             OracleExpectedOutcome::Output {
                 visits,
@@ -698,10 +709,6 @@ fn execute_expected(
             }
         }
         _ => return Err(LinuxRunnerError::new("USTE_BM01_QUERY_MISMATCH")),
-    };
-    Ok(ValidatedExecution {
-        outcome,
-        query_elapsed,
     })
 }
 
@@ -750,7 +757,7 @@ fn add_cache_work(
     })
 }
 
-fn record_latency(
+pub(super) fn record_latency(
     groups: &mut BTreeMap<GroupKey, Vec<u128>>,
     key: GroupKey,
     latency: u128,
@@ -763,7 +770,7 @@ fn record_latency(
     Ok(())
 }
 
-fn summarize(groups: BTreeMap<GroupKey, Vec<u128>>) -> Vec<LatencySummary> {
+pub(super) fn summarize(groups: BTreeMap<GroupKey, Vec<u128>>) -> Vec<LatencySummary> {
     groups
         .into_iter()
         .map(|(key, mut values)| {
@@ -795,7 +802,7 @@ fn percentile(sorted: &[u128], percentile: usize) -> u128 {
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
-fn read_oracle_bundle(path: &Path) -> Result<OracleBundle, LinuxRunnerError> {
+pub(super) fn read_oracle_bundle(path: &Path) -> Result<OracleBundle, LinuxRunnerError> {
     let mut file = File::open(path).map_err(|_| LinuxRunnerError::new("USTE_BM01_ORACLE_OPEN"))?;
     let mut input = String::new();
     Read::by_ref(&mut file)
@@ -811,7 +818,10 @@ fn read_oracle_bundle(path: &Path) -> Result<OracleBundle, LinuxRunnerError> {
     OracleBundle::parse(&input).map_err(|_| LinuxRunnerError::new("USTE_BM01_ORACLE_INVALID"))
 }
 
-fn validate_bundle(bundle: &OracleBundle, profile: Bm01Profile) -> Result<(), LinuxRunnerError> {
+pub(super) fn validate_bundle(
+    bundle: &OracleBundle,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
     if bundle.profile() != profile {
         return Err(LinuxRunnerError::new("USTE_BM01_ORACLE_PROFILE"));
     }
@@ -821,7 +831,7 @@ fn validate_bundle(bundle: &OracleBundle, profile: Bm01Profile) -> Result<(), Li
     Ok(())
 }
 
-const fn latency_class_name(class: LatencyClass) -> &'static str {
+pub(super) const fn latency_class_name(class: LatencyClass) -> &'static str {
     match class {
         LatencyClass::All => "all",
         LatencyClass::Query(QueryClass::Uniform) => "uniform",

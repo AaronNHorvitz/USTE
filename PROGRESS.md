@@ -51,6 +51,29 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0079 adds `linux-disk-sample` and its persistent worker under the existing 30-second
+  preemptive supervisor/watchdog. Shared plans/validators preserve 96 warm-ups, 384 paired queries,
+  separate outcome/depth/topology populations, exact digest and the fixed five-by-60-second
+  qualifying plan. Native commands remain development-capped. Reports omit unavailable complete
+  authenticated-I/O counters, disclose resident storage metadata and withhold budget evaluation.
+  Parent validation now also checks schema, deadline seconds, sample windows and rounds/counts.
+  The real CLI sample passes with 768 executions, 32 groups, the independent oracle digest,
+  64 MiB cache and zero retained-cache misses on 20/200. Counter rollback/overflow and report
+  substitution tests pass. Review found that missing bootstrap identities could make policy
+  installation a fresh append; the new pre-commit tuple/cardinality guard plus canonical retry
+  validation refuses five unrelated prefixes without advancing their durable revision.
+  Verified on pushed `0cf71bf` plus this increment under MemoryHigh=3G/MemoryMax=4G/
+  MemorySwapMax=512M, one job/thread: `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 39 unit tests
+  (two pre-existing exact-profile oracle tests ignored) in 28.15s and all three real CLI tests
+  in 13.43s. `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml
+  --all-targets --locked --offline -- -D warnings` passed. A missing mode argument in the old
+  deadline test was corrected during compilation; that test now checks both engine modes.
+  Docs/task checks pass (152 links, 68 tasks). Latest host headroom: 34 GiB RAM, 3.9 GiB free swap.
+  No qualifying campaign ran. Next derive/verify qualifying-profile admission and complete I/O
+  accounting, address remaining storage metadata residency, and execute BM-01/BM-06 only when
+  their prerequisites are met. T-20, T-19 and the full roadmap remain open; M1 is unchanged.
+
 - Decision 0078 adds the native disk crash-probe CLI and real process-loss integration matrix.
   Prefix 1 pauses after policy certification before roots; prefixes 2/3 pause after each complete
   graph/metadata publication. The test verifies the marker, SIGKILLs/reaps only its owned child,
@@ -1236,9 +1259,10 @@ metadata base with exact first-owner proofs and explicit read amplification. Tha
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
 Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
-Decisions 0074–0077 connect the independent development oracle and native construction/recovery/query
-commands to the implemented disk path. Next connect native disk supervised sampling,
-qualifying-profile admission, and remove remaining resident storage metadata. Decision 0071 supplies bounded authorized upload
+Decisions 0074–0079 connect independent development oracles, native construction/recovery/query,
+real process-loss tests and supervised sampling to the disk path. Next derive qualifying-profile
+admission, complete I/O accounting, and remove remaining resident storage metadata.
+Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference
 publisher remains a bounded legacy bridge, not larger-than-memory construction.

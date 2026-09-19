@@ -20,7 +20,9 @@ type Disk = DiskCommitCoordinator<
 >;
 
 mod query;
+mod sampling;
 pub use query::query_correctness;
+pub use sampling::sample_worker;
 
 struct DiskSession {
     filesystem: LinuxFileSystem,
@@ -276,6 +278,25 @@ fn bootstrap(
 }
 
 fn install_policy(raw: &mut LinuxRaw, fs: &mut LinuxFileSystem) -> Result<(), LinuxRunnerError> {
+    // Recovery must be an exact retry, never a fresh policy append to an unrelated prefix.
+    if let Some((revision, _)) = raw
+        .checkpoint_anchor()
+        .map_err(|_| error("USTE_BM01_DISK_STATE"))?
+    {
+        let mut outcomes = raw.checkpoint_outcomes();
+        let Some((principal, key, outcome)) = outcomes.next() else {
+            return Err(error("USTE_BM01_BOOTSTRAP_PROFILE"));
+        };
+        if revision.get() != 1
+            || outcome.revision != revision
+            || principal != PRINCIPAL
+            || key != identity(1, IdempotencyKey::from_bytes)
+            || outcome.transaction_id != identity(1, TransactionId::from_bytes)
+            || outcomes.next().is_some()
+        {
+            return Err(error("USTE_BM01_BOOTSTRAP_PROFILE"));
+        }
+    }
     let policy = benchmark_policy(scope()).map_err(|_| error("USTE_BM01_POLICY_PROFILE"))?;
     let install = encode_transaction(&GraphTransaction::with_policy_mutation(
         scope(),

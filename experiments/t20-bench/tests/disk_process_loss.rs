@@ -65,7 +65,7 @@ impl Fixture {
     }
     fn run(&self, phase: &str) -> serde_json::Value {
         let mut command = self.command(phase);
-        if phase == "linux-disk-query" {
+        if phase == "linux-disk-query" || phase == "linux-disk-sample" {
             command.arg("--oracle-file").arg(&self.oracle);
         }
         let output = complete(command);
@@ -216,4 +216,93 @@ fn disk_cli_crash_probe_refuses_nonprefixes_before_filesystem_access() {
                 .contains("USTE_BM01_CRASH_PROBE_REVISION")
         );
     }
+}
+
+#[test]
+fn disk_cli_supervised_sampling_preserves_oracle_cache_pairs_and_deadline_claim() {
+    let fixture = Fixture::new();
+    fixture.run("linux-disk-create");
+    let mut generator = Command::new(EXECUTABLE);
+    generator.args(["oracle-bundle", "--entities", "20"]);
+    let output = complete(generator);
+    assert!(output.status.success());
+    let bundle =
+        uste_t20_bench::OracleBundle::parse(std::str::from_utf8(&output.stdout).unwrap()).unwrap();
+    fs::write(&fixture.oracle, output.stdout).unwrap();
+    let report = fixture.run("linux-disk-sample");
+    assert_eq!(report["schema"], "bm01-linux-disk-sampling-v1");
+    assert_eq!(
+        report["qualification"],
+        "nonqualifying-development-sampling"
+    );
+    assert_eq!(report["query_deadline_enforced"], true);
+    assert_eq!(report["query_deadline_postchecked"], true);
+    assert_eq!(report["query_deadline_seconds"], 30);
+    assert_eq!(report["budget_evaluation"], "not-performed");
+    assert_eq!(report["authenticated_io_accounting"], "not-measured");
+    assert_eq!(report["full_memory_graph_state"], false);
+    assert_eq!(report["full_memory_coordinator_metadata"], false);
+    assert_eq!(report["storage_metadata_memory_resident"], true);
+    assert_eq!(report["warmup"]["queries"], 96);
+    assert_eq!(report["warmup"]["successes"], 96);
+    let samples = report["samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 1);
+    let sample = &samples[0];
+    assert_eq!(sample["timed_executions"], 768);
+    assert_eq!(sample["rounds"], 1);
+    assert_eq!(sample["minimum_duration_milliseconds"], 0);
+    let cache = sample["cache_work"].as_array().unwrap();
+    assert_eq!(cache.len(), 2);
+    for work in cache {
+        assert_eq!(work["index_cache_budget_bytes"], 64 * 1024 * 1024);
+        assert!(work.get("index_pages_read").is_none());
+        assert!(work.get("authorized_reads").is_none());
+        assert!(work["index_cache_hits"].as_u64().unwrap() > 0);
+    }
+    assert!(cache[0]["index_cache_misses"].as_u64().unwrap() > 0);
+    assert_eq!(cache[1]["index_cache_misses"], 0);
+    assert_eq!(cache[0]["successful_visits"], cache[1]["successful_visits"]);
+    let latencies = sample["latency_groups"].as_array().unwrap();
+    assert_eq!(latencies.len(), 32);
+    let all_count: u64 = latencies
+        .iter()
+        .filter(|group| group["class"] == "all")
+        .map(|group| group["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(all_count, 768);
+    let mut digest = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
+    digest.update(&1_u64.to_be_bytes());
+    for expected in bundle.measured().expectations() {
+        let uste_t20_bench::OracleExpectedOutcome::Output { output_digest, .. } = expected.outcome
+        else {
+            panic!("20/200 corpus must succeed");
+        };
+        for cache in [1, 2] {
+            digest.update(&[
+                cache,
+                1,
+                expected.query.class.code(),
+                expected.query.direction.code(),
+                expected.query.depth,
+            ]);
+            digest.update(&expected.query.ordinal.to_be_bytes());
+            digest.update(&output_digest);
+        }
+    }
+    assert_eq!(
+        sample["output_digest"],
+        digest.finalize().to_hex().to_string()
+    );
+    let mut refused = fixture.command("linux-disk-sample");
+    refused
+        .arg("--oracle-file")
+        .arg(&fixture.oracle)
+        .args(["--entities", "100000"]);
+    let refused = complete(refused);
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8(refused.stderr)
+            .unwrap()
+            .contains("USTE_BM01_DISK_DEVELOPMENT_LIMIT")
+    );
 }

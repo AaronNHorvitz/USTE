@@ -27,6 +27,12 @@ enum WorkerMessage {
     End,
 }
 
+#[derive(Clone, Copy)]
+enum SampleMode {
+    Legacy,
+    Disk,
+}
+
 pub fn supervise_sample(
     executable: &Path,
     root: &Path,
@@ -34,8 +40,49 @@ pub fn supervise_sample(
     bundle_file: &Path,
     profile: Bm01Profile,
 ) -> Result<String, LinuxRunnerError> {
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::Legacy,
+    )
+}
+
+pub fn supervise_disk_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    if profile.entities() > crate::engine::MAX_DEVELOPMENT_ENTITIES {
+        return Err(LinuxRunnerError::new("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
+    }
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::Disk,
+    )
+}
+
+fn supervise_mode(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+    mode: SampleMode,
+) -> Result<String, LinuxRunnerError> {
     let child = Command::new(executable)
-        .arg("linux-sample-worker")
+        .arg(match mode {
+            SampleMode::Legacy => "linux-sample-worker",
+            SampleMode::Disk => "linux-disk-sample-worker",
+        })
         .arg("--root")
         .arg(root)
         .arg("--password-file")
@@ -83,15 +130,16 @@ pub fn supervise_sample(
         worker.terminate()?;
         return Err(LinuxRunnerError::new("USTE_BM01_SAMPLE_SPAWN"));
     }
-    supervise_protocol(&mut worker, &receiver, profile)
+    supervise_protocol(&mut worker, &receiver, profile, mode)
 }
 
 fn supervise_protocol(
     worker: &mut WorkerGuard,
     receiver: &Receiver<WorkerMessage>,
     profile: Bm01Profile,
+    mode: SampleMode,
 ) -> Result<String, LinuxRunnerError> {
-    supervise_protocol_with_deadline(worker, receiver, profile, QUERY_DEADLINE)
+    supervise_protocol_with_deadline(worker, receiver, profile, QUERY_DEADLINE, mode)
 }
 
 fn supervise_protocol_with_deadline(
@@ -99,6 +147,7 @@ fn supervise_protocol_with_deadline(
     receiver: &Receiver<WorkerMessage>,
     profile: Bm01Profile,
     query_deadline: Duration,
+    mode: SampleMode,
 ) -> Result<String, LinuxRunnerError> {
     let mut completed_queries = 0_u64;
     loop {
@@ -119,7 +168,7 @@ fn supervise_protocol_with_deadline(
                 }
             },
             WorkerMessage::Report(report) => {
-                let report = match finalize_report(&report, profile, completed_queries) {
+                let report = match finalize_report(&report, profile, completed_queries, mode) {
                     Ok(report) => report,
                     Err(_) => {
                         return fail_after_termination(worker, "USTE_BM01_SAMPLE_PROTOCOL");
@@ -243,15 +292,36 @@ fn finalize_report(
     report: &str,
     profile: Bm01Profile,
     completed_queries: u64,
+    mode: SampleMode,
 ) -> Result<String, LinuxRunnerError> {
     let value: serde_json::Value = serde_json::from_str(report)
         .map_err(|_| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
     let object = value
         .as_object()
         .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
-    expect_string(object, "schema", "bm01-linux-sampling-v1")?;
+    expect_string(
+        object,
+        "schema",
+        match mode {
+            SampleMode::Legacy => "bm01-linux-sampling-v1",
+            SampleMode::Disk => "bm01-linux-disk-sampling-v1",
+        },
+    )?;
+    if matches!(mode, SampleMode::Disk) {
+        expect_bool(object, "full_memory_graph_state", false)?;
+        expect_bool(object, "full_memory_coordinator_metadata", false)?;
+        expect_bool(object, "storage_metadata_memory_resident", true)?;
+        expect_string(object, "authenticated_io_accounting", "not-measured")?;
+        expect_string(
+            object,
+            "qualification",
+            "nonqualifying-development-sampling",
+        )?;
+        expect_string(object, "budget_evaluation", "not-performed")?;
+    }
     expect_bool(object, "query_deadline_enforced", false)?;
     expect_bool(object, "query_deadline_postchecked", true)?;
+    expect_u64(object, "query_deadline_seconds", QUERY_DEADLINE.as_secs())?;
     expect_u64(object, "entities", profile.entities())?;
     expect_u64(object, "relationships", profile.relationships())?;
     let warmup = object
@@ -280,7 +350,18 @@ fn finalize_report(
             .as_object()
             .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
         let executions = value_u64(sample, "timed_executions")?;
-        if executions == 0 || !executions.is_multiple_of(768) {
+        let rounds = value_u64(sample, "rounds")?;
+        let minimum = if profile == Bm01Profile::qualifying() {
+            60_000
+        } else {
+            0
+        };
+        expect_u64(sample, "minimum_duration_milliseconds", minimum)?;
+        if executions == 0
+            || executions > 2_000_000
+            || rounds.checked_mul(768) != Some(executions)
+            || value_u64(sample, "elapsed_milliseconds")? < minimum
+        {
             return Err(LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"));
         }
         claimed_queries = claimed_queries
@@ -452,23 +533,26 @@ mod tests {
 
     #[test]
     fn deadline_terminates_the_exact_worker_process() {
-        let child = Command::new("sleep")
-            .arg("60")
-            .stdin(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let mut worker = WorkerGuard::new(child).unwrap();
-        let (sender, receiver) = mpsc::channel();
-        sender.send(WorkerMessage::QueryStarted).unwrap();
-        let error = supervise_protocol_with_deadline(
-            &mut worker,
-            &receiver,
-            Bm01Profile::new(20).unwrap(),
-            Duration::from_millis(10),
-        )
-        .unwrap_err();
-        assert_eq!(error.code(), "USTE_BM01_QUERY_DEADLINE");
-        assert!(worker.reaped);
+        for mode in [super::SampleMode::Legacy, super::SampleMode::Disk] {
+            let child = Command::new("sleep")
+                .arg("60")
+                .stdin(Stdio::piped())
+                .spawn()
+                .unwrap();
+            let mut worker = WorkerGuard::new(child).unwrap();
+            let (sender, receiver) = mpsc::channel();
+            sender.send(WorkerMessage::QueryStarted).unwrap();
+            let error = supervise_protocol_with_deadline(
+                &mut worker,
+                &receiver,
+                Bm01Profile::new(20).unwrap(),
+                Duration::from_millis(10),
+                mode,
+            )
+            .unwrap_err();
+            assert_eq!(error.code(), "USTE_BM01_QUERY_DEADLINE");
+            assert!(worker.reaped);
+        }
     }
 
     #[test]
@@ -492,14 +576,114 @@ mod tests {
             "\"qualification\":\"nonqualifying-development-sampling\",",
             "\"query_deadline_enforced\":false,",
             "\"query_deadline_postchecked\":true,",
+            "\"query_deadline_seconds\":30,",
             "\"entities\":20,\"relationships\":200,",
             "\"warmup\":{\"queries\":96},",
-            "\"samples\":[{\"timed_executions\":768}]}"
+            "\"samples\":[{\"timed_executions\":768,\"rounds\":1,\"minimum_duration_milliseconds\":0,\"elapsed_milliseconds\":12}]}"
         );
-        let finalized = finalize_report(report, Bm01Profile::new(20).unwrap(), 864).unwrap();
+        let finalized = finalize_report(
+            report,
+            Bm01Profile::new(20).unwrap(),
+            864,
+            super::SampleMode::Legacy,
+        )
+        .unwrap();
         assert!(finalized.contains("\"query_deadline_enforced\":true"));
         assert!(!finalized.contains("\"query_deadline_enforced\":false"));
-        assert!(finalize_report(report, Bm01Profile::new(20).unwrap(), 863).is_err());
-        assert!(finalize_report("{}", Bm01Profile::new(20).unwrap(), 864).is_err());
+        assert!(
+            finalize_report(
+                report,
+                Bm01Profile::new(20).unwrap(),
+                863,
+                super::SampleMode::Legacy
+            )
+            .is_err()
+        );
+        assert!(
+            finalize_report(
+                "{}",
+                Bm01Profile::new(20).unwrap(),
+                864,
+                super::SampleMode::Legacy
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn supervisor_binds_disk_schema_and_preserves_required_windows() {
+        let mut report = serde_json::json!({
+            "schema": "bm01-linux-disk-sampling-v1", "qualification": "nonqualifying-development-sampling",
+            "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
+            "entities": 20, "relationships": 200, "warmup": { "queries": 96 },
+            "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
+            "storage_metadata_memory_resident": true, "authenticated_io_accounting": "not-measured",
+            "budget_evaluation": "not-performed", "samples": [{ "timed_executions": 768, "rounds": 1,
+                "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12 }],
+        });
+        let profile = Bm01Profile::new(20).unwrap();
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_ok()
+        );
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Legacy).is_err()
+        );
+        report["query_deadline_enforced"] = true.into();
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+        );
+        report["query_deadline_enforced"] = false.into();
+        report["query_deadline_seconds"] = 1.into();
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+        );
+        report["query_deadline_seconds"] = 30.into();
+        report["samples"][0]["rounds"] = 2.into();
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+        );
+        report["samples"][0]["rounds"] = 1.into();
+        report["full_memory_graph_state"] = true.into();
+        assert!(
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+        );
+        report["schema"] = "bm01-linux-sampling-v1".into();
+        report["qualification"] =
+            "qualification-candidate-deadline-and-environment-unverified".into();
+        report["entities"] = 100_000.into();
+        report["relationships"] = 1_000_000.into();
+        let sample = serde_json::json!({ "timed_executions": 768, "rounds": 1,
+            "minimum_duration_milliseconds": 60_000, "elapsed_milliseconds": 60_000 });
+        report["samples"] = serde_json::Value::Array(vec![sample; 5]);
+        assert!(
+            finalize_report(
+                &report.to_string(),
+                Bm01Profile::qualifying(),
+                3936,
+                super::SampleMode::Legacy
+            )
+            .is_ok()
+        );
+        report["samples"][0]["elapsed_milliseconds"] = 59_999.into();
+        assert!(
+            finalize_report(
+                &report.to_string(),
+                Bm01Profile::qualifying(),
+                3936,
+                super::SampleMode::Legacy
+            )
+            .is_err()
+        );
+        report["samples"][0]["elapsed_milliseconds"] = 60_000.into();
+        report["samples"][0]["minimum_duration_milliseconds"] = 0.into();
+        assert!(
+            finalize_report(
+                &report.to_string(),
+                Bm01Profile::qualifying(),
+                3936,
+                super::SampleMode::Legacy
+            )
+            .is_err()
+        );
     }
 }

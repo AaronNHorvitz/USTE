@@ -55,6 +55,44 @@ impl Fixture {
         if prefix == 0 {
             return;
         }
+        if (7..=11).contains(&prefix) {
+            let bytes = encode_transaction(&GraphTransaction::new(
+                scope(),
+                vec![Operation::Create {
+                    expected: Expected::Absent,
+                    record: NewRecord::Evidence(NewEvidence {
+                        id: evidence_ref(scope()),
+                        digest: [0; 32],
+                        locator: text("unrelated-prefix").unwrap(),
+                    }),
+                }],
+            ))
+            .unwrap();
+            raw.commit(
+                &mut fs,
+                TransactionRequest {
+                    principal: if prefix == 8 {
+                        uste_txn::PrincipalDigest::from_bytes([9; 32])
+                    } else {
+                        PRINCIPAL
+                    },
+                    idempotency_key: identity(
+                        if prefix == 7 || prefix == 10 { 9 } else { 1 },
+                        IdempotencyKey::from_bytes,
+                    ),
+                    transaction_id: identity(
+                        if prefix == 9 || prefix == 10 { 9 } else { 1 },
+                        TransactionId::from_bytes,
+                    ),
+                    canonical_request: &bytes,
+                    blob_inventory: None,
+                },
+                &mut SystemClock::new(),
+                &NeverCancel,
+            )
+            .unwrap();
+            return;
+        }
         install_policy(&mut raw, &mut fs).unwrap();
         if prefix == 1 {
             return;
@@ -247,4 +285,34 @@ fn native_disk_queries_match_separate_summary_and_reject_substitution() {
     );
     fs::write(&path, b"truncated summary").unwrap();
     assert!(query_correctness(Path::new("unused"), Path::new("unused"), &path, profile).is_err());
+}
+
+#[test]
+fn native_bootstrap_refuses_foreign_retry_identity_without_appending_policy() {
+    for prefix in 7..=11 {
+        let fixture = Fixture::new();
+        fixture.seed(prefix);
+        assert_eq!(
+            fixture.run("resume").unwrap_err().code(),
+            if prefix == 11 {
+                "USTE_BM01_POLICY_COMMIT"
+            } else {
+                "USTE_BM01_BOOTSTRAP_PROFILE"
+            }
+        );
+        let mut fs = open_filesystem(&fixture.root).unwrap();
+        let mut adapter =
+            PortableRecoveryAdapter::new(credential::read_password(&fixture.password).unwrap());
+        let (_, report, transaction) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut fs,
+            &EntryName::new("bm01-linux-disk-engine").unwrap(),
+            scope(),
+            OsEntropy,
+            OsEntropy,
+            &mut adapter,
+        )
+        .unwrap();
+        assert_eq!(report.frontier.unwrap().get(), 1);
+        assert_eq!(transaction.unwrap().revision().get(), 1);
+    }
 }

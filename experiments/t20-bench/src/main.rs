@@ -23,6 +23,8 @@ fn run() -> Result<(), String> {
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
+            | "linux-disk-sample"
+            | "linux-disk-sample-worker"
             | "linux-disk-create-crash-probe"
             | "linux-create-crash-probe"
             | "linux-resume"
@@ -129,10 +131,15 @@ fn run() -> Result<(), String> {
         {
             let root = root.ok_or("--root is required")?;
             let password_file = password_file.ok_or("--password-file is required")?;
-            if command == "linux-sample-worker" {
+            if command == "linux-sample-worker" || command == "linux-disk-sample-worker" {
                 uste_t20_bench::linux_runner::start_parent_watchdog()
                     .map_err(|error| error.code().to_owned())?;
-                uste_t20_bench::linux_runner::sample_worker(
+                let worker = if command == "linux-disk-sample-worker" {
+                    uste_t20_bench::linux_runner::disk::sample_worker
+                } else {
+                    uste_t20_bench::linux_runner::sample_worker
+                };
+                worker(
                     &root,
                     &password_file,
                     &oracle_file.ok_or("--oracle-file is required")?,
@@ -142,6 +149,17 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-disk-sample" => {
+                    let executable = env::current_exe()
+                        .map_err(|_| "cannot resolve current benchmark executable")?;
+                    uste_t20_bench::linux_runner::supervise_disk_sample(
+                        &executable,
+                        &root,
+                        &password_file,
+                        &oracle_file.ok_or("--oracle-file is required")?,
+                        profile,
+                    )
+                }
                 "linux-disk-create-crash-probe" => {
                     uste_t20_bench::linux_runner::disk::create_crash_probe(
                         &root,
@@ -236,7 +254,7 @@ fn print_usage() {
          --pause-after-revision REVISION --entities COUNT (at most 1000; nonqualifying)\n\
          uste-t20-bench <linux-query|linux-sample> --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
-         uste-t20-bench linux-disk-query --root DIR --password-file FILE \
+         uste-t20-bench <linux-disk-query|linux-disk-sample> --root DIR --password-file FILE \
          --oracle-file FILE --entities COUNT (at most 1000; nonqualifying)\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
          oracle-summary emits content-free expectations for a separate query process;\n\

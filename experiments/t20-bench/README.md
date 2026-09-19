@@ -3,7 +3,8 @@
 This standalone experiment pins `bm01-materialization-v1`. It prepares deterministic synthetic
 fixture semantics and an independent adjacency-array BFS oracle. Its bounded `engine-check`
 command also validates the mapping against production encrypted, authorized, durable graph/index
-code after a simulated restart. It does **not** measure latency or provide BM-01 acceptance evidence.
+code after a simulated restart. The fixture checks do not provide BM-01 acceptance evidence;
+the separate Linux samplers collect diagnostic latency while still withholding qualification.
 
 The qualifying-size profile always uses the accepted BM-01 seed and exactly:
 
@@ -39,6 +40,8 @@ cargo run --release --locked --offline -- linux-disk-open --root ROOT \
   --password-file PASSWORD --entities 20
 cargo run --release --locked --offline -- linux-disk-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
+cargo run --release --locked --offline -- linux-disk-sample --root ROOT \
+  --password-file PASSWORD --oracle-file ORACLE_BUNDLE --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo run --release --locked --offline -- linux-sample --root ROOT \
@@ -71,8 +74,8 @@ credentials, retaining the 1,000-entity development ceiling. Create streams the 
 authorized disk writes; resume admits paired metadata roots and a ready graph base or one pending
 transaction, repairs derived roots, then retries the unchanged deterministic plan. Only an empty
 or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
-Open requires completed, repaired roots and validates the fixture Evidence binding. These commands
-do not yet run the disk query sampler or qualify BM-01/BM-06; storage metadata remains resident.
+Open requires completed, repaired roots and validates the fixture Evidence binding. Construction
+and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
 The native tests require the experiment's `target` directory to reside on Btrfs:
 `CARGO_BUILD_JOBS=1 cargo test --release --locked --offline native_disk -- --test-threads=1`.
 
@@ -82,6 +85,15 @@ result sizes and digests, with a 64 MiB USTE cache cleared before each query. Th
 does not build oracle adjacency arrays. Its single-pass latency/RSS diagnostics are not sampling
 or qualification: host caches remain uncontrolled, storage metadata remains resident, and this
 command does not enforce the sampler's preemptive deadline. Reports state these limits explicitly.
+
+`linux-disk-sample` instead uses a persistent, parent-supervised worker with the fixed 30-second
+query deadline, separate warm-up and paired empty/retained-cache measurements. It shares the
+unchanged sample plan and exact outcome/digest checks. Parent validation binds the engine schema,
+sample windows, round/execution counts and enforcement claim. Native commands still retain their
+development ceiling; this is not a qualifying-size campaign. Reports disclose resident storage
+metadata and unmeasured complete authenticated I/O, omitting unavailable counters. As with the
+legacy sampler, `engine_benchmark:true` denotes sampling while `budget_evaluation:not-performed`
+and the nonqualifying label prevent it being mistaken for acceptance.
 
 `oracle-summary` is intended to run separately from `linux-query`, so the independent oracle's
 adjacency arrays do not enter the query process. The bounded 256 KiB summary pins profile/query
