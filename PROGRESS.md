@@ -997,8 +997,21 @@ with filter `cold_root_pair_reconstructs_seed_and_replays_graph_suffix` after th
 (1 passed); `CARGO_BUILD_JOBS=1 cargo clippy -p uste-txn -p uste-graph --all-targets
 --locked --offline -- -D warnings` passed. `python3 scripts/check_docs.py` and
 `python3 scripts/check_task_graph.py` passed (139 links, 68 tasks).
-Next implement bounded disk graph reads behind current-policy and candidate authorization;
-writes and staged-upload reconciliation remain separate unfinished consumer capabilities.
+The next point-read increment (Decision 0067), tested on `c754264` plus its changes, adds a
+restricted disk reader with trusted-adapter fixed limits/private cache, exact durable policy,
+target authorization before I/O, and cancellation before/candidate/terminal checks. Graph
+current/history reads use admitted ready roots, exact journal anchors and embedded-reference
+filtering. Tests cover current/historical values, absence, future revision, foreign namespace,
+foreign kernel, record denial, cancellation, byte refusal and embedded-reference suppression;
+the fault fixture proves denied point reads do not consume an armed disk-read fault.
+Initial compile checks found and corrected anchor-result/root-type mismatches, a test delimiter
+and unnecessary qualifications. Final verification under the same memory scope:
+`CARGO_BUILD_JOBS=1 cargo test -p uste-txn -p uste-graph --all-targets --locked --offline
+-- --test-threads=1` and `CARGO_BUILD_JOBS=1 cargo clippy -p uste-txn -p uste-graph
+--all-targets --locked --offline -- -D warnings` exited 0. Docs/task checks passed (140 links,
+68 tasks). Last sampled cgroup peak was 638,480,384 bytes with zero swap (not a final peak).
+Next extend bounded disk reads to adjacency/provenance with shared aggregate admission and
+candidate filtering; writes and staged-upload reconciliation remain unfinished capabilities.
 
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and
@@ -1014,8 +1027,8 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-aware authorization beyond restricted
-metadata reads (writes, upload quota/reconciliation and graph candidate filtering),
+next extend disk-aware authorization beyond metadata and point/history
+reads (bounded adjacency/provenance, writes and upload quota/reconciliation),
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.

@@ -5,6 +5,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+mod authorized_read;
+pub use authorized_read::GraphDiskRecordReadLimits;
+
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
 use uste_policy::NamespacePolicy;
@@ -4058,7 +4061,7 @@ where
     charge_lookup_stats(report, limits, &predecessor.stats)?;
     let record = predecessor
         .entry
-        .map(|entry| decode_history_lookup(candidate, requirement.target, entry))
+        .map(|entry| decode_history_lookup(&candidate.root, requirement.target, entry))
         .transpose()?;
     if !reference_requirement_matches(requirement, record.as_ref()) {
         return Err(GraphDiskError::IndexCorrupt);
@@ -4152,7 +4155,7 @@ fn graph_requirement_error(
 }
 
 fn decode_history_lookup(
-    candidate: &GraphStateRootCandidate,
+    candidate: &RecoveredIndexRoot,
     id: RecordRef,
     entry: uste_storage::IndexScanEntry,
 ) -> Result<Record, GraphDiskError> {

@@ -16,7 +16,10 @@ pub use authorized::{
     AuthorizedTransactionRequest, AuthorizedTransactionState, DurablePolicyChange,
     MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
 };
-pub use authorized_disk::{AuthorizedDiskMetadata, AuthorizedDiskPolicyState};
+pub use authorized_disk::{
+    AuthorizedDiskMetadata, AuthorizedDiskPolicyState, AuthorizedDiskReadState,
+    AuthorizedDiskReader,
+};
 pub use disk_metadata::{
     COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, CoordinatorMetadataCandidate,

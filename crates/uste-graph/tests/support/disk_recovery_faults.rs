@@ -308,6 +308,15 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
         .unwrap();
     let principal = kernel.authenticate(&mut Identity, &()).unwrap();
     let facade = uste_txn::AuthorizedDiskMetadata::new(disk, &kernel).unwrap();
+    let reader = uste_txn::AuthorizedDiskReader::new(
+        disk,
+        &kernel,
+        uste_graph::GraphDiskRecordReadLimits {
+            current: uste_storage::IndexGetLimits::new(64, 4096).unwrap(),
+            historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
+        },
+    )
+    .unwrap();
     filesystem
         .arm(
             FaultPlan::new([FaultPoint {
@@ -348,6 +357,21 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
         ),
         Err(uste_txn::AuthorizedError::Unauthorized)
     );
+    assert_eq!(filesystem.operation_count(FaultOperation::ReadAt), 0);
+    for request in [
+        uste_graph::GraphReadRequest::Record { id: record(0x21) },
+        uste_graph::GraphReadRequest::RecordAt {
+            id: record(0x21),
+            revision: CommitRevision::FIRST,
+        },
+    ] {
+        assert!(matches!(
+            reader.read(filesystem, &principal, &request, &NeverCancel),
+            Err(uste_txn::AuthorizedReadError::Authorization(
+                uste_txn::AuthorizedError::Unauthorized
+            ))
+        ));
+    }
     assert_eq!(filesystem.operation_count(FaultOperation::ReadAt), 0);
     assert_eq!(filesystem.pending_faults(), 1);
     assert!(

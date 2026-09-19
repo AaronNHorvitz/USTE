@@ -2214,17 +2214,34 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
             vec![
                 uste_policy::Action::ReadOwnOutcome,
                 uste_policy::Action::InspectQuota,
+                uste_policy::Action::ReadRecord,
+                uste_policy::Action::ReadHistory,
             ],
         ),
-        (0x91, vec![uste_policy::Action::ReadOwnOutcome]),
+        (
+            0x91,
+            vec![
+                uste_policy::Action::ReadOwnOutcome,
+                uste_policy::Action::ReadRecord,
+            ],
+        ),
     ] {
+        let mut grant = uste_policy::NamespaceGrant::new(
+            uste_policy::PermissionSet::from_actions(actions),
+            quotas,
+        );
+        if digest == 0x91 {
+            grant
+                .deny_record(
+                    entity.record(),
+                    uste_policy::PermissionSet::from_actions([uste_policy::Action::ReadRecord]),
+                )
+                .unwrap();
+        }
         metadata_policy
             .grant(
                 uste_policy::PrincipalDigest::from_bytes([digest; 32]),
-                uste_policy::NamespaceGrant::new(
-                    uste_policy::PermissionSet::from_actions(actions),
-                    quotas,
-                ),
+                grant,
             )
             .unwrap();
     }
@@ -2644,7 +2661,11 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                                     uste_graph::RecordVersion::new(u64::from(revision - 1))
                                         .unwrap(),
                                 ),
-                                properties: Value::Bool(revision == 4),
+                                properties: if revision == 3 {
+                                    Value::RecordRef(entity)
+                                } else {
+                                    Value::Bool(true)
+                                },
                             }],
                         );
                         let encoded = encode_transaction(&transaction).unwrap();
@@ -2737,6 +2758,35 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                             GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
                         )
                         .unwrap();
+                        if revision == 3 {
+                            let mut filtered = 0;
+                            let result =
+                                <GraphDiskLiveState as uste_txn::AuthorizedDiskReadState<
+                                    MemoryFileSystem,
+                                    TestEnvelope,
+                                    CounterEntropy,
+                                    CounterEntropy,
+                                >>::read_disk_authorized(
+                                    &disk,
+                                    &mut filesystem,
+                                    &uste_graph::GraphReadRequest::Record { id: entity },
+                                    &uste_graph::GraphDiskRecordReadLimits {
+                                        current: uste_storage::IndexGetLimits::new(64, 4096)
+                                            .unwrap(),
+                                        historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
+                                    },
+                                    &mut admission_cache,
+                                    &mut |action, target| {
+                                        assert_eq!(action, uste_policy::Action::ReadRecord);
+                                        assert_eq!(target, uste_policy::Target::Record(entity));
+                                        filtered += 1;
+                                        false
+                                    },
+                                )
+                                .unwrap();
+                            assert_eq!(filtered, 1);
+                            assert_eq!(result, uste_graph::GraphReadOutput::Record(None));
+                        }
                         disk.rebase_metadata(
                             &mut filesystem,
                             uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read },
@@ -2827,6 +2877,127 @@ fn assert_authorized_disk_metadata(
     let foreign_kernel = uste_policy::PolicyKernel::new();
     let foreign = foreign_kernel.authenticate(&mut Identity, &0x90).unwrap();
     let facade = uste_txn::AuthorizedDiskMetadata::new(disk, &kernel).unwrap();
+    let read_limits = uste_graph::GraphDiskRecordReadLimits {
+        current: uste_storage::IndexGetLimits::new(64, 4096).unwrap(),
+        historical: IndexPredecessorLimits::new(64, 4096).unwrap(),
+    };
+    let reader = uste_txn::AuthorizedDiskReader::new(disk, &kernel, read_limits).unwrap();
+    let current = uste_graph::GraphReadRequest::Record { id: record(0x21) };
+    let historical = uste_graph::GraphReadRequest::RecordAt {
+        id: record(0x21),
+        revision: CommitRevision::FIRST,
+    };
+    assert!(matches!(
+        reader.read(filesystem, &bob, &current, &NeverCancel),
+        Err(uste_txn::AuthorizedReadError::Authorization(
+            uste_txn::AuthorizedError::Unauthorized
+        ))
+    ));
+    let foreign_record = RecordRef::new(
+        scope().database(),
+        NamespaceId::from_bytes([0xee; 16]),
+        record(0x21).record(),
+    );
+    assert!(matches!(
+        reader.read(
+            filesystem,
+            &alice,
+            &uste_graph::GraphReadRequest::Record { id: foreign_record },
+            &NeverCancel
+        ),
+        Err(uste_txn::AuthorizedReadError::Authorization(
+            uste_txn::AuthorizedError::Unauthorized
+        ))
+    ));
+    for (request, properties) in [(&current, Value::Bool(true)), (&historical, Value::Null)] {
+        let output = reader
+            .read(filesystem, &alice, request, &NeverCancel)
+            .unwrap();
+        let uste_graph::GraphReadOutput::Record(Some(found)) = output else {
+            panic!("missing record")
+        };
+        let Record::Entity(found) = *found else {
+            panic!("wrong record type")
+        };
+        assert_eq!(found.id, record(0x21));
+        assert_eq!(found.properties, properties);
+    }
+    for principal in [&bob, &denied, &foreign] {
+        assert!(matches!(
+            reader.read(filesystem, principal, &historical, &NeverCancel),
+            Err(uste_txn::AuthorizedReadError::Authorization(
+                uste_txn::AuthorizedError::Unauthorized
+            ))
+        ));
+    }
+    assert_eq!(
+        reader
+            .read(
+                filesystem,
+                &alice,
+                &uste_graph::GraphReadRequest::Record { id: record(0x99) },
+                &NeverCancel
+            )
+            .unwrap(),
+        uste_graph::GraphReadOutput::Record(None)
+    );
+    assert!(matches!(
+        reader.read(
+            filesystem,
+            &alice,
+            &uste_graph::GraphReadRequest::RecordAt {
+                id: record(0x21),
+                revision: CommitRevision::new(3).unwrap()
+            },
+            &NeverCancel
+        ),
+        Err(uste_txn::AuthorizedReadError::Domain(
+            GraphDiskError::Graph(GraphError::UnknownReadView(_))
+        ))
+    ));
+    struct CancelAt {
+        calls: std::cell::Cell<usize>,
+        at: usize,
+    }
+    impl uste_txn::Cancellation for CancelAt {
+        fn is_cancelled(&self) -> bool {
+            self.calls.set(self.calls.get() + 1);
+            self.calls.get() >= self.at
+        }
+    }
+    for at in [1, 2] {
+        assert!(matches!(
+            reader.read(
+                filesystem,
+                &alice,
+                &current,
+                &CancelAt {
+                    calls: std::cell::Cell::new(0),
+                    at
+                }
+            ),
+            Err(uste_txn::AuthorizedReadError::Authorization(
+                uste_txn::AuthorizedError::Transaction(uste_txn::TransactionError::Cancelled)
+            ))
+        ));
+    }
+    let tiny = uste_txn::AuthorizedDiskReader::new(
+        disk,
+        &kernel,
+        uste_graph::GraphDiskRecordReadLimits {
+            current: uste_storage::IndexGetLimits::new(64, 1).unwrap(),
+            ..read_limits
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        tiny.read(filesystem, &alice, &current, &NeverCancel),
+        Err(uste_txn::AuthorizedReadError::Domain(
+            GraphDiskError::Transaction(uste_txn::TransactionError::Storage(
+                uste_storage::journal::StorageError::ResourceLimit
+            ))
+        ))
+    ));
     // Missing and another principal's transactions stay indistinguishable, including expiry.
     for now in [3, 10_000_000] {
         for transaction in [

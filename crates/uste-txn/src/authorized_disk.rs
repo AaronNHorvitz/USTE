@@ -2,6 +2,9 @@
 
 use std::sync::Mutex;
 
+mod read;
+pub use read::{AuthorizedDiskReadState, AuthorizedDiskReader};
+
 use uste_crypto::EntropySource;
 use uste_policy::{Action, AuthenticatedPrincipal, NamespacePolicy, PolicyKernel, Target};
 use uste_storage::{

@@ -1239,7 +1239,7 @@ where
     Ok((AuthorizedCoordinator::new(coordinator, policy)?, report))
 }
 
-const fn map_requirement_error(error: ApplyError) -> AuthorizedError {
+pub(crate) const fn map_requirement_error(error: ApplyError) -> AuthorizedError {
     AuthorizedError::Transaction(match error {
         ApplyError::Conflict => TransactionError::Conflict,
         ApplyError::SourceChanged => TransactionError::SourceChanged,
