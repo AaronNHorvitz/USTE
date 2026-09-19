@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `041cb89` plus this increment: [Decision 0134](docs/decisions/0134-streaming-packed-tree-validation.md)
+  adds complete streaming packed-tree structural/content validation with one prior key, a bounded
+  iterative path and incremental exact-length value hashing. Every reachable node and chunk is
+  authenticated; subtree boundary bits, leaf routing, strict key order and aggregate counts/bytes
+  are checked before a receipt can escape. This receipt is not domain or journal admission.
+  Seven new tests cover generated reference trees, 16 MiB values, empty/singleton roots,
+  exact/minus-one and hard admission, 189 observed read/error/crash cases, authenticated wrong
+  partitions, late chunk/leaf corruption and cycles. The seven-key fixture pins 13 nodes,
+  eight chunks and 21 reads/431,445 encoded bytes. Streaming hash partitions match whole-value
+  commitments, with short/overlong input refusing completion. Initial test compilation required
+  unwrapping the validated fault plan; the first run then caught a stale model directory handle
+  reused after restart. Both test defects were fixed; production checks were not weakened.
+  Focused scope `run-p532665-i21495233.scope` passed seven tests/0.70s and strict Clippy/9.28s.
+  Final scope `run-p533323-i21495346.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 493 tests/46 executables, no failures/ignores
+  (replay 50/114.67s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed/0.05s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.08s;
+  `python3 scripts/check_ordered_commitment_vectors.py` passed all four independent vectors.
+  Supplemental log `/tmp/uste-d134-workspace-verification.log`; preflight 33 GiB RAM/4.0 GiB swap,
+  sampled scope peak 1,412,562,944 bytes/zero swap (not final peak). Formatting, diff, documentation
+  and task checks passed. No native matrix rerun (latest native baseline `42f9abb`), benchmark,
+  M1/lockfile change or task completion claimed. Decision 0135 is an excluded next-package draft.
+  Next implement bounded range traversal, then independent manifests, Linux process checks,
+  recovery/domain integration, complete accounting and qualifying campaigns.
+
 - Implemented on pushed `702ab33` plus this increment: [Decision 0133](docs/decisions/0133-bounded-packed-tree-batches.md)
   adds bounded private copy-on-write batches with exact sorted preconditions, unchanged-subtree
   reuse, conservative 64 MiB metadata reservation and iterative final-reachable-node serialization.

@@ -20,6 +20,7 @@ pub mod packed_index_page;
 pub mod packed_tree_batch;
 pub mod packed_tree_lookup;
 pub mod packed_tree_record;
+pub mod packed_tree_validation;
 
 pub use adapter::{
     AdapterError, AdapterErrorKind, Clock, ClockObservation, EntryName, EntryNameError,

@@ -170,6 +170,48 @@ pub fn value_commitment(value: &[u8]) -> Result<ValueCommitment, CommitmentError
     })
 }
 
+/// Internal bounded streaming counterpart; no digest is exposed before exact-length completion.
+pub(crate) struct ValueStream {
+    hash: Sha256,
+    length: u64,
+    remaining: u64,
+    failed: bool,
+}
+impl ValueStream {
+    pub(crate) fn new(length: u64) -> Result<Self, CommitmentError> {
+        if length > MAX_VALUE_BYTES as u64 {
+            return Err(CommitmentError::ResourceLimit);
+        }
+        let mut hash = Sha256::new();
+        hash.update(VALUE_DOMAIN);
+        hash.update(length.to_be_bytes());
+        Ok(Self {
+            hash,
+            length,
+            remaining: length,
+            failed: false,
+        })
+    }
+    pub(crate) fn update(&mut self, bytes: &[u8]) -> Result<(), CommitmentError> {
+        if self.failed || bytes.len() as u64 > self.remaining {
+            self.failed = true;
+            return Err(CommitmentError::InvalidProof);
+        }
+        self.hash.update(bytes);
+        self.remaining -= bytes.len() as u64;
+        Ok(())
+    }
+    pub(crate) fn finish(self) -> Result<ValueCommitment, CommitmentError> {
+        if self.failed || self.remaining != 0 {
+            return Err(CommitmentError::InvalidProof);
+        }
+        Ok(ValueCommitment {
+            length: self.length,
+            digest: self.hash.finalize().into(),
+        })
+    }
+}
+
 pub fn empty_commitment(context: CommitmentContext) -> OrderedCommitment {
     OrderedCommitment {
         entries: 0,

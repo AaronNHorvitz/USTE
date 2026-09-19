@@ -190,6 +190,10 @@ Decision 0133 adds private copy-on-write batches over those trees: sorted exact 
 arena/path/read reservations, before-value proof checks before output creation, unchanged-subtree
 reuse and iterative final-only serialization. The returned staged root is not a journal commit or
 independently admitted manifest; integration and recovery still have to establish that authority.
+Decision 0134 adds complete bounded structural/content validation: iterative ordered traversal,
+canonical subtree-boundary checks and incremental value hashing. Its receipt records a successful
+read of every reachable node/chunk, not domain semantics, journal authority or protection against
+subsequent mutation; later operations must authenticate their own reads.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

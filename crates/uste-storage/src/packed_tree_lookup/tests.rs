@@ -16,6 +16,7 @@ use uste_types::{DatabaseId, NamespaceId};
 
 mod batch;
 mod corruption;
+mod validation;
 
 struct Entropy(u64);
 impl EntropySource for Entropy {
