@@ -194,6 +194,10 @@ Decision 0134 adds complete bounded structural/content validation: iterative ord
 canonical subtree-boundary checks and incremental value hashing. Its receipt records a successful
 read of every reachable node/chunk, not domain semantics, journal authority or protection against
 subsequent mutation; later operations must authenticate their own reads.
+Decision 0135 adds a bounded in-process range cursor over independently admitted canonical roots,
+including compressed-prefix lower-bound seek and ordered successors. It returns one completely
+verified zeroizing entry per step, accounts cumulative work, and permanently refuses continuation
+after errors. It does not grant consumer authorization or define a serialized resume token.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

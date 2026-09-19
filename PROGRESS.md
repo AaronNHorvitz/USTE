@@ -58,6 +58,35 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `5c9d43a` plus this increment: [Decision 0135](docs/decisions/0135-bounded-packed-tree-cursor.md)
+  adds a raw streaming packed-tree range cursor with compressed-prefix lower-bound seek, ordered
+  successors, exact terminal root proofs and complete value verification. Cumulative candidate,
+  returned-byte and page/encoded-byte budgets are enforced; errors permanently poison continuation.
+  Conservative path/proof/key metadata reservation is capped at 32 MiB, separately from value and
+  crypto/page buffers. The existing lookup reader is reused without algorithm changes.
+  Seven tests cover every one-byte lower bound with multiple upper/prefix bounds, skipped-prefix
+  seeks, empty/singleton/16 MiB values, hard/exact/minus-one limits, 117 observed read/error/crash
+  cases, late content corruption after successful entries, wrong scope and sticky terminal states.
+  A 256-key common-prefix tree's final-key seek uses ten reads and one candidate, not a preceding
+  keyspace scan. The mixed range fault fixture pins 13 reads/117 cases; a full seven-key traversal
+  uses 21 reads. Focused scope `run-p538822-i21522622.scope` passed six tests/1.69s and strict
+  Clippy/1.86s before adding the metadata-geometry test. Earlier tests passed but strict Clippy
+  rejected a complex test-helper return type; a named alias fixed it without suppressing the lint.
+  Final scope `run-p539469-i21507284.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 500 tests/46 executables, no failures/ignores
+  (replay 50/115.63s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed/6.22s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.09s. Supplemental local log:
+  `/tmp/uste-d135-workspace-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap; sampled scope peak
+  2,168,717,312 bytes/zero swap (not final peak). Formatting, diff, documentation and task checks
+  passed. No native matrix rerun (latest native baseline `42f9abb`), benchmark, M1/lockfile change,
+  root authority or task completion claimed. Unregistered `packed_root_manifest.rs` and Decision
+  0136 are excluded next-package work. Next implement separately versioned packed-root manifests,
+  then journal/domain admission, publication/recovery, Linux process checks, complete accounting
+  and qualifying campaigns.
+
 - Implemented on pushed `041cb89` plus this increment: [Decision 0134](docs/decisions/0134-streaming-packed-tree-validation.md)
   adds complete streaming packed-tree structural/content validation with one prior key, a bounded
   iterative path and incremental exact-length value hashing. Every reachable node and chunk is

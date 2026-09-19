@@ -59,16 +59,16 @@ pub struct TreeLookupResult {
     pub report: TreeLookupReport,
 }
 
-struct Reader<'a, F: FileSystem, W, E: EntropySource> {
-    filesystem: &'a mut F,
-    directory: &'a F::Directory,
-    vault: &'a KeyVault<W, E>,
-    context: TreeReadContext,
-    limits: TreeLookupLimits,
-    report: TreeLookupReport,
+pub(crate) struct Reader<'a, F: FileSystem, W, E: EntropySource> {
+    pub(crate) filesystem: &'a mut F,
+    pub(crate) directory: &'a F::Directory,
+    pub(crate) vault: &'a KeyVault<W, E>,
+    pub(crate) context: TreeReadContext,
+    pub(crate) limits: TreeLookupLimits,
+    pub(crate) report: TreeLookupReport,
 }
 impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
-    fn page(&mut self, location: PackedLocator) -> Result<PackedPage, StorageError> {
+    pub(crate) fn page(&mut self, location: PackedLocator) -> Result<PackedPage, StorageError> {
         if self.report.pages >= self.limits.maximum_pages
             || ENCODED_PAGE_BYTES as u64
                 > self.limits.maximum_encoded_bytes - self.report.encoded_bytes
@@ -90,7 +90,7 @@ impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
         Ok(page)
     }
 
-    fn value(
+    pub(crate) fn value(
         &mut self,
         expected: ValueCommitment,
         mut next: Option<PackedLocator>,
