@@ -51,6 +51,29 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0083](docs/decisions/0083-profile-derived-disk-driver-limits.md) routes both disk
+  adapters through validated fixture/batch-derived admission, preparation and merge limits.
+  It pins 212 journal groups, 30,001 preparation proofs and a three-million-entry largest
+  family at exact size; every accepted profile's constructor validates without database work.
+  Encoded fixture-kind/status/revision tests verify the per-proof byte premise. Native size
+  guards remain intact. Admission now also uses the accepted 64 MiB cache, dropped between phases.
+  Verified on pushed `4efc450` plus this increment under the established 3G/4G/512M scope,
+  one job/thread: `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 43 unit tests
+  (2 existing exact-profile oracle tests ignored) in 27.84s and 3 real CLI tests in 12.79s;
+  experiment all-target strict clippy passed. The first clippy run rejected an eight-argument
+  helper; grouping batch identity and operations corrected it without suppressing the lint.
+  `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M
+  /usr/bin/time -v timeout --signal=TERM --kill-after=10s 180s
+  experiments/t20-bench/target/release/uste-t20-bench disk-engine-check --entities 1000`
+  exited 0: all 384 comparisons passed at 1,000 entities/10,000 relationships, cold frontier 4,
+  digest `698901177087f1d26e98857d5cee1e575b90dcacc77908c3a70eb6a4771b43e4`, 61.64s elapsed,
+  maximum RSS 152,312 KiB, 64 MiB cache, 46,287,696 hits/370 misses. Sampled scope peak was
+  153,366,528 bytes with zero swap use; this is not a 24 GiB reservation or qualifying campaign.
+  Host preflight: 36 GiB available RAM, 3.9 GiB free swap. Docs/task checks pass (156 links,
+  68 tasks). Next implement native query I/O accounting and retain its measurement boundaries,
+  then validate campaign readiness and BM-06's independent protocol. T-20/T-19 remain open.
+
 - [Decision 0082](docs/decisions/0082-aggregate-graph-admission-work-limits.md) corrects cold
   admission's aggregate lookup configuration: repeated proof visits/returned bytes use operation
   count and per-operation ceilings, not a single scan's physical capacity. Explicit budgets,

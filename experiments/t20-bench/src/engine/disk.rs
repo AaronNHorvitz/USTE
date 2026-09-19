@@ -1,5 +1,7 @@
 //! Development oracle check using disk-backed graph and coordinator state after policy bootstrap.
 use super::*;
+mod limits;
+pub(crate) use limits::DiskProfileLimits;
 use uste_graph::{
     GraphDiskBaseAdmissionLimits, GraphDiskExpansionLimits, GraphDiskLiveState,
     GraphDiskPreparationLimits, GraphDiskReadLimits, GraphDiskWritePreparationLimits,
@@ -139,7 +141,8 @@ pub fn verify_disk_development_profile(
     drop(policy_snapshot);
     drop(bootstrap);
     fs.restart().map_err(debug)?;
-    let mut disk = open_disk(&mut fs, &name)?;
+    let limits = DiskProfileLimits::new(profile)?;
+    let mut disk = open_disk(&mut fs, &name, limits)?;
     let mut policy_kernel = kernel(policy.clone())?;
     let principal = policy_kernel
         .authenticate(&mut AuthAdapter, &())
@@ -151,18 +154,19 @@ pub fn verify_disk_development_profile(
             &mut fs,
             &mut policy_kernel,
             &principal,
-            DiskBatchIdentity {
+            DiskBatch {
                 sequence,
                 idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
                 transaction_id: identity(sequence, TransactionId::from_bytes),
+                operations,
             },
-            operations,
             &mut clock(sequence),
+            limits,
         )
     })?;
     drop(disk);
     fs.restart().map_err(debug)?;
-    let disk = open_disk(&mut fs, &name)?;
+    let disk = open_disk(&mut fs, &name, limits)?;
     if disk
         .state()
         .map_err(debug)?
@@ -229,7 +233,11 @@ pub fn verify_disk_development_profile(
     })
 }
 
-fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String> {
+fn open_disk(
+    fs: &mut MemoryFileSystem,
+    name: &EntryName,
+    limits: DiskProfileLimits,
+) -> Result<Disk, String> {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
     let entropy = ENTROPY.fetch_add(1_000_000, std::sync::atomic::Ordering::Relaxed);
     let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
@@ -241,8 +249,13 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
         &mut TestKeyAdapter,
     )
     .map_err(debug)?;
-    admit_development_disk(fs, recovery, frontier.ok_or("missing disk frontier")?)
-        .map(|(disk, _)| disk)
+    admit_development_disk(
+        fs,
+        recovery,
+        frontier.ok_or("missing disk frontier")?,
+        limits,
+    )
+    .map(|(disk, _)| disk)
 }
 
 /// Shared adapter-independent development recovery. No full graph/coordinator fallback is allowed.
@@ -251,6 +264,7 @@ pub(crate) fn admit_development_disk<F, W, E, I>(
     fs: &mut F,
     recovery: AuthenticatedIndexRecovery<F, W, E, I>,
     frontier: uste_txn::RecoveredFrontierTransaction,
+    profile_limits: DiskProfileLimits,
 ) -> Result<AdmittedDisk<F, W, E, I>, String>
 where
     F: OwnershipFileSystem,
@@ -258,7 +272,7 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    let mut cache = PageCache::new(64 * 1024).map_err(debug)?;
+    let mut cache = PageCache::new(limits::CACHE_BYTES).map_err(debug)?;
     let lookup = IndexGetLimits::new(64, 136).map_err(debug)?;
     let graph_candidate = uste_graph::load_graph_state_root_candidates_for_recovery(&recovery, fs)
         .map_err(debug)?
@@ -295,10 +309,10 @@ where
         fs,
         transaction_root,
         uste_txn::CoordinatorTransactionAdmissionLimits {
-            run: IndexRunReadLimits::new(1000, 1000, 1024 * 1024).map_err(debug)?,
+            run: profile_limits.transaction_run,
             lookup,
-            maximum_groups: 1000,
-            maximum_encoded_bytes: 128 * 1024 * 1024,
+            maximum_groups: profile_limits.groups,
+            maximum_encoded_bytes: profile_limits.prefix_bytes,
         },
         &mut cache,
     )
@@ -310,45 +324,19 @@ where
         candidate,
         transactions,
         uste_txn::CoordinatorDiskAdmissionLimits {
-            metadata: uste_txn::CoordinatorMetadataLoadLimits::new(
-                1000,
-                0,
-                1001,
-                1000,
-                1024 * 1024,
-            )
-            .map_err(debug)?,
+            metadata: profile_limits.metadata,
             lookup,
-            maximum_total_journal_groups: 1000,
-            maximum_encoded_bytes_per_pass: 128 * 1024 * 1024,
+            maximum_total_journal_groups: profile_limits.groups,
+            maximum_encoded_bytes_per_pass: profile_limits.prefix_bytes,
         },
         &mut cache,
-    )
-    .map_err(debug)?;
-    let limits = GraphDiskBaseAdmissionLimits::new(
-        GraphStateLoadLimits::new(
-            100_000,
-            200_000,
-            1000,
-            1_000_000,
-            100_000,
-            256 * 1024 * 1024,
-        )
-        .map_err(debug)?,
-        4,
-        64 * 1024,
-        1_000_000,
-        1_000_000,
-        1_000_000,
-        256 * 1024 * 1024,
-        IndexPredecessorLimits::new(64, 16 * 1024).map_err(debug)?,
     )
     .map_err(debug)?;
     let (base, graph_report) = uste_graph::admit_graph_disk_base_candidate_for_recovery(
         &recovery,
         fs,
         &graph_candidate,
-        limits,
+        profile_limits.graph,
         &mut cache,
     )
     .map_err(debug)?;
@@ -366,8 +354,7 @@ where
             fs,
             &base,
             &frontier,
-            GraphDiskPreparationLimits::new(20_000, 1_000_000, 100_000, 100_000, 32 * 1024 * 1024)
-                .map_err(debug)?,
+            profile_limits.preparation,
             &mut cache,
         )
         .map_err(debug)?
@@ -393,7 +380,7 @@ where
         uste_txn::DiskCoordinatorRecoveryLimits {
             overlay: uste_txn::CoordinatorRecoveryLimits::new(2, 0).map_err(debug)?,
             lookup,
-            maximum_encoded_bytes: 128 * 1024 * 1024,
+            maximum_encoded_bytes: profile_limits.suffix_bytes,
         },
         &mut cache,
     )
@@ -497,10 +484,11 @@ fn emit_batches(
     Ok(())
 }
 
-pub(crate) struct DiskBatchIdentity {
+pub(crate) struct DiskBatch {
     pub sequence: u64,
     pub idempotency_key: IdempotencyKey,
     pub transaction_id: TransactionId,
+    pub operations: Vec<Operation>,
 }
 
 pub(crate) fn commit_batch<F, W, E, I>(
@@ -508,9 +496,9 @@ pub(crate) fn commit_batch<F, W, E, I>(
     fs: &mut F,
     kernel: &mut PolicyKernel,
     principal: &AuthenticatedPrincipal,
-    identity: DiskBatchIdentity,
-    operations: Vec<Operation>,
+    batch: DiskBatch,
     clock: &mut impl uste_storage::Clock,
+    limits: DiskProfileLimits,
 ) -> Result<(), String>
 where
     F: OwnershipFileSystem,
@@ -518,24 +506,18 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    let encoded = encode_transaction(&GraphTransaction::new(scope(), operations)).map_err(debug)?;
-    let (read, merge) = development_merge_limits()?;
+    let encoded =
+        encode_transaction(&GraphTransaction::new(scope(), batch.operations)).map_err(debug)?;
+    let (read, merge) = (limits.merge_read, limits.merge);
     let mut writer = AuthorizedDiskWriter::new_with_cache_budget(
         disk,
         kernel,
         GraphDiskWritePreparationLimits {
-            proof: GraphDiskPreparationLimits::new(
-                20_000,
-                1_000_000,
-                100_000,
-                100_000,
-                32 * 1024 * 1024,
-            )
-            .map_err(debug)?,
+            proof: limits.preparation,
             delta: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
         },
         GraphStateRootMergeLimits::uniform(merge, 64 * 1024).map_err(debug)?,
-        64 * 1024 * 1024,
+        limits::CACHE_BYTES,
     )
     .map_err(debug)?;
     let outcome = writer
@@ -543,8 +525,8 @@ where
             fs,
             principal,
             AuthorizedTransactionRequest {
-                idempotency_key: identity.idempotency_key,
-                transaction_id: identity.transaction_id,
+                idempotency_key: batch.idempotency_key,
+                transaction_id: batch.transaction_id,
                 canonical_request: &encoded,
                 blob_inventory: None,
             },
@@ -552,26 +534,12 @@ where
             &NeverCancel,
         )
         .map_err(debug)?;
-    if outcome.revision.get() != identity.sequence {
+    if outcome.revision.get() != batch.sequence {
         return Err("disk commit revision mismatch".into());
     }
     drop(writer);
     disk.rebase_metadata(fs, CoordinatorMetadataRebaseLimits { merge, reuse: read })
         .map_err(debug)
-}
-
-pub(crate) fn development_merge_limits() -> Result<(IndexRunReadLimits, IndexRunMergeLimits), String>
-{
-    let read = IndexRunReadLimits::new(100_000, 1_000_000, 256 * 1024 * 1024).map_err(debug)?;
-    let merge = IndexRunMergeLimits::new(
-        read,
-        1_000_000,
-        64 * 1024 * 1024,
-        1_000_000,
-        256 * 1024 * 1024,
-    )
-    .map_err(debug)?;
-    Ok((read, merge))
 }
 
 #[cfg(test)]

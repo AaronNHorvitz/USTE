@@ -1,8 +1,8 @@
 //! Native development disk pipeline; no full-state recovery fallback or qualification claim.
 use super::*;
 use crate::engine::disk::{
-    DiskBatchIdentity, admit_development_disk, commit_batch, development_merge_limits,
-    fixture_state_counts, visit_development_batches,
+    DiskBatch, DiskProfileLimits, admit_development_disk, commit_batch, fixture_state_counts,
+    visit_development_batches,
 };
 use uste_graph::{GraphDiskLiveState, GraphDiskReadLimits, GraphStateRootMergeLimits};
 use uste_storage::{IndexGetLimits, IndexPredecessorLimits};
@@ -94,6 +94,7 @@ fn prepare_session_with_observer(
     if !matches!(phase, "create" | "resume" | "open") {
         return Err(error("USTE_BM01_DISK_PHASE"));
     }
+    let limits = DiskProfileLimits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?;
     let started = Instant::now();
     let mut fs = open_filesystem(root)?;
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password_file)?);
@@ -155,7 +156,7 @@ fn prepare_session_with_observer(
     };
     let frontier = frontier.ok_or_else(|| error("USTE_BM01_FRONTIER_MISSING"))?;
     let outcome = frontier.outcome();
-    let (mut disk, admission) = admit_development_disk(&mut fs, recovery, frontier)
+    let (mut disk, admission) = admit_development_disk(&mut fs, recovery, frontier, limits)
         .map_err(|_| error("USTE_BM01_DISK_ADMISSION"))?;
     if phase == "open"
         && (disk
@@ -168,7 +169,7 @@ fn prepare_session_with_observer(
         return Err(error("USTE_BM01_DISK_REPAIR_REQUIRED"));
     }
     if phase != "open" {
-        let (read, merge) = development_merge_limits().map_err(|_| error("USTE_BM01_LIMITS"))?;
+        let (read, merge) = (limits.merge_read, limits.merge);
         if disk
             .state()
             .map_err(|_| error("USTE_BM01_DISK_STATE"))?
@@ -204,13 +205,14 @@ fn prepare_session_with_observer(
                 &mut fs,
                 &mut policy,
                 &principal,
-                DiskBatchIdentity {
+                DiskBatch {
                     sequence,
                     idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
                     transaction_id: identity(sequence, TransactionId::from_bytes),
+                    operations,
                 },
-                operations,
                 &mut clock,
+                limits,
             )?;
             observer(sequence).map_err(|error| error.code().to_owned())
         })

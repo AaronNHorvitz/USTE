@@ -71,7 +71,11 @@ blob metadata in memory. It is semantic evidence, not performance or bounded tot
 The existing Linux commands are not silently switched by this development command.
 
 `linux-disk-create/resume/open` use a distinct native Btrfs database name and portable recovery
-credentials, retaining the 1,000-entity development ceiling. Create streams the fixture through
+credentials, retaining the 1,000-entity development ceiling. They use profile-derived
+admission/preparation/merge work limits shared with the memory-adapter verifier.
+The limits validate through the exact-size 212-revision plan, including 30,001 preparation proofs,
+but constructor validity does not qualify execution or remove the native development ceiling.
+Create streams the fixture through
 authorized disk writes; resume admits paired metadata roots and a ready graph base or one pending
 transaction, repairs derived roots, then retries the unchanged deterministic plan. Only an empty
 or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
