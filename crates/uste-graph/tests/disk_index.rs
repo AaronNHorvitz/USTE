@@ -2203,6 +2203,28 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
         GraphState::new(scope()),
     )
     .unwrap();
+    let quotas = QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap();
+    let mut metadata_policy = NamespacePolicy::new(scope(), PolicyVersion::new(1).unwrap(), quotas);
+    for (digest, actions) in [
+        (
+            0x90,
+            vec![
+                uste_policy::Action::ReadOwnOutcome,
+                uste_policy::Action::InspectQuota,
+            ],
+        ),
+        (0x91, vec![uste_policy::Action::ReadOwnOutcome]),
+    ] {
+        metadata_policy
+            .grant(
+                uste_policy::PrincipalDigest::from_bytes([digest; 32]),
+                uste_policy::NamespaceGrant::new(
+                    uste_policy::PermissionSet::from_actions(actions),
+                    quotas,
+                ),
+            )
+            .unwrap();
+    }
     commit(
         &mut coordinator,
         &mut filesystem,
@@ -2219,11 +2241,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                 }),
             }],
             DurablePolicyMutation::Install {
-                policy: NamespacePolicy::new(
-                    scope(),
-                    PolicyVersion::new(1).unwrap(),
-                    QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
-                ),
+                policy: metadata_policy.clone(),
             },
         ),
     );
@@ -2433,6 +2451,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     .unwrap();
     assert_eq!(disk.overlay_counts(), (0, 0));
     assert_eq!(disk.state().unwrap().revision().get(), 2);
+    assert_authorized_disk_metadata(&disk, &mut filesystem, &metadata_policy);
     drop(disk);
 
     // An older metadata pair can accompany either a ready newer graph base or one pending
@@ -2570,6 +2589,18 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                 assert_eq!(disk.overlay_counts(), (1, 0));
                 assert_eq!(disk.state().unwrap().revision().get(), 2);
                 assert_eq!(disk.state().unwrap().is_pending(), case != 1);
+                if case == 1 {
+                    assert_authorized_disk_metadata(&disk, &mut filesystem, &metadata_policy);
+                } else {
+                    let mut kernel = uste_policy::PolicyKernel::new();
+                    kernel
+                        .install_initial_policy(metadata_policy.clone())
+                        .unwrap();
+                    assert!(matches!(
+                        uste_txn::AuthorizedDiskMetadata::new(&disk, &kernel),
+                        Err(uste_txn::AuthorizedError::InvalidPolicy)
+                    ));
+                }
                 if case == 6 {
                     let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
                     let merge =
@@ -2599,6 +2630,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                     )
                     .unwrap();
                     assert_eq!(disk.overlay_counts(), (0, 0));
+                    assert_authorized_disk_metadata(&disk, &mut filesystem, &metadata_policy);
                 }
             }
             2 => assert!(matches!(
@@ -2632,6 +2664,148 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     assert_eq!(seeded_report.frontier.unwrap().get(), 2);
     assert_eq!(recovered.read_view().unwrap().state(), &expected);
     assert_eq!(recovered.checkpoint_outcomes().len(), 2);
+}
+
+fn assert_authorized_disk_metadata(
+    disk: &uste_txn::DiskCommitCoordinator<
+        GraphDiskLiveState,
+        MemoryFileSystem,
+        TestEnvelope,
+        CounterEntropy,
+        CounterEntropy,
+    >,
+    filesystem: &mut MemoryFileSystem,
+    policy: &NamespacePolicy,
+) {
+    struct Identity;
+    impl uste_policy::TrustedPrincipalAdapter for Identity {
+        type Credential = u8;
+        fn authenticate(
+            &mut self,
+            credential: &u8,
+        ) -> Result<uste_policy::PrincipalDigest, uste_policy::AuthenticationError> {
+            Ok(uste_policy::PrincipalDigest::from_bytes([*credential; 32]))
+        }
+    }
+    let mut kernel = uste_policy::PolicyKernel::new();
+    kernel.install_initial_policy(policy.clone()).unwrap();
+    let alice = kernel.authenticate(&mut Identity, &0x90).unwrap();
+    let bob = kernel.authenticate(&mut Identity, &0x91).unwrap();
+    let denied = kernel.authenticate(&mut Identity, &0x92).unwrap();
+    let foreign_kernel = uste_policy::PolicyKernel::new();
+    let foreign = foreign_kernel.authenticate(&mut Identity, &0x90).unwrap();
+    let facade = uste_txn::AuthorizedDiskMetadata::new(disk, &kernel).unwrap();
+    let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    for revision in [1_u8, 2] {
+        let key = IdempotencyKey::from_bytes([revision; 16]);
+        let transaction = TransactionId::from_bytes([revision + 32; 16]);
+        let outcome = facade
+            .outcome(filesystem, &alice, key, &mut clock(3), lookup, &mut cache)
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.revision.get(), u64::from(revision));
+        assert_eq!(
+            facade
+                .transaction_outcome(
+                    filesystem,
+                    &alice,
+                    transaction,
+                    &mut clock(3),
+                    lookup,
+                    &mut cache
+                )
+                .unwrap(),
+            Some(outcome)
+        );
+        assert_eq!(
+            facade
+                .outcome(filesystem, &bob, key, &mut clock(3), lookup, &mut cache)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            facade
+                .transaction_outcome(
+                    filesystem,
+                    &bob,
+                    transaction,
+                    &mut clock(3),
+                    lookup,
+                    &mut cache
+                )
+                .unwrap(),
+            None
+        );
+        for principal in [&denied, &foreign] {
+            let mut unused_clock = ScriptedClock::new([]);
+            assert_eq!(
+                facade.outcome(
+                    filesystem,
+                    principal,
+                    key,
+                    &mut unused_clock,
+                    lookup,
+                    &mut cache
+                ),
+                Err(uste_txn::AuthorizedError::Unauthorized)
+            );
+            assert_eq!(
+                facade.transaction_outcome(
+                    filesystem,
+                    principal,
+                    transaction,
+                    &mut unused_clock,
+                    lookup,
+                    &mut cache
+                ),
+                Err(uste_txn::AuthorizedError::Unauthorized)
+            );
+        }
+        assert_eq!(
+            facade.outcome(
+                filesystem,
+                &alice,
+                key,
+                &mut clock(10_000_000),
+                lookup,
+                &mut cache
+            ),
+            Err(uste_txn::AuthorizedError::Transaction(
+                uste_txn::TransactionError::IdempotencyExpired
+            ))
+        );
+    }
+    let accounting = uste_txn::DiskBlobAccountingLimits {
+        base: IndexRunReadLimits::new(1, 1, 1).unwrap(),
+        maximum_total_owners: 0,
+    };
+    assert_eq!(
+        facade
+            .committed_blob_usage(filesystem, &alice, accounting)
+            .unwrap(),
+        uste_txn::CommittedBlobUsage::default()
+    );
+    assert_eq!(
+        facade.committed_blob_usage(filesystem, &bob, accounting),
+        Err(uste_txn::AuthorizedError::Unauthorized)
+    );
+    assert!(matches!(
+        uste_txn::AuthorizedDiskMetadata::new(disk, &foreign_kernel),
+        Err(uste_txn::AuthorizedError::InvalidPolicy)
+    ));
+    let mut stale = uste_policy::PolicyKernel::new();
+    stale
+        .install_initial_policy(NamespacePolicy::new(
+            scope(),
+            PolicyVersion::new(2).unwrap(),
+            QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap(),
+        ))
+        .unwrap();
+    assert!(matches!(
+        uste_txn::AuthorizedDiskMetadata::new(disk, &stale),
+        Err(uste_txn::AuthorizedError::InvalidPolicy)
+    ));
 }
 
 #[derive(Debug)]

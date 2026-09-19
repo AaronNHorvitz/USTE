@@ -128,6 +128,11 @@ where
         Ok(&self.inner.state)
     }
 
+    #[must_use]
+    pub const fn scope(&self) -> NamespaceRef {
+        self.inner.scope
+    }
+
     /// Replay an authenticated suffix into bounded private overlays and an ordinary reducer.
     /// No state is returned until the terminal group succeeds. Reducers requiring external I/O
     /// preparation (including pending disk-graph states) are not silently reconstructed in RAM;

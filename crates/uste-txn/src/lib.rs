@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 mod authorized;
+mod authorized_disk;
 mod disk_metadata;
 mod index_recovery;
 
@@ -15,6 +16,7 @@ pub use authorized::{
     AuthorizedTransactionRequest, AuthorizedTransactionState, DurablePolicyChange,
     MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
 };
+pub use authorized_disk::{AuthorizedDiskMetadata, AuthorizedDiskPolicyState};
 pub use disk_metadata::{
     COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, CoordinatorMetadataCandidate,

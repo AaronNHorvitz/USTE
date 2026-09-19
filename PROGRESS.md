@@ -51,6 +51,21 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0065](docs/decisions/0065-authorized-disk-metadata-reads.md) adds a restricted borrowed
+  consumer facade for own retry/transaction outcomes and committed-byte usage. Authentication
+  and independent action permissions precede clock/disk work; current durable policy must match
+  exactly without constructing a snapshot. Graph pending state refuses the facade until repair.
+  Base/overlay isolation, foreign-kernel denial, expiry, quota permissions, missing/mismatched
+  policy and pending-state rejection pass in `cargo test -p uste-graph --test disk_index
+  --locked --offline -- --test-threads=1` (5 tests). Strict all-target txn/graph clippy passed
+  on `512e4d6` plus this increment. This is not authorized writes/uploads or graph reads.
+  `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_NET_OFFLINE=true bash scripts/check.sh` passed
+  under `MemoryHigh=3G MemoryMax=4G MemorySwapMax=512M`: workspace all-feature tests/clippy,
+  rustdoc, vectors, documentation/task graph, dependency/fixture builds and capped T-20 driver
+  (31 passed, 2 pre-existing exact-profile acceptance cases ignored). This is not a qualifying
+  benchmark. Preflight 17 GiB available RAM, 1.5 GiB free swap; last sampled cgroup peak was
+  2,847,420,416 bytes with zero cgroup swap, not an end-of-run peak measurement.
+
 - Added privileged bounded streaming committed-byte accounting as a disk-aware authorization
   prerequisite. It preflights base-plus-overlay owners, authenticates the complete owner run and
   returns exact namespace/principal first-owner charges only on terminal success. No complete
@@ -891,7 +906,8 @@ remaining mixed workload have not passed.
   The legacy coordinator still replays complete metadata maps; Decisions 0060–0063 add a separate
   disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
   metadata rebase. Decision 0064 connects the ready/one-pending graph suffix path; its dedicated
-  fault/corruption coverage and authorization facade remain incomplete.
+  fault/corruption coverage and full authorization facade remain incomplete. Decision 0065 adds
+  only restricted authorized own-outcome and committed-usage reads against a ready durable policy.
   Storage's own certificate/blob collections remain memory-resident, first-owner admission is
   read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
   the legacy publication API retains its compatibility scrub.
@@ -933,7 +949,8 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-graph fault/corruption coverage, add disk-aware authorization,
+next extend disk-graph fault/corruption coverage and disk-aware authorization beyond restricted
+metadata reads (writes, upload quota/reconciliation and graph candidate filtering),
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.

@@ -30,8 +30,10 @@ expiry, first-owner queries, privileged upload operations, and the existing narr
 maintenance and postcommit domain-publication hooks. It does not expose its internal legacy
 coordinator: that object's memory-only reads would omit the disk base. No legacy authorized view
 or authorization adapter is reused. These APIs remain trusted maintenance APIs, not consumer
-capabilities. A disk-aware authorization adapter, bounded suffix recovery, scalable first-owner
-admission, metadata rebase and disk-specific fault matrices remain required.
+capabilities. The extensions below add ordinary suffix recovery, accounting and commit faults;
+Decision 0063 adds rebase, Decision 0064 graph suffix recovery, and Decision 0065 restricted
+authorized metadata reads. Full disk-aware authorization and scalable first-owner admission
+remain required.
 
 Storage's certificate/blob metadata collections remain memory-resident. The current tests use
 small synthetic fixtures and capped processes, not BM-01/BM-06 qualification. T-20 stays open.
@@ -51,8 +53,8 @@ Only a terminal successful replay returns a coordinator. Any late byte/admission
 reducer failure drops the entire provisional state and overlays. This path supports ordinary
 `TransactionState::prepare` reducers; it does not supply the explicit-I/O graph proof preparation
 or intermediate graph-root handling needed for multi-revision `GraphDiskLiveState` recovery.
-No fallback materializes a graph map. The generic suffix capability does not close that graph gap,
-the disk-specific crash/fault matrix, authorization, rebase or large-scale qualification.
+No fallback materializes a graph map. Decision 0064 subsequently supplies ready/one-pending graph
+recovery; the generic suffix capability alone does not supply it or large-scale qualification.
 
 ## Streaming committed-byte accounting extension
 
@@ -79,4 +81,5 @@ state/outcome reads and exposes no new overlay. Restart from the disk base resto
 old frontier or the new certified frontier; an exact retry then yields revision two once. The
 new frontier is required specifically for crash-after certificate sync, never guessed from a
 lost response. These memory-filesystem crash cases do not simulate power loss or replace real
-process/filesystem qualification. Rebase and disk-graph recovery fault matrices remain open.
+process/filesystem qualification. Decision 0063 subsequently adds the rebase fault matrix;
+dedicated disk-graph recovery fault/corruption coverage remains open.

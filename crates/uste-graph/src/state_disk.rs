@@ -2110,6 +2110,15 @@ impl uste_txn::DiskCoordinatorState for GraphDiskLiveState {
     }
 }
 
+impl uste_txn::AuthorizedDiskPolicyState for GraphDiskLiveState {
+    fn current_durable_policy(&self) -> Result<&NamespacePolicy, ApplyError> {
+        self.current_base()
+            .ok_or(ApplyError::Conflict)?
+            .namespace_policy()
+            .ok_or(ApplyError::InvalidRequest)
+    }
+}
+
 impl EquivalentTransactionState for GraphState {
     type Equivalent = GraphDiskLiveState;
 

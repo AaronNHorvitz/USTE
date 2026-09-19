@@ -64,6 +64,12 @@ uncommitted and foreign objects share the same content-free error; this is not a
 claim. Graph policy is durable and must exactly match the trusted local adapter at open; initial
 installation is restricted to privileged raw bootstrap and absence fails closed.
 
+Decision 0065 adds `AuthorizedDiskMetadata`, a restricted read-only facade for the separate
+disk-base/overlay coordinator. It checks the exact ready durable policy without a snapshot,
+derives identity from the current kernel, and authorizes before disk/clock work. It exposes only
+own outcomes and committed-byte accounting, not writes, uploads, graph reads or complete quota
+state. Pending graph roots require trusted repair before this restricted facade becomes usable.
+
 Decision 0039 treats index cache/I/O diagnostics as privileged, cardinality-sensitive operator
 telemetry. Report and cache-clear operations require a fresh `ManageSchema` decision, an opaque
 root bound to the issuing authorized coordinator and a certain transaction outcome; revoked,
