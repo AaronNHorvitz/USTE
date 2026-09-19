@@ -471,7 +471,7 @@ where
 {
     let encoded = encode_transaction(&GraphTransaction::new(scope(), operations)).map_err(debug)?;
     let (read, merge) = development_merge_limits()?;
-    let mut writer = AuthorizedDiskWriter::new(
+    let mut writer = AuthorizedDiskWriter::new_with_cache_budget(
         disk,
         kernel,
         GraphDiskWritePreparationLimits {
@@ -486,6 +486,7 @@ where
             delta: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
         },
         GraphStateRootMergeLimits::uniform(merge, 64 * 1024).map_err(debug)?,
+        64 * 1024 * 1024,
     )
     .map_err(debug)?;
     let outcome = writer

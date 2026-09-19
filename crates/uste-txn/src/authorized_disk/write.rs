@@ -85,15 +85,33 @@ where
         preparation: S::PrepareLimits,
         publication: S::PublishLimits,
     ) -> Result<Self, AuthorizedError> {
+        Self::new_with_cache_budget(inner, policy, preparation, publication, 64 * 1024)
+    }
+
+    /// Trusted adapter configuration under storage's fixed cache cap, never a request override.
+    /// Proof and publication work limits remain independent of cache residency.
+    pub fn new_with_cache_budget(
+        inner: &'a mut DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a mut PolicyKernel,
+        preparation: S::PrepareLimits,
+        publication: S::PublishLimits,
+        cache_bytes: usize,
+    ) -> Result<Self, AuthorizedError> {
         let writer = Self {
             inner,
             policy,
             preparation,
             publication,
-            cache: PageCache::new(64 * 1024).map_err(TransactionError::Storage)?,
+            cache: PageCache::new(cache_bytes).map_err(TransactionError::Storage)?,
         };
         writer.validate_policy()?;
         Ok(writer)
+    }
+
+    /// Fixed constructor configuration only; exposes no candidate-dependent cache counters.
+    #[must_use]
+    pub fn cache_budget_bytes(&self) -> usize {
+        self.cache.budget()
     }
 
     fn validate_policy(&self) -> Result<(), AuthorizedError> {

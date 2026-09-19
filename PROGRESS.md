@@ -51,6 +51,24 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0080](docs/decisions/0080-trusted-disk-writer-cache-budget.md) adds trusted writer
+  cache configuration without changing the default, request limits or durable formats. Benchmark
+  writer batches now explicitly select 64 MiB, independently of the later query cache. Oversize
+  refusal, custom-budget authorization/fault/reference-write checks and default-budget exact retry
+  pass. Verified on pushed `a32bb56` plus this increment under the 3G/4G/512M process scope,
+  one Cargo job/test thread: `cargo test -p uste-graph --test disk_index --locked --offline
+  disk_queries -- --test-threads=1` (1 passed); `cargo test -p uste-txn --all-targets --locked
+  --offline -- --test-threads=1` (5 unit, 13 authorization, 14 coordinator passed);
+  `cargo clippy --workspace --all-targets --locked --offline -- -D warnings` passed.
+  `cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline
+  -- --test-threads=1` passed 39 unit tests (2 existing exact-profile oracle tests ignored)
+  in 28.28s and 3 real CLI tests in 13.62s. Experiment all-target strict clippy and
+  `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline` passed.
+  Host preflight: 29 GiB available RAM, 3.9 GiB free swap. No qualifying campaign ran.
+  Next retain measured cold-admission work/counts in native reports so profile limits can be
+  checked against actual authenticated work; then complete qualifying admission and I/O accounting.
+  T-20/T-19 remain open and the pinned M1 result is unchanged.
+
 - Decision 0079 adds `linux-disk-sample` and its persistent worker under the existing 30-second
   preemptive supervisor/watchdog. Shared plans/validators preserve 96 warm-ups, 384 paired queries,
   separate outcome/depth/topology populations, exact digest and the fixed five-by-60-second

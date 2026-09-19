@@ -59,6 +59,18 @@ pub(super) fn verify(
     bob: &AuthenticatedPrincipal,
     reference: &mut GraphState,
 ) {
+    let before = filesystem.operation_count(FaultOperation::ReadAt);
+    assert!(
+        AuthorizedDiskWriter::new_with_cache_budget(
+            disk,
+            kernel,
+            preparation(1024 * 1024),
+            publication(2 * 1024 * 1024),
+            usize::MAX
+        )
+        .is_err()
+    );
+    assert_eq!(filesystem.operation_count(FaultOperation::ReadAt), before);
     let transaction = GraphTransaction::new(
         scope(),
         vec![Operation::ReplaceEntity {
@@ -88,13 +100,15 @@ pub(super) fn verify(
         )
         .unwrap();
     {
-        let mut writer = AuthorizedDiskWriter::new(
+        let mut writer = AuthorizedDiskWriter::new_with_cache_budget(
             disk,
             kernel,
             preparation(1024 * 1024),
             publication(2 * 1024 * 1024),
+            128 * 1024,
         )
         .unwrap();
+        assert_eq!(writer.cache_budget_bytes(), 128 * 1024);
         let foreign_kernel = PolicyKernel::new();
         let foreign = foreign_kernel.authenticate(&mut Identity, &1).unwrap();
         assert!(matches!(
@@ -156,11 +170,12 @@ pub(super) fn verify(
         .unwrap();
     let expected_digest = GraphState::result_digest(&prepared);
     let outcome = {
-        let mut writer = AuthorizedDiskWriter::new(
+        let mut writer = AuthorizedDiskWriter::new_with_cache_budget(
             disk,
             kernel,
             preparation(1024 * 1024),
             publication(2 * 1024 * 1024),
+            128 * 1024,
         )
         .unwrap();
         // This clock has exactly one sample for preflight plus actual commit.
@@ -182,6 +197,7 @@ pub(super) fn verify(
         let mut writer =
             AuthorizedDiskWriter::new(disk, kernel, preparation(1), publication(2 * 1024 * 1024))
                 .unwrap();
+        assert_eq!(writer.cache_budget_bytes(), 64 * 1024);
         assert_eq!(
             writer
                 .commit(

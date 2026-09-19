@@ -63,7 +63,8 @@ digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
 
 `disk-engine-check` preserves that same cap, fixture, 384-query corpus and golden digest. Only a
 policy-only bootstrap uses `GraphState`; all fixture writes and the final cold-admitted reads use
-the disk-backed graph/coordinator capabilities. It selects the accepted 64 MiB USTE cache and
+the disk-backed graph/coordinator capabilities. It selects the accepted 64 MiB USTE cache for
+each writer batch and for the later reader (not simultaneous writer/reader caches), and
 reports maintenance-authorized cache counters. It still uses the memory fault-model adapter and
 development keys, holds the independent oracle in process and retains storage-level certificate/
 blob metadata in memory. It is semantic evidence, not performance or bounded total-RSS evidence.
