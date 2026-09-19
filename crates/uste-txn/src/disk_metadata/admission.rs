@@ -23,6 +23,44 @@ pub struct CoordinatorDiskBase {
 }
 
 impl CoordinatorDiskBase {
+    pub(crate) fn owner_count(&self) -> u64 {
+        self.metadata
+            .runs()
+            .find(|run| run.family() == FAMILY_BLOB_OWNER)
+            .map_or(0, |run| run.entry_count())
+    }
+
+    pub(crate) fn visit_owners_from_journal<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        limits: IndexRunReadLimits,
+        visitor: &mut dyn FnMut(BlobReference, PrincipalDigest) -> Result<(), StorageError>,
+    ) -> Result<(), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        if self.owner_count() == 0 {
+            return Ok(());
+        }
+        journal
+            .visit_index_run(
+                filesystem,
+                &self.metadata,
+                FAMILY_BLOB_OWNER,
+                limits,
+                &mut |key, value| {
+                    let (reference, principal) = decode_owner(self.metadata.scope(), key, value)?;
+                    visitor(reference, principal)
+                },
+            )
+            .map_err(TransactionError::Storage)?;
+        Ok(())
+    }
+
     pub(crate) fn revalidate_journal_binding<F, W, E, I>(
         &self,
         journal: &uste_storage::journal::JournalStore<F, W, E, I>,

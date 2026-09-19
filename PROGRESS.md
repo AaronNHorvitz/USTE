@@ -51,6 +51,19 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added privileged bounded streaming committed-byte accounting as a disk-aware authorization
+  prerequisite. It preflights base-plus-overlay owners, authenticates the complete owner run and
+  returns exact namespace/principal first-owner charges only on terminal success. No complete
+  quota owner map is built. This is O(owners) reference accounting, not a scalable aggregate index,
+  staged-upload accounting or a consumer authorization facade.
+- Accounting verification on `da7b40c` plus this increment: `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed all 5 tests, including
+  empty/poisoned state, owner/byte refusal, base plus overlay totals, principal isolation,
+  repeated references preserving first charges, and identical totals after rebase. Strict
+  all-target txn/replay clippy passed. An initial test compile exposed a missing type qualification;
+  repaired without production changes. One job/thread under the established 4 GiB process scope;
+  preflight 18 GiB available RAM and 1.5 GiB free swap. No benchmark or task completion claimed.
+
 - [Decision 0064](docs/decisions/0064-disk-coordinator-graph-suffix.md) connects the disk metadata
   coordinator to independently admitted graph state. Metadata may lag the ready graph root;
   authenticated streaming rebuilds only bounded post-metadata-base overlays. Recovery accepts a

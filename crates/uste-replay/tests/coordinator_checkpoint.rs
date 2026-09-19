@@ -187,6 +187,19 @@ fn disk_coordinator_commit_faults_preserve_base_and_exact_suffix() {
         let (mut disk, frontier) =
             reopen_fault_disk_counter(&mut filesystem, &name, base_state.clone());
         assert_eq!(frontier, 1);
+        let accounting = uste_txn::DiskBlobAccountingLimits {
+            base: uste_storage::IndexRunReadLimits::new(1, 1, 1).unwrap(),
+            maximum_total_owners: 0,
+        };
+        assert_eq!(
+            disk.committed_blob_usage(
+                &mut filesystem,
+                PrincipalDigest::from_bytes([1; 32]),
+                accounting,
+            )
+            .unwrap(),
+            uste_txn::CommittedBlobUsage::default()
+        );
         filesystem
             .arm(
                 FaultPlan::new([FaultPoint {
@@ -215,6 +228,14 @@ fn disk_coordinator_commit_faults_preserve_base_and_exact_suffix() {
             assert_eq!(disk.state().unwrap().value, 5);
         } else {
             assert_eq!(error, TransactionError::OutcomeUnknown);
+            assert_eq!(
+                disk.committed_blob_usage(
+                    &mut filesystem,
+                    PrincipalDigest::from_bytes([1; 32]),
+                    accounting,
+                ),
+                Err(TransactionError::OutcomeUnknown)
+            );
             assert!(matches!(
                 disk.state(),
                 Err(TransactionError::OutcomeUnknown)
@@ -1746,6 +1767,71 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
             let mut recovered = result.unwrap();
             assert_eq!(recovered.state().unwrap().value, 30);
             assert_eq!(recovered.overlay_counts(), (2, 1));
+            let accounting = uste_txn::DiskBlobAccountingLimits {
+                base: uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+                maximum_total_owners: 2,
+            };
+            assert!(matches!(
+                recovered.committed_blob_usage(
+                    &mut filesystem,
+                    principal,
+                    uste_txn::DiskBlobAccountingLimits {
+                        maximum_total_owners: 1,
+                        ..accounting
+                    }
+                ),
+                Err(TransactionError::ResourceLimit)
+            ));
+            assert!(matches!(
+                recovered.committed_blob_usage(
+                    &mut filesystem,
+                    principal,
+                    uste_txn::DiskBlobAccountingLimits {
+                        base: uste_storage::IndexRunReadLimits::new(16, 10, 1).unwrap(),
+                        ..accounting
+                    }
+                ),
+                Err(TransactionError::Storage(
+                    uste_storage::journal::StorageError::ResourceLimit
+                ))
+            ));
+            let before_usage = recovered
+                .committed_blob_usage(&mut filesystem, principal, accounting)
+                .unwrap();
+            assert_eq!(before_usage.owners, 2);
+            assert_eq!(
+                before_usage.namespace_bytes,
+                reference.byte_len() + new_reference.byte_len()
+            );
+            assert_eq!(before_usage.principal_bytes, reference.byte_len());
+            let new_owner_usage = recovered
+                .committed_blob_usage(
+                    &mut filesystem,
+                    PrincipalDigest::from_bytes([4; 32]),
+                    accounting,
+                )
+                .unwrap();
+            assert_eq!(new_owner_usage.principal_bytes, new_reference.byte_len());
+            let stranger_usage = recovered
+                .committed_blob_usage(
+                    &mut filesystem,
+                    PrincipalDigest::from_bytes([0xfe; 32]),
+                    accounting,
+                )
+                .unwrap();
+            assert_eq!(stranger_usage.principal_bytes, 0);
+            assert_eq!(
+                recovered
+                    .committed_blob_usage(
+                        &mut filesystem,
+                        PrincipalDigest::from_bytes([2; 32]),
+                        accounting,
+                    )
+                    .unwrap()
+                    .principal_bytes,
+                0,
+                "later references do not transfer the charge"
+            );
             assert_eq!(
                 recovered
                     .commit(
@@ -1788,6 +1874,12 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
                 .rebase_metadata(&mut filesystem, metadata_rebase_limits())
                 .unwrap();
             assert_eq!(recovered.overlay_counts(), (0, 0));
+            assert_eq!(
+                recovered
+                    .committed_blob_usage(&mut filesystem, principal, accounting)
+                    .unwrap(),
+                before_usage
+            );
             assert_eq!(
                 recovered
                     .committed_blob_owner(

@@ -24,6 +24,28 @@ pub struct DiskCoordinatorRecoveryLimits {
     pub maximum_encoded_bytes: u64,
 }
 
+/// Explicit bounds for complete committed-byte accounting, not staging or blob reads.
+#[derive(Clone, Copy, Debug)]
+pub struct DiskBlobAccountingLimits {
+    pub base: IndexRunReadLimits,
+    /// Includes both immutable base owners and bounded overlay owners.
+    pub maximum_total_owners: u64,
+}
+
+/// Exact first-owner logical-byte charges. These are privileged, cardinality-sensitive data.
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub struct CommittedBlobUsage {
+    pub namespace_bytes: u64,
+    pub principal_bytes: u64,
+    pub owners: u64,
+}
+
+impl core::fmt::Debug for CommittedBlobUsage {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("CommittedBlobUsage([REDACTED])")
+    }
+}
+
 pub(crate) struct DiskCommitMetadata<'a> {
     pub base: &'a CoordinatorDiskBase,
     pub overlay: CoordinatorRecoveryLimits,
@@ -401,6 +423,57 @@ where
             self.inner.outcomes.len(),
             self.inner.committed_blob_owners.len(),
         )
+    }
+
+    /// Privileged exact accounting without materializing a complete owner ledger. Fully streams
+    /// the base run and adds disjoint first-owner overlays. No partial total escapes late failure.
+    /// O(total owners) reads per call; not an aggregate index or a scalability qualification.
+    pub fn committed_blob_usage(
+        &self,
+        filesystem: &mut F,
+        principal: PrincipalDigest,
+        limits: DiskBlobAccountingLimits,
+    ) -> Result<CommittedBlobUsage, TransactionError> {
+        self.state()?;
+        let count = self
+            .base
+            .owner_count()
+            .checked_add(self.inner.committed_blob_owners.len() as u64)
+            .ok_or(TransactionError::ResourceLimit)?;
+        if count > limits.maximum_total_owners {
+            return Err(TransactionError::ResourceLimit);
+        }
+        let mut usage = CommittedBlobUsage::default();
+        let mut charge = |reference: BlobReference, owner: PrincipalDigest| {
+            usage.namespace_bytes = usage
+                .namespace_bytes
+                .checked_add(reference.byte_len())
+                .ok_or(StorageError::ResourceLimit)?;
+            if owner == principal {
+                usage.principal_bytes = usage
+                    .principal_bytes
+                    .checked_add(reference.byte_len())
+                    .ok_or(StorageError::ResourceLimit)?;
+            }
+            usage.owners = usage
+                .owners
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
+            Ok(())
+        };
+        self.base.visit_owners_from_journal(
+            &self.inner.journal,
+            filesystem,
+            limits.base,
+            &mut charge,
+        )?;
+        for &(reference, owner) in self.inner.committed_blob_owners.values() {
+            charge(reference, owner).map_err(TransactionError::Storage)?;
+        }
+        if usage.owners != count {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok(usage)
     }
 
     /// Stream the admitted base plus bounded overlays into current-revision metadata roots.

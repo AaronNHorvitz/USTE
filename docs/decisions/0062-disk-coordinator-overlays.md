@@ -54,6 +54,21 @@ or intermediate graph-root handling needed for multi-revision `GraphDiskLiveStat
 No fallback materializes a graph map. The generic suffix capability does not close that graph gap,
 the disk-specific crash/fault matrix, authorization, rebase or large-scale qualification.
 
+## Streaming committed-byte accounting extension
+
+`committed_blob_usage` computes exact namespace and selected-principal committed logical bytes
+from first-owner references without reconstructing the authorization ledger's complete owner map.
+Preflight the aggregate base-plus-overlay owner count, then authenticate the entire immutable owner
+run under caller page/entry/byte limits and add disjoint overlay first owners. Checked sums and
+terminal authentication must succeed before any total is returned. Rebase preserves the totals;
+later references by another principal never transfer the original charge. Outcome-unknown state
+denies accounting, including an otherwise empty ledger.
+
+This is a privileged accounting primitive, not an authorization facade: an eventual consumer path
+must authorize before invoking it and account separately for staged uploads and reservations.
+It performs O(total owners) reads per call, so it is a bounded-memory reference path, not a scalable
+aggregate index or benchmark qualification. No staging admission or quota policy is bypassed.
+
 ## Commit fault regression coverage
 
 The disk coordinator now has a 13-case deterministic regression matrix: error/crash-before/
