@@ -54,6 +54,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0094](docs/decisions/0094-disk-certificate-anchor-proofs.md) implements bounded
+  certificate-chain proofs directly from disk without the historical anchor map, plus proven
+  index lookup/cursors and scratch target admission. Proofs bind the exact live journal instance;
+  historical reads permit its successful append while staging requires the exact frontier.
+  A retained proof holds no key or filesystem lock. The first run passed 3 tests and rejected
+  a test's empty staged root; corrected the fixture to construct a real run, preserving the
+  nonempty-root contract. Four proof tests then passed (0.28s), existing four stage tests passed
+  (0.83s before the final owner-identity addition), and workspace strict lint passed. Final
+  append/reopen coverage passed all 4 proof tests (0.28s). Final source on `eaa4352` plus this
+  increment passed `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-graph --all-targets
+  --all-features --locked --offline -- --test-threads=1`, including 77 storage tests (173.02s),
+  15 disk-graph tests/full fault sweep (253.42s) and real adapter/process tests. Workspace
+  all-target/all-feature strict clippy and `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage
+  --no-deps --locked --offline` passed. Release native regressions passed via `CARGO_BUILD_JOBS=1
+  cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline
+  -- --test-threads=1`: 51 unit tests (42.97s; 2 existing oracle ignores), 3 CLI tests (11.92s).
+  Format, whitespace, docs (167 links) and task graph checks passed. Scope 3G/4G/512M, one
+  job/thread; preflight 37 GiB available/3.9 GiB free swap; sampled peak 1,103,712,256 bytes,
+  zero swap. This does not yet remove resident recovery maps or qualify T-20. Next integrate
+  owner-bound proofs with root discovery/read handles and a map-free certificate recovery mode;
+  preserve explicit proof work accounting and fail-closed behavior.
+
 - Decision 0093's native process regression now also restores saved derived manifests from a
   killed revision-two child beneath an unchanged completed revision-four journal. Open refuses
   without root mutation; separate resume/open/query processes recover the two-revision suffix
@@ -1613,9 +1635,11 @@ allocation/validation and add actual native one-page eviction regression; the pi
 development comparison preserves all results and work counts with reduced CPU time. Decision
 0091 supplies unpublished certified-revision storage roots. Decision 0092 connects them to
 verified private multi-revision graph/coordinator recovery. Decision 0093 integrates native
-resume with explicit fixture-derived limits and separate suffix diagnostics. Next extend native
+resume with explicit fixture-derived limits and separate suffix diagnostics. Native
 process coverage of stale-root gaps is now passing. Next address remaining resident storage
-metadata, starting with bounded authenticated certificate lookup and exact owner/frontier binding.
+metadata. Decision 0094 supplies bounded authenticated disk certificate proofs and exact live-owner
+binding for proven reads/cursors/staging. Next integrate proof-bound root handles and map-free
+certificate recovery, without hiding proof read amplification; blob collections still remain.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

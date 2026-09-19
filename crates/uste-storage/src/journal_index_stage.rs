@@ -8,6 +8,10 @@ pub struct IndexRecoveryStage {
     revision: CommitRevision,
     certificate_digest: [u8; 32],
     frontier: (CommitRevision, [u8; 32]),
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    certificate_log_id: [u8; 16],
+    owner: std::sync::Arc<CertificateProofOwner>,
 }
 
 impl fmt::Debug for IndexRecoveryStage {
@@ -25,6 +29,30 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Admit a scratch target using a bounded on-disk certificate proof, not the resident map.
+    /// Transaction/domain validation remains the recovery coordinator's responsibility.
+    pub fn open_proven_index_recovery_stage(
+        &self,
+        scope: NamespaceRef,
+        proof: &CertificateAnchorProof,
+    ) -> Result<IndexRecoveryStage, StorageError> {
+        self.validate_certificate_anchor_proof(proof)?;
+        if scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        let (revision, certificate_digest) = proof.anchor();
+        Ok(IndexRecoveryStage {
+            scope,
+            revision,
+            certificate_digest,
+            frontier: self.checkpoint_anchor().ok_or(StorageError::InvalidState)?,
+            epoch: self.epoch,
+            writer: self.writer,
+            certificate_log_id: self.certificate_log_id,
+            owner: std::sync::Arc::clone(&self.proof_owner),
+        })
+    }
+
     /// Admit recovery scratch work without I/O. The caller still must authenticate selected
     /// transactions and validate exact domain outcomes before exposing recovered state.
     pub fn open_index_recovery_stage(
@@ -46,6 +74,10 @@ where
             revision,
             certificate_digest,
             frontier,
+            epoch: self.epoch,
+            writer: self.writer,
+            certificate_log_id: self.certificate_log_id,
+            owner: std::sync::Arc::clone(&self.proof_owner),
         })
     }
 
@@ -53,7 +85,10 @@ where
         if self.poisoned
             || stage.scope.database() != self.database
             || self.checkpoint_anchor() != Some(stage.frontier)
-            || self.certificate_anchors.get(&stage.revision) != Some(&stage.certificate_digest)
+            || stage.epoch != self.epoch
+            || stage.writer != self.writer
+            || stage.certificate_log_id != self.certificate_log_id
+            || !std::sync::Arc::ptr_eq(&stage.owner, &self.proof_owner)
         {
             return Err(StorageError::InvalidState);
         }

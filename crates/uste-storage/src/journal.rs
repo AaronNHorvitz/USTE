@@ -39,6 +39,13 @@ use crate::{
 #[path = "journal_index_stage.rs"]
 mod index_stage;
 pub use index_stage::IndexRecoveryStage;
+#[path = "journal_certificate_proof.rs"]
+mod certificate_proof;
+use certificate_proof::CertificateProofOwner;
+pub use certificate_proof::{
+    CertificateAnchorProof, CertificateAnchorReadLimits, CertificateAnchorReadReport,
+    ProvenIndexRunCursor,
+};
 
 const STORAGE_MAJOR: u8 = 1;
 const STORAGE_MINOR: u8 = 0;
@@ -197,6 +204,7 @@ where
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
     certificate_anchors: BTreeMap<CommitRevision, [u8; 32]>,
+    proof_owner: std::sync::Arc<CertificateProofOwner>,
     committed_blob_inventories: BTreeSet<[u8; 32]>,
     committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
     committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
@@ -329,6 +337,7 @@ where
             frontier: None,
             previous_certificate_digest: [0; 32],
             certificate_anchors: BTreeMap::new(),
+            proof_owner: std::sync::Arc::new(CertificateProofOwner),
             committed_blob_inventories: BTreeSet::new(),
             committed_blobs: BTreeMap::new(),
             committed_blob_bytes: BTreeMap::new(),
@@ -532,6 +541,7 @@ where
                 frontier: replayed.frontier,
                 previous_certificate_digest: replayed.previous_certificate_digest,
                 certificate_anchors: replayed.certificate_anchors,
+                proof_owner: std::sync::Arc::new(CertificateProofOwner),
                 committed_blob_inventories: replayed.committed_blob_inventories,
                 committed_blobs: replayed.committed_blobs,
                 committed_blob_bytes: replayed.committed_blob_bytes,
@@ -2818,6 +2828,7 @@ fn read_array<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], St
 
 #[cfg(test)]
 mod tests {
+    mod certificate_proof_tests;
     mod index_stage_tests;
 
     use std::fmt::Write as _;

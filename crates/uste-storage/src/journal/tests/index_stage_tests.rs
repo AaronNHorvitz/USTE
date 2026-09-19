@@ -202,6 +202,26 @@ fn historical_stages_remain_invisible_until_current_frontier_publication() {
 #[test]
 fn stage_anchor_binding_and_forward_only_base_precede_io() {
     let mut f = Fixture::new();
+    let mut foreign = Fixture::new();
+    assert_eq!(
+        foreign.store.checkpoint_anchor(),
+        f.store.checkpoint_anchor()
+    );
+    let stage = f.stage(1);
+    foreign.fs.arm(FaultPlan::default()).unwrap();
+    assert!(
+        merge(
+            &mut foreign.store,
+            &mut foreign.fs,
+            &stage,
+            &foreign.base,
+            b"one",
+            b"two"
+        )
+        .is_err()
+    );
+    assert_eq!(foreign.fs.operation_count(Operation::ReadAt), 0);
+    assert_eq!(foreign.fs.operation_count(Operation::CreateNew), 0);
     f.fs.arm(FaultPlan::default()).unwrap();
     assert!(
         f.store
