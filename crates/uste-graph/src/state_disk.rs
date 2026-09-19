@@ -164,6 +164,8 @@ pub struct GraphStateLoadReport {
 }
 
 /// Caller-selected bounds for cold semantic admission without materializing complete graph maps.
+/// Scan capacities bound distinct run contents; aggregate lookup work includes repeated reads and
+/// cache hits, and is independently bounded by operation count and per-lookup storage ceilings.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GraphDiskBaseAdmissionLimits {
     scan: GraphStateLoadLimits,
@@ -188,6 +190,21 @@ impl GraphDiskBaseAdmissionLimits {
         maximum_lookup_result_bytes: u64,
         predecessor: IndexPredecessorLimits,
     ) -> Result<Self, GraphDiskError> {
+        let pages_per_lookup = if predecessor.maximum_page_visits() > MAX_INDEX_GET_PAGE_VISITS {
+            predecessor.maximum_page_visits()
+        } else {
+            MAX_INDEX_GET_PAGE_VISITS
+        };
+        let bytes_per_lookup = if predecessor.maximum_result_bytes() > MAX_INDEX_VALUE_BYTES {
+            predecessor.maximum_result_bytes()
+        } else {
+            MAX_INDEX_VALUE_BYTES
+        };
+        // These are representable configuration ceilings, not allocations or work counters.
+        // Saturation clamps a theoretical product to u64; actual charging remains checked and
+        // exact and every lookup is additionally clamped to the remaining aggregate budget.
+        let possible_pages = maximum_lookup_operations.saturating_mul(pages_per_lookup);
+        let possible_bytes = maximum_lookup_operations.saturating_mul(bytes_per_lookup as u64);
         if maximum_history_group_versions == 0
             || maximum_history_group_versions > MAX_INDEX_ENTRIES_PER_RUN
             || maximum_history_group_logical_bytes == 0
@@ -200,9 +217,9 @@ impl GraphDiskBaseAdmissionLimits {
             || maximum_lookup_operations
                 > MAX_INDEX_ENTRIES_PER_RUN * crate::MAX_TRANSACTION_REFERENCES as u64
             || maximum_lookup_page_visits == 0
-            || maximum_lookup_page_visits > MAX_INDEX_PAGES_PER_RUN * FAMILY_COUNT as u64
+            || maximum_lookup_page_visits > possible_pages
             || maximum_lookup_result_bytes == 0
-            || maximum_lookup_result_bytes > MAX_INDEX_RUN_LOGICAL_BYTES * FAMILY_COUNT as u64
+            || maximum_lookup_result_bytes > possible_bytes
         {
             return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
         }
@@ -5331,6 +5348,121 @@ mod tests {
     use uste_policy::{NamespacePolicy, PolicyVersion, QuotaLimits};
     use uste_txn::TransactionState;
     use uste_types::{BoundedString, DatabaseId, NamespaceId, NamespaceRef, RecordId, Value};
+
+    #[test]
+    fn admission_lookup_work_is_independent_of_single_scan_capacity() {
+        let scan = GraphStateLoadLimits::new(1, 1, 1, 8, 8, 4096).unwrap();
+        let predecessor = IndexPredecessorLimits::new(64, 16 * 1024).unwrap();
+        let limits = |operations, pages, bytes| {
+            GraphDiskBaseAdmissionLimits::new(
+                scan,
+                1,
+                4096,
+                1,
+                operations,
+                pages,
+                bytes,
+                predecessor,
+            )
+        };
+        // Repeated proofs can exceed one traversal of the format's eight possible runs.
+        assert!(
+            limits(
+                200_000,
+                MAX_INDEX_PAGES_PER_RUN * 8 + 1,
+                MAX_INDEX_RUN_LOGICAL_BYTES * 8 + 1
+            )
+            .is_ok()
+        );
+        assert!(
+            GraphStateLoadLimits::new(1, 1, 1, 8, MAX_INDEX_PAGES_PER_RUN * 8 + 1, 4096).is_err()
+        );
+        assert!(limits(1, MAX_INDEX_GET_PAGE_VISITS, MAX_INDEX_VALUE_BYTES as u64).is_ok());
+        assert!(limits(1, MAX_INDEX_GET_PAGE_VISITS + 1, 1).is_err());
+        assert!(limits(1, 1, MAX_INDEX_VALUE_BYTES as u64 + 1).is_err());
+        assert!(limits(0, 1, 1).is_err());
+        assert!(limits(1, 0, 1).is_err());
+        assert!(limits(1, 1, 0).is_err());
+        let large_predecessor = IndexPredecessorLimits::new(
+            uste_storage::MAX_INDEX_PREDECESSOR_PAGE_VISITS,
+            uste_storage::MAX_INDEX_KEY_BYTES + MAX_INDEX_VALUE_BYTES,
+        )
+        .unwrap();
+        assert!(
+            GraphDiskBaseAdmissionLimits::new(
+                scan,
+                1,
+                4096,
+                1,
+                1,
+                large_predecessor.maximum_page_visits(),
+                large_predecessor.maximum_result_bytes() as u64,
+                large_predecessor,
+            )
+            .is_ok()
+        );
+        let tiny = limits(2, 2, 2).unwrap();
+        let mut counted = GraphDiskBaseAdmissionReport::default();
+        charge_lookup_stats(
+            &mut counted,
+            tiny,
+            &IndexReadStats {
+                pages_read: 1,
+                cache_hits: 1,
+                result_bytes: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(counted.lookup_page_visits, 2);
+        assert!(remaining_exact_get_limits(&counted, tiny).is_err());
+        assert!(remaining_predecessor_limits(&counted, tiny).is_err());
+        assert!(
+            charge_lookup_stats(
+                &mut counted,
+                tiny,
+                &IndexReadStats {
+                    cache_hits: 1,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        let max_operations = MAX_INDEX_ENTRIES_PER_RUN * crate::MAX_TRANSACTION_REFERENCES as u64;
+        let maximal = limits(max_operations, u64::MAX, u64::MAX).unwrap();
+        assert!(limits(max_operations + 1, 1, 1).is_err());
+        // Configuration multiplication may saturate; runtime counters must never wrap.
+        let mut report = GraphDiskBaseAdmissionReport {
+            lookup_page_visits: u64::MAX,
+            ..Default::default()
+        };
+        assert!(
+            charge_lookup_stats(
+                &mut report,
+                maximal,
+                &IndexReadStats {
+                    cache_hits: 1,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        report.lookup_page_visits = 0;
+        report.lookup_result_bytes = u64::MAX;
+        assert!(
+            charge_lookup_stats(
+                &mut report,
+                maximal,
+                &IndexReadStats {
+                    result_bytes: 1,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(remaining_exact_get_limits(&report, maximal).is_err());
+        assert!(remaining_predecessor_limits(&report, maximal).is_err());
+    }
 
     fn scope() -> NamespaceRef {
         NamespaceRef::new(

@@ -51,6 +51,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0082](docs/decisions/0082-aggregate-graph-admission-work-limits.md) corrects cold
+  admission's aggregate lookup configuration: repeated proof visits/returned bytes use operation
+  count and per-operation ceilings, not a single scan's physical capacity. Explicit budgets,
+  checked runtime counters, cache-hit charging and remaining-budget clamps are unchanged.
+  Physical run/scan limits remain fixed. New tests cover both per-operation maxima, zero and
+  impossible budgets, configuration-product saturation and runtime overflow/exhaustion.
+  Verified on pushed `b74f320` plus this increment under the 3G/4G/512M scope, one job/thread:
+  `cargo test -p uste-graph --all-targets --locked --offline -- --test-threads=1` passed all
+  48 graph tests, including unchanged exact-minus, corruption and fault recovery tests (nine
+  disk integration tests, 31.38s). After extending the boundary test, `cargo test -p uste-graph
+  --lib --locked --offline admission_lookup_work -- --test-threads=1` passed. The complete release
+  experiment command passed 41 unit tests (2 existing exact-profile oracle tests ignored) in
+  29.36s and 3 real CLI tests in 13.54s. Workspace and experiment all-target strict clippy and
+  `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline` passed.
+  Docs/task checks pass (155 links, 68 tasks). Host preflight: 36 GiB available RAM, 3.9 GiB free
+  swap. No qualifying campaign ran. Next derive driver limits from the pinned fixture/batch plan,
+  validate them without lifting the development ceiling prematurely, and complete I/O accounting.
+  T-20/T-19 remain open; M1 and release gates are unchanged.
+
 - [Decision 0081](docs/decisions/0081-native-cold-admission-measurements.md) retains authenticated
   cold graph scan/lookup measurements and initial graph/metadata revisions in native setup
   reports, separately from final repaired/materialized cardinalities. No extra reads or complete

@@ -167,6 +167,11 @@ proof-operation, semantic-reference, lookup-page and lookup-byte budgets must re
 resource limit; exact-value byte limits apply before allocation. The resulting base must work with
 the existing bounded disk-preparation path without reconstructing complete graph maps.
 
+Decision 0082 distinguishes aggregate lookup work from one-pass physical scan capacity. Repeated
+proofs and cache hits still consume explicit aggregate budgets, each operation is clamped to the
+remaining allowance, and actual counter overflow fails closed. Configuration tests cover the
+independent scan/work ceilings and representable products; they do not qualify a larger workload.
+
 Decision 0052 verifies the warm live transition separately. Tests must prove exact reducer/root/
 certificate equivalence at handoff, proof-bound authoritative commit, exact idempotent retry,
 distinct-progress and proof-load refusal while pending, failed-publication retention, adequate-
