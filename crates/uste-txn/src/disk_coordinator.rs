@@ -7,6 +7,8 @@ mod blob_writes;
 mod commit_check;
 mod index_reads;
 mod inventory_free_recovery;
+mod metadata_reads;
+pub(crate) use metadata_reads::DiskMetadataBase;
 mod streaming;
 pub use blob_reads::DiskBlobReadLimits;
 pub use commit_check::DiskCommitCheck;
@@ -85,9 +87,8 @@ impl core::fmt::Debug for CommittedBlobUsage {
 }
 
 pub(crate) struct DiskCommitMetadata<'a> {
-    pub base: &'a CoordinatorDiskBase,
+    pub base: DiskMetadataBase<'a>,
     pub overlay: CoordinatorRecoveryLimits,
-    pub lookup: IndexGetLimits,
     pub storage: Option<uste_storage::journal::DiskBlobAppendLimits>,
     pub cache: &'a mut PageCache,
 }
@@ -97,7 +98,6 @@ impl DiskCommitMetadata<'_> {
         DiskCommitMetadata {
             base: self.base,
             overlay: self.overlay,
-            lookup: self.lookup,
             storage: self.storage,
             cache: self.cache,
         }
@@ -811,9 +811,8 @@ where
             clock,
             cancellation,
             Some(DiskCommitMetadata {
-                base: &self.base,
+                base: DiskMetadataBase::Runs(&self.base, lookup),
                 overlay,
-                lookup,
                 storage: None,
                 cache,
             }),
@@ -844,9 +843,8 @@ where
             clock,
             cancellation,
             Some(DiskCommitMetadata {
-                base: &self.base,
+                base: DiskMetadataBase::Runs(&self.base, lookup),
                 overlay,
-                lookup,
                 storage: None,
                 cache,
             }),

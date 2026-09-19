@@ -244,6 +244,12 @@ empty or populated quota projections with one bounded primary cursor and 1–512
 batches, requiring exhaustion before returning accounting. Existing roots are never changed by
 rebuilding; live authorized integration remains separate work.
 
+Decision 0147 adds an opt-in raw packed coordinator. Installation requires independently admitted
+primary/quota prefixes, exact published family receipts, live owner bindings and a trusted ready
+domain-state check including the explicit state-commitment profile. Its bounded overlays use the
+existing shared commit-admission/publication engine with packed historical reads. This is not a
+consumer authorization facade, automatic rebase, domain adapter or benchmark qualification.
+
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
 compare-and-swap deltas. It changes no v1 digest or persisted format and is not a live disk index

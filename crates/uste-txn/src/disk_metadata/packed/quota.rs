@@ -8,6 +8,7 @@ pub use admission::{
 pub use rebuild::{
     PackedQuotaRebuildLimits, PackedQuotaRebuildReport, rebuild_packed_quota_prefix,
 };
+use uste_storage::journal::JournalStore;
 use uste_storage::ordered_commitment::OrderedCommitment;
 
 pub const COORDINATOR_PACKED_USAGE_PROFILE_V1: [u8; 32] = [
@@ -58,6 +59,27 @@ fn head(owners: u64, bytes: u64, principals: u64) -> Vec<u8> {
 }
 
 impl PackedQuotaPrefix {
+    pub(crate) fn validate_live_pair<F, W, E, I>(
+        &self,
+        journal: &JournalStore<F, W, E, I>,
+        primary: &PackedCoordinatorPrefix,
+    ) -> Result<(), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        if !self.paired(primary) {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        for tree in primary.trees.iter().chain(self.trees.iter()) {
+            journal
+                .validate_packed_tree_binding(tree)
+                .map_err(TransactionError::Storage)?;
+        }
+        Ok(())
+    }
     pub fn anchor(&self) -> (CommitRevision, [u8; 32]) {
         self.anchor
     }

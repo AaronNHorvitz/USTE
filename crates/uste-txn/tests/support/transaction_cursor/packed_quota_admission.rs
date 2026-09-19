@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_live.rs"]
+mod live;
 #[path = "packed_quota_rebuild.rs"]
 mod rebuild;
 use uste_storage::{

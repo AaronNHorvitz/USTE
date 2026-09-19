@@ -1,5 +1,6 @@
 //! Inductively journal-validated private coordinator metadata. No root publication.
 mod admission;
+mod live_reads;
 mod quota;
 use super::*;
 use crate::{PackedIndexMaintenance, RecoveredFrontierTransaction};

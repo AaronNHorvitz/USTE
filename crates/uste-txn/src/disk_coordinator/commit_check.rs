@@ -37,9 +37,8 @@ where
             clock,
             cancellation,
             Some(DiskCommitMetadata {
-                base: &self.base,
+                base: DiskMetadataBase::Runs(&self.base, lookup),
                 overlay: self.admitted_overlay_limits(),
-                lookup,
                 storage: None,
                 cache,
             }),

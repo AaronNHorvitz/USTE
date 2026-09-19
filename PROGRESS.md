@@ -2,6 +2,41 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — packed live coordinator (Decision 0147)
+
+Implemented on pushed `95b6b03` plus this increment: a separate raw packed coordinator consumes
+the recovery owner, matches published primary/quota receipts and independently validated ready
+domain claims, and starts with empty bounded overlays. Shared authoritative admission now selects
+run-backed or packed historical reads. Exact retries, expiry, collision, original-owner reference
+binding, cancellation, external preparation and uncertainty keep the existing commit state machine.
+Raw upload staging remains privileged and is not a consumer quota/authorization facade.
+
+Six focused tests passed in session 30239 / scope `run-p622055-i21611950.scope` (1.19 s), followed
+by warnings-denied workspace Clippy (0.34 s). Coverage includes zero/one-owner overlay limits,
+seven rejected installation variants, corruption in all three read families, exhausted lookup
+budgets, prepared binding/second cancellation and 60 injected read/write/crash cases. Each fault
+restarts against an independent small-fixture full-replay oracle and cold-admits the unchanged
+old packed pair. The full-map test oracle is not part of the live implementation. Initial compile
+errors in imports, field names and test fixture API usage were corrected before passing tests.
+
+Full workspace verification passed in session 55215, scope `run-p622532-i21639292.scope`,
+exit 0: 555 tests across 47 executables, Clippy (0.07 s) and docs (1.14 s). Retained log:
+`/tmp/uste-d147-workspace-verification.log`. Exact command (preceded by `cargo fmt --all -- --check`):
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d147-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline'
+```
+
+Preflight showed 32 GiB available RAM / 5.6 GiB free swap; sampled scope peak 1,646,514,176 bytes
+and zero swap. `python3 scripts/check_docs.py` passed (222 links/documents, 152 definitions), as did
+format and diff checks. Next implement Decision 0148 packed live metadata rebase; its draft is
+excluded from this increment. No native/M1 interface switch, benchmark qualification or task
+completion is claimed. T-20/T-19 and the full roadmap remain open.
+
 ## Latest verified increment — bounded packed quota rebuild (Decision 0146)
 
 Implemented on pushed `a3c0ffa` plus this increment: quota reconstruction streams an independently

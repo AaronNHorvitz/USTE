@@ -68,7 +68,6 @@ where
                 filesystem,
                 request.principal,
                 request.idempotency_key,
-                disk.lookup,
                 disk.cache,
             )?;
         }
@@ -94,7 +93,6 @@ where
                     &self.journal,
                     filesystem,
                     request.transaction_id,
-                    disk.lookup,
                     disk.cache,
                 )?
                 .is_some()
@@ -104,7 +102,6 @@ where
             if self.outcomes.len() >= disk.overlay.maximum_outcomes
                 || disk
                     .base
-                    .metadata
                     .revision()
                     .get()
                     .checked_add(self.outcomes.len() as u64)
@@ -137,7 +134,6 @@ where
                         &self.journal,
                         filesystem,
                         reference.id(),
-                        disk.lookup,
                         disk.cache,
                     )?;
                 }

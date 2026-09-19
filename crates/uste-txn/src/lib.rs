@@ -10,7 +10,9 @@ mod authorized_disk;
 mod commit_admission;
 mod disk_metadata;
 mod index_recovery;
+mod packed_coordinator;
 mod packed_maintenance;
+pub use packed_coordinator::{PackedCommitCoordinator, PackedCommitLimits, PackedCoordinatorState};
 mod packed_root_maintenance;
 pub use packed_maintenance::{PackedIndexMaintenance, ScopedPackedCursor};
 
