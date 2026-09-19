@@ -40,6 +40,16 @@ fn fixture_roots(
     flip: bool,
     roots: bool,
 ) -> (FaultFs, EntryName, [u8; 32]) {
+    fixture_metadata_roots(count, graph_revision, flip, roots, None)
+}
+
+fn fixture_metadata_roots(
+    count: u8,
+    graph_revision: u8,
+    flip: bool,
+    roots: bool,
+    metadata_at: Option<u8>,
+) -> (FaultFs, EntryName, [u8; 32]) {
     let mut filesystem = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let name = EntryName::new("disk-graph-recovery-faults").unwrap();
     let mut coordinator = CommitCoordinator::create(
@@ -101,6 +111,11 @@ fn fixture_roots(
         if roots && revision == graph_revision {
             let snapshot = coordinator.read_view().unwrap().state().clone();
             publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
+        }
+        if metadata_at == Some(revision) {
+            publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+            uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem)
+                .unwrap();
         }
     }
     let digest =
@@ -190,7 +205,9 @@ fn prepare_source(
             recovery
                 .load_index_root_manifests(filesystem, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
                 .unwrap()
-                .remove(0),
+                .into_iter()
+                .min_by_key(|root| root.revision())
+                .unwrap(),
         ),
     };
     let transaction_groups = transaction_root.revision().get();
@@ -212,7 +229,9 @@ fn prepare_source(
             &recovery, filesystem,
         )
         .unwrap()
-        .remove(0)
+        .into_iter()
+        .min_by_key(|root| root.revision())
+        .unwrap()
     });
     let metadata_groups = candidate.revision().get();
     let metadata = uste_txn::admit_coordinator_disk_base(
@@ -443,6 +462,45 @@ fn origin_graph_genesis_staging_faults_leave_no_discoverable_roots() {
     }
     assert!(attempts > 0);
     eprintln!("genesis staging I/O error/crash attempts: {attempts}");
+}
+
+#[test]
+fn private_origin_rebase_can_replace_stale_pairs_without_relaxing_ordinary_rebase() {
+    let (mut fs, name, digest) = fixture_metadata_roots(3, 1, false, true, Some(3));
+    let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    let limits = uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read };
+    let input = prepare_source(&mut fs, &name, true, true, false);
+    let (mut disk, _) = recover_stream(&mut fs, input, 3, 1_000_000).unwrap();
+    let anchor = disk.checkpoint_anchor().unwrap();
+    assert_eq!(
+        disk.rebase_metadata(&mut fs, limits),
+        Err(uste_txn::TransactionError::ResourceLimit)
+    );
+    drop(disk);
+    fs.restart().unwrap();
+    let input = prepare_source(&mut fs, &name, true, true, true);
+    let (mut disk, _) = recover_stream(&mut fs, input, 3, 1_000_000).unwrap();
+    disk.rebase_metadata(&mut fs, limits).unwrap();
+    assert_eq!(disk.checkpoint_anchor().unwrap(), anchor);
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    assert!(!disk.rebase_required());
+    for profile in [
+        uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+        uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+    ] {
+        let roots = disk.load_index_root_manifests(&mut fs, profile).unwrap();
+        let terminal = roots
+            .iter()
+            .find(|root| root.revision().get() == 4)
+            .unwrap();
+        assert_eq!(terminal.logical_state_digest(), &digest);
+        assert!(
+            roots
+                .iter()
+                .all(|root| [3, 4].contains(&root.revision().get()))
+        );
+    }
 }
 
 #[test]

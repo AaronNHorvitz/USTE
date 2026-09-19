@@ -70,9 +70,12 @@ where
             .load_index_root_manifests(filesystem, profile)?
             .iter()
             .any(|root| root.revision() > base.metadata.revision() && root.revision() != anchor.0)
+            && !(base.metadata.revision() == CommitRevision::FIRST && base.has_unpublished_roots())
         {
             // Do not rotate away the pinned older pair when a different writer path advanced
             // beyond an incomplete rebase. Explicit cache rebuild is required in this case.
+            // An independently admitted private genesis plus its fully validated suffix is
+            // that explicit origin rebuild: it depends on no discoverable older root pair.
             return Err(TransactionError::ResourceLimit);
         }
     }

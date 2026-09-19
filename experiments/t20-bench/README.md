@@ -65,6 +65,15 @@ refuse complete graph-base loss, and repair exact incomplete certificate/journal
 include `repaired_certificate_tail_bytes` and `ignored_uncommitted_journal_bytes`; committed
 certificate corruption remains fatal. See the [control evidence](../../docs/evidence/native-bm06-recovery-controls.md).
 
+Decision 0119 adds explicit `bm06-linux-rebuild --root ROOT --password-file PASSWORD --records 2`
+for the terminal fixture, including complete loss of optional graph/coordinator roots. It privately
+reconstructs only the authenticated first transaction, independently admits its staged indexes,
+streams 100 later graph revisions, publishes/rebases terminal roots, checks exact retry and verifies
+all 200 history versions. Ordinary open/recover retain their complete graph-base-loss refusal.
+Reports disclose 100 admitted in-memory suffix outcomes against a 101-outcome ceiling: this is
+bounded development recovery, not incremental large-history metadata staging or qualification.
+Tests preserve committed journal/certificate bytes under complete missing/corrupt cache loss.
+
 ## BM-01 materialization
 
 This standalone experiment pins `bm01-materialization-v1`. It prepares deterministic synthetic

@@ -58,6 +58,40 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `bdb4ac9` plus this increment: [Decision 0119](docs/decisions/0119-native-bm06-origin-rebuild.md)
+  connects private genesis reconstruction to explicit native `bm06-linux-rebuild`, retaining the
+  two-record cap and ordinary open/recover refusal on total graph-base loss. Native tests rebuild
+  with intact caches and after corruption/removal-by-move of every optional root, verify all 200
+  historical versions and preserve certificate/journal files byte-for-byte. Reports explicitly
+  disclose 100 reconstructed suffix outcomes under the 101-outcome ceiling; this is not incremental
+  large-history coordinator staging. Committed certificate corruption and premature rebuild refuse.
+  The first intact-cache test failed `USTE_BM06_METADATA_REPAIR` because the ordinary stale-pair
+  guard intentionally refused intermediate cached metadata roots. Its origin-only exception now
+  requires a private, admitted revision-one base plus the fully validated suffix; the existing
+  exact-content terminal reuse/publication rules remain. A core test proves ordinary published-base
+  recovery still refuses that case while private origin reconstruction succeeds at unchanged authority.
+  Native focused scope `run-p432026-i21434430.scope` exited 0: the new test passes both full-cache-loss
+  variants (14.08s). `run-p432590-i21388766.scope` exited 0: the core stale-pair test passes (0.02s),
+  workspace and experiment strict Clippy pass (4.09s/1.40s). All used one Cargo job/test thread and
+  MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M. Final scope `run-p433391-i21423399.scope`
+  exited 0 with the same limits:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 404 tests across 46 executables, no failures or
+  ignores (graph disk 19/13.88s, replay 27/10.35s, storage 123/18.29s, txn 32/0.35s, M1 process
+  2/2.72s). `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 58 active units
+  (45.68s), three BM-01 process tests (11.89s), two BM-06 CLI tests (0.51s), eight BM-06 process
+  tests (70.43s); two prior exact-oracle ignores remain unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (0.04s) and `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (1.07s) pass.
+  Sampled scope peak 1,465,622,528 bytes, zero swap, not final whole-run peak. Preflight: 35 GiB
+  available RAM, 3.9 GiB free swap. Formatting/whitespace, docs (193 links), task graph (68 tasks)
+  pass. M1 sources and lockfiles are unchanged; no qualifying campaign ran.
+  Next: incremental bounded origin coordinator staging and construction/recovery scaling, without
+  claiming qualifying campaigns or T-20/T-19 completion.
+
 - Implemented on pushed `368521c` plus this increment: [Decision 0118](docs/decisions/0118-private-genesis-index-reconstruction.md)
   supplies bounded first-transaction reconstruction and unpublished graph/retry/transaction-ID
   bootstrap candidates for origin recovery. Normal semantic/journal admission remains mandatory;
@@ -2437,8 +2471,10 @@ transaction collision and first-owner semantics. The authenticated streaming suf
 implemented; native failure qualification, full immutable-run rewrite amplification and
 accounting qualification remain open. Decision 0113 implements bounded populated-base quota
 construction. Decisions 0114–0117 pin BM-06 materialization and add bounded model/native recovery,
-cache-loss refusal/retained-root controls and authenticated prefix resume; exact-scale construction,
-complete graph-cache-loss rebuild and the 30-trial campaign remain open. Decisions 0111–0112
+cache-loss refusal/retained-root controls and authenticated prefix resume. Decisions 0118–0119 add
+private origin candidates and explicit bounded native graph/coordinator cache-loss rebuild.
+Exact-scale construction, incremental large-history origin metadata staging and the 30-trial
+campaign remain open. Decisions 0111–0112
 add admitted disk principal totals and authorized opt-in accounting without whole-ledger scans.
 Decisions 0104–0110 reduce authenticated
 reverse-scan, empty-catalog, point-lookup and cache-recency work without qualifying T-20.

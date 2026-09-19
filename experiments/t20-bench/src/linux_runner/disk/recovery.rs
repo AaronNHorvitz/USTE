@@ -58,7 +58,7 @@ fn run_observed(
     }
     if !matches!(
         phase,
-        "create" | "resume" | "tail" | "recover" | "open" | "tail-crash-probe"
+        "create" | "resume" | "tail" | "recover" | "rebuild" | "open" | "tail-crash-probe"
     ) {
         return Err(error("USTE_BM06_PHASE"));
     }
@@ -139,14 +139,19 @@ fn run_observed(
     if frontier.revision().get() != expected {
         return Err(error("USTE_BM06_FRONTIER"));
     }
-    let (mut disk, admission) = admit_development_disk(
-        &mut fs,
-        recovery,
-        frontier,
-        limits,
-        matches!(phase, "recover" | "resume"),
-    )
+    let (mut disk, admission) = if phase == "rebuild" {
+        crate::engine::disk::rebuild_development_disk(&mut fs, recovery, frontier, limits)
+    } else {
+        admit_development_disk(
+            &mut fs,
+            recovery,
+            frontier,
+            limits,
+            matches!(phase, "recover" | "resume"),
+        )
+    }
     .map_err(|_| error("USTE_BM06_ADMISSION"))?;
+    let admitted_metadata_overlay_outcomes = disk.overlay_counts().0;
     let mut kernel = kernel(policy).map_err(|_| error("USTE_BM06_POLICY"))?;
     let principal = authenticate(&kernel)?;
     if matches!(phase, "create" | "resume") {
@@ -183,7 +188,7 @@ fn run_observed(
             .map_err(|_| error("USTE_BM06_MATERIALIZE"))?;
             observer(sequence)?;
         }
-    } else if phase == "recover" {
+    } else if matches!(phase, "recover" | "rebuild") {
         disk.rebase_metadata(
             &mut fs,
             CoordinatorMetadataRebaseLimits {
@@ -255,6 +260,12 @@ fn run_observed(
         "development_record_limit": MAX_NATIVE_RECORDS, "records": profile.records(),
         "filesystem_profile": "linux-x86_64-btrfs", "recovery_profile": "portable-argon2id-v1",
         "initial_graph_revision": admission.graph_revision, "initial_metadata_revision": admission.metadata_revision,
+        "origin_reconstruction": phase == "rebuild",
+        "private_graph_suffix_revisions": admission.suffix.revisions,
+        "private_graph_suffix_output_logical_bytes": admission.suffix.output_logical_bytes,
+        "maximum_metadata_overlay_outcomes": limits.groups,
+        "admitted_metadata_overlay_outcomes": admitted_metadata_overlay_outcomes,
+        "metadata_recovery_model": "disk-base-plus-bounded-suffix-overlays",
         "frontier": final_revision, "verified_history_versions": verified,
         "repaired_certificate_tail_bytes": storage_report.repaired_certificate_tail_bytes,
         "ignored_uncommitted_journal_bytes": storage_report.ignored_uncommitted_journal_bytes,

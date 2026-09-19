@@ -280,43 +280,98 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    admit_disk_mode(fs, recovery, frontier, profile_limits, repair, false)
+}
+
+/// Explicit small-development origin rebuild, never an automatic open fallback.
+pub(crate) fn rebuild_development_disk<F, W, E, I>(
+    fs: &mut F,
+    recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+    frontier: uste_txn::RecoveredFrontierTransaction,
+    profile_limits: DiskProfileLimits,
+) -> Result<AdmittedDisk<F, W, E, I>, String>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_disk_mode(fs, recovery, frontier, profile_limits, true, true)
+}
+
+fn admit_disk_mode<F, W, E, I>(
+    fs: &mut F,
+    mut recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+    frontier: uste_txn::RecoveredFrontierTransaction,
+    profile_limits: DiskProfileLimits,
+    repair: bool,
+    origin: bool,
+) -> Result<AdmittedDisk<F, W, E, I>, String>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if frontier.revision().get() > profile_limits.groups {
+        return Err("disk graph frontier exceeds admitted groups".into());
+    }
     let mut cache = PageCache::new(limits::CACHE_BYTES).map_err(debug)?;
     let lookup = IndexGetLimits::new(64, 136).map_err(debug)?;
-    let graph_candidate = uste_graph::load_graph_state_root_candidates_for_recovery(&recovery, fs)
-        .map_err(debug)?
-        .into_iter()
-        .filter(|root| root.revision() <= frontier.revision())
-        .max_by_key(|root| root.revision())
-        .ok_or("missing graph base")?;
-    if frontier.revision().get() > profile_limits.groups
-        || (!repair && graph_candidate.revision() != frontier.revision())
-    {
-        return Err("disk graph suffix requires admitted repair".into());
-    }
-    let transaction_roots = recovery
-        .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
-        .map_err(debug)?;
-    let candidate =
-        uste_txn::load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
-            &recovery, fs,
+    let (graph_candidate, candidate, transaction_root) = if origin {
+        let genesis = recovery
+            .recover_inventory_free_genesis(fs, GraphState::new(recovery.scope()), 1_048_576)
+            .map_err(debug)?;
+        let graph =
+            uste_graph::stage_graph_genesis_root(&mut recovery, fs, &genesis, profile_limits.merge)
+                .map_err(debug)?;
+        let (metadata, transactions) = uste_txn::stage_inventory_free_genesis_metadata(
+            &mut recovery,
+            fs,
+            &genesis,
+            profile_limits.merge,
         )
-        .map_err(debug)?
-        .into_iter()
-        .filter(|root| {
-            root.revision() <= graph_candidate.revision()
-                && transaction_roots
-                    .iter()
-                    .any(|tx| tx.revision() == root.revision())
-        })
-        .max_by_key(|root| root.revision())
-        .ok_or("missing paired metadata base")?;
-    if !repair && candidate.revision() != frontier.revision() {
-        return Err("disk metadata suffix requires admitted repair".into());
-    }
-    let transaction_root = transaction_roots
-        .into_iter()
-        .find(|root| root.revision() == candidate.revision())
-        .ok_or("missing paired transaction root")?;
+        .map_err(debug)?;
+        (graph, metadata, transactions)
+    } else {
+        let graph_candidate =
+            uste_graph::load_graph_state_root_candidates_for_recovery(&recovery, fs)
+                .map_err(debug)?
+                .into_iter()
+                .filter(|root| root.revision() <= frontier.revision())
+                .max_by_key(|root| root.revision())
+                .ok_or("missing graph base")?;
+        if frontier.revision().get() > profile_limits.groups
+            || (!repair && graph_candidate.revision() != frontier.revision())
+        {
+            return Err("disk graph suffix requires admitted repair".into());
+        }
+        let transaction_roots = recovery
+            .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+            .map_err(debug)?;
+        let candidate =
+            uste_txn::load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
+                &recovery, fs,
+            )
+            .map_err(debug)?
+            .into_iter()
+            .filter(|root| {
+                root.revision() <= graph_candidate.revision()
+                    && transaction_roots
+                        .iter()
+                        .any(|tx| tx.revision() == root.revision())
+            })
+            .max_by_key(|root| root.revision())
+            .ok_or("missing paired metadata base")?;
+        if !repair && candidate.revision() != frontier.revision() {
+            return Err("disk metadata suffix requires admitted repair".into());
+        }
+        let transaction_root = transaction_roots
+            .into_iter()
+            .find(|root| root.revision() == candidate.revision())
+            .ok_or("missing paired transaction root")?;
+        (graph_candidate, candidate, transaction_root)
+    };
     let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
         &recovery,
         fs,

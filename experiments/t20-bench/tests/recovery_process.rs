@@ -314,7 +314,7 @@ fn bm06_native_sigkill_tail_recovers_exact_history_and_rejects_substitution() {
     assert_eq!(certificate.read_at(&mut original, offset).unwrap(), 1);
     assert_eq!(certificate.write_at(&[original[0] ^ 1], offset).unwrap(), 1);
     certificate.sync_all().unwrap();
-    for phase in ["open", "recover"] {
+    for phase in ["open", "recover", "rebuild"] {
         let output = complete(fixture.command(phase));
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
@@ -329,7 +329,7 @@ fn bm06_native_sigkill_tail_recovers_exact_history_and_rejects_substitution() {
 fn bm06_native_tail_and_open_preserve_explicit_phase_frontiers() {
     let fixture = Fixture::new(1);
     assert_eq!(fixture.run("create")["verified_history_versions"], 99);
-    for phase in ["create", "recover", "open"] {
+    for phase in ["create", "recover", "rebuild", "open"] {
         assert!(!complete(fixture.command(phase)).status.success());
     }
     let tail = fixture.run("tail");
@@ -384,6 +384,67 @@ fn bm06_native_corrupt_or_missing_terminal_caches_rebuild_from_retained_roots() 
             certificates
         );
         assert_eq!(fixture.run("open")["frontier"], 101);
+    }
+}
+
+#[test]
+fn bm06_native_explicit_origin_rebuild_preserves_authority_after_all_cache_loss() {
+    for missing in [false, true] {
+        let fixture = Fixture::new(2);
+        fixture.run("create");
+        fixture.run("tail");
+        fixture.run("recover");
+        let certificates = fs::read(fixture.database().join("CERTIFICATES")).unwrap();
+        let segments: BTreeMap<_, _> = fs::read_dir(fixture.database())
+            .unwrap()
+            .map(Result::unwrap)
+            .filter(|entry| entry.file_name().to_str().unwrap().starts_with("j-"))
+            .map(|entry| (entry.path(), fs::read(entry.path()).unwrap()))
+            .collect();
+        assert_eq!(segments.len(), 1);
+        // Explicit origin reconstruction must also coexist with valid old/terminal caches.
+        assert_eq!(
+            fixture.run("rebuild")["private_graph_suffix_revisions"],
+            100
+        );
+        let saved = fixture.root.join("saved-all-cache-roots");
+        fs::DirBuilder::new().mode(0o700).create(&saved).unwrap();
+        for (name, mut bytes) in fixture.roots() {
+            if missing {
+                fs::rename(fixture.database().join(&name), saved.join(&name)).unwrap();
+            } else {
+                bytes[100] ^= 1;
+                fixture.replace_root(&name, &bytes);
+            }
+        }
+        fs::File::open(&saved).unwrap().sync_all().unwrap();
+        fs::File::open(fixture.database())
+            .unwrap()
+            .sync_all()
+            .unwrap();
+        for phase in ["open", "recover"] {
+            assert!(!complete(fixture.command(phase)).status.success());
+        }
+        let rebuilt = fixture.run("rebuild");
+        assert_eq!(rebuilt["origin_reconstruction"], true);
+        assert_eq!(rebuilt["initial_graph_revision"], 1);
+        assert_eq!(rebuilt["initial_metadata_revision"], 1);
+        assert_eq!(rebuilt["private_graph_suffix_revisions"], 100);
+        assert_eq!(rebuilt["maximum_metadata_overlay_outcomes"], 101);
+        assert_eq!(rebuilt["admitted_metadata_overlay_outcomes"], 100);
+        assert_eq!(rebuilt["frontier"], 101);
+        assert_eq!(rebuilt["verified_history_versions"], 200);
+        assert_eq!(
+            fs::read(fixture.database().join("CERTIFICATES")).unwrap(),
+            certificates
+        );
+        for (path, bytes) in segments {
+            assert_eq!(fs::read(path).unwrap(), bytes);
+        }
+        let opened = fixture.run("open");
+        assert_eq!(opened["origin_reconstruction"], false);
+        assert_eq!(opened["private_graph_suffix_revisions"], 0);
+        assert_eq!(opened["verified_history_versions"], 200);
     }
 }
 
