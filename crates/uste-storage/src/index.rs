@@ -381,6 +381,48 @@ impl IndexGetLimits {
     }
 }
 
+/// Prefix-scan work bounds, including binary-search and cache-hit page visits.
+/// Result bytes count keys and values; zero result/count budgets can prove absence.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct IndexScanLimits {
+    maximum_page_visits: u64,
+    maximum_results: usize,
+    maximum_result_bytes: usize,
+}
+
+impl IndexScanLimits {
+    pub const fn new(
+        maximum_page_visits: u64,
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+    ) -> Result<Self, StorageError> {
+        if maximum_page_visits == 0
+            || maximum_page_visits > MAX_INDEX_GET_PAGE_VISITS
+            || maximum_results > MAX_INDEX_SCAN_RESULTS
+            || maximum_result_bytes > MAX_INDEX_RESULT_BYTES
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Self {
+            maximum_page_visits,
+            maximum_results,
+            maximum_result_bytes,
+        })
+    }
+    #[must_use]
+    pub const fn maximum_page_visits(self) -> u64 {
+        self.maximum_page_visits
+    }
+    #[must_use]
+    pub const fn maximum_results(self) -> usize {
+        self.maximum_results
+    }
+    #[must_use]
+    pub const fn maximum_result_bytes(self) -> usize {
+        self.maximum_result_bytes
+    }
+}
+
 /// Per-operation work bounds for an authenticated greatest-key-at-or-before lookup.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IndexPredecessorLimits {
@@ -2270,16 +2312,43 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    let mut entries = Vec::new();
-    let stats = scan_prefix_visit(
+    scan_prefix_bounded(
         filesystem,
         context,
         vault,
         root,
         family,
         prefix,
-        maximum,
-        maximum_result_bytes,
+        IndexScanLimits::new(MAX_INDEX_GET_PAGE_VISITS, maximum, maximum_result_bytes)?,
+        cache,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn scan_prefix_bounded<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    prefix: &[u8],
+    limits: IndexScanLimits,
+    cache: &mut PageCache,
+) -> Result<IndexScan, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let mut entries = Vec::new();
+    let stats = scan_prefix_visit_bounded(
+        filesystem,
+        context,
+        vault,
+        root,
+        family,
+        prefix,
+        limits,
         cache,
         &mut |entry| {
             entries
@@ -2310,14 +2379,55 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
+    scan_prefix_visit_bounded(
+        filesystem,
+        context,
+        vault,
+        root,
+        family,
+        prefix,
+        IndexScanLimits::new(MAX_INDEX_GET_PAGE_VISITS, maximum, maximum_result_bytes)?,
+        cache,
+        visitor,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn scan_prefix_visit_bounded<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    root: &RecoveredIndexRoot,
+    family: u8,
+    prefix: &[u8],
+    limits: IndexScanLimits,
+    cache: &mut PageCache,
+    visitor: &mut dyn FnMut(IndexScanEntry) -> Result<(), StorageError>,
+) -> Result<IndexReadStats, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
     validate_read(root, context, prefix)?;
-    if maximum > MAX_INDEX_SCAN_RESULTS || maximum_result_bytes > MAX_INDEX_RESULT_BYTES {
-        return Err(StorageError::ResourceLimit);
-    }
     let run = root.run(family)?;
     let mut stats = IndexReadStats::default();
-    let Some(mut page_index) = lower_bound_page(
-        filesystem, context, vault, root, run, prefix, cache, &mut stats,
+    let mut page_visits = 0;
+    let page_limits = IndexGetLimits {
+        maximum_page_visits: limits.maximum_page_visits,
+        maximum_result_bytes: MAX_INDEX_VALUE_BYTES,
+    };
+    let Some(mut page_index) = lower_bound_page_bounded(
+        filesystem,
+        context,
+        vault,
+        root,
+        run,
+        prefix,
+        page_limits,
+        &mut page_visits,
+        cache,
+        &mut stats,
     )?
     else {
         return Ok(stats);
@@ -2328,8 +2438,17 @@ where
     let mut current_total = None;
     let mut finished = false;
     while page_index < run.page_count && !finished {
-        let page = load_page(
-            filesystem, context, vault, root, run, page_index, cache, &mut stats,
+        let page = load_get_page(
+            filesystem,
+            context,
+            vault,
+            root,
+            run,
+            page_index,
+            page_limits,
+            &mut page_visits,
+            cache,
+            &mut stats,
         )?;
         let parsed = ParsedPage::new(page, root, run, page_index)?;
         for fragment in parsed.fragments() {
@@ -2346,6 +2465,16 @@ where
                 if fragment.offset != 0 {
                     return Err(StorageError::IntegrityFailure);
                 }
+                let next_bytes = fragment
+                    .key
+                    .len()
+                    .checked_add(fragment.total_len)
+                    .and_then(|next| usize::try_from(stats.result_bytes).ok()?.checked_add(next))
+                    .ok_or(StorageError::ResourceLimit)?;
+                if entry_count == limits.maximum_results || next_bytes > limits.maximum_result_bytes
+                {
+                    return Err(StorageError::ResourceLimit);
+                }
                 current_key.extend_from_slice(fragment.key);
                 current_total = Some(fragment.total_len);
                 current_value
@@ -2360,7 +2489,7 @@ where
             }
             current_value.extend_from_slice(fragment.value);
             if current_value.len() == fragment.total_len {
-                if entry_count == maximum {
+                if entry_count == limits.maximum_results {
                     return Err(StorageError::ResourceLimit);
                 }
                 let next_bytes = current_key
@@ -2372,7 +2501,7 @@ where
                             .and_then(|current| current.checked_add(value))
                     })
                     .ok_or(StorageError::ResourceLimit)?;
-                if next_bytes > maximum_result_bytes {
+                if next_bytes > limits.maximum_result_bytes {
                     return Err(StorageError::ResourceLimit);
                 }
                 stats.result_bytes =
@@ -3054,47 +3183,6 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn lower_bound_page<F, W, E>(
-    filesystem: &mut F,
-    context: &IndexContext<'_, F::Directory>,
-    vault: &KeyVault<W, E>,
-    root: &RecoveredIndexRoot,
-    run: &IndexRunDescriptor,
-    key: &[u8],
-    cache: &mut PageCache,
-    stats: &mut IndexReadStats,
-) -> Result<Option<u64>, StorageError>
-where
-    F: FileSystem,
-    W: DurableKeyEnvelope,
-    E: EntropySource,
-{
-    let mut low = 0_u64;
-    let mut high = run.page_count;
-    while low < high {
-        let middle = low + (high - low) / 2;
-        let page = load_page(
-            filesystem,
-            filesystem_context(context),
-            vault,
-            root,
-            run,
-            middle,
-            cache,
-            stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, middle)?;
-        let last = parsed.last_key()?;
-        if last < key {
-            low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
-        } else {
-            high = middle;
-        }
-    }
-    Ok((low < run.page_count).then_some(low))
-}
-
-#[allow(clippy::too_many_arguments)]
 fn lower_bound_page_bounded<F, W, E>(
     filesystem: &mut F,
     context: &IndexContext<'_, F::Directory>,
@@ -3190,10 +3278,6 @@ where
     load_page(
         filesystem, context, vault, root, run, page_index, cache, stats,
     )
-}
-
-const fn filesystem_context<'a, D>(context: &'a IndexContext<'_, D>) -> &'a IndexContext<'a, D> {
-    context
 }
 
 #[allow(clippy::too_many_arguments)]

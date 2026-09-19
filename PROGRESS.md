@@ -974,6 +974,18 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
+T-20 bounded prefix-scan increment (Decision 0066), tested on `d8fd8fa` plus this increment:
+storage and both coordinators now admit prefix-scan page visits (including cache hits), entry
+count and key-plus-value bytes. Fragmented entries are admitted before entry allocation.
+Cold/warm budget refusals, exact-byte success, absence and provisional-visitor refusal pass.
+Verification: `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G
+-p MemorySwapMax=512M bash -lc 'CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn
+-p uste-graph --all-targets --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1
+cargo clippy -p uste-storage -p uste-txn -p uste-graph --all-targets --locked --offline
+-- -D warnings'` exited 0. Host check after completion: 17 GiB available RAM, 1.5 GiB free
+swap. No qualifying benchmark ran. Next harden the restricted metadata facade: caller-owned
+cache telemetry and adjustable outcome lookup limits must not cross its authorization boundary.
+
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and
 unchanged pilot sources, and the complete gate at `8885da4` included the pilot recovery tests.

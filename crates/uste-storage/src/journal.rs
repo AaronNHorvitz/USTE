@@ -30,8 +30,8 @@ use crate::{
         self, DurableIndexRoot, IndexContext, IndexDelta, IndexEntry, IndexGetLimits,
         IndexPredecessor, IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor,
         IndexRunDescriptor, IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport,
-        IndexRunVisitor, IndexScan, IndexScanEntry, IndexScrubReport, MergedIndexRun, PageCache,
-        RecoveredIndexRoot,
+        IndexRunVisitor, IndexScan, IndexScanEntry, IndexScanLimits, IndexScrubReport,
+        MergedIndexRun, PageCache, RecoveredIndexRoot,
     },
     read_exact_at, write_all_at,
 };
@@ -1652,6 +1652,38 @@ where
             prefix,
             maximum,
             maximum_result_bytes,
+            cache,
+        )
+    }
+
+    /// Caller-bounded prefix scan. Page visits include search and cache hits; result limits are
+    /// admitted before allocating each entry. No partial collection is returned on failure.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        limits: IndexScanLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, StorageError> {
+        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
+            return Err(StorageError::InvalidState);
+        }
+        index::scan_prefix_bounded(
+            filesystem,
+            &IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            root,
+            family,
+            prefix,
+            limits,
             cache,
         )
     }
@@ -3534,6 +3566,110 @@ mod tests {
             .unwrap();
         assert_eq!(collected, comparison.entries);
         assert_eq!(visit_stats, comparison.stats);
+
+        assert_eq!(
+            IndexScanLimits::new(0, 1, 1),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            IndexScanLimits::new(index::MAX_INDEX_GET_PAGE_VISITS + 1, 1, 1),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            IndexScanLimits::new(32, index::MAX_INDEX_SCAN_RESULTS + 1, 1),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            IndexScanLimits::new(32, 1, index::MAX_INDEX_RESULT_BYTES + 1),
+            Err(StorageError::ResourceLimit)
+        );
+        let exact = store
+            .index_scan_prefix_bounded(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"beta",
+                IndexScanLimits::new(32, 1, large.len() + 4).unwrap(),
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(
+            exact.entries,
+            vec![IndexScanEntry {
+                key: b"beta".to_vec(),
+                value: large.clone()
+            }]
+        );
+        for limits in [
+            IndexScanLimits::new(1, 1, large.len() + 4).unwrap(),
+            IndexScanLimits::new(32, 0, large.len() + 4).unwrap(),
+            IndexScanLimits::new(32, 1, large.len() + 3).unwrap(),
+        ] {
+            for warm in [false, true] {
+                let mut scan_cache = PageCache::new(
+                    index::INDEX_PAGE_BYTES * usize::try_from(run.page_count()).unwrap(),
+                )
+                .unwrap();
+                if warm {
+                    store
+                        .index_scan_prefix_bounded(
+                            &mut filesystem,
+                            &roots[0],
+                            1,
+                            b"beta",
+                            IndexScanLimits::new(32, 1, large.len() + 4).unwrap(),
+                            &mut scan_cache,
+                        )
+                        .unwrap();
+                }
+                assert_eq!(
+                    store.index_scan_prefix_bounded(
+                        &mut filesystem,
+                        &roots[0],
+                        1,
+                        b"beta",
+                        limits,
+                        &mut scan_cache
+                    ),
+                    Err(StorageError::ResourceLimit)
+                );
+            }
+        }
+        assert!(
+            store
+                .index_scan_prefix_bounded(
+                    &mut filesystem,
+                    &roots[0],
+                    1,
+                    b"z",
+                    IndexScanLimits::new(32, 0, 0).unwrap(),
+                    &mut cache
+                )
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        let mut callbacks = 0;
+        assert_eq!(
+            store.index_scan_prefix_visit(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"beta",
+                1,
+                large.len() + 3,
+                &mut cache,
+                &mut |_| {
+                    callbacks += 1;
+                    Ok(())
+                }
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        assert_eq!(
+            callbacks, 0,
+            "over-budget entry must not escape to the visitor"
+        );
 
         let logical_bytes = u64::try_from(large.len() + 24).unwrap();
         let mut full_run_entries = Vec::new();

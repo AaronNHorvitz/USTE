@@ -101,6 +101,20 @@ where
             .open_index_run_cursor(filesystem, root, family, limits)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        limits: IndexScanLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, TransactionError> {
+        self.inner
+            .index_scan_prefix_bounded(filesystem, root, family, prefix, limits, cache)
+    }
+
     pub fn next_index_run_entry(
         &self,
         filesystem: &mut F,

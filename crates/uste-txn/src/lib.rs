@@ -49,8 +49,8 @@ use uste_storage::{
     EMPTY_BLOB_INVENTORY_DIGEST, IndexDelta, IndexEntry, IndexGetLimits, IndexPredecessor,
     IndexPredecessorLimits, IndexReadStats, IndexRootInput, IndexRunCursor, IndexRunDescriptor,
     IndexRunMergeLimits, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor, IndexScan,
-    IndexScrubReport, MergedIndexRun, OwnershipFileSystem, PageCache, RecoveredCheckpoint,
-    RecoveredIndexRoot,
+    IndexScanLimits, IndexScrubReport, MergedIndexRun, OwnershipFileSystem, PageCache,
+    RecoveredCheckpoint, RecoveredIndexRoot,
     journal::{
         CommitInput, CreationOptions, DurableKeyEnvelope, JournalStore, RecoveredGroup,
         RecoveryReport, StorageError,
@@ -1542,6 +1542,28 @@ where
         }
         self.journal
             .index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted raw bounded prefix scan. Consumer-facing callers must authorize before expansion.
+    #[allow(clippy::too_many_arguments)]
+    pub fn index_scan_prefix_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        limits: IndexScanLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexScan, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if root.scope() != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .index_scan_prefix_bounded(filesystem, root, family, prefix, limits, cache)
             .map_err(TransactionError::Storage)
     }
 
