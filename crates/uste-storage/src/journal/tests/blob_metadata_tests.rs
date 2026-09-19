@@ -1,4 +1,5 @@
 use super::*;
+mod append;
 mod cold;
 
 fn limits() -> BlobMetadataRebuildLimits {

@@ -54,6 +54,7 @@ mod blob_metadata;
 pub use blob_metadata::{
     BLOB_METADATA_PROFILE_V1, BlobMetadataAdmissionLimits, BlobMetadataAdmissionReport,
     BlobMetadataBase, BlobMetadataCounts, BlobMetadataRebuildLimits, BlobMetadataRebuildReport,
+    DiskBlobAppendLimits,
 };
 #[path = "journal_blob_recovery.rs"]
 mod blob_recovery;
@@ -843,8 +844,8 @@ where
             return self.append_group(filesystem, input);
         }
         if self.disk_blob_recovery.is_some() {
-            // Empty resident maps are not evidence of absence. A later explicit disk-aware
-            // append path must prove collision, inventory protection and capacity before I/O.
+            // Empty resident maps are not evidence of absence. The explicit disk-aware append
+            // path proves collision, inventory protection and capacity with caller bounds.
             return Err(StorageError::InvalidState);
         }
         for reference in inventory.references() {
@@ -868,7 +869,12 @@ where
             .checked_add(added_bindings)
             .ok_or(StorageError::ResourceLimit)?;
         check_blob_reference_binding_limit(projected_bindings)?;
-        self.publish_blob_inventory(filesystem, inventory)?;
+        self.publish_blob_inventory(
+            filesystem,
+            inventory,
+            self.committed_blob_inventories
+                .contains(&inventory.digest()),
+        )?;
         let durable = self.append_group_internal(filesystem, input, inventory.digest())?;
         for reference in inventory.references() {
             if register_committed_blob(
@@ -1007,7 +1013,8 @@ where
             self.certificate_anchors
                 .insert(revision, certificate_digest);
         }
-        if blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST {
+        if blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST && self.disk_blob_recovery.is_none()
+        {
             self.committed_blob_inventories
                 .insert(blob_inventory_digest);
         }
@@ -1022,6 +1029,7 @@ where
         &mut self,
         filesystem: &mut F,
         inventory: &BlobInventory,
+        previously_committed: bool,
     ) -> Result<(), StorageError> {
         for reference in inventory.references() {
             verify_reference(
@@ -1054,7 +1062,7 @@ where
                     filesystem.sync_directory(&self.database_directory)?;
                     return Ok(());
                 }
-                if self.committed_blob_inventories.contains(&digest) {
+                if previously_committed {
                     return Err(StorageError::IntegrityFailure);
                 }
                 filesystem.set_len(&file, 0)?;

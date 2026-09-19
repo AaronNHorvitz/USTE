@@ -108,8 +108,9 @@ and open do not themselves run query verification or qualify BM-01/BM-06. The se
 `storage_recovery` object reports the last owner's cold-open validation/replay, catalog proofs,
 admission/rebuild and actual resident-entry counts. A bootstrap can open more than one owner;
 these work counters do not cover all owners or all filesystem I/O. Setup adapter counters remain
-the separate aggregate adapter observation. Nonempty inventory append in the new mode is not yet
-available; arbitrary-blob acceptance is tested at the storage boundary, not inferred from this
+the separate aggregate adapter observation. Decision 0101 adds bounded nonempty inventory append
+at the trusted storage boundary; its coordinator/authorized write integration is separate work.
+Arbitrary-blob acceptance is tested at the storage boundary, not inferred from this
 zero-blob fixture. Larger-than-memory and exact-scale performance qualification remain open.
 Native reports distinguish filesystem-adapter observation from authenticated cached-index work.
 Decision 0085 adds cached primitive operation/error, page, hit, fragment and result-byte totals, including

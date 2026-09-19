@@ -1,6 +1,6 @@
 use super::*;
 
-fn recovery_limits() -> BlobRecoveryLimits {
+pub(super) fn recovery_limits() -> BlobRecoveryLimits {
     BlobRecoveryLimits {
         catalog: limits(),
         catalog_recovery: BlobCatalogRecovery::AdmitOrRebuild,
@@ -9,7 +9,7 @@ fn recovery_limits() -> BlobRecoveryLimits {
     }
 }
 
-fn reopen<V>(
+pub(super) fn reopen<V>(
     fs: &mut FaultFileSystem<MemoryFileSystem>,
     database: DatabaseId,
     limits: BlobRecoveryLimits,

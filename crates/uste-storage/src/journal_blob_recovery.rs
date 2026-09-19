@@ -41,7 +41,8 @@ pub struct BlobRecoveryReport {
 }
 
 pub(super) struct DiskBlobRecoveryState {
-    base: Option<BlobMetadataBase>,
+    pub(super) base: Option<BlobMetadataBase>,
+    pub(super) pending: blob_metadata::BlobMetadataPending,
     report: BlobRecoveryReport,
 }
 
@@ -238,7 +239,14 @@ where
             repaired_certificate_tail_bytes,
             ignored_uncommitted_journal_bytes,
         };
-        self.disk_blob_recovery = Some(DiskBlobRecoveryState { base, report: work });
+        let counts = base
+            .as_ref()
+            .map_or(BlobMetadataCounts::default(), BlobMetadataBase::counts);
+        self.disk_blob_recovery = Some(DiskBlobRecoveryState {
+            base,
+            pending: blob_metadata::BlobMetadataPending::new(counts),
+            report: work,
+        });
         Ok((self, report))
     }
 }

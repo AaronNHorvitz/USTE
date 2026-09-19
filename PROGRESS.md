@@ -54,6 +54,30 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `a3d80f3` plus this increment: [Decision 0101](docs/decisions/0101-disk-blob-inventory-append.md)
+  adds explicit bounded disk-backed inventory append and catalog refresh, without legacy history
+  maps. Prepared overlays preserve first references, inventory protection, exact namespace bytes
+  and binding counts; successful certification installs metadata without further fallible I/O.
+  Six focused tests passed (49.82s), including 144 append fault attempts across empty/populated
+  bases and a pending overlay, and 45 selected refresh mutation faults. Strict storage Clippy
+  passed (2.30s). Added first-commit/empty-inventory coverage. Full regression passed under
+  `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M`:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn -p uste-replay --all-targets
+  --all-features --locked --offline -- --test-threads=1` (109 storage unit tests, 721.93s,
+  including the complete catalog/cold fault matrices with no skips; 13 coordinator/replay tests,
+  121.82s; 18 transaction tests, 5.96s; 13 authorization tests, 0.90s; portable recovery, 15.67s;
+  all adapter/process and other selected tests pass). Then `CARGO_BUILD_JOBS=1 cargo clippy
+  --workspace --all-targets --all-features --locked --offline -- -D warnings` passed (7.02s),
+  and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn
+  --no-deps --locked --offline` passed (1.98s). Preflight 36 GiB available RAM/3.9 GiB free swap;
+  sampled scope peak 829,804,544 bytes, zero sampled swap (not the final whole-run peak).
+  Formatting, whitespace, docs (174 links), task graph (68 tasks) pass. M1 crate sources remain
+  identical to pinned `b9689f3`; lockfile digest remains
+  `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`.
+  Unwired next-increment coordinator/test files are excluded from this storage commit and these
+  verification claims. Coordinator write bridging, authorized charge transfer and all
+  qualification gates remain open; no task is newly complete.
+
 - Tested on pushed `eb7c229` plus this increment: [Decision 0100](docs/decisions/0100-native-disk-storage-recovery.md)
   connects map-free storage cold open to authenticated transaction recovery and both disk
   development drivers. Reports use actual residency modes and separate last-owner cold work;
@@ -1692,8 +1716,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0100 transaction/native integration is locally verified; next complete
-bounded disk-aware inventory append. Decisions
+Current action: Decision 0101 bounded disk-aware inventory append is locally verified; next connect
+the explicit coordinator write bridge and authorized upload charge transfer. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

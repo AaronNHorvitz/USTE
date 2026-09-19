@@ -3,10 +3,14 @@ use super::*;
 
 #[path = "journal_blob_metadata/admission.rs"]
 mod admission;
+#[path = "journal_blob_metadata/append.rs"]
+mod append;
 #[path = "journal_blob_metadata/codec.rs"]
 mod codec;
 #[path = "journal_blob_metadata/rebuild.rs"]
 mod rebuild;
+pub(super) use append::BlobMetadataPending;
+pub use append::DiskBlobAppendLimits;
 use codec::*;
 
 #[cfg(test)]
