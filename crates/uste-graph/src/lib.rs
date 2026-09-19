@@ -8,6 +8,11 @@ mod query;
 mod record;
 mod state;
 mod state_disk;
+pub use state_disk::packed::{
+    GRAPH_ORDERED_STATE_PROFILE_V1, GRAPH_PACKED_PROFILE_V1, PackedGraphBase,
+    PackedGraphBridgeLimits, PackedGraphBridgeReport, bridge_graph_base_to_packed,
+    packed_graph_v1_digest,
+};
 
 pub use codec::{
     GraphCodecError, decode_stored_record, decode_transaction, encode_stored_record,

@@ -2,7 +2,45 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — bounded reverse packed traversal (Decision 0151)
+## Latest verified increment — streamed packed graph bridge (Decision 0152)
+
+Implemented on pushed `da64673` plus this increment: an independently admitted v1 graph base
+streams through bounded private batches into eight explicit canonical packed families. Every source
+cursor must fully authenticate before the opaque graph base is returned. Counts, policy, records,
+history and the original v1 digest remain intact; the ordered commitment has a distinct profile
+and never substitutes for the frozen oracle digest. Bounded export recomputes the exact v1 hash.
+Source and batch work ceilings are separate; reports exclude certificate/failed adapter work.
+
+Seven integration tests plus an independent literal-vector unit test cover 1/2/3/512 partition
+independence, all eight nonempty families, explicit empty families, exact/minus-one budgets,
+405 observed bridge I/O/error/crash cases with cold restart, late source and packed ciphertext
+corruption, foreign owner refusal, disk-backed certificate ownership and cold per-family admission
+of the published result. Canonical family admission alone is not packed graph semantic admission.
+`python3 scripts/check_packed_graph_vector.py` independently verified two profiles and one state
+framing vector. Early fixture mistakes (non-cloneable model filesystem, private limit constructors,
+certificate-byte geometry and validation-field naming) were fixed before the final focused pass.
+Session 78211 / scope `run-p659200-i21672551.scope` passed 8 tests (integration 7/4.42 s) and
+Clippy (0.27 s).
+
+Full gate session 81051 / scope `run-p659696-i21408064.scope` exited 0: 587 tests across 47
+executables (graph disk 31/31.63 s; transaction integration 93/98.90 s), Clippy 0.07 s and docs
+1.66 s. Preflight: 31 GiB available RAM / 5.6 GiB free swap; sampled scope peak 398,118,912 bytes /
+zero swap. Format, diff, docs and task checks passed. Exact full-gate command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d152-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline'
+```
+
+Next implement packed graph proof preparation, typed delta staging and live/cold semantic
+integration. Decision 0153 and unregistered `packed/preparation.rs` / `packed_preparation.rs` drafts
+are excluded from this increment. T-20/T-19, complete I/O accounting and qualifying campaigns remain
+open. No native command or M1 interface changed; their pinned baselines remain unchanged.
+
+## Prior verified increment — bounded reverse packed traversal (Decision 0151)
 
 Implemented on pushed `cb63dbd` plus this increment: descending `(lower, upper]` cursor and
 owner/scope-bound wrappers reuse authenticated path/value verification and cumulative limits.

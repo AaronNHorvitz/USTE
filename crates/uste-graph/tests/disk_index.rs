@@ -40,6 +40,8 @@ mod disk_recovery_faults;
 
 #[path = "support/disk_queries.rs"]
 mod disk_queries;
+#[path = "support/packed_bridge.rs"]
+mod packed_bridge;
 
 fn scope() -> NamespaceRef {
     NamespaceRef::new(

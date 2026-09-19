@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod authorized_read;
 mod authorized_write;
+pub mod packed;
 mod streaming_recovery;
 pub use authorized_read::{GraphDiskExpansionLimits, GraphDiskReadLimits};
 pub use authorized_write::GraphDiskWritePreparationLimits;

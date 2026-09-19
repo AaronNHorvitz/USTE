@@ -264,6 +264,11 @@ this does not supply the separately required packed disk-domain adapter.
 Decision 0150 adds restricted authorized own-outcome and committed-quota reads bound to exact
 current durable policy. Base plus bounded first-owner overlays provide charges without ledger
 scans. Authorized packed writes, staged reservations and reconciliation remain separate work.
+Decision 0152 streams an already semantically admitted v1 graph cache into eight explicit packed
+families in bounded private batches. The separate ordered-state commitment excludes physical
+layout; bounded v1 digest export reproduces the unchanged canonical oracle. Source cursors must
+fully authenticate before a typed packed base escapes. This cache bridge is not authoritative
+migration, cold packed semantic admission, live graph integration or benchmark qualification.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
