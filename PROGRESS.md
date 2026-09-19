@@ -54,6 +54,38 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `6ae070a` plus this increment: [Decision 0099](docs/decisions/0099-disk-blob-cold-recovery.md)
+  adds opt-in cold storage recovery without resident certificate/blob/inventory/namespace maps.
+  Both physical scans verify payloads with explicit repeated-byte and tail-descriptor admission;
+  catalog validation/staging precedes journal repair, resynchronization and replay. Existing or
+  rebuilt catalogs preserve exact frontier/counts; legacy nonempty inventory writes refuse
+  before I/O in this mode until the disk-aware append path exists. Five focused cold tests pass
+  (2.03s) with strict storage Clippy. A stale-root test initially reused a scripted entropy range,
+  correctly causing immutable-name AlreadyExists; fresh per-open counter ranges fix the fixture,
+  not the storage collision behavior. Six focused cold tests then passed (309.21s), including
+  191 exhaustive ready-open read/resync boundaries and 16 selected cold-rebuild write boundaries:
+  621 attempts, 620 failures, one optional absent-root OpenExisting/CrashAfter non-crash, and exact
+  restart after every attempt. Command under 3G/4G/512M scope: `CARGO_BUILD_JOBS=1 cargo test
+  -p uste-storage --locked --offline disk_blob_cold -- --test-threads=1 --nocapture`, followed by
+  strict storage all-target/all-feature Clippy (0.82s). Sampled scope peak 411,443,200 bytes,
+  zero sampled swap. The broader storage/transaction/replay regression passed, partitioned
+  with `--skip disk_blob_cold_recovery_faults_keep_journal_authority_and_restart_exactly` because
+  that exact sweep already passed against the unchanged code. This is not a removed test or
+  reduced fault matrix. Exact second gate under the same 3G/4G/512M scope, one job/thread:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn -p uste-replay --all-targets
+  --all-features --locked --offline -- --test-threads=1
+  --skip disk_blob_cold_recovery_faults_keep_journal_authority_and_restart_exactly` passed:
+  101 storage unit tests (350.80s, including the complete 324-attempt catalog mutation sweep),
+  13 coordinator/replay integration tests (120.95s), 17 transaction tests (5.68s), 13 authorization
+  tests (0.88s), storage portable recovery (15.22s), real process/adapter and all other selected
+  tests. Then `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked
+  --offline -- -D warnings` passed (5.72s), followed by `CARGO_BUILD_JOBS=1
+  RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn --no-deps --locked --offline`
+  (2.23s). Host preflight: 36 GiB available RAM/3.9 GiB free swap; sampled scope peak
+  570,609,664 bytes, zero sampled swap (not the final whole-run peak). Formatting/whitespace,
+  docs (172 links) and task graph (68 tasks) pass. Native adapters still use the previous mode;
+  disk-aware nonempty inventory append and benchmark qualification remain open. No task is newly complete.
+
 - Tested on `5b19bcb` plus this increment: [Decision 0098](docs/decisions/0098-storage-blob-disk-catalog.md)
   adds the journal-derived encrypted storage blob catalog, bounded one-inventory rebuild and
   independent disk/journal admission. The initial five focused tests pass (3.76s), including
@@ -78,8 +110,9 @@ unverified external distribution prerequisite.
   sampled swap (not the final whole-run peak). No qualifying benchmark ran. M1 source crates
   remain unchanged from `b9689f3`; lock SHA-256 remains
   `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`.
-  Journal open/append still retain resident blob collections; tests explicitly isolate only the
-  new capability. T-20, T-19 and benchmark/release gates remain unchecked.
+  At that increment journal open/append still retained resident blob collections; its tests
+  isolate only the catalog capability. Decision 0099 adds opt-in cold recovery, not disk-aware
+  nonempty append. T-20, T-19 and benchmark/release gates remain unchecked.
 
 - [Decision 0097](docs/decisions/0097-disk-coordinator-blob-reads.md) connects admitted disk
   owner/first-reference metadata to bounded certificate/inventory proofs and raw committed reads.
@@ -1632,8 +1665,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: integrate Decision 0098's verified catalog into storage cold recovery and bounded
-append/suffix metadata. Decisions
+Current action: integrate Decision 0099's verified cold-storage mode into authenticated transaction/
+native recovery, then complete bounded disk-aware inventory append. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.
@@ -1756,8 +1789,8 @@ process coverage of stale-root gaps is now passing. Next address remaining resid
 metadata. Decision 0094 supplies bounded authenticated disk certificate proofs and exact live-owner
 binding for proven reads/cursors/staging. Decision 0095 integrated proof-bound handles and map-free
 certificate recovery; Decisions 0096–0097 added committed blob proofs and disk-coordinator reads.
-Decision 0098 adds the verified bounded catalog rebuild/admission; resident blob recovery/append
-collections still remain.
+Decision 0098 adds the verified bounded catalog rebuild/admission; Decision 0099 supplies opt-in
+map-free blob cold recovery. Native adapter integration and disk-aware inventory append remain.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

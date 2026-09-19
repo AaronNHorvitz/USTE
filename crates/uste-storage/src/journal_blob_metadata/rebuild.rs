@@ -16,6 +16,17 @@ where
         limits: BlobMetadataRebuildLimits,
         cache: &mut PageCache,
     ) -> Result<(BlobMetadataBase, BlobMetadataRebuildReport), StorageError> {
+        let (base, report) = self.stage_blob_metadata_rebuild(filesystem, limits, cache)?;
+        let base = self.publish_admitted_blob_metadata(filesystem, base, limits.admission.run)?;
+        Ok((base, report))
+    }
+
+    pub(in crate::journal) fn stage_blob_metadata_rebuild(
+        &mut self,
+        filesystem: &mut F,
+        limits: BlobMetadataRebuildLimits,
+        cache: &mut PageCache,
+    ) -> Result<(BlobMetadataBase, BlobMetadataRebuildReport), StorageError> {
         validate_counts(BlobMetadataCounts::default(), limits.admission)?;
         let frontier = self.frontier.ok_or(StorageError::InvalidState)?;
         if self.poisoned {
@@ -210,9 +221,18 @@ where
             .ok_or(StorageError::InvalidState)?
             .read_root()
             .clone();
-        let (mut admitted, admission) =
+        let (admitted, admission) =
             self.admit_blob_metadata_internal(filesystem, root, limits.admission, cache)?;
         report.admission = admission;
+        Ok((admitted, report))
+    }
+
+    pub(in crate::journal) fn publish_admitted_blob_metadata(
+        &mut self,
+        filesystem: &mut F,
+        mut admitted: BlobMetadataBase,
+        limits: IndexRunReadLimits,
+    ) -> Result<BlobMetadataBase, StorageError> {
         let root = &admitted.root;
         let proof = root
             .certificate_proof
@@ -227,13 +247,9 @@ where
             logical_state_digest: *root.logical_state_digest(),
             index_profile: BLOB_METADATA_PROFILE_V1,
         };
-        let published = self.publish_index_root_recovered_bounded(
-            filesystem,
-            input,
-            &runs,
-            limits.admission.run,
-        )?;
+        let published =
+            self.publish_index_root_recovered_bounded(filesystem, input, &runs, limits)?;
         admitted.root = self.bind_index_root_certificate(published, proof)?;
-        Ok((admitted, report))
+        Ok(admitted)
     }
 }

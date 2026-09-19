@@ -55,6 +55,12 @@ pub use blob_metadata::{
     BLOB_METADATA_PROFILE_V1, BlobMetadataAdmissionLimits, BlobMetadataAdmissionReport,
     BlobMetadataBase, BlobMetadataCounts, BlobMetadataRebuildLimits, BlobMetadataRebuildReport,
 };
+#[path = "journal_blob_recovery.rs"]
+mod blob_recovery;
+use blob_recovery::DiskBlobRecoveryState;
+pub use blob_recovery::{
+    BlobCatalogRecovery, BlobRecoveryLimits, BlobRecoveryReport, BlobRecoveryScanReport,
+};
 
 const STORAGE_MAJOR: u8 = 1;
 const STORAGE_MINOR: u8 = 0;
@@ -221,6 +227,7 @@ where
     committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
     committed_blob_bytes: BTreeMap<NamespaceRef, u64>,
     committed_blob_reference_bindings: u64,
+    disk_blob_recovery: Option<DiskBlobRecoveryState>,
     poisoned: bool,
     vault: KeyVault<W, E>,
     identity_entropy: I,
@@ -355,6 +362,7 @@ where
             committed_blobs: BTreeMap::new(),
             committed_blob_bytes: BTreeMap::new(),
             committed_blob_reference_bindings: 0,
+            disk_blob_recovery: None,
             poisoned: false,
             vault,
             identity_entropy,
@@ -387,6 +395,7 @@ where
             vault_entropy,
             identity_entropy,
             key_adapter,
+            None,
             None,
             visitor,
         )
@@ -426,6 +435,7 @@ where
             identity_entropy,
             key_adapter,
             Some(limits),
+            None,
             visitor,
         )
     }
@@ -439,6 +449,7 @@ where
         identity_entropy: I,
         key_adapter: &mut A,
         certificate_read_limits: Option<CertificateAnchorReadLimits>,
+        disk_blob_recovery: Option<(BlobRecoveryLimits, &mut PageCache)>,
         mut visitor: V,
     ) -> Result<(Self, RecoveryReport), StorageError>
     where
@@ -528,6 +539,12 @@ where
         let repaired_certificate_tail_bytes =
             certificate_payload_bytes - complete_certificate_bytes;
         let certificate_count = complete_certificate_bytes / SMALL_ENVELOPE_BYTES;
+        let disk_blob_limits = disk_blob_recovery.as_ref().map(|(limits, _)| *limits);
+        if disk_blob_limits.is_some_and(|limits| {
+            certificate_count > limits.catalog.admission.maximum_journal_groups
+        }) {
+            return Err(StorageError::ResourceLimit);
+        }
         if certificate_read_limits.is_some_and(|limits| {
             certificate_count > limits.maximum_certificates()
                 || complete_certificate_bytes > limits.maximum_encoded_bytes()
@@ -551,9 +568,58 @@ where
             certificate_count,
             &no_trusted_inventories,
             certificate_read_limits.is_none(),
+            disk_blob_limits,
             false,
             &mut |_group| Ok(()),
         )?;
+
+        if let Some((limits, cache)) = disk_blob_recovery {
+            if !validated.certificate_anchors.is_empty()
+                || !validated.committed_blobs.is_empty()
+                || !validated.committed_blob_inventories.is_empty()
+                || !validated.committed_blob_bytes.is_empty()
+                || !validated.verified_blob_inventories.is_empty()
+            {
+                return Err(StorageError::IntegrityFailure);
+            }
+            let store = Self {
+                database: expected_database,
+                epoch,
+                writer,
+                certificate_log_id: manifest.certificate_log_id,
+                database_directory,
+                certificate_file,
+                current_segment_id: validated.current_segment_id,
+                current_segment_file: validated.current_segment_file.clone(),
+                current_segment_offset: validated.current_segment_offset,
+                frontier: validated.frontier,
+                previous_certificate_digest: validated.previous_certificate_digest,
+                certificate_anchors: BTreeMap::new(),
+                certificate_read_limits,
+                proof_owner: std::sync::Arc::new(CertificateProofOwner),
+                committed_blob_inventories: BTreeSet::new(),
+                committed_blobs: BTreeMap::new(),
+                committed_blob_bytes: BTreeMap::new(),
+                committed_blob_reference_bindings: validated.committed_blob_reference_bindings,
+                disk_blob_recovery: None,
+                poisoned: false,
+                vault,
+                identity_entropy,
+                _ownership: ownership,
+            };
+            return store.finish_disk_blob_recovery(
+                filesystem,
+                manifest,
+                initial_segment_file,
+                certificate_count,
+                complete_certificate_bytes,
+                repaired_certificate_tail_bytes,
+                validated,
+                limits,
+                cache,
+                visitor,
+            );
+        }
 
         if repaired_certificate_tail_bytes != 0 {
             filesystem.set_len(
@@ -590,6 +656,7 @@ where
             certificate_count,
             &validated.verified_blob_inventories,
             certificate_read_limits.is_none(),
+            None,
             true,
             &mut visitor,
         )?;
@@ -633,6 +700,7 @@ where
                 committed_blobs: replayed.committed_blobs,
                 committed_blob_bytes: replayed.committed_blob_bytes,
                 committed_blob_reference_bindings: replayed.committed_blob_reference_bindings,
+                disk_blob_recovery: None,
                 poisoned: false,
                 vault,
                 identity_entropy,
@@ -773,6 +841,11 @@ where
         }
         if inventory.is_empty() {
             return self.append_group(filesystem, input);
+        }
+        if self.disk_blob_recovery.is_some() {
+            // Empty resident maps are not evidence of absence. A later explicit disk-aware
+            // append path must prove collision, inventory protection and capacity before I/O.
+            return Err(StorageError::InvalidState);
         }
         for reference in inventory.references() {
             if self
@@ -2218,6 +2291,7 @@ struct ScanState<H> {
     committed_blob_reference_bindings: u64,
     verified_blob_inventories: BTreeMap<[u8; 32], u32>,
     uncommitted_tails: Vec<SegmentTail>,
+    blob_work: BlobRecoveryScanReport,
 }
 
 struct SegmentTail {
@@ -2427,6 +2501,7 @@ fn scan_certificates<F, W, E, V>(
     certificate_count: u64,
     trusted_blob_inventories: &BTreeMap<[u8; 32], u32>,
     retain_certificate_anchors: bool,
+    disk_blob_limits: Option<BlobRecoveryLimits>,
     invoke_visitor: bool,
     visitor: &mut V,
 ) -> Result<ScanState<F::File>, StorageError>
@@ -2448,6 +2523,7 @@ where
     let mut committed_blob_reference_bindings = 0_u64;
     let mut verified_blob_inventories = BTreeMap::new();
     let mut uncommitted_tails = Vec::new();
+    let mut blob_work = BlobRecoveryScanReport::default();
 
     for sequence in 1..=certificate_count {
         let revision = CommitRevision::new(sequence).map_err(|_| StorageError::IntegrityFailure)?;
@@ -2482,6 +2558,7 @@ where
                 current_segment_id,
                 current_segment_offset,
                 &mut uncommitted_tails,
+                disk_blob_limits.map(|limits| limits.maximum_uncommitted_segment_tails),
             )?;
             let next_file = filesystem
                 .open_existing(database_directory, &segment_name(certificate.segment_id)?)
@@ -2510,6 +2587,17 @@ where
             return Err(StorageError::IntegrityFailure);
         }
         validate_group_encoded_length(certificate.group_length)?;
+        if let Some(limits) = disk_blob_limits {
+            let bytes = SMALL_ENVELOPE_BYTES
+                .checked_add(certificate.group_length)
+                .and_then(|bytes| blob_work.encoded_group_certificate_bytes.checked_add(bytes))
+                .ok_or(StorageError::ResourceLimit)?;
+            if bytes > limits.catalog.admission.maximum_journal_encoded_bytes {
+                return Err(StorageError::ResourceLimit);
+            }
+            blob_work.encoded_group_certificate_bytes = bytes;
+            blob_work.groups = sequence;
+        }
         let group_end = certificate
             .group_offset
             .checked_add(certificate.group_length)
@@ -2548,6 +2636,55 @@ where
         let blob_inventory: Option<BlobInventory> =
             if certificate.blob_inventory_digest == EMPTY_BLOB_INVENTORY_DIGEST {
                 None
+            } else if let Some(limits) = disk_blob_limits {
+                let inventory = load_blob_inventory(
+                    filesystem,
+                    vault,
+                    database_directory,
+                    manifest.database,
+                    epoch,
+                    writer,
+                    certificate.blob_inventory_digest,
+                    false,
+                )?;
+                let reference_count = inventory.references().len() as u64;
+                committed_blob_reference_bindings = committed_blob_reference_bindings
+                    .checked_add(reference_count)
+                    .ok_or(StorageError::ResourceLimit)?;
+                check_blob_reference_binding_limit(committed_blob_reference_bindings)?;
+                if committed_blob_reference_bindings
+                    > limits.catalog.admission.maximum_reference_bindings
+                {
+                    return Err(StorageError::ResourceLimit);
+                }
+                blob_work.reference_bindings = committed_blob_reference_bindings;
+                blob_work.maximum_live_inventory_references = blob_work
+                    .maximum_live_inventory_references
+                    .max(inventory.references().len());
+                // Admit the entire current inventory's logical verification work before reading
+                // any payload. Do not retain a digest-to-count cache across inventories.
+                let mut projected = blob_work.verified_blob_bytes;
+                for reference in inventory.references() {
+                    projected = projected
+                        .checked_add(reference.byte_len())
+                        .ok_or(StorageError::ResourceLimit)?;
+                }
+                if projected > limits.maximum_verified_blob_bytes_per_pass {
+                    return Err(StorageError::ResourceLimit);
+                }
+                for reference in inventory.references() {
+                    verify_reference(
+                        filesystem,
+                        database_directory,
+                        vault,
+                        manifest.database,
+                        epoch,
+                        writer,
+                        *reference,
+                    )?;
+                }
+                blob_work.verified_blob_bytes = projected;
+                Some(inventory)
             } else {
                 let digest = certificate.blob_inventory_digest;
                 let trusted_count = trusted_blob_inventories
@@ -2632,7 +2769,9 @@ where
         current_segment_id,
         current_segment_offset,
         &mut uncommitted_tails,
+        disk_blob_limits.map(|limits| limits.maximum_uncommitted_segment_tails),
     )?;
+    blob_work.peak_pending_segment_tails = uncommitted_tails.len();
 
     Ok(ScanState {
         current_segment_id,
@@ -2647,6 +2786,7 @@ where
         committed_blob_reference_bindings,
         verified_blob_inventories,
         uncommitted_tails,
+        blob_work,
     })
 }
 
@@ -2656,12 +2796,16 @@ fn record_uncommitted_tail<F: FileSystem>(
     segment_id: [u8; 16],
     committed_end: u64,
     tails: &mut Vec<SegmentTail>,
+    maximum_tails: Option<usize>,
 ) -> Result<(), StorageError> {
     let file_len = filesystem.metadata(file)?.len;
     if file_len < committed_end || file_len > JOURNAL_SEGMENT_LIMIT {
         return Err(StorageError::IntegrityFailure);
     }
     if file_len > committed_end {
+        if maximum_tails.is_some_and(|maximum| tails.len() >= maximum) {
+            return Err(StorageError::ResourceLimit);
+        }
         tails
             .try_reserve(1)
             .map_err(|_| StorageError::ResourceLimit)?;

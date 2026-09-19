@@ -103,7 +103,7 @@ pub struct BlobMetadataRebuildReport {
     pub admission: BlobMetadataAdmissionReport,
 }
 
-fn metadata_scope(database: DatabaseId) -> NamespaceRef {
+pub(super) fn metadata_scope(database: DatabaseId) -> NamespaceRef {
     // A profile-separated internal carrier, not reservation/authorization of a user namespace.
     NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0; 16]))
 }
@@ -112,7 +112,7 @@ fn checked_add(left: u64, right: u64) -> Result<u64, StorageError> {
     left.checked_add(right).ok_or(StorageError::ResourceLimit)
 }
 
-fn validate_counts(
+pub(super) fn validate_counts(
     counts: BlobMetadataCounts,
     limits: BlobMetadataAdmissionLimits,
 ) -> Result<(), StorageError> {

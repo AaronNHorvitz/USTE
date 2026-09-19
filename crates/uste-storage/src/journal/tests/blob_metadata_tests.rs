@@ -1,4 +1,5 @@
 use super::*;
+mod cold;
 
 fn limits() -> BlobMetadataRebuildLimits {
     let run = IndexRunReadLimits::new(32, 32, 8192).unwrap();
