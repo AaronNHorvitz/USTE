@@ -33,10 +33,56 @@ fn reopen_with_admission_passes(
     disk_certificates: bool,
     admission_passes: u64,
 ) -> FaultDiskCounter {
+    reopen_storage_mode(
+        fs,
+        name,
+        state,
+        if disk_certificates {
+            StorageMode::DiskCertificates
+        } else {
+            StorageMode::Legacy
+        },
+        admission_passes,
+    )
+}
+
+enum StorageMode {
+    Legacy,
+    DiskCertificates,
+    DiskBlobs,
+}
+
+pub(super) fn reopen_blob_mode(
+    fs: &mut Fs,
+    name: &EntryName,
+    state: CounterState,
+) -> FaultDiskCounter {
+    reopen_storage_mode(fs, name, state, StorageMode::DiskBlobs, 1)
+}
+
+fn reopen_storage_mode(
+    fs: &mut Fs,
+    name: &EntryName,
+    state: CounterState,
+    mode: StorageMode,
+    admission_passes: u64,
+) -> FaultDiskCounter {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(2_000_000);
     let entropy = ENTROPY.fetch_add(10_000, std::sync::atomic::Ordering::Relaxed);
     let revision = state.revision.unwrap();
-    let (recovery, _) = if disk_certificates {
+    let (recovery, _) = if matches!(mode, StorageMode::DiskBlobs) {
+        uste_txn::AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+            fs,
+            name,
+            scope(),
+            CounterEntropy::new(entropy),
+            CounterEntropy::new(entropy + 5_000),
+            &mut TestKeyAdapter,
+            disk_inventory_writes::storage_limits(),
+            &mut PageCache::new(64 * 1024).unwrap(),
+        )
+        .map(|(recovery, report, _)| (recovery, report))
+    } else if matches!(mode, StorageMode::DiskCertificates) {
         uste_txn::AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
             fs,
             name,
@@ -93,11 +139,16 @@ fn reopen_with_admission_passes(
         .unwrap()
         .into_iter()
         .find(|root| root.anchor() == candidate.anchor());
+    let maximum_owners = if matches!(mode, StorageMode::DiskBlobs) {
+        3
+    } else {
+        2
+    };
     let limits = uste_txn::CoordinatorDiskAdmissionLimits {
         metadata: CoordinatorMetadataLoadLimits::new(
             revision.get(),
-            2,
-            revision.get() + 3,
+            maximum_owners,
+            revision.get() + maximum_owners + 1,
             32,
             4096,
         )
@@ -146,7 +197,9 @@ fn reopen_with_admission_passes(
     .unwrap()
 }
 
-fn fixture(initial_owner: bool) -> (Fs, EntryName, FaultDiskCounter, CounterState, BlobInventory) {
+pub(super) fn fixture(
+    initial_owner: bool,
+) -> (Fs, EntryName, FaultDiskCounter, CounterState, BlobInventory) {
     let name = EntryName::new("first-reference-rebase").unwrap();
     let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let vault = KeyVault::create(

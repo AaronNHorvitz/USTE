@@ -1937,14 +1937,21 @@ where
         request: TransactionRequest<'_>,
         clock: &mut impl Clock,
         cancellation: &impl Cancellation,
-        disk: Option<disk_coordinator::DiskCommitMetadata<'_>>,
+        mut disk: Option<disk_coordinator::DiskCommitMetadata<'_>>,
         prepare: P,
     ) -> Result<TransactionOutcome, TransactionError>
     where
         P: FnOnce(&S, CommitRevision) -> Result<S::Prepared, ApplyError>,
     {
         let using_disk = disk.is_some();
-        let admitted = self.admit_commit(filesystem, request, clock, cancellation, disk)?;
+        let admitted = self.admit_commit(
+            filesystem,
+            request,
+            clock,
+            cancellation,
+            disk.as_mut()
+                .map(disk_coordinator::DiskCommitMetadata::reborrow),
+        )?;
         let commit_admission::FreshCommitAdmission {
             accepted_at,
             expires_at,
@@ -1956,6 +1963,14 @@ where
             commit_admission::CommitAdmission::Retry(outcome) => return Ok(outcome),
             commit_admission::CommitAdmission::Fresh(admission) => admission,
         };
+        if request.blob_inventory.is_some()
+            && disk.as_ref().is_some_and(|disk| disk.storage.is_some())
+            && self.journal.blob_metadata_residency().0
+        {
+            // Exact retries above need no fresh publication capability. A fresh explicit disk
+            // inventory request must not silently select the legacy resident-map writer.
+            return Err(TransactionError::InvalidRequest);
+        }
         let prepared = prepare(&self.state, revision).map_err(map_apply_error)?;
         let result_digest = S::result_digest(&prepared);
         if cancellation.is_cancelled() {
@@ -1976,8 +1991,20 @@ where
         };
         let durable = match request.blob_inventory {
             Some(inventory) if !inventory.is_empty() => {
-                self.journal
-                    .append_group_with_inventory(filesystem, commit_input, inventory)
+                if let Some(disk) = disk.as_mut()
+                    && let Some(limits) = disk.storage
+                {
+                    self.journal.append_group_with_disk_inventory(
+                        filesystem,
+                        commit_input,
+                        inventory,
+                        limits,
+                        disk.cache,
+                    )
+                } else {
+                    self.journal
+                        .append_group_with_inventory(filesystem, commit_input, inventory)
+                }
             }
             _ => self.journal.append_group(filesystem, commit_input),
         };

@@ -4,6 +4,8 @@ use uste_crypto::{
 
 #[path = "support/disk_commit_check.rs"]
 mod disk_commit_check;
+#[path = "support/disk_inventory_writes.rs"]
+mod disk_inventory_writes;
 #[path = "support/first_reference.rs"]
 mod first_reference;
 #[path = "support/first_reference_rebase.rs"]

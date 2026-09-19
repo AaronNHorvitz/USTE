@@ -54,6 +54,31 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `fd44ca2` plus this increment: [Decision 0102](docs/decisions/0102-disk-coordinator-inventory-publication.md)
+  connects ordinary/external prepared disk-coordinator commits to explicit bounded storage
+  inventory publication. Shared retry/collision/first-owner admission is preserved; storage
+  refresh releases no coordinator overlay. Four focused tests pass (72.81s), including 93 injected
+  read/publication faults with exact suffix recovery/retry, wrong-mode/resource refusal, external
+  preparation, expiry and first-owner/charge/rebase checks. Initial test compilation rejected two
+  temporary byte-array borrows; owned fixture bindings corrected them. Command under the
+  3G/4G/512M scope: `CARGO_BUILD_JOBS=1 cargo test -p uste-replay --locked --offline
+  disk_inventory_write -- --test-threads=1 --nocapture`. Broader gate passed in the same scope:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-txn -p uste-replay -p uste-graph -p uste-memory
+  -p uste-memory-adapter -p uste-ingest -p uste-spatial --all-targets --all-features --locked
+  --offline -- --test-threads=1`: 16 disk-index/graph fault tests (535.43s), 17 coordinator/replay
+  tests (196.68s), 18 transaction tests (5.80s), 13 authorization tests (0.89s), M1 process tests
+  (30.92s), all other selected graph/ingestion/spatial/memory cases passed. Unchanged storage
+  code already passed its complete regression in `fd44ca2`. Then `CARGO_BUILD_JOBS=1 cargo test
+  --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`
+  passed 51 active native unit tests (43.08s) and three process-loss/CLI tests (12.29s); two
+  unchanged exact-scale oracle ignores remain. Strict workspace all-target/all-feature Clippy
+  (5.72s), native all-target Clippy (2.35s) and strict storage/transaction Rustdoc (0.95s) pass,
+  all one-job/locked/offline with warnings denied. Format/whitespace, docs (175 links) and task
+  graph (68 tasks) pass. Host preflight 36 GiB available RAM/3.9 GiB free swap; sampled scope peak
+  1,498,120,192 bytes, zero sampled swap (not the final whole-run peak). Unwired next-increment
+  authorization files are excluded from this commit and its verification claims. No consumer
+  inventory authorization or qualification is implied yet.
+
 - Tested on pushed `a3d80f3` plus this increment: [Decision 0101](docs/decisions/0101-disk-blob-inventory-append.md)
   adds explicit bounded disk-backed inventory append and catalog refresh, without legacy history
   maps. Prepared overlays preserve first references, inventory protection, exact namespace bytes
@@ -1716,8 +1741,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0101 bounded disk-aware inventory append is locally verified; next connect
-the explicit coordinator write bridge and authorized upload charge transfer. Decisions
+Current action: Decision 0102 coordinator bridge is locally verified; implement authorized
+upload charge transfer and consumer inventory publication. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

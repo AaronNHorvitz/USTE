@@ -3,6 +3,7 @@
 use super::*;
 
 mod blob_reads;
+mod blob_writes;
 mod commit_check;
 mod index_reads;
 mod streaming;
@@ -82,7 +83,20 @@ pub(crate) struct DiskCommitMetadata<'a> {
     pub base: &'a CoordinatorDiskBase,
     pub overlay: CoordinatorRecoveryLimits,
     pub lookup: IndexGetLimits,
+    pub storage: Option<uste_storage::journal::DiskBlobAppendLimits>,
     pub cache: &'a mut PageCache,
+}
+
+impl DiskCommitMetadata<'_> {
+    pub(crate) fn reborrow(&mut self) -> DiskCommitMetadata<'_> {
+        DiskCommitMetadata {
+            base: self.base,
+            overlay: self.overlay,
+            lookup: self.lookup,
+            storage: self.storage,
+            cache: self.cache,
+        }
+    }
 }
 
 /// Privileged coordinator with explicit disk I/O and bounded post-base metadata overlays.
@@ -681,6 +695,7 @@ where
                 base: &self.base,
                 overlay,
                 lookup,
+                storage: None,
                 cache,
             }),
             |state, revision| {
@@ -713,6 +728,7 @@ where
                 base: &self.base,
                 overlay,
                 lookup,
+                storage: None,
                 cache,
             }),
             move |state, revision| {
