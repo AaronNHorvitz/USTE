@@ -9,6 +9,7 @@ pub fn query_correctness(
     oracle_file: &Path,
     profile: Bm01Profile,
 ) -> Result<String, LinuxRunnerError> {
+    validate_native_profile(profile)?;
     let summary = read_oracle_summary(oracle_file)?;
     validate_measured_summary(&summary, profile)?;
     let (mut session, _) = prepare_session(root, password_file, profile, "open")?;
@@ -129,7 +130,7 @@ pub fn query_correctness(
             "\"current_rss_kib\":{},\"process_peak_rss_kib\":{},\"oracle_summary_digest\":\"{}\",",
             "\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_accounted_bytes\":{},",
             "\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{},",
-            "\"setup_adapter_io\":{},\"query_adapter_io\":{},\"cached_index_work\":{}}}"
+            "\"setup_adapter_io\":{},\"query_adapter_io\":{},\"cached_index_work\":{},\"development_entity_limit\":{}}}"
         ),
         profile.entities(),
         profile.relationships(),
@@ -161,6 +162,7 @@ pub fn query_correctness(
                 .index_read_report(&session.principal)
                 .map_err(|_| error("USTE_BM01_INDEX_REPORT"))?
         )
-        .json()
+        .json(),
+        MAX_NATIVE_DEVELOPMENT_ENTITIES
     ))
 }

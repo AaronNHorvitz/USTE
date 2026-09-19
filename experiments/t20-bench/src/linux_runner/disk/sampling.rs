@@ -43,6 +43,7 @@ fn sample(
     profile: Bm01Profile,
     observer: &mut dyn QueryObserver,
 ) -> Result<String, LinuxRunnerError> {
+    validate_native_profile(profile)?;
     let bundle = read_oracle_bundle(bundle_file)?;
     validate_bundle(&bundle, profile)?;
     let (mut session, _) = prepare_session(root, password_file, profile, "open")?;
@@ -99,6 +100,7 @@ fn sample(
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
         "budget_evaluation": "not-performed", "entities": profile.entities(),
+        "development_entity_limit": MAX_NATIVE_DEVELOPMENT_ENTITIES,
         "relationships": profile.relationships(), "frontier": session.frontier,
         "setup_milliseconds": session.setup_elapsed.as_millis(),
         "warmup": { "queries": bundle.warmup().expectations().len(), "successes": warmup[0],

@@ -148,7 +148,7 @@ pub fn verify_disk_development_profile(
         .authenticate(&mut AuthAdapter, &())
         .map_err(debug)?;
     let materializer = Materializer::new(profile);
-    let expected_revision = visit_development_batches(profile, |sequence, operations| {
+    let expected_revision = visit_disk_batches(profile, |sequence, operations| {
         commit_batch(
             &mut disk,
             &mut fs,
@@ -389,13 +389,10 @@ where
 }
 
 /// Stream the unchanged fixture plan in bounded batches to either disk adapter.
-pub(crate) fn visit_development_batches(
+pub(crate) fn visit_disk_batches(
     profile: Bm01Profile,
     mut visitor: impl FnMut(u64, Vec<Operation>) -> Result<(), String>,
 ) -> Result<u64, String> {
-    if profile.entities() > MAX_DEVELOPMENT_ENTITIES {
-        return Err("development disk profile exceeded".into());
-    }
     let materializer = Materializer::new(profile);
     let mut sequence = 2;
     emit_batches(
@@ -545,6 +542,26 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn disk_batches_stream_the_larger_native_profile_without_widening_memory_checks() {
+        let profile = Bm01Profile::new(10_000).unwrap();
+        let mut operations = 0;
+        let mut expected_sequence = 2;
+        let frontier = visit_disk_batches(profile, |sequence, batch| {
+            assert_eq!(sequence, expected_sequence);
+            expected_sequence += 1;
+            assert!(!batch.is_empty() && batch.len() <= 10_000);
+            operations += batch.len();
+            let encoded = encode_transaction(&GraphTransaction::new(scope(), batch)).unwrap();
+            assert!(encoded.len() <= 16 * 1024 * 1024);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(frontier, 23);
+        assert_eq!(operations, 210_001);
+        assert!(verify_disk_development_profile(profile).is_err());
+        assert!(super::super::verify_development_profile(profile).is_err());
+    }
     #[test]
     fn fixture_cardinalities_include_policy_and_both_relationship_versions() {
         assert_eq!(

@@ -247,15 +247,15 @@ fn print_usage() {
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-create|linux-disk-resume|linux-disk-open> \
-         --root DIR --password-file FILE --entities COUNT (at most 1000; nonqualifying)\n\
+         --root DIR --password-file FILE --entities COUNT (at most 10000; nonqualifying)\n\
          uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
          --pause-after-revision REVISION [--entities COUNT]\n\
          uste-t20-bench linux-disk-create-crash-probe --root DIR --password-file FILE \
-         --pause-after-revision REVISION --entities COUNT (at most 1000; nonqualifying)\n\
+         --pause-after-revision REVISION --entities COUNT (at most 10000; nonqualifying)\n\
          uste-t20-bench <linux-query|linux-sample> --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-query|linux-disk-sample> --root DIR --password-file FILE \
-         --oracle-file FILE --entities COUNT (at most 1000; nonqualifying)\n\
+         --oracle-file FILE --entities COUNT (at most 10000; nonqualifying)\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
          oracle-summary emits content-free expectations for a separate query process;\n\
          oracle-bundle emits disjoint warm-up plus measured expectations for sampling;\n\

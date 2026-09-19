@@ -57,9 +57,7 @@ pub fn supervise_disk_sample(
     bundle_file: &Path,
     profile: Bm01Profile,
 ) -> Result<String, LinuxRunnerError> {
-    if profile.entities() > crate::engine::MAX_DEVELOPMENT_ENTITIES {
-        return Err(LinuxRunnerError::new("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
-    }
+    super::disk::validate_native_profile(profile)?;
     supervise_mode(
         executable,
         root,

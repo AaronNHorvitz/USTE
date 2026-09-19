@@ -54,6 +54,20 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0087](docs/decisions/0087-native-development-cache-pressure-scale.md) gives native
+  development commands a separate 10,000-entity ceiling; memory-backed checks stay at 1,000
+  and qualifying native profiles are still refused. Admission precedes filesystem/process access.
+  Shared batch streaming now follows adapter admission and tests pin the larger plan at 23
+  revisions / 210,001 operations, with every batch respecting 10,000 operations / 16 MiB.
+  On pushed `4503a25` plus this increment, `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 50 unit tests
+  (2 existing exact-profile ignores) in 28.53s and 3 CLI tests in 12.88s. Experiment strict
+  all-target clippy passed. The 3G/4G/512M scope peaked at a sampled 333,647,872 bytes with zero
+  swap; host preflight had 34 GiB available RAM and 3.9 GiB free swap. No actual 10,000-entity
+  construction or cache-pressure result is claimed yet. Next run the native development fixture
+  with separate oracle generation, a bounded construction timeout and retained recovery artifacts
+  in `experiments/t20-bench/target/native-pressure.kedpTk`; qualifying BM-01/BM-06 remain open.
+
 - [Decision 0086](docs/decisions/0086-ordered-cache-eviction.md) replaces linear oldest-page
   selection with a bounded ordered recency map. It preserves exact LRU/reference behavior,
   complete cache identity and zeroizing ownership; malformed/duplicate insertions precede

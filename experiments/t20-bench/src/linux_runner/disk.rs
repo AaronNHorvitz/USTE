@@ -2,7 +2,7 @@
 use super::*;
 use crate::engine::disk::{
     DiskBatch, DiskProfileLimits, admit_development_disk, commit_batch, fixture_state_counts,
-    visit_development_batches,
+    visit_disk_batches,
 };
 use uste_graph::{GraphDiskLiveState, GraphDiskReadLimits, GraphStateRootMergeLimits};
 use uste_storage::{IndexGetLimits, IndexPredecessorLimits};
@@ -29,6 +29,15 @@ mod sampling;
 pub use query::query_correctness;
 pub use sampling::sample_worker;
 
+pub(super) const MAX_NATIVE_DEVELOPMENT_ENTITIES: u64 = 10_000;
+
+pub(super) fn validate_native_profile(profile: Bm01Profile) -> Result<(), LinuxRunnerError> {
+    if profile.entities() > MAX_NATIVE_DEVELOPMENT_ENTITIES {
+        return Err(error("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
+    }
+    Ok(())
+}
+
 struct DiskSession {
     filesystem: DiskFileSystem,
     coordinator: Disk,
@@ -38,7 +47,7 @@ struct DiskSession {
     setup_elapsed: std::time::Duration,
 }
 
-/// These commands intentionally retain the existing development ceiling. Their limits and
+/// These commands use the separate bounded native development ceiling. Their limits and
 /// measurements are not substituted for the accepted exact-size BM-01/BM-06 campaigns.
 pub fn run(
     root: &Path,
@@ -66,6 +75,7 @@ pub fn create_crash_probe(
     pause_after_revision: u64,
 ) -> Result<String, LinuxRunnerError> {
     use std::io::Write as _;
+    validate_native_profile(profile)?;
     let final_revision = materialization_revision_count(profile);
     if pause_after_revision == 0 || pause_after_revision >= final_revision {
         return Err(error("USTE_BM01_CRASH_PROBE_REVISION"));
@@ -93,9 +103,7 @@ fn prepare_session_with_observer(
     phase: &str,
     observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
 ) -> Result<(DiskSession, String), LinuxRunnerError> {
-    if profile.entities() > crate::engine::MAX_DEVELOPMENT_ENTITIES {
-        return Err(error("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
-    }
+    validate_native_profile(profile)?;
     if !matches!(phase, "create" | "resume" | "open") {
         return Err(error("USTE_BM01_DISK_PHASE"));
     }
@@ -204,7 +212,7 @@ fn prepare_session_with_observer(
     }
     if phase != "open" {
         let mut clock = SystemClock::new();
-        visit_development_batches(profile, |sequence, operations| {
+        visit_disk_batches(profile, |sequence, operations| {
             commit_batch(
                 &mut disk,
                 &mut fs,
@@ -266,7 +274,7 @@ fn prepare_session_with_observer(
             "\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},",
             "\"frontier\":{},\"recovered_revision\":{},\"elapsed_milliseconds\":{},",
             "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{},",
-            "\"cold_admission\":{},\"final_state_counts\":{},\"setup_adapter_io\":{}}}"
+            "\"cold_admission\":{},\"final_state_counts\":{},\"setup_adapter_io\":{},\"development_entity_limit\":{}}}"
         ),
         phase,
         profile.entities(),
@@ -278,7 +286,8 @@ fn prepare_session_with_observer(
         report.ignored_uncommitted_journal_bytes,
         admission_json,
         serde_json::json!(final_counts),
-        fs.snapshot()?.json()?
+        fs.snapshot()?.json()?,
+        MAX_NATIVE_DEVELOPMENT_ENTITIES
     );
     Ok((
         DiskSession {

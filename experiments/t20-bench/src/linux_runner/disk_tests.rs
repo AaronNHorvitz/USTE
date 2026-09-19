@@ -1,6 +1,47 @@
 use super::*;
 use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
+#[test]
+fn native_profile_admission_is_separate_and_precedes_filesystem_or_process_access() {
+    assert!(
+        validate_native_profile(Bm01Profile::new(MAX_NATIVE_DEVELOPMENT_ENTITIES).unwrap()).is_ok()
+    );
+    assert_eq!(
+        materialization_revision_count(Bm01Profile::new(MAX_NATIVE_DEVELOPMENT_ENTITIES).unwrap()),
+        23
+    );
+    let absent = Path::new("deliberately-absent-native-profile-boundary");
+    for count in [MAX_NATIVE_DEVELOPMENT_ENTITIES + 1, 100_000] {
+        let profile = Bm01Profile::new(count).unwrap();
+        for phase in ["create", "resume", "open"] {
+            assert_eq!(
+                run(absent, absent, profile, phase).unwrap_err().code(),
+                "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
+            );
+        }
+        assert_eq!(
+            query_correctness(absent, absent, absent, profile)
+                .unwrap_err()
+                .code(),
+            "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
+        );
+        assert_eq!(
+            create_crash_probe(absent, absent, profile, 1)
+                .unwrap_err()
+                .code(),
+            "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
+        );
+        assert_eq!(
+            super::super::supervision::supervise_disk_sample(
+                absent, absent, absent, absent, profile
+            )
+            .unwrap_err()
+            .code(),
+            "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
+        );
+    }
+}
+
 struct Fixture {
     root: PathBuf,
     password: PathBuf,
@@ -97,7 +138,7 @@ impl Fixture {
         if prefix == 12 {
             // Valid profile Evidence and final revision, but only one relationship. A binding
             // digest alone is not proof that every fixture record was materialized.
-            visit_development_batches(Bm01Profile::new(20).unwrap(), |sequence, mut operations| {
+            visit_disk_batches(Bm01Profile::new(20).unwrap(), |sequence, mut operations| {
                 if sequence > 2 {
                     operations.truncate(1);
                 }
@@ -134,30 +175,28 @@ impl Fixture {
             uste_txn::publish_coordinator_metadata_root(&mut raw, &mut fs).unwrap();
             uste_txn::publish_coordinator_transaction_index(&mut raw, &mut fs).unwrap();
         }
-        let result =
-            visit_development_batches(Bm01Profile::new(20).unwrap(), |sequence, operations| {
-                assert!(sequence == 2 || (prefix == 6 && sequence == 3));
-                let encoded =
-                    encode_transaction(&GraphTransaction::new(scope(), operations)).unwrap();
-                raw.commit(
-                    &mut fs,
-                    TransactionRequest {
-                        principal: PRINCIPAL,
-                        idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
-                        transaction_id: identity(sequence, TransactionId::from_bytes),
-                        canonical_request: &encoded,
-                        blob_inventory: None,
-                    },
-                    &mut SystemClock::new(),
-                    &NeverCancel,
-                )
-                .unwrap();
-                if prefix == 6 && sequence == 2 {
-                    Ok(())
-                } else {
-                    Err("stop fixture at its selected certificate".into())
-                }
-            });
+        let result = visit_disk_batches(Bm01Profile::new(20).unwrap(), |sequence, operations| {
+            assert!(sequence == 2 || (prefix == 6 && sequence == 3));
+            let encoded = encode_transaction(&GraphTransaction::new(scope(), operations)).unwrap();
+            raw.commit(
+                &mut fs,
+                TransactionRequest {
+                    principal: PRINCIPAL,
+                    idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
+                    transaction_id: identity(sequence, TransactionId::from_bytes),
+                    canonical_request: &encoded,
+                    blob_inventory: None,
+                },
+                &mut SystemClock::new(),
+                &NeverCancel,
+            )
+            .unwrap();
+            if prefix == 6 && sequence == 2 {
+                Ok(())
+            } else {
+                Err("stop fixture at its selected certificate".into())
+            }
+        });
         assert!(result.is_err());
         if prefix == 3 || prefix == 4 {
             let snapshot = raw.read_view().unwrap().state().clone();
