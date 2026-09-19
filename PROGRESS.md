@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `95fafcc` plus this increment: [Decision 0122](docs/decisions/0122-inventory-bearing-genesis-reconstruction.md)
+  reconstructs one bounded inventory-bearing first transaction and streams unpublished primary
+  retry/transaction/owner candidates. Independent journal admission remains mandatory; closed
+  inventory-free APIs retain their refusal behavior. Four new reference/fault tests recover
+  zero/three suffix revisions from no coordinator roots, preserve first owners, durably rebase
+  and cold-admit; all 39 read and 84 staging fault attempts refuse and restart exactly. Existing
+  bootstrap probes now verify reference admission before preparation and wrong-result refusal.
+  A test-helper `let_and_return` lint was fixed before the final gate, without suppression.
+  Focused scope `run-p456096-i21464153.scope` passed four tests/2.17s before that lint failure;
+  the preceding `run-p455425-i21435796.scope` also passed the two bootstrap tests/0.01s.
+  Final scope `run-p456705-i21464178.scope` exited 0 under 3G/4G/512M, one job/thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 420 tests/46 executables, no failures/ignores
+  (graph disk 24/26.38s, replay 37/24.45s, storage 123/18.71s, M1 process 2/2.69s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/44.98s, BM-01 process 3/11.80s,
+  BM-06 CLI 2/0.50s and BM-06 process 8/73.49s; two old exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (1.32s), `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (1.63s)
+  and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked
+  --offline` (1.02s) pass. Preflight 35 GiB available RAM/3.9 GiB free swap; sampled peak
+  1,754,238,976 bytes/zero swap, not final whole-run peak. Formatting/whitespace, docs (196 links)
+  and task graph (68 tasks) pass. M1 sources/locks unchanged; no qualifying campaign.
+  Next: maintain optional owner projections during bounded streaming recovery, then remaining
+  immutable-run scaling and accounting before qualification. T-20/T-19 remain open.
+
 - Implemented on pushed `3f793a6` plus this increment: [Decision 0121](docs/decisions/0121-streamed-primary-owner-recovery.md)
   extends paired-base private staging to primary blob owners. Only one inventory's new-owner
   deltas are retained; earlier references are checked against disk and preserve their first
@@ -2395,9 +2423,9 @@ remaining mixed workload have not passed.
 
 Current action: T-20 remains the priority. Decisions 0108–0120, including the retained native
 20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
-`3f793a6`; their evidence is recorded above, not in flight. Decision 0121 extends primary-owner
-suffix staging. Next implement bounded inventory-bearing genesis bootstrap and maintain optional
-owner projections on the new streaming path, then address immutable-family rewrite scaling and
+`3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
+suffix staging and bounded inventory-bearing genesis bootstrap. Next maintain optional
+owner projections on the streaming path, then address immutable-family rewrite scaling and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

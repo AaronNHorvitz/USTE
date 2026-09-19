@@ -20,7 +20,7 @@ use super::{
 mod maintenance;
 pub use maintenance::RecoveryIndexMaintenance;
 
-/// Private reconstruction of only the first certified, inventory-free transaction.
+/// Private reconstruction of only the first certified transaction.
 /// This is trusted recovery input, not current consumer state or a durable receipt. The caller
 /// supplied the genesis reducer; its memory behavior remains that reducer's responsibility.
 pub struct RecoveredGenesis<S> {
@@ -401,8 +401,37 @@ where
     pub fn recover_inventory_free_genesis<S: TransactionState>(
         &self,
         filesystem: &mut F,
+        state: S,
+        maximum_encoded_bytes: u64,
+    ) -> Result<RecoveredGenesis<S>, TransactionError> {
+        self.recover_genesis_bounded(filesystem, state, maximum_encoded_bytes, None)
+    }
+
+    /// Reconstruct exactly the first certified transaction, including a bounded inventory.
+    /// The storage decoder's independent inventory caps still apply before the narrower
+    /// reference admission. No owner maps or root slots are created. Primary metadata staging
+    /// and independent journal admission must preserve every first owner before live recovery.
+    pub fn recover_primary_genesis<S: TransactionState>(
+        &self,
+        filesystem: &mut F,
+        state: S,
+        maximum_encoded_bytes: u64,
+        maximum_inventory_references: usize,
+    ) -> Result<RecoveredGenesis<S>, TransactionError> {
+        self.recover_genesis_bounded(
+            filesystem,
+            state,
+            maximum_encoded_bytes,
+            Some(maximum_inventory_references),
+        )
+    }
+
+    fn recover_genesis_bounded<S: TransactionState>(
+        &self,
+        filesystem: &mut F,
         mut state: S,
         maximum_encoded_bytes: u64,
+        inventory_limit: Option<usize>,
     ) -> Result<RecoveredGenesis<S>, TransactionError> {
         let mut cursor = self.open_transaction_cursor(
             CommitRevision::FIRST,
@@ -414,11 +443,18 @@ where
             .next_recovered_transaction(filesystem, &mut cursor)?
             .ok_or(TransactionError::IntegrityFailure)?;
         self.finish_transaction_cursor(cursor)?;
-        if transaction.blob_inventory.is_some() {
-            return Err(TransactionError::InvalidRequest);
+        if let Some(inventory) = transaction.blob_inventory.as_ref() {
+            let maximum = inventory_limit.ok_or(TransactionError::InvalidRequest)?;
+            if inventory.references().len() > maximum {
+                return Err(TransactionError::ResourceLimit);
+            }
         }
         let prepared = state
-            .prepare(&transaction.canonical_request, None, CommitRevision::FIRST)
+            .prepare(
+                &transaction.canonical_request,
+                transaction.blob_inventory.as_ref(),
+                CommitRevision::FIRST,
+            )
             .map_err(super::map_apply_error)?;
         if S::result_digest(&prepared) != transaction.outcome.result_digest {
             return Err(TransactionError::IntegrityFailure);

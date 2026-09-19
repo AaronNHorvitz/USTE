@@ -149,6 +149,13 @@ fn fixture() -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
     fixture_mode(true)
 }
 fn fixture_mode(initial_owner: bool) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
+    fixture_options(initial_owner, true, 4)
+}
+fn fixture_options(
+    initial_owner: bool,
+    roots: bool,
+    last: u8,
+) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
     let name = EntryName::new("streamed-primary-owners").unwrap();
     let mut fs = Fs::new(MemoryFileSystem::default(), FaultPlan::default());
     let vault = KeyVault::create(
@@ -180,7 +187,7 @@ fn fixture_mode(initial_owner: bool) -> (Fs, EntryName, Anchored, [BlobReference
         );
     }
     let mut base = None;
-    for revision in 1..=4 {
+    for revision in 1..=last {
         let inventory = BlobInventory::new(
             scope(),
             if revision == 1 {
@@ -205,8 +212,10 @@ fn fixture_mode(initial_owner: bool) -> (Fs, EntryName, Anchored, [BlobReference
             )
             .unwrap();
         if revision == 1 {
-            publish_coordinator_metadata_root(&mut coordinator, &mut fs).unwrap();
-            uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut fs).unwrap();
+            if roots {
+                publish_coordinator_metadata_root(&mut coordinator, &mut fs).unwrap();
+                uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut fs).unwrap();
+            }
             base = Some(Anchored {
                 state: coordinator.read_view().unwrap().state().clone(),
                 certificate: coordinator.checkpoint_anchor().unwrap().unwrap().1,
@@ -230,6 +239,25 @@ fn admit_mode(
     revision: CommitRevision,
     first: bool,
 ) -> (Recovery, CoordinatorDiskBase) {
+    let recovery = open(fs, name);
+    let root = recovery
+        .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|r| r.revision() == revision)
+        .unwrap();
+    let candidate =
+        uste_txn::load_coordinator_metadata_candidates_for_recovery::<CounterState, _, _, _, _>(
+            &recovery, fs,
+        )
+        .unwrap()
+        .into_iter()
+        .find(|r| r.revision() == revision)
+        .unwrap();
+    let base = admit_roots(fs, &recovery, root, candidate, first);
+    (recovery, base)
+}
+fn open(fs: &mut Fs, name: &EntryName) -> Recovery {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(8_000_000);
     let entropy = ENTROPY.fetch_add(10_000, std::sync::atomic::Ordering::Relaxed);
     let (recovery, _, _) = Recovery::open_with_disk_blob_metadata(
@@ -243,14 +271,18 @@ fn admit_mode(
         &mut cache(),
     )
     .unwrap();
-    let root = recovery
-        .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
-        .unwrap()
-        .into_iter()
-        .find(|r| r.revision() == revision)
-        .unwrap();
+    recovery
+}
+fn admit_roots(
+    fs: &mut Fs,
+    recovery: &Recovery,
+    root: uste_storage::RecoveredIndexRoot,
+    candidate: uste_txn::CoordinatorMetadataCandidate,
+    first: bool,
+) -> CoordinatorDiskBase {
+    let revision = candidate.revision();
     let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
-        &recovery,
+        recovery,
         fs,
         root,
         uste_txn::CoordinatorTransactionAdmissionLimits {
@@ -262,14 +294,6 @@ fn admit_mode(
         &mut cache(),
     )
     .unwrap();
-    let candidate =
-        uste_txn::load_coordinator_metadata_candidates_for_recovery::<CounterState, _, _, _, _>(
-            &recovery, fs,
-        )
-        .unwrap()
-        .into_iter()
-        .find(|r| r.revision() == revision)
-        .unwrap();
     let admission = uste_txn::CoordinatorDiskAdmissionLimits {
         metadata: CoordinatorMetadataLoadLimits::new(
             revision.get(),
@@ -283,7 +307,7 @@ fn admit_mode(
         maximum_total_journal_groups: revision.get() * 3,
         maximum_encoded_bytes_per_pass: 1_000_000,
     };
-    let base = if first {
+    if first {
         let root = recovery
             .load_index_root_manifests(fs, uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1)
             .unwrap()
@@ -291,7 +315,7 @@ fn admit_mode(
             .find(|r| r.revision() == revision)
             .unwrap();
         uste_txn::admit_coordinator_disk_base_with_first_references(
-            &recovery,
+            recovery,
             fs,
             candidate,
             transactions,
@@ -302,7 +326,7 @@ fn admit_mode(
         )
     } else {
         uste_txn::admit_coordinator_disk_base(
-            &recovery,
+            recovery,
             fs,
             candidate,
             transactions,
@@ -310,8 +334,7 @@ fn admit_mode(
             &mut cache(),
         )
     }
-    .unwrap();
-    (recovery, base)
+    .unwrap()
 }
 fn recover(
     fs: &mut Fs,
@@ -336,6 +359,294 @@ fn recover(
         &mut cache(),
         domain,
     )
+}
+
+fn origin(fs: &mut Fs, mut recovery: Recovery) -> (Recovery, CoordinatorDiskBase, Anchored) {
+    let genesis = recovery
+        .recover_primary_genesis(fs, CounterState::new(scope()), 1_000_000, 1)
+        .unwrap();
+    let state = Anchored {
+        state: genesis.state().clone(),
+        certificate: *genesis.transaction().certificate_digest(),
+    };
+    let (candidate, transactions) = uste_txn::stage_primary_genesis_metadata(
+        &mut recovery,
+        fs,
+        &genesis,
+        1,
+        metadata_rebase_limits().merge,
+    )
+    .unwrap();
+    let base = admit_roots(fs, &recovery, transactions, candidate, false);
+    (recovery, base, state)
+}
+
+#[test]
+fn primary_genesis_recovers_all_owner_metadata_after_complete_cache_loss() {
+    for last in [1, 4] {
+        let (mut fs, name, _, references) = fixture_options(true, false, last);
+        let recovery = open(&mut fs, &name);
+        let (recovery, base, state) = origin(&mut fs, recovery);
+        for profile in [
+            COORDINATOR_METADATA_PROFILE_V1,
+            uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+        ] {
+            assert!(
+                recovery
+                    .load_index_root_manifests(&mut fs, profile)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let (mut disk, report) = recover(
+            &mut fs,
+            recovery,
+            base,
+            state,
+            limits(),
+            &mut Domain::default(),
+        )
+        .unwrap();
+        assert_eq!(report.revisions, u64::from(last - 1));
+        assert!(disk.rebase_required());
+        assert_eq!(disk.overlay_counts(), (0, 0));
+        if last == 4 {
+            assert_terminal(&disk, &mut fs, references);
+        } else {
+            assert_eq!(disk.state().unwrap().state.value, 1);
+            assert_eq!(
+                disk.committed_blob_owner(&mut fs, references[0], lookup(), &mut cache())
+                    .unwrap(),
+                Some(PrincipalDigest::from_bytes([1; 32]))
+            );
+            assert_eq!(
+                disk.committed_blob_owner(&mut fs, references[1], lookup(), &mut cache())
+                    .unwrap(),
+                None
+            );
+        }
+        disk.rebase_metadata(&mut fs, metadata_rebase_limits())
+            .unwrap();
+        let state = disk.state().unwrap().clone();
+        drop(disk);
+        fs.restart().unwrap();
+        let (recovery, base) = admit(
+            &mut fs,
+            &name,
+            CommitRevision::new(u64::from(last)).unwrap(),
+        );
+        let (disk, report) = recover(
+            &mut fs,
+            recovery,
+            base,
+            state,
+            limits(),
+            &mut Domain::default(),
+        )
+        .unwrap();
+        assert_eq!(report, PrimaryMetadataRecoveryReport::default());
+        assert!(!disk.rebase_required());
+        assert_eq!(
+            disk.state().unwrap().state.value,
+            if last == 1 { 1 } else { 10 }
+        );
+    }
+}
+
+#[test]
+fn primary_genesis_owner_limits_and_inventory_free_wrapper_refuse_before_staging() {
+    let (mut fs, name, _, _) = fixture_options(true, false, 4);
+    let mut recovery = open(&mut fs, &name);
+    let genesis = recovery
+        .recover_primary_genesis(&mut fs, CounterState::new(scope()), 1_000_000, 1)
+        .unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    assert!(matches!(
+        uste_txn::stage_primary_genesis_metadata(
+            &mut recovery,
+            &mut fs,
+            &genesis,
+            0,
+            metadata_rebase_limits().merge
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    assert!(matches!(
+        uste_txn::stage_inventory_free_genesis_metadata(
+            &mut recovery,
+            &mut fs,
+            &genesis,
+            metadata_rebase_limits().merge
+        ),
+        Err(TransactionError::IntegrityFailure)
+    ));
+    assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+    assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+    assert!(
+        recovery
+            .recover_primary_genesis(&mut fs, CounterState::new(scope()), 1, 1)
+            .is_err()
+    );
+    assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+}
+
+#[test]
+fn primary_genesis_every_staging_fault_leaves_no_discoverable_roots() {
+    let (mut fs, name, _, _) = fixture_options(true, false, 4);
+    let mut recovery = open(&mut fs, &name);
+    let genesis = recovery
+        .recover_primary_genesis(&mut fs, CounterState::new(scope()), 1_000_000, 1)
+        .unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    uste_txn::stage_primary_genesis_metadata(
+        &mut recovery,
+        &mut fs,
+        &genesis,
+        1,
+        metadata_rebase_limits().merge,
+    )
+    .unwrap();
+    let mut attempts = 0;
+    for operation in [
+        Operation::OpenExisting,
+        Operation::Metadata,
+        Operation::ReadAt,
+        Operation::CreateNew,
+        Operation::WriteAt,
+        Operation::SetLen,
+        Operation::SyncAll,
+        Operation::SyncDirectory,
+        Operation::RenameNoReplace,
+        Operation::RemoveFile,
+        Operation::SyncData,
+    ] {
+        for occurrence in 1..=fs.operation_count(operation) {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                let (mut trial, name, _, references) = fixture_options(true, false, 4);
+                let mut recovery = open(&mut trial, &name);
+                let genesis = recovery
+                    .recover_primary_genesis(&mut trial, CounterState::new(scope()), 1_000_000, 1)
+                    .unwrap();
+                trial
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    uste_txn::stage_primary_genesis_metadata(
+                        &mut recovery,
+                        &mut trial,
+                        &genesis,
+                        1,
+                        metadata_rebase_limits().merge
+                    )
+                    .is_err(),
+                    "{operation:?}/{occurrence}/{action:?}"
+                );
+                assert_eq!(trial.pending_faults(), 0);
+                drop(recovery);
+                trial.restart().unwrap();
+                let recovery = open(&mut trial, &name);
+                for profile in [
+                    COORDINATOR_METADATA_PROFILE_V1,
+                    uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+                ] {
+                    assert!(
+                        recovery
+                            .load_index_root_manifests(&mut trial, profile)
+                            .unwrap()
+                            .is_empty()
+                    );
+                }
+                let (recovery, base, state) = origin(&mut trial, recovery);
+                let (disk, _) = recover(
+                    &mut trial,
+                    recovery,
+                    base,
+                    state,
+                    limits(),
+                    &mut Domain::default(),
+                )
+                .unwrap();
+                assert_terminal(&disk, &mut trial, references);
+                attempts += 1;
+            }
+        }
+    }
+    eprintln!("primary genesis staging fault attempts={attempts}");
+    assert!(attempts > 0);
+}
+
+#[test]
+fn primary_genesis_every_read_fault_refuses_then_recovers_exact_inventory() {
+    let (mut fs, name, _, _) = fixture_options(true, false, 4);
+    let recovery = open(&mut fs, &name);
+    fs.arm(FaultPlan::default()).unwrap();
+    recovery
+        .recover_primary_genesis(&mut fs, CounterState::new(scope()), 1_000_000, 1)
+        .unwrap();
+    let mut attempts = 0;
+    for operation in [
+        Operation::OpenExisting,
+        Operation::Metadata,
+        Operation::ReadAt,
+    ] {
+        for occurrence in 1..=fs.operation_count(operation) {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                let (mut trial, name, _, references) = fixture_options(true, false, 4);
+                let recovery = open(&mut trial, &name);
+                trial
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    recovery
+                        .recover_primary_genesis(
+                            &mut trial,
+                            CounterState::new(scope()),
+                            1_000_000,
+                            1
+                        )
+                        .is_err()
+                );
+                assert_eq!(trial.pending_faults(), 0);
+                assert_eq!(trial.operation_count(Operation::CreateNew), 0);
+                drop(recovery);
+                trial.restart().unwrap();
+                let recovery = open(&mut trial, &name);
+                let genesis = recovery
+                    .recover_primary_genesis(&mut trial, CounterState::new(scope()), 1_000_000, 1)
+                    .unwrap();
+                assert_eq!(
+                    genesis.transaction().blob_inventory().unwrap().references(),
+                    &references[..1]
+                );
+                assert_eq!(genesis.state().value, 1);
+                attempts += 1;
+            }
+        }
+    }
+    eprintln!("primary genesis read fault attempts={attempts}");
+    assert!(attempts > 0);
 }
 fn assert_terminal(disk: &Disk, fs: &mut Fs, references: [BlobReference; 2]) {
     assert_terminal_owners(disk, fs, references, [1, 2]);

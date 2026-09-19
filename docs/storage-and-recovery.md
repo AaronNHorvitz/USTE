@@ -145,7 +145,9 @@ unchanged. Whole-family rewrite costs and qualifying recovery campaigns remain o
 Decision 0121 adds a separate inventory-bearing primary-metadata streaming API. It retains only
 one inventory's new-owner deltas, preserves first principals through disk lookups and stages the
 owner family at every step. Attached first-reference/quota projections explicitly refuse on this
-path; ordinary general recovery remains available. Generic origin bootstrap and scaling are open.
+path; ordinary general recovery remains available. Decision 0122 adds bounded inventory-bearing
+genesis reconstruction and private primary owner candidates, completing this primary-only origin
+path with independent admission. Optional projection maintenance and scaling remain open.
 
 ## Indexing and bounded resources
 

@@ -113,6 +113,30 @@ fn bounded_bootstrap_admission_retry_owner_and_exclusive_handoff() {
         Some(TransactionError::InvalidRequest)
     );
     assert_eq!(preparations.get(), 0);
+    for (references, wrong, expected_calls) in [(0, false, 0), (1, true, 1), (1, false, 1)] {
+        let preparations = Rc::new(Cell::new(0));
+        let result = recovery.recover_primary_genesis(
+            &mut fs,
+            ProbeState {
+                value: CounterState::default(),
+                preparations: preparations.clone(),
+                wrong_digest: wrong,
+            },
+            1_000_000,
+            references,
+        );
+        if references == 0 {
+            assert_eq!(result.err(), Some(TransactionError::ResourceLimit));
+        } else if wrong {
+            assert_eq!(result.err(), Some(TransactionError::IntegrityFailure));
+        } else {
+            let genesis = result.unwrap();
+            assert_eq!(genesis.transaction().blob_inventory(), Some(&inventory));
+            assert_eq!(genesis.transaction().revision(), CommitRevision::FIRST);
+            assert_eq!(genesis.state().value, CounterState(5));
+        }
+        assert_eq!(preparations.get(), expected_calls);
+    }
     drop(recovery);
 
     for (outcomes, owners, bytes, wrong, expected_preparations) in [
