@@ -1,5 +1,9 @@
 //! Separately typed packed graph cache; never a v1 root or consumer authorization capability.
 use super::*;
+mod admission;
+pub use admission::{
+    PackedGraphAdmissionLimits, PackedGraphAdmissionReport, admit_packed_graph_base,
+};
 mod preparation;
 pub use preparation::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphDelta,
@@ -43,7 +47,7 @@ impl PackedGraphBase {
     pub fn namespace_policy(&self) -> Option<&NamespacePolicy> {
         self.policy.as_ref()
     }
-    /// Present only for an exact v1 bridge; later staged states require streaming export.
+    /// Cached by exact v1 bridging or cold semantic admission; staged states require export.
     pub fn source_v1_digest(&self) -> Option<&[u8; 32]> {
         self.source_v1_digest.as_ref()
     }

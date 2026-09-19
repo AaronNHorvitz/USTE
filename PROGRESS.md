@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed live graph state and repair (Decision 0155)
+## Latest verified increment — cold packed graph semantic admission (Decision 0156)
+
+Implemented on pushed `f95fe7e` plus this increment: canonical admission of eight explicit packed
+families followed by streamed history transitions, historical/current reference closure, terminal
+history/current equality, exact derived membership/cardinality and terminal/current policy checks.
+Existing pure graph semantic rules and frozen v1 digest framing are reused. Reverse packed proofs
+select historical predecessors. Independent canonical, sequential and repeated-proof budgets avoid
+interleaved reads overspending an old allowance. Only complete admission returns an opaque base;
+its optional cached v1 digest is now also populated by cold semantic admission. No graph-wide maps
+or cache writes are introduced. Reports count actual packed work, not complete physical I/O.
+
+Six tests cover five populated reference states, policy-only and policy-absent states with explicit
+empty families, exact and 24 narrower resource boundaries, eight authenticated/canonical but
+semantically false graphs, false profile/digest claims, foreign owners, late policy ciphertext
+corruption and 1,377 observed read/error/crash cases with restart. Initial Clippy feedback on a
+collapsible conditional was corrected. Focused session 11362 / `run-p679343-i21622401.scope`
+passed five tests in 29.82 s and Clippy in 0.38 s; session 84580 /
+`run-p679894-i21677318.scope` passed the added empty-family test and Clippy.
+
+Full gate session 60453 / `run-p680387-i21622442.scope` exited 0: 607 tests across 47 executables
+(graph disk 51/74.75 s; transaction integration 93/100.37 s), Clippy 0.04 s and graph docs 1.13 s.
+Preflight: 31 GiB available RAM / 5.7 GiB free swap; sampled scope peak 724,246,528 bytes / zero
+swap. Format, diff, documentation and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d156-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline'
+```
+
+Next integrate paired packed graph suffix recovery, followed by authorized consumer writes and
+native qualification readiness. Decision 0157 and unregistered graph `live/recovery.rs`, transaction
+`packed_coordinator/domain_recovery.rs` and `packed_suffix.rs` test drafts are excluded from this
+increment. T-20/T-19, full I/O accounting and qualifying campaigns remain open. Native standalone
+remains last tested at `42f9abb`; pinned M1 implementation and handoff are unchanged. This section
+supersedes historical next-step text below.
+
+## Prior verified increment — packed live graph state and repair (Decision 0155)
 
 Implemented on pushed `b4b2c0e` plus this increment: exact published-root installation, explicit
 proof-prepared commits, one certified pending graph plan, private staging/terminal publication and

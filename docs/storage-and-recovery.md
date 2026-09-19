@@ -284,6 +284,12 @@ exact coordinator retries remain available. Private family staging and terminal 
 must succeed before ready state and current policy are exposed again. Metadata rebase then binds
 the new ordered graph commitment. This is raw trusted maintenance, not an authorized consumer
 write facade or cold packed graph recovery.
+Decision 0156 cold-admits the eight packed graph families using canonical validation followed by
+streamed graph semantics: history transitions, historical/current references, exact secondary
+membership/counts and policy equality. Validation, sequential scanning and repeated lookup budgets
+are separate. Cold admission recomputes and caches the frozen v1 compatibility digest while the
+published ordered commitment keeps its distinct profile. No full graph maps or cache writes are
+required. Paired packed graph suffix recovery and authorized consumer writes remain separate.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

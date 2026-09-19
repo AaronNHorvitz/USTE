@@ -10,9 +10,10 @@ mod state;
 mod state_disk;
 pub use state_disk::packed::{
     GRAPH_ORDERED_STATE_PROFILE_V1, GRAPH_PACKED_PROFILE_V1, GraphPackedLivePublication,
-    GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphBase, PackedGraphBridgeLimits,
-    PackedGraphBridgeReport, PackedGraphDelta, PackedGraphPreparationLimits, PackedGraphReadReport,
-    PackedGraphStageLimits, PackedGraphStageReport, PackedPreparedGraph,
+    GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphAdmissionLimits,
+    PackedGraphAdmissionReport, PackedGraphBase, PackedGraphBridgeLimits, PackedGraphBridgeReport,
+    PackedGraphDelta, PackedGraphPreparationLimits, PackedGraphReadReport, PackedGraphStageLimits,
+    PackedGraphStageReport, PackedPreparedGraph, admit_packed_graph_base,
     bridge_graph_base_to_packed, packed_graph_v1_digest, prepare_packed_graph_delta,
     prepare_packed_graph_transaction, publish_packed_graph_live_base, stage_packed_graph_delta,
 };

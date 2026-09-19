@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_admission.rs"]
+mod admission;
 #[path = "packed_live.rs"]
 mod live;
 use uste_graph::{
