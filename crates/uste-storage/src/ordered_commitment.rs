@@ -77,6 +77,26 @@ impl core::fmt::Debug for OrderedCommitment {
 }
 
 impl OrderedCommitment {
+    /// Imported nonempty summary claims are structural only, never canonical-root admission.
+    pub(crate) fn claimed_nonempty(
+        entries: u64,
+        logical_bytes: u64,
+        digest: [u8; 32],
+    ) -> Result<Self, CommitmentError> {
+        if entries == 0
+            || entries > MAX_ENTRIES
+            || logical_bytes < entries
+            || logical_bytes > entries * (MAX_KEY_BYTES + MAX_VALUE_BYTES) as u64
+        {
+            return Err(CommitmentError::InvalidProof);
+        }
+        Ok(Self {
+            entries,
+            logical_bytes,
+            digest,
+        })
+    }
+
     pub fn entries(self) -> u64 {
         self.entries
     }

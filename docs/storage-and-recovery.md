@@ -177,6 +177,10 @@ Decision 0130 connects it to bounded create-new immutable pack writes and exact-
 Successful finish requires file and directory sync; append failures poison the writer and leave
 only unreferenced staging, with no root publication. Its deterministic restart/fault coverage is
 not yet Linux process qualification, typed tree validation or a cold-admitted graph profile.
+Decision 0131 supplies the closed node/value-chunk grammar and bounded imported-summary checks.
+Typed parsing recomputes a node's logical commitment but does not prove referenced contents or
+canonical partitioning; traversal must compare each child and the complete recovered value with
+their expected commitments before declaring success.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

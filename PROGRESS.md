@@ -58,6 +58,30 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `a64fc19` plus this increment: [Decision 0131](docs/decisions/0131-packed-tree-record-contract.md)
+  adds strict borrowed tree-node/value-chunk decoding, zeroizing bounded encoding, fixed physical
+  locators and structurally bounded imported logical-summary claims. Seven tests pin literal bytes,
+  every truncation/trailing byte, tags/flags, locator revisions/bounds, key/value/count/byte limits,
+  canonical chunk partitioning, physical-layout-independent logical hashes and an encrypted-pack
+  model restart with exact child/value commitments. The pack writer now exposes its framing context
+  for typed encoding; this does not grant authorization or root admission. Focused scope
+  `run-p511215-i21494013.scope` passed seven tests/0.00s and strict workspace Clippy/6.25s.
+  Final scope `run-p511887-i21524703.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 468 tests/46 executables, no failures/ignores
+  (graph disk 24/25.63s, replay 50/116.40s, storage 153/19.77s, coordinator 37/0.55s,
+  M1 process 2/2.74s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed/0.06s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.06s. Preflight 34 GiB RAM/
+  3.9 GiB swap; sampled scope peak 1,550,884,864 bytes, zero swap, not a final peak.
+  Documentation/task checks passed 206 links (including the next decision draft)/68 tasks;
+  diff check passed. No standalone native rerun (last baseline `42f9abb`), benchmark, Linux
+  packed-tree process qualification, root/domain admission, task completion or M1/lockfile change.
+  Unregistered `packed_tree_lookup.rs` and Decision 0132 remain next-package drafts explicitly
+  excluded from this tested commit. Next connect bounded authenticated lookup and whole-value
+  checks, then reachable-node copy-on-write batches and independently admitted root recovery.
+
 - Implemented on pushed `7a98146` plus this increment: [Decision 0130](docs/decisions/0130-bounded-immutable-index-packs.md)
   streams encrypted records into create-new immutable packs with explicit page/record/payload
   ceilings, sticky append errors and file-then-directory durable finish. Exact-context reads
@@ -2646,8 +2670,9 @@ removes duplicate staging proofs (pushed `fa3897a`). Decision 0127 adds bounded 
 windows to private forward recovery (pushed `42f9abb`). Decision 0128 adds locally verified
 canonical ordered commitments (pushed `3a2a361`) without changing any persisted v1 profile.
 Decision 0129 adds the encrypted packed-page framing carrier (pushed `7a98146`); Decision 0130
-adds bounded durable pack I/O. Next wire and verify typed records, then bounded copy-on-write
-traversal, root admission and domain integration, and
+adds bounded durable pack I/O (pushed `a64fc19`). Decision 0131 adds the typed record codec.
+Next connect and verify bounded authenticated traversal, then reachable-node copy-on-write
+batches, root admission and domain integration, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

@@ -68,6 +68,14 @@ pub struct ImmutablePackWriter<F: FileSystem> {
 }
 
 impl<F: FileSystem> ImmutablePackWriter<F> {
+    /// Current physical framing context for encoding typed records before append.
+    pub fn context(&self) -> PackedPageContext {
+        PackedPageContext {
+            page: self.page_index,
+            ..self.context
+        }
+    }
+
     /// `context.object` and `context.page` must be zero; a fresh identity is generated here.
     pub fn create<I: EntropySource>(
         filesystem: &mut F,

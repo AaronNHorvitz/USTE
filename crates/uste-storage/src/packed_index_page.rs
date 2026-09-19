@@ -33,7 +33,7 @@ pub struct PackedPageContext {
 }
 
 impl PackedPageContext {
-    fn validate(self) -> Result<(), StorageError> {
+    pub(crate) fn validate(self) -> Result<(), StorageError> {
         if self.family == 0 || self.object == [0; 16] {
             return Err(StorageError::InvalidState);
         }
