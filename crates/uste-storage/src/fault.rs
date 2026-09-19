@@ -123,6 +123,12 @@ impl<F> FaultFileSystem<F> {
         self.plan.points.len()
     }
 
+    /// Calls observed since creation or the last arm, including an injected failing call.
+    #[must_use]
+    pub fn operation_count(&self, operation: Operation) -> u64 {
+        self.occurrences.get(&operation).copied().unwrap_or(0)
+    }
+
     /// Install a fresh one-shot plan after setup and restart operation counters at zero.
     ///
     /// A pending plan or crashed adapter must be consumed/restarted first so tests cannot silently

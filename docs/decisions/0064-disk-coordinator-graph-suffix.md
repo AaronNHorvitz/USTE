@@ -50,3 +50,17 @@ metadata-rebase cycles. Each result matches the reference reducer; exact retries
 pending, proof-byte refusal leaves overlays empty, and further preparation waits for root repair.
 The final derived root and independent journal replay reconstruct the same complete reference
 history. Complete maps exist only in the test oracle/reconstruction, not the warm production path.
+
+## Disk-graph recovery fault extension
+
+The synthetic fixture now counts every suffix-recovery `ReadAt` boundary and injects error,
+crash-before and crash-after at each one (10 reads, 30 cases in this baseline). Every fault must
+fire, no provisional coordinator is returned, and clean restart must recover the same certified
+pending transaction. Terminal-root repair must reproduce the full reference logical digest and
+metadata rebase must release the overlay. A committed-certificate mutation after domain/metadata
+admission is rejected both by the suffix revalidation and by a fresh journal open.
+
+An armed read fault also proves denied own-outcome, transaction-ID and committed-usage calls do
+not touch storage or clock; the still-pending fault must fire on a subsequent privileged read.
+These are deterministic model faults, not process/filesystem/power-loss qualification. Dedicated
+graph terminal-publication faults and larger-scale qualification remain outstanding.

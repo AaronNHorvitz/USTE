@@ -35,6 +35,9 @@ use uste_types::{
     RecordRef, TransactionId, UtcInstant, Value,
 };
 
+#[path = "support/disk_recovery_faults.rs"]
+mod disk_recovery_faults;
+
 fn scope() -> NamespaceRef {
     NamespaceRef::new(
         DatabaseId::from_bytes([0x81; 16]),
@@ -79,15 +82,15 @@ fn admission_limits() -> GraphDiskBaseAdmissionLimits {
     .unwrap()
 }
 
-fn commit(
+fn commit<F: uste_storage::OwnershipFileSystem>(
     coordinator: &mut CommitCoordinator<
         GraphState,
-        MemoryFileSystem,
+        F,
         TestEnvelope,
         CounterEntropy,
         CounterEntropy,
     >,
-    filesystem: &mut MemoryFileSystem,
+    filesystem: &mut F,
     revision: u8,
     transaction: GraphTransaction,
 ) -> TransactionOutcome {
