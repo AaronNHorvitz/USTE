@@ -51,6 +51,19 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Connected warm graph proof preparation to the disk metadata coordinator, retaining narrow
+  bounded read methods rather than exposing its overlay-only legacy coordinator. Ready roots
+  must match the journal anchor and profiles; pending state refuses new preparation. The
+  regression continues through two additional prepare/commit/root/rebase cycles, exact retries
+  while pending, proof-byte refusal and final full-reference equality from both journal and root.
+  No consumer write authorization or large-scale qualification is implied.
+- Warm continuation verification on `bb75477` plus this increment: `cargo test -p uste-txn
+  -p uste-graph --all-targets --locked --offline -- --test-threads=1` passed; the final enhanced
+  `cargo test -p uste-graph --test disk_index --locked --offline -- --test-threads=1` passed 5.
+  Strict all-target txn/graph clippy passed. One job/thread under the existing 4 GiB scope;
+  preflight 18 GiB available RAM and 1.5 GiB free swap. Documentation/task graph checked; T-20
+  stays open for the outstanding authorization, recovery coverage and qualification work.
+
 - [Decision 0065](docs/decisions/0065-authorized-disk-metadata-reads.md) adds a restricted borrowed
   consumer facade for own retry/transaction outcomes and committed-byte usage. Authentication
   and independent action permissions precede clock/disk work; current durable policy must match

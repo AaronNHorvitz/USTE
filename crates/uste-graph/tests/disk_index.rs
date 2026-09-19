@@ -2269,6 +2269,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     let expected = coordinator.read_view().unwrap().state().clone();
     let newer_metadata_publication =
         publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
+    let mut reference_state = coordinator.reducer_state_for_checkpoint().unwrap().clone();
     let newer_graph_publication =
         publish_graph_state_root(&mut coordinator, &mut filesystem, &expected).unwrap();
     uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
@@ -2631,6 +2632,115 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
                     .unwrap();
                     assert_eq!(disk.overlay_counts(), (0, 0));
                     assert_authorized_disk_metadata(&disk, &mut filesystem, &metadata_policy);
+                    for revision in [3_u8, 4] {
+                        let transaction = GraphTransaction::new(
+                            scope(),
+                            vec![Operation::ReplaceEntity {
+                                target: entity,
+                                expected: Expected::Version(
+                                    uste_graph::RecordVersion::new(u64::from(revision - 1))
+                                        .unwrap(),
+                                ),
+                                properties: Value::Bool(revision == 4),
+                            }],
+                        );
+                        let encoded = encode_transaction(&transaction).unwrap();
+                        assert!(matches!(
+                            uste_graph::load_graph_disk_coordinator_preparation_view(
+                                &disk,
+                                &mut filesystem,
+                                transaction.clone(),
+                                GraphDiskPreparationLimits::new(8, 8, 8, 8, 1).unwrap(),
+                                &mut admission_cache,
+                            ),
+                            Err(GraphDiskError::Storage(
+                                uste_storage::journal::StorageError::ResourceLimit
+                            ))
+                        ));
+                        assert_eq!(disk.overlay_counts(), (0, 0));
+                        assert!(!disk.state().unwrap().is_pending());
+                        let prepared = uste_graph::load_graph_disk_coordinator_preparation_view(
+                            &disk,
+                            &mut filesystem,
+                            transaction.clone(),
+                            GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+                            &mut admission_cache,
+                        )
+                        .unwrap()
+                        .prepare()
+                        .unwrap();
+                        let prepared = prepare_graph_disk_commit(
+                            prepared,
+                            GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+                        )
+                        .unwrap();
+                        let request = TransactionRequest {
+                            principal: uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+                            idempotency_key: IdempotencyKey::from_bytes([revision; 16]),
+                            transaction_id: TransactionId::from_bytes([revision + 32; 16]),
+                            canonical_request: &encoded,
+                            blob_inventory: None,
+                        };
+                        let outcome = disk
+                            .commit_prepared(
+                                &mut filesystem,
+                                request,
+                                prepared.clone(),
+                                &mut clock(u64::from(revision)),
+                                &NeverCancel,
+                                lookup_limits,
+                                &mut metadata_cache,
+                            )
+                            .unwrap();
+                        let reference = uste_txn::TransactionState::prepare(
+                            &reference_state,
+                            &encoded,
+                            None,
+                            CommitRevision::new(u64::from(revision)).unwrap(),
+                        )
+                        .unwrap();
+                        assert_eq!(
+                            outcome.result_digest,
+                            <GraphState as uste_txn::TransactionState>::result_digest(&reference)
+                        );
+                        uste_txn::TransactionState::publish(&mut reference_state, reference);
+                        assert_eq!(
+                            disk.commit_prepared(
+                                &mut filesystem,
+                                request,
+                                prepared,
+                                &mut clock(u64::from(revision)),
+                                &NeverCancel,
+                                lookup_limits,
+                                &mut metadata_cache
+                            )
+                            .unwrap(),
+                            outcome
+                        );
+                        assert!(matches!(
+                            uste_graph::load_graph_disk_coordinator_preparation_view(
+                                &disk,
+                                &mut filesystem,
+                                transaction,
+                                GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+                                &mut admission_cache,
+                            ),
+                            Err(GraphDiskError::RootStateMismatch)
+                        ));
+                        uste_graph::publish_graph_disk_coordinator_base(
+                            &mut disk,
+                            &mut filesystem,
+                            outcome,
+                            GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
+                        )
+                        .unwrap();
+                        disk.rebase_metadata(
+                            &mut filesystem,
+                            uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read },
+                        )
+                        .unwrap();
+                        assert_eq!(disk.overlay_counts(), (0, 0));
+                    }
                 }
             }
             2 => assert!(matches!(
@@ -2661,9 +2771,28 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
         seed,
     )
     .unwrap();
-    assert_eq!(seeded_report.frontier.unwrap().get(), 2);
-    assert_eq!(recovered.read_view().unwrap().state(), &expected);
-    assert_eq!(recovered.checkpoint_outcomes().len(), 2);
+    assert_eq!(seeded_report.frontier.unwrap().get(), 4);
+    assert_eq!(
+        recovered.read_view().unwrap().state(),
+        &uste_txn::TransactionState::snapshot(&reference_state)
+    );
+    assert_eq!(recovered.checkpoint_outcomes().len(), 4);
+    let final_candidates = load_graph_state_root_candidates(&recovered, &mut filesystem).unwrap();
+    let final_candidate = final_candidates
+        .iter()
+        .find(|root| root.revision().get() == 4)
+        .unwrap();
+    let (final_root_state, _) = reconstruct_graph_state_candidate(
+        &recovered,
+        &mut filesystem,
+        final_candidate,
+        state_load_limits(),
+    )
+    .unwrap();
+    assert_eq!(
+        uste_txn::TransactionState::snapshot(&final_root_state),
+        uste_txn::TransactionState::snapshot(&reference_state)
+    );
 }
 
 fn assert_authorized_disk_metadata(

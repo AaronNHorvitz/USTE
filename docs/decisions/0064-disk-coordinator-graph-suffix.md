@@ -36,3 +36,17 @@ outcome/byte admission refusal, absent and misplaced suffixes, failed terminal p
 by repair, and metadata rebase to empty overlays. Ordinary-reducer recovery and commit/rebase fault
 matrices remain regression tests. Dedicated disk-graph fault/corruption campaigns, disk-aware
 authorization, scalable first-owner admission and qualifying BM-01/BM-06 remain required.
+
+## Warm continuation extension
+
+`load_graph_disk_coordinator_preparation_view` now loads the existing bounded graph proof directly
+from `DiskCommitCoordinator<GraphDiskLiveState>`. The ready root must match the exact journal
+frontier/certificate and graph profiles. Pending state refuses preparation. Narrow privileged
+read methods delegate to the established scope/uncertainty/certificate checks; they do not expose
+the internal overlay-only legacy coordinator or confer consumer authorization.
+
+Tests continue from repaired/rebased recovery through two further proof/commit/root-publication/
+metadata-rebase cycles. Each result matches the reference reducer; exact retries work while
+pending, proof-byte refusal leaves overlays empty, and further preparation waits for root repair.
+The final derived root and independent journal replay reconstruct the same complete reference
+history. Complete maps exist only in the test oracle/reconstruction, not the warm production path.

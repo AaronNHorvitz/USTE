@@ -2,6 +2,8 @@
 
 use super::*;
 
+mod index_reads;
+
 /// Trusted domain proof that the supplied live state is exactly the metadata base's state.
 /// Implementations must check scope, revision, reducer profile and logical state digest (or an
 /// equivalent independently admitted full anchor). Pending/unpublished domain states must fail.

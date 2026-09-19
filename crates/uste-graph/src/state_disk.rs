@@ -716,6 +716,101 @@ where
     }
 }
 
+impl<S, F, W, E, I> GraphStateIndexReader<F> for uste_txn::DiskCommitCoordinator<S, F, W, E, I>
+where
+    S: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    fn reader_scope(&self) -> NamespaceRef {
+        self.scope()
+    }
+    fn reader_load_root_manifests(
+        &self,
+        filesystem: &mut F,
+        profile: [u8; 32],
+    ) -> Result<Vec<RecoveredIndexRoot>, TransactionError> {
+        self.load_index_root_manifests(filesystem, profile)
+    }
+    fn reader_visit_run(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+        visitor: &mut IndexRunVisitor<'_>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.visit_index_run(filesystem, root, family, limits, visitor)
+    }
+    fn reader_get_bounded(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        key: &[u8],
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Option<Vec<u8>>, IndexReadStats), TransactionError> {
+        self.index_get_bounded(filesystem, root, family, key, limits, cache)
+    }
+    fn reader_get_predecessor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        upper_bound: &[u8],
+        limits: IndexPredecessorLimits,
+        cache: &mut PageCache,
+    ) -> Result<IndexPredecessor, TransactionError> {
+        self.index_get_predecessor(filesystem, root, family, prefix, upper_bound, limits, cache)
+    }
+    fn reader_scan_prefix(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        prefix: &[u8],
+        maximum_results: usize,
+        maximum_result_bytes: usize,
+        cache: &mut PageCache,
+    ) -> Result<uste_storage::IndexScan, TransactionError> {
+        self.index_scan_prefix(
+            filesystem,
+            root,
+            family,
+            prefix,
+            maximum_results,
+            maximum_result_bytes,
+            cache,
+        )
+    }
+    fn reader_open_cursor(
+        &self,
+        filesystem: &mut F,
+        root: &RecoveredIndexRoot,
+        family: u8,
+        limits: IndexRunReadLimits,
+    ) -> Result<IndexRunCursor<F>, TransactionError> {
+        self.open_index_run_cursor(filesystem, root, family, limits)
+    }
+    fn reader_next_cursor(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut IndexRunCursor<F>,
+    ) -> Result<Option<IndexEntry>, TransactionError> {
+        self.next_index_run_entry(filesystem, cursor)
+    }
+    fn reader_finish_cursor(
+        &self,
+        cursor: IndexRunCursor<F>,
+    ) -> Result<IndexRunReadReport, TransactionError> {
+        self.finish_index_run_cursor(cursor)
+    }
+}
+
 impl<F, W, E, I> GraphStateIndexReader<F> for AuthenticatedIndexRecovery<F, W, E, I>
 where
     F: OwnershipFileSystem,
@@ -1092,6 +1187,36 @@ where
         .current_base()
         .ok_or(GraphDiskError::RootStateMismatch)?;
     validate_current_root(coordinator, base.admitted_root())?;
+    load_graph_disk_preparation_view_with_reader(
+        coordinator,
+        filesystem,
+        base.admitted_root(),
+        transaction,
+        limits,
+        cache,
+    )
+}
+
+/// Trusted warm preparation against the disk coordinator's exact ready graph base.
+/// Consumer authorization must precede this explicit-I/O proof phase.
+pub fn load_graph_disk_coordinator_preparation_view<F, W, E, I>(
+    coordinator: &uste_txn::DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    transaction: GraphTransaction,
+    limits: GraphDiskPreparationLimits,
+    cache: &mut PageCache,
+) -> Result<GraphDiskPreparationView, GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let base = coordinator
+        .state()?
+        .current_base()
+        .ok_or(GraphDiskError::RootStateMismatch)?;
+    validate_root_anchor(coordinator.checkpoint_anchor()?, base.admitted_root())?;
     load_graph_disk_preparation_view_with_reader(
         coordinator,
         filesystem,
@@ -4860,7 +4985,14 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    let Some((revision, certificate_digest)) = coordinator.checkpoint_anchor()? else {
+    validate_root_anchor(coordinator.checkpoint_anchor()?, root)
+}
+
+fn validate_root_anchor(
+    anchor: Option<(CommitRevision, [u8; 32])>,
+    root: &DerivedGraphStateRoot,
+) -> Result<(), GraphDiskError> {
+    let Some((revision, certificate_digest)) = anchor else {
         return Err(GraphDiskError::RootStateMismatch);
     };
     if root.root.revision() != revision
