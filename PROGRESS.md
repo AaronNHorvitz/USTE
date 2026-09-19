@@ -51,6 +51,18 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Added 81 graph terminal-publication model faults: every create (5), write (6), length change
+  (5), file sync (5) and directory sync (6), each with error/crash-before/crash-after. Every fault
+  fires. Failed publication preserves pending state, overlays and exact journal anchor;
+  in-process retry succeeds, and restart admits either the older graph base plus pending suffix
+  or the completed root. Repair reproduces the reference digest and rebase empties overlays.
+- Verification on `a3b2d7c` plus this increment: `cargo test -p uste-graph --test disk_index
+  --locked --offline -- --test-threads=1 --nocapture` passed 8, including both 30-case read and
+  81-case publication matrices; strict all-target graph clippy passed. One job/thread and the
+  established 4 GiB scope; preflight 17 GiB available RAM, 1.5 GiB free swap. This does not
+  replace real process/filesystem/power-loss or larger-than-memory qualification. Continue
+  authorized graph read/write and upload reconciliation integration.
+
 - Added a dynamically enumerated disk-graph suffix read-fault matrix: 10 read boundaries ×
   error/crash-before/crash-after = 30 injected cases. Every fault fires; no provisional coordinator
   escapes, and restart repairs the same certified transaction to the reference digest, then
@@ -932,8 +944,8 @@ remaining mixed workload have not passed.
   The legacy coordinator still replays complete metadata maps; Decisions 0060–0063 add a separate
   disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
   metadata rebase. Decision 0064 connects the ready/one-pending graph suffix path; its dedicated
-  terminal-publication fault coverage and full authorization facade remain incomplete. The
-  dedicated suffix read-fault/certificate-corruption cases now pass. Decision 0065 adds
+  full authorization facade remains incomplete. Dedicated suffix read-fault/certificate-corruption
+  and terminal-publication model cases now pass. Decision 0065 adds
   only restricted authorized own-outcome and committed-usage reads against a ready durable policy.
   Storage's own certificate/blob collections remain memory-resident, first-owner admission is
   read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
@@ -976,7 +988,7 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-graph terminal-publication fault coverage and disk-aware authorization beyond restricted
+next extend disk-aware authorization beyond restricted
 metadata reads (writes, upload quota/reconciliation and graph candidate filtering),
 and replace per-owner
 prefix scans with scalable authenticated first-reference

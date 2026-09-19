@@ -18,7 +18,7 @@ struct RecoveryInput {
     recovery: Recovery,
     metadata: uste_txn::CoordinatorDiskBase,
     state: GraphDiskLiveState,
-    suffix: uste_txn::RecoveredPreparedSuffix<uste_graph::GraphDiskCommit>,
+    suffix: Option<uste_txn::RecoveredPreparedSuffix<uste_graph::GraphDiskCommit>>,
     cache: PageCache,
 }
 
@@ -145,21 +145,30 @@ fn prepare(filesystem: &mut FaultFs, name: &EntryName) -> RecoveryInput {
     )
     .unwrap();
     let frontier = frontier.unwrap();
-    let proof = load_graph_disk_recovery_preparation_view(
-        &recovery,
-        filesystem,
-        &base,
-        &frontier,
-        GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
-        &mut cache,
-    )
-    .unwrap()
-    .prepare()
-    .unwrap();
-    let suffix = frontier.bind_prepared(
-        prepare_graph_disk_commit(proof, GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap())
-            .unwrap(),
-    );
+    let suffix = if base.revision() == frontier.revision() {
+        None
+    } else {
+        let proof = load_graph_disk_recovery_preparation_view(
+            &recovery,
+            filesystem,
+            &base,
+            &frontier,
+            GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+            &mut cache,
+        )
+        .unwrap()
+        .prepare()
+        .unwrap();
+        Some(
+            frontier.bind_prepared(
+                prepare_graph_disk_commit(
+                    proof,
+                    GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+                )
+                .unwrap(),
+            ),
+        )
+    };
     RecoveryInput {
         recovery,
         metadata,
@@ -178,7 +187,7 @@ fn recover(
         filesystem,
         input.metadata,
         input.state,
-        Some(input.suffix),
+        input.suffix,
         RetentionDays::new(30).unwrap(),
         uste_txn::DiskCoordinatorRecoveryLimits {
             overlay: uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
@@ -390,4 +399,112 @@ fn certificate_mutation_after_disk_graph_admission_fails_closed_again() {
         ),
         Err(uste_txn::TransactionError::IntegrityFailure)
     ));
+}
+
+fn publish_pending(disk: &mut Disk, filesystem: &mut FaultFs) -> Result<(), GraphDiskError> {
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    let outcome = disk
+        .outcome(
+            filesystem,
+            uste_policy::PrincipalDigest::from_bytes([0x90; 32]),
+            IdempotencyKey::from_bytes([2; 16]),
+            UtcInstant::new(3, 0).unwrap(),
+            uste_storage::IndexGetLimits::new(16, 136).unwrap(),
+            &mut cache,
+        )?
+        .unwrap();
+    let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    uste_graph::publish_graph_disk_coordinator_base(
+        disk,
+        filesystem,
+        outcome,
+        GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn every_disk_graph_terminal_publication_fault_retains_recoverable_certified_state() {
+    let (mut filesystem, name, _) = fixture();
+    let input = prepare(&mut filesystem, &name);
+    let mut disk = recover(&mut filesystem, input).unwrap();
+    filesystem.arm(FaultPlan::default()).unwrap();
+    publish_pending(&mut disk, &mut filesystem).unwrap();
+    let counts = [
+        FaultOperation::CreateNew,
+        FaultOperation::WriteAt,
+        FaultOperation::SetLen,
+        FaultOperation::SyncAll,
+        FaultOperation::SyncDirectory,
+    ]
+    .map(|operation| (operation, filesystem.operation_count(operation)));
+    assert!(counts.iter().filter(|(_, count)| *count > 0).count() >= 4);
+    eprintln!(
+        "disk_graph_publication_boundaries={counts:?} fault_cases={}",
+        counts.iter().map(|(_, count)| count * 3).sum::<u64>()
+    );
+    drop(disk);
+    for (operation, count) in counts {
+        for occurrence in 1..=count {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                let (mut filesystem, name, expected_digest) = fixture();
+                let input = prepare(&mut filesystem, &name);
+                let mut disk = recover(&mut filesystem, input).unwrap();
+                let anchor = disk.checkpoint_anchor().unwrap();
+                filesystem
+                    .arm(
+                        FaultPlan::new([FaultPoint {
+                            operation,
+                            occurrence,
+                            action,
+                        }])
+                        .unwrap(),
+                    )
+                    .unwrap();
+                assert!(
+                    publish_pending(&mut disk, &mut filesystem).is_err(),
+                    "{operation:?}/{occurrence}/{action:?}"
+                );
+                assert_eq!(
+                    filesystem.pending_faults(),
+                    0,
+                    "every planned publication fault must fire"
+                );
+                assert!(disk.state().unwrap().is_pending());
+                assert_eq!(disk.overlay_counts(), (1, 0));
+                assert_eq!(disk.checkpoint_anchor().unwrap(), anchor);
+                if !filesystem.is_crashed() {
+                    publish_pending(&mut disk, &mut filesystem).unwrap();
+                    assert!(!disk.state().unwrap().is_pending());
+                }
+                drop(disk);
+                filesystem.restart().unwrap();
+                let input = prepare(&mut filesystem, &name);
+                let mut disk = recover(&mut filesystem, input).unwrap();
+                assert_eq!(disk.checkpoint_anchor().unwrap(), anchor);
+                assert_eq!(disk.state().unwrap().revision().get(), 2);
+                if disk.state().unwrap().is_pending() {
+                    publish_pending(&mut disk, &mut filesystem).unwrap();
+                }
+                let roots = disk
+                    .load_index_root_manifests(&mut filesystem, GRAPH_STATE_PROFILE_V1)
+                    .unwrap();
+                assert_eq!(roots[0].logical_state_digest(), &expected_digest);
+                let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+                let merge =
+                    IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+                disk.rebase_metadata(
+                    &mut filesystem,
+                    uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read },
+                )
+                .unwrap();
+                assert_eq!(disk.overlay_counts(), (0, 0));
+            }
+        }
+    }
 }

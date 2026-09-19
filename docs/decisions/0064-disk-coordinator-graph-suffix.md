@@ -62,5 +62,13 @@ admission is rejected both by the suffix revalidation and by a fresh journal ope
 
 An armed read fault also proves denied own-outcome, transaction-ID and committed-usage calls do
 not touch storage or clock; the still-pending fault must fire on a subsequent privileged read.
-These are deterministic model faults, not process/filesystem/power-loss qualification. Dedicated
-graph terminal-publication faults and larger-scale qualification remain outstanding.
+These are deterministic model faults, not process/filesystem/power-loss qualification.
+
+The terminal-publication extension enumerates every create, write, length change, file-sync and
+directory-sync boundary in the synthetic pending-root publication. This baseline has 27 boundaries
+(5 creates, 6 writes, 5 length changes, 5 file syncs and 6 directory syncs), each exercised with
+error/crash-before/crash-after, for 81 cases. Every fault must fire. Errors leave the certified
+domain state pending and preserve the exact journal anchor; an in-process retry must finish.
+Restart accepts the old base with its one pending suffix or the completed new root, repairs when
+needed, checks the full reference logical digest and rebases metadata to empty overlays. This
+extends local fault coverage; production and large-scale qualification remain outstanding.
