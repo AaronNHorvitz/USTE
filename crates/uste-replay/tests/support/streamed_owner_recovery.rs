@@ -1,6 +1,8 @@
 use super::*;
 #[path = "streamed_owner_recovery/first_references.rs"]
 mod first_references;
+#[path = "streamed_owner_recovery/usage.rs"]
+mod usage;
 use uste_storage::fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation};
 use uste_storage::journal::StorageError;
 use uste_storage::{BlobReference, FileSystem, IndexGetLimits, IndexRunReadLimits, PageCache};
@@ -166,6 +168,16 @@ fn fixture_projection(
     last: u8,
     first: bool,
 ) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
+    fixture_principals(initial_owner, roots, last, first, 2, false)
+}
+fn fixture_principals(
+    initial_owner: bool,
+    roots: bool,
+    last: u8,
+    first: bool,
+    second_principal: u8,
+    zero_second: bool,
+) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
     let name = EntryName::new("streamed-primary-owners").unwrap();
     let mut fs = Fs::new(MemoryFileSystem::default(), FaultPlan::default());
     let vault = KeyVault::create(
@@ -185,7 +197,14 @@ fn fixture_projection(
     )
     .unwrap();
     let mut references = Vec::new();
-    for content in [b"first".as_slice(), b"second".as_slice()] {
+    for content in [
+        b"first".as_slice(),
+        if zero_second {
+            &[][..]
+        } else {
+            b"second".as_slice()
+        },
+    ] {
         let mut upload = coordinator.start_blob_upload(scope()).unwrap();
         coordinator
             .write_blob_upload(&mut fs, &mut upload, content)
@@ -213,6 +232,13 @@ fn fixture_projection(
             .commit(
                 &mut fs,
                 TransactionRequest {
+                    principal: PrincipalDigest::from_bytes(
+                        [if revision == 2 {
+                            second_principal
+                        } else {
+                            revision
+                        }; 32],
+                    ),
                     blob_inventory: (revision != 4 && (revision != 1 || initial_owner))
                         .then_some(&inventory),
                     ..request(revision, &(revision as u64).to_be_bytes())

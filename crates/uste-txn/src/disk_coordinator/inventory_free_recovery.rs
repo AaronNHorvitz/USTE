@@ -27,6 +27,7 @@ enum MetadataMode {
     InventoryFree,
     Primary,
     FirstReferences,
+    IndexedUsage(IndexGetLimits),
 }
 
 /// Trusted private-merge diagnostics, not consumer cardinalities or complete physical I/O.
@@ -50,7 +51,7 @@ impl InventoryFreeMetadataRecoveryReport {
         })
     }
 
-    fn add(&mut self, other: &Self) -> Result<(), TransactionError> {
+    pub(crate) fn add(&mut self, other: &Self) -> Result<(), TransactionError> {
         let add = |a: u64, b| a.checked_add(b).ok_or(TransactionError::ResourceLimit);
         let next = Self {
             revisions: add(self.revisions, other.revisions)?,
@@ -169,6 +170,36 @@ where
         )
     }
 
+    /// Preserve admitted first-reference and quota projections with private per-revision staging.
+    /// An independently admitted quota root is mandatory even for an empty owner base; absence
+    /// is never interpreted as zero usage. Only new first owners add charges to their principal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_with_indexed_usage_streaming_domain<D: DiskRecoveryDomain<S, F, W, E, I>>(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        metadata_limits: PrimaryMetadataRecoveryLimits,
+        usage_lookup: IndexGetLimits,
+        cache: &mut PageCache,
+        domain: &mut D,
+    ) -> Result<(Self, PrimaryMetadataRecoveryReport), TransactionError> {
+        Self::recover_primary_metadata(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            metadata_limits,
+            MetadataMode::IndexedUsage(usage_lookup),
+            cache,
+            domain,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn recover_primary_metadata<D: DiskRecoveryDomain<S, F, W, E, I>>(
         mut recovery: AuthenticatedIndexRecovery<F, W, E, I>,
@@ -202,11 +233,18 @@ where
         {
             return Err(TransactionError::IntegrityFailure);
         }
-        let first_references = mode == MetadataMode::FirstReferences;
+        let first_references = matches!(
+            mode,
+            MetadataMode::FirstReferences | MetadataMode::IndexedUsage(_)
+        );
+        let usage_lookup = match mode {
+            MetadataMode::IndexedUsage(lookup) => Some(lookup),
+            _ => None,
+        };
         if (mode == MetadataMode::InventoryFree && base.owner_count() != 0)
             || (!first_references && base.has_first_reference_evidence())
             || (first_references && base.owner_count() != 0 && !base.has_first_reference_evidence())
-            || base.has_blob_usage_index()
+            || base.has_blob_usage_index() != usage_lookup.is_some()
         {
             return Err(TransactionError::InvalidRequest);
         }
@@ -333,6 +371,7 @@ where
                     metadata_limits.merge,
                     &owners,
                     first_references,
+                    usage_lookup,
                 )?;
                 report.add(&step)?;
                 base = next;

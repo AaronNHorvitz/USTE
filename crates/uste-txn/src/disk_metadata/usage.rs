@@ -3,11 +3,14 @@ use super::*;
 use uste_storage::{IndexDelta, IndexGetLimits, PageCache};
 
 mod rebuild;
+mod recovery;
 pub(crate) use rebuild::rebuild_usage;
 pub use rebuild::{
     CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,
     MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS,
 };
+pub use recovery::stage_genesis_blob_usage;
+pub(super) use recovery::stage_projection;
 
 /// SHA-256 of `USTE coordinator-blob-usage-v1`.
 pub const COORDINATOR_BLOB_USAGE_PROFILE_V1: [u8; 32] = [
@@ -33,6 +36,15 @@ pub(super) struct BlobUsageIndex {
     owners: u64,
     bytes: u64,
     principals: u64,
+}
+
+impl BlobUsageIndex {
+    pub(super) fn owner_count(&self) -> u64 {
+        self.owners
+    }
+    pub(super) fn has_unpublished_root(&self) -> bool {
+        self.root.generation() == 0
+    }
 }
 
 fn add(a: u64, b: u64) -> Result<u64, StorageError> {

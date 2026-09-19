@@ -28,7 +28,16 @@ pub struct CoordinatorDiskBase {
 
 impl CoordinatorDiskBase {
     pub(crate) fn has_unpublished_roots(&self) -> bool {
-        self.metadata.generation() == 0 || self.transactions.root.generation() == 0
+        self.metadata.generation() == 0
+            || self.transactions.root.generation() == 0
+            || self
+                .first_references
+                .as_ref()
+                .is_some_and(|root| root.generation() == 0)
+            || self
+                .usage
+                .as_ref()
+                .is_some_and(usage::BlobUsageIndex::has_unpublished_root)
     }
 
     pub(crate) fn owner_count(&self) -> u64 {

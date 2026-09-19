@@ -13,6 +13,7 @@ pub(crate) fn stage_primary_metadata_step<F, W, E, I>(
     limits: IndexRunMergeLimits,
     owners: &BTreeMap<BlobId, (BlobReference, PrincipalDigest)>,
     preserve_first_references: bool,
+    usage_lookup: Option<uste_storage::IndexGetLimits>,
 ) -> Result<(CoordinatorDiskBase, InventoryFreeMetadataRecoveryReport), TransactionError>
 where
     F: OwnershipFileSystem,
@@ -22,7 +23,7 @@ where
 {
     if (!preserve_first_references && base.first_references.is_some())
         || (preserve_first_references && base.owner_count() != 0 && base.first_references.is_none())
-        || base.usage.is_some()
+        || base.usage.is_some() != usage_lookup.is_some()
         || transaction.scope != recovery.scope()
         || input.scope != recovery.scope()
         || input.revision != transaction.revision
@@ -163,12 +164,35 @@ where
     } else {
         None
     };
+    let usage = if let Some(lookup) = usage_lookup {
+        let previous = base
+            .usage
+            .as_ref()
+            .ok_or(TransactionError::IntegrityFailure)?;
+        if previous.owner_count() != base.owner_count() {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let (next, work) = usage::stage_projection(
+            recovery,
+            filesystem,
+            Some(previous),
+            transaction,
+            input,
+            owners,
+            limits,
+            lookup,
+        )?;
+        report.add(&work)?;
+        Some(next)
+    } else {
+        None
+    };
     Ok((
         CoordinatorDiskBase {
             metadata,
             transactions: CoordinatorTransactionIndex { root: transactions },
             first_references,
-            usage: None,
+            usage,
         },
         report,
     ))

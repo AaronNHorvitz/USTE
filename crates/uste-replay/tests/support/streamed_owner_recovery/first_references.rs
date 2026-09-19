@@ -34,7 +34,7 @@ fn prepare(
     let base = admit_roots_with_first(fs, &recovery, transactions, metadata, first);
     (recovery, base)
 }
-fn recover_first(
+pub(super) fn recover_first(
     fs: &mut Fs,
     recovery: Recovery,
     base: CoordinatorDiskBase,
@@ -175,6 +175,42 @@ fn streamed_first_references_refuse_populated_unwitnessed_base_before_io() {
     assert_eq!((domain.advanced, domain.finished), (0, false));
     assert_eq!(fs.operation_count(Operation::ReadAt), 0);
     assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+}
+
+#[test]
+fn private_first_reference_on_published_primary_roots_requires_terminal_rebase() {
+    let (mut fs, name, state, references) = fixture_projection(true, true, 1, true);
+    let mut recovery = open(&mut fs, &name);
+    let genesis = recovery
+        .recover_primary_genesis(&mut fs, CounterState::new(scope()), 1_000_000, 1)
+        .unwrap();
+    let first = uste_txn::stage_genesis_first_references(
+        &mut recovery,
+        &mut fs,
+        &genesis,
+        1,
+        metadata_rebase_limits().merge,
+    )
+    .unwrap();
+    assert_eq!(first.as_ref().unwrap().generation(), 0);
+    let metadata =
+        uste_txn::load_coordinator_metadata_candidates_for_recovery::<CounterState, _, _, _, _>(
+            &recovery, &mut fs,
+        )
+        .unwrap()
+        .remove(0);
+    let transactions = recovery
+        .load_index_root_manifests(&mut fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+        .unwrap()
+        .remove(0);
+    assert_ne!(transactions.generation(), 0);
+    let base = admit_roots_with_first(&mut fs, &recovery, transactions, metadata, first);
+    let (mut disk, report) =
+        recover_first(&mut fs, recovery, base, state, &mut Domain::default()).unwrap();
+    assert_eq!(report, PrimaryMetadataRecoveryReport::default());
+    assert!(disk.rebase_required());
+    publish(&mut disk, &mut fs);
+    assert_first(&disk, &mut fs, references, [1, 2], 1);
 }
 
 #[test]

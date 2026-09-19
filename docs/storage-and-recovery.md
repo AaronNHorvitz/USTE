@@ -151,6 +151,10 @@ path with independent admission. Optional projection maintenance and scaling rem
 Decision 0123 adds explicit first-reference-preserving streaming recovery and private genesis
 witness staging. Earliest claims are retained with only current-inventory deltas; populated bases
 without admitted witnesses refuse. Quota-preserving streaming and rewrite/accounting scale remain open.
+Decision 0124 adds explicit quota-preserving streaming and private genesis quota candidates, with
+exact first-owner charges and mandatory independent initial quota admission. Private optional roots
+also require rebase when primary roots are already published. Rewrite/proof amplification and
+complete accounting/qualification remain open; the paired-base paths do not remove every limit.
 
 ## Indexing and bounded resources
 

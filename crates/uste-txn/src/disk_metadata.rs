@@ -29,7 +29,7 @@ pub(crate) use recovery_step::stage_primary_metadata_step;
 pub use usage::{
     COORDINATOR_BLOB_USAGE_PROFILE_V1, CoordinatorBlobUsageLimits,
     CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,
-    MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS,
+    MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS, stage_genesis_blob_usage,
 };
 pub(crate) use usage::{bootstrap_empty_usage, rebuild_usage};
 

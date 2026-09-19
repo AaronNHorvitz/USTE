@@ -58,6 +58,38 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `b3650cd` plus this increment: [Decision 0124](docs/decisions/0124-streamed-quota-recovery.md)
+  maintains admitted quota and first-reference projections through private per-revision metadata
+  staging, and provides private genesis quota candidates including the zero-owner head. Only new
+  first owners add charges; exact repeated references preserve their principal. Missing quota
+  roots and omitted projection preservation refuse, never imply zero usage. Eight new tests
+  cover new/existing principals, zero-byte blobs, populated/empty and origin/published bases,
+  bounded lookup refusal, cold aggregate admission, late corruption and optional-root durability.
+  The latter fixes private first-reference/quota roots attached to published primary roots being
+  omitted from the rebase-required guard, including zero suffixes. Separate tests isolate both.
+  Fault schedules: 57 genesis failures, 909 suffix cases (906 failures/three optional no-crash
+  boundaries), 804 publication cases (788 failures/sixteen optional no-crash boundaries).
+  Initial compilation corrected explicit storage-error conversions and merge-report field names.
+  Focused scope `run-p468765-i21472403.scope` exited 0: seven quota tests/59.84s and strict
+  workspace lint/6.13s. Final scope `run-p469496-i21425565.scope` exited 0 under 3G/4G/512M,
+  one Cargo job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 433 tests/46 executables, no failures/ignores
+  (graph disk 24/26.30s, replay 50/117.40s, storage 123/18.68s, M1 process 2/2.73s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/45.06s, BM-01 process 3/11.90s,
+  BM-06 CLI 2/0.50s and BM-06 process 8/74.09s; two prior exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (4.16s), `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (2.25s)
+  and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked
+  --offline` (1.06s) pass. Preflight 35 GiB available RAM/3.9 GiB free swap; sampled peak
+  1,684,643,840 bytes/zero swap, not final whole-run peak. Formatting/whitespace, docs (198 links)
+  and task graph (68 tasks) pass. M1 sources/locks unchanged; no qualifying campaign.
+  Next: apply streamed metadata to native paired-base recovery, then construction/recovery
+  scaling and complete accounting before qualifying campaigns. T-20/T-19 remain open.
+
 - Implemented on pushed `c8dff73` plus this increment: [Decision 0123](docs/decisions/0123-streamed-first-reference-recovery.md)
   preserves admitted first-reference evidence during private per-revision metadata staging and
   supplies bounded private genesis witnesses. Empty-owner bases may bootstrap; populated bases
@@ -2455,7 +2487,8 @@ Current action: T-20 remains the priority. Decisions 0108–0120, including the 
 20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
 `3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
 suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
-references on that path. Next maintain quota projections, then address immutable-family rewrite scaling and
+references on that path; Decision 0124 maintains quota projections. Next apply streamed metadata
+to native paired-base recovery, then address immutable-family rewrite scaling and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.
