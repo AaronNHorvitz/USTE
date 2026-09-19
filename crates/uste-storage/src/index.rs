@@ -790,6 +790,7 @@ pub(crate) fn publish_root<F, W, E, I>(
     identity_entropy: &mut I,
     input: IndexRootInput,
     runs: &[IndexRunDescriptor],
+    fallback_limits: Option<IndexRunReadLimits>,
 ) -> Result<RecoveredIndexRoot, StorageError>
 where
     F: FileSystem,
@@ -801,13 +802,23 @@ where
         return Err(StorageError::InvalidState);
     }
     validate_run_bindings(runs, input, &context)?;
-    let candidates = load_candidates(
-        filesystem,
-        &context,
-        vault,
-        input.scope,
-        input.index_profile,
-    )?;
+    let candidates = match fallback_limits {
+        Some(limits) => load_candidates_bounded(
+            filesystem,
+            &context,
+            vault,
+            input.scope,
+            input.index_profile,
+            limits,
+        )?,
+        None => load_candidates(
+            filesystem,
+            &context,
+            vault,
+            input.scope,
+            input.index_profile,
+        )?,
+    };
     let generation = candidates
         .iter()
         .map(|(_, root)| root.generation)
@@ -2850,6 +2861,51 @@ where
             Ok(_) => candidates.push((slot, root)),
             Err(StorageError::IntegrityFailure | StorageError::UnsupportedProfile) => {}
             Err(error) => return Err(error),
+        }
+    }
+    validate_candidate_generations(&candidates)?;
+    Ok(candidates)
+}
+
+fn load_candidates_bounded<F, W, E>(
+    filesystem: &mut F,
+    context: &IndexContext<'_, F::Directory>,
+    vault: &KeyVault<W, E>,
+    scope: NamespaceRef,
+    index_profile: [u8; 32],
+    limits: IndexRunReadLimits,
+) -> Result<Vec<(Slot, RecoveredIndexRoot)>, StorageError>
+where
+    F: FileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+{
+    let manifests = load_manifest_candidates(filesystem, context, vault, scope, index_profile)?;
+    let mut candidates = Vec::new();
+    for (slot, root) in manifests {
+        let mut usable = true;
+        for run in root.runs() {
+            match visit_run(
+                filesystem,
+                context,
+                vault,
+                &root,
+                run.family,
+                limits,
+                &mut |_, _| Ok(()),
+            ) {
+                Ok(_) => {}
+                Err(StorageError::IntegrityFailure | StorageError::UnsupportedProfile) => {
+                    usable = false;
+                    break;
+                }
+                // A budget or I/O refusal is not evidence of corruption. Do not overwrite a
+                // potentially sole usable fallback that was merely too expensive to validate.
+                Err(error) => return Err(error),
+            }
+        }
+        if usable {
+            candidates.push((slot, root));
         }
     }
     validate_candidate_generations(&candidates)?;

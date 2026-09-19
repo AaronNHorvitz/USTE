@@ -36,9 +36,14 @@ pinned pair. No executable cache-rebuild completion is claimed here.
 
 ## Limits and verification boundary
 
-Merge/reuse limits are per family, not aggregate. Storage's existing new-root publication still
-uses its compatibility scrub when selecting the safe overwrite slot; caller-bounded publication
-admission remains a T-20 gap. Scratch files left by failure are optional unreferenced index data;
+Merge/reuse limits are per family, not aggregate. New metadata roots now select the safe overwrite
+slot through caller-bounded fallback validation: the reuse limits apply to every run in both fixed
+slots. Resource or I/O refusal stops publication without overwriting a slot; only authenticated
+integrity/profile failure makes a candidate unusable. Graph terminal-root publication likewise
+uses explicit fallback limits, taking the largest declared base page, entry and logical-byte
+budgets across its families. An older fallback exceeding those limits requires a larger explicit
+budget, not silent rejection as corruption. The legacy publication API retains its compatibility
+scrub. Scratch files left by failure are optional unreferenced index data;
 later maintenance owns reclamation. No journal history, source data or physical-erasure claim
 changes. Storage certificate/blob collections and first-owner admission's read amplification
 also remain open.

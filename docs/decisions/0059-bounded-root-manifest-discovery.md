@@ -50,6 +50,13 @@ one suffix. It makes no BM-01/BM-06, production or release claim.
 
 ## Verification
 
+Subsequent T-20 extension: `publish_index_root_recovered_bounded` authenticates both fallback
+slots under caller-selected per-run limits before choosing an overwrite slot. Budget and I/O
+failures leave slots unchanged; corrupt runs may be excluded only after integrity failure.
+Metadata rebase and graph terminal-root publication use this API. The compatibility API remains
+unchanged. Tests cover page/entry/byte refusals and preservation of the sole good older fallback
+when the newest run is corrupt. This bounds the scrub; it does not eliminate its read cost.
+
 ~~~text
 cargo test -p uste-storage -p uste-txn -p uste-graph --all-targets --locked --offline -- --test-threads=1
 # uste-storage: 77 passed; uste-txn: 28 passed; uste-graph: 43 passed

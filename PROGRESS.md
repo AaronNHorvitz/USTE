@@ -51,13 +51,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Caller-bounded fallback validation now precedes metadata rebase and graph terminal-root
+  overwrite selection. Per-run page/entry/byte refusal leaves root slots unchanged, and a corrupt
+  newest run cannot displace the sole good older fallback. The compatibility API remains available.
+  Verified on `eb02a33` plus this increment: `cargo test -p uste-storage
+  bounded_root_publication_preserves --locked --offline -- --test-threads=1` passed 1;
+  the existing `encrypted_index_runs_round_trip_large_values_with_bounded_cache_and_root_fallback`
+  filter passed 1; `cargo test -p uste-graph --test disk_index --locked --offline --
+  --test-threads=1` passed 5; the same flags for `-p uste-replay --test coordinator_checkpoint`
+  passed 5 including the 48-case rebase matrix. Strict all-target storage/txn/replay/graph clippy
+  passed. One job/thread, `MemoryHigh=3G MemoryMax=4G MemorySwapMax=512M`; preflight 17 GiB
+  available RAM, 888 MiB free swap. No qualifying benchmark or task completion is claimed.
+
 - [Decision 0063](docs/decisions/0063-coordinator-metadata-rebase.md) adds streaming insertion-only
   metadata rebase, exact output checks and overlay release only after both current roots succeed.
   A matching partial root is reauthenticated and resynchronized without slot rotation. Pending
   rebase blocks new writes (including after restart) while permitting exact retries; advancing a
   legacy writer beyond an intermediate partial root requires explicit cache rebuild, not deletion
-  of the pinned pair. The compatibility overwrite-selection scrub remains a bounded-publication
-  gap. First-owner read amplification and storage metadata maps also remain open.
+  of the pinned pair. The subsequent bounded-publication extension above closes that path's
+  caller-admission gap. First-owner read amplification and storage metadata maps remain open.
 - Focused rebase verification passed 48 error/crash-before/crash-after cases covering run/root
   syncs, directory syncs and root writes, plus one repeated partial-pair failure. Same-process
   retries resynchronize previously visible unsynced roots; cold reopen installs the new pair
@@ -850,7 +862,8 @@ remaining mixed workload have not passed.
   disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
   metadata rebase. Its disk-graph suffix path and authorization facade are not yet complete.
   Storage's own certificate/blob collections remain memory-resident, first-owner admission is
-  read-amplified, and new-root publication still uses the compatibility overwrite-selection scrub.
+  read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
+  the legacy publication API retains its compatibility scrub.
   BM-01/BM-06 have not run. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
@@ -889,7 +902,7 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery is implemented; next extend the disk-graph external
-preparation/recovery path, add disk-aware authorization and bounded root-publication admission,
+preparation/recovery path, add disk-aware authorization,
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.

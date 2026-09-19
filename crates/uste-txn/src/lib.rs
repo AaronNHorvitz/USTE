@@ -664,6 +664,21 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    pub fn publish_index_root_recovered_bounded(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_index_root_recovered_bounded(filesystem, input, runs, fallback_limits)
+            .map_err(TransactionError::Storage)
+    }
+
     #[must_use]
     pub fn checkpoint_anchor(&self) -> Option<(CommitRevision, [u8; 32])> {
         self.journal.checkpoint_anchor()
@@ -1412,6 +1427,25 @@ where
         }
         self.journal
             .publish_index_root_recovered(filesystem, input, runs)
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Publish with explicit per-run fallback validation limits before selecting an overwrite slot.
+    pub fn publish_index_root_recovered_bounded(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
+    ) -> Result<RecoveredIndexRoot, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        if input.scope != self.scope {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.journal
+            .publish_index_root_recovered_bounded(filesystem, input, runs, fallback_limits)
             .map_err(TransactionError::Storage)
     }
 

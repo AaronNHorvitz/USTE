@@ -3,7 +3,7 @@
 use super::*;
 use uste_storage::{IndexDelta, IndexRunDescriptor, IndexRunMergeLimits};
 
-/// Per-family merge and already-published-root verification limits. At most three data families
+/// Per-family merge and root verification limits (reuse and fallback-slot selection). Three data families
 /// and one fixed metadata entry are processed; these bounds are not aggregate across families.
 #[derive(Clone, Copy, Debug)]
 pub struct CoordinatorMetadataRebaseLimits {
@@ -241,5 +241,8 @@ where
             .map_err(TransactionError::Storage)?;
         return Ok(root);
     }
-    coordinator.publish_index_root_recovered(filesystem, input, runs)
+    coordinator
+        .journal
+        .publish_index_root_recovered_bounded(filesystem, input, runs, limits)
+        .map_err(TransactionError::Storage)
 }

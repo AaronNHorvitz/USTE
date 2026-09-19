@@ -1399,6 +1399,29 @@ where
         input: IndexRootInput,
         runs: &[IndexRunDescriptor],
     ) -> Result<RecoveredIndexRoot, StorageError> {
+        self.publish_index_root_with_fallback_limits(filesystem, input, runs, None)
+    }
+
+    /// Publish only after authenticating potential fallback runs within caller-selected limits.
+    /// Limits apply per run in each of the two fixed candidate slots, not to newly written runs.
+    /// Budget/I/O failure refuses publication; it never classifies an unexamined root as corrupt.
+    pub fn publish_index_root_recovered_bounded(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
+    ) -> Result<RecoveredIndexRoot, StorageError> {
+        self.publish_index_root_with_fallback_limits(filesystem, input, runs, Some(fallback_limits))
+    }
+
+    fn publish_index_root_with_fallback_limits(
+        &mut self,
+        filesystem: &mut F,
+        input: IndexRootInput,
+        runs: &[IndexRunDescriptor],
+        fallback_limits: Option<IndexRunReadLimits>,
+    ) -> Result<RecoveredIndexRoot, StorageError> {
         if self.poisoned
             || self.frontier != Some(input.revision)
             || self.previous_certificate_digest != input.certificate_digest
@@ -1418,6 +1441,7 @@ where
             &mut self.identity_entropy,
             input,
             runs,
+            fallback_limits,
         )
     }
 
@@ -3092,6 +3116,123 @@ mod tests {
     }
 
     #[test]
+    fn bounded_root_publication_preserves_good_fallback_after_newest_run_corruption() {
+        let database = DatabaseId::from_bytes([0xe1; 16]);
+        let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xe2; 16]));
+        let mut filesystem = MemoryFileSystem::default();
+        let mut store = JournalStore::create(
+            &mut filesystem,
+            options(database, "bounded-root-fallback"),
+            create_vault(database, 93_000),
+            CounterEntropy::new(94_000),
+        )
+        .unwrap();
+        let committed = store
+            .append_group(
+                &mut filesystem,
+                CommitInput {
+                    encoded_group: b"bounded root anchor",
+                    logical_event_digest: [0xe3; 32],
+                },
+            )
+            .unwrap();
+        let profile = [0xe4; 32];
+        let input = IndexRootInput {
+            scope,
+            revision: committed.revision,
+            certificate_digest: committed.certificate_digest,
+            reducer_profile: [0xe5; 32],
+            logical_state_digest: [0xe6; 32],
+            index_profile: profile,
+        };
+        let limits = IndexRunReadLimits::new(4, 2, 64).unwrap();
+        let old = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                committed.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"a".to_vec(),
+                    value: b"old".to_vec(),
+                }],
+            )
+            .unwrap();
+        store
+            .publish_index_root_recovered_bounded(&mut filesystem, input, &[old], limits)
+            .unwrap();
+        let before = filesystem
+            .test_child_names(&store.database_directory)
+            .unwrap();
+        let newest = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                committed.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"a".to_vec(),
+                    value: b"new".to_vec(),
+                }],
+            )
+            .unwrap();
+        let newest_name = filesystem
+            .test_child_names(&store.database_directory)
+            .unwrap()
+            .into_iter()
+            .find(|name| name.as_str().starts_with("i-") && !before.contains(name))
+            .unwrap();
+        store
+            .publish_index_root_recovered_bounded(&mut filesystem, input, &[newest], limits)
+            .unwrap();
+        filesystem
+            .test_mutate_file(&store.database_directory, &newest_name, 100)
+            .unwrap();
+        let replacement = store
+            .publish_index_run(
+                &mut filesystem,
+                scope,
+                committed.revision,
+                profile,
+                1,
+                [IndexEntry {
+                    key: b"a".to_vec(),
+                    value: b"fix".to_vec(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(
+            store.publish_index_root_recovered_bounded(
+                &mut filesystem,
+                input,
+                &[replacement],
+                IndexRunReadLimits::new(4, 2, 1).unwrap(),
+            ),
+            Err(StorageError::ResourceLimit)
+        );
+        let unchanged = store
+            .load_index_root_manifests(&mut filesystem, scope, profile)
+            .unwrap();
+        assert_eq!(unchanged.len(), 2);
+        assert_eq!(
+            unchanged[0].runs().copied().collect::<Vec<_>>(),
+            vec![newest]
+        );
+        let published = store
+            .publish_index_root_recovered_bounded(&mut filesystem, input, &[replacement], limits)
+            .unwrap();
+        assert_eq!(published.generation(), 2);
+        let roots = store
+            .load_index_roots(&mut filesystem, scope, profile)
+            .unwrap();
+        assert_eq!(roots.len(), 2);
+        assert_eq!(roots[1].generation(), 1);
+        assert_eq!(roots[1].runs().copied().collect::<Vec<_>>(), vec![old]);
+    }
+
+    #[test]
     fn encrypted_index_runs_round_trip_large_values_with_bounded_cache_and_root_fallback() {
         let database = DatabaseId::from_bytes([0xd1; 16]);
         let scope = NamespaceRef::new(database, uste_types::NamespaceId::from_bytes([0xd2; 16]));
@@ -3159,11 +3300,36 @@ mod tests {
                 .generation,
             1
         );
+        let fallback_bytes = u64::try_from(large.len() + 24).unwrap();
+        for limits in [
+            IndexRunReadLimits::new(1, 4, fallback_bytes).unwrap(),
+            IndexRunReadLimits::new(run.page_count(), 3, fallback_bytes).unwrap(),
+            IndexRunReadLimits::new(run.page_count(), 4, fallback_bytes - 1).unwrap(),
+        ] {
+            assert_eq!(
+                store.publish_index_root_recovered_bounded(&mut filesystem, input, &[run], limits,),
+                Err(StorageError::ResourceLimit)
+            );
+            let retained = store
+                .load_index_root_manifests(&mut filesystem, scope, profile)
+                .unwrap();
+            assert_eq!(retained.len(), 1);
+            assert_eq!(
+                retained[0].generation(),
+                1,
+                "budget refusal must not rotate a root slot"
+            );
+        }
         assert_eq!(
             store
-                .publish_index_root(&mut filesystem, input, &[run])
+                .publish_index_root_recovered_bounded(
+                    &mut filesystem,
+                    input,
+                    &[run],
+                    IndexRunReadLimits::new(run.page_count(), 4, fallback_bytes).unwrap()
+                )
                 .unwrap()
-                .generation,
+                .generation(),
             2
         );
         let mismatched = IndexRootInput {

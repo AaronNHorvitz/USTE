@@ -468,6 +468,28 @@ pub struct GraphStateRootMergeLimits {
 }
 
 impl GraphStateRootMergeLimits {
+    /// Both fallback slots use the largest declared per-family base budget, never format maxima.
+    fn fallback_read_limits(&self) -> Result<IndexRunReadLimits, GraphDiskError> {
+        IndexRunReadLimits::new(
+            self.families
+                .iter()
+                .map(|limit| limit.base().maximum_pages())
+                .max()
+                .unwrap_or(0),
+            self.families
+                .iter()
+                .map(|limit| limit.base().maximum_entries())
+                .max()
+                .unwrap_or(0),
+            self.families
+                .iter()
+                .map(|limit| limit.base().maximum_logical_bytes())
+                .max()
+                .unwrap_or(0),
+        )
+        .map_err(GraphDiskError::Storage)
+    }
+
     pub const fn new(
         families: [IndexRunMergeLimits; FAMILY_COUNT as usize],
         maximum_history_group_logical_bytes: u64,
@@ -2221,6 +2243,7 @@ where
         filesystem: &mut F,
         input: IndexRootInput,
         runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
     ) -> Result<RecoveredIndexRoot, TransactionError>;
 }
 
@@ -2268,8 +2291,9 @@ where
         filesystem: &mut F,
         input: IndexRootInput,
         runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
     ) -> Result<RecoveredIndexRoot, TransactionError> {
-        self.publish_index_root_recovered(filesystem, input, runs)
+        self.publish_index_root_recovered_bounded(filesystem, input, runs, fallback_limits)
     }
 }
 
@@ -2316,8 +2340,9 @@ where
         filesystem: &mut F,
         input: IndexRootInput,
         runs: &[IndexRunDescriptor],
+        fallback_limits: IndexRunReadLimits,
     ) -> Result<RecoveredIndexRoot, TransactionError> {
-        self.publish_index_root_recovered(filesystem, input, runs)
+        self.publish_index_root_recovered_bounded(filesystem, input, runs, fallback_limits)
     }
 }
 
@@ -2464,6 +2489,7 @@ where
             index_profile: GRAPH_STATE_PROFILE_V1,
         },
         &runs,
+        limits.fallback_read_limits()?,
     )?;
     Ok((DerivedGraphStateRoot { root }, report))
 }
