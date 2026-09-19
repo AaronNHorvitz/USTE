@@ -101,7 +101,8 @@ fn run() -> Result<(), String> {
     } else if command == "disk-engine-check" {
         let report = verify_disk_development_profile(profile)?;
         println!(
-            "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-disk-development-equivalence\",\"filesystem_profile\":\"durable-memory-model\",\"oracle_memory_resident\":true,\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},\"recovered_revision\":{},\"queries\":{},\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_hits\":{},\"cache_misses\":{}}}",
+            "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-disk-development-equivalence\",\"filesystem_profile\":\"durable-memory-model\",\"oracle_memory_resident\":true,\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,\"storage_metadata_memory_resident\":{},\"entities\":{},\"relationships\":{},\"recovered_revision\":{},\"queries\":{},\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_hits\":{},\"cache_misses\":{}}}",
+            report.storage_metadata_memory_resident,
             report.entities,
             report.relationships,
             report.recovered_revision,

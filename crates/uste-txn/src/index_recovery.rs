@@ -273,6 +273,42 @@ where
         Ok((Self { scope, journal }, report, frontier))
     }
 
+    /// Authenticate storage without resident certificate/blob/inventory/namespace history.
+    /// Retains only the final decoded transaction; domain/coordinator admission remains required.
+    /// Nonempty inventory append still requires a separate disk-aware storage capability.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_disk_blob_metadata<A>(
+        filesystem: &mut F,
+        final_name: &EntryName,
+        scope: NamespaceRef,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        limits: uste_storage::journal::BlobRecoveryLimits,
+        cache: &mut PageCache,
+    ) -> Result<(Self, RecoveryReport, Option<RecoveredFrontierTransaction>), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+    {
+        let mut frontier = None;
+        let (journal, report) = JournalStore::open_with_disk_blob_metadata(
+            filesystem,
+            final_name,
+            scope.database(),
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            limits,
+            cache,
+            |group| {
+                frontier = Some(capture_group(scope, group)?);
+                Ok(())
+            },
+        )
+        .map_err(map_open_error)?;
+        Ok((Self { scope, journal }, report, frontier))
+    }
+
     /// Consume this exclusive owner into a deliberately bounded full-replay coordinator.
     /// Intended for small bootstrap prefixes before any derived roots exist. The caller supplies
     /// trusted genesis state; this is not the disk-backed large-history recovery path.

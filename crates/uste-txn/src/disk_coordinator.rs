@@ -22,6 +22,16 @@ where
     pub fn certificate_anchor_residency(&self) -> (bool, usize) {
         self.inner.journal.certificate_anchor_residency()
     }
+
+    /// Trusted storage diagnostic: legacy residency enabled, references, inventories, namespaces.
+    pub fn blob_metadata_residency(&self) -> (bool, usize, usize, usize) {
+        self.inner.journal.blob_metadata_residency()
+    }
+
+    /// Historical cold-open work, not current consumer quotas or complete I/O accounting.
+    pub fn blob_recovery_report(&self) -> Option<&uste_storage::journal::BlobRecoveryReport> {
+        self.inner.journal.blob_recovery_report()
+    }
 }
 
 /// Trusted domain proof that the supplied live state is exactly the metadata base's state.

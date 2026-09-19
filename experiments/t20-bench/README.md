@@ -66,8 +66,9 @@ policy-only bootstrap uses `GraphState`; all fixture writes and the final cold-a
 the disk-backed graph/coordinator capabilities. It selects the accepted 64 MiB USTE cache for
 each writer batch and for the later reader (not simultaneous writer/reader caches), and
 reports maintenance-authorized cache counters. It still uses the memory fault-model adapter and
-development keys, holds the independent oracle in process and retains storage-level certificate/
-blob metadata in memory. It is semantic evidence, not performance or bounded total-RSS evidence.
+development keys and holds the independent oracle in process. It now opens with disk-backed
+certificate/blob metadata (Decision 0100), with actual storage residency in its report. It is
+semantic evidence, not performance or bounded total-RSS evidence.
 The existing Linux commands are not silently switched by this development command.
 
 `linux-disk-create/resume/open` use a distinct native Btrfs database name and portable recovery
@@ -87,8 +88,12 @@ replay, including all certificate-proof re-reads, with explicit per-revision pro
 Disk recovery no longer retains the complete certificate-anchor map; actual residency/counts
 appear in `suffix_recovery.certificate_anchor_residency`. Each range step currently proves its
 certificate to the frontier, so the declared byte bound includes a triangular proof term and
-does not imply constant-time cold recovery. Blob/inventory metadata remains resident. Only an empty
-or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
+does not imply constant-time cold recovery. Storage blob/inventory/namespace metadata now uses
+Decision 0099's disk catalog. This closed graph fixture admits zero blob bindings and a one-entry,
+68-logical-byte catalog; its exact point lookup allows two visits (one read plus one cache hit).
+Only an empty or policy-only bootstrap may use bounded full replay. Missing graph/coordinator
+roots on a larger prefix still fail closed. Optional storage catalogs can rebuild before that
+graph admission, including on open; this does not authorize intermediate graph-root publication.
 Open requires completed, repaired roots and validates the fixture Evidence binding and exact
 current/history/adjacency/provenance/reverse/policy cardinalities. Reports retain the initial
 `cold_admission` graph/metadata revisions, graph scan and semantic lookup work, and admitted
@@ -99,7 +104,13 @@ work; they are not complete authenticated-I/O counters. The separate `suffix_rec
 reports private graph merge work/counts and declared recovery ceilings; it likewise excludes
 proof reads, coordinator passes and terminal publication I/O. An already-current root is
 reauthenticated and resynchronized without rotating slots, even on open. Construction
-and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
+and open do not themselves run query verification or qualify BM-01/BM-06. The separate
+`storage_recovery` object reports the last owner's cold-open validation/replay, catalog proofs,
+admission/rebuild and actual resident-entry counts. A bootstrap can open more than one owner;
+these work counters do not cover all owners or all filesystem I/O. Setup adapter counters remain
+the separate aggregate adapter observation. Nonempty inventory append in the new mode is not yet
+available; arbitrary-blob acceptance is tested at the storage boundary, not inferred from this
+zero-blob fixture. Larger-than-memory and exact-scale performance qualification remain open.
 Native reports distinguish filesystem-adapter observation from authenticated cached-index work.
 Decision 0085 adds cached primitive operation/error, page, hit, fragment and result-byte totals, including
 work before errors, with separate warm-up and paired sample deltas. These maintenance-only
@@ -118,15 +129,16 @@ The native tests require the experiment's `target` directory to reside on Btrfs:
 but uses native disk state and authorized reads throughout. It checks all exact outcomes, visits,
 result sizes and digests, with a 64 MiB USTE cache cleared before each query. The query process
 does not build oracle adjacency arrays. Its single-pass latency/RSS diagnostics are not sampling
-or qualification: host caches remain uncontrolled, storage metadata remains resident, and this
+or qualification: host caches remain uncontrolled, complete recovery I/O accounting is absent, and this
 command does not enforce the sampler's preemptive deadline. Reports state these limits explicitly.
 
 `linux-disk-sample` instead uses a persistent, parent-supervised worker with the fixed 30-second
 query deadline, separate warm-up and paired empty/retained-cache measurements. It shares the
 unchanged sample plan and exact outcome/digest checks. Parent validation binds the engine schema,
 sample windows, round/execution counts and enforcement claim. Native commands still retain their
-development ceiling; this is not a qualifying-size campaign. Reports disclose resident storage
-metadata and unmeasured complete authenticated I/O, omitting unavailable counters. As with the
+development ceiling; this is not a qualifying-size campaign. Reports expose disk storage residency
+and unmeasured complete authenticated I/O, omitting unavailable counters. The parent validates
+the disk storage mode, zero history-map entries and exact cold-pass fixture cardinalities. As with the
 legacy sampler, `engine_benchmark:true` denotes sampling while `budget_evaluation:not-performed`
 and the nonqualifying label prevent it being mistaken for acceptance.
 

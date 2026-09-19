@@ -96,10 +96,10 @@ impl Fixture {
             );
             assert!(entry.file_type().unwrap().is_file());
             assert_eq!(entry.metadata().unwrap().len(), 4177);
-            assert!(roots.len() < 8, "four profiles, two slots each");
+            assert!(roots.len() < 10, "five profiles, two slots each");
             roots.insert(name, fs::read(entry.path()).unwrap());
         }
-        assert!((6..=8).contains(&roots.len()));
+        assert!((6..=10).contains(&roots.len()));
         roots
     }
 
@@ -246,7 +246,17 @@ fn disk_cli_sigkill_prefixes_resume_and_match_separate_oracle() {
             fixture.restore_derived_roots(&old_roots);
             let refused = complete(fixture.command("linux-disk-open"));
             assert!(!refused.status.success());
-            assert_eq!(fixture.derived_roots(), old_roots);
+            // Open may reconstruct the optional storage catalog, but must not repair
+            // any of the saved graph/coordinator manifests. This prefix predates the
+            // first storage catalog, so exactly one new manifest is expected.
+            let after_refusal = fixture.derived_roots();
+            assert_eq!(after_refusal.len(), old_roots.len() + 1);
+            for (name, bytes) in &old_roots {
+                assert_eq!(after_refusal.get(name), Some(bytes), "changed {name}");
+            }
+            let refused_again = complete(fixture.command("linux-disk-open"));
+            assert!(!refused_again.status.success());
+            assert_eq!(fixture.derived_roots(), after_refusal);
             let resumed = fixture.run("linux-disk-resume");
             assert_eq!(resumed["recovered_revision"], 4);
             assert_eq!(resumed["cold_admission"]["graph_revision"], 2);
@@ -317,7 +327,10 @@ fn disk_cli_supervised_sampling_preserves_oracle_cache_pairs_and_deadline_claim(
     );
     assert_eq!(report["full_memory_graph_state"], false);
     assert_eq!(report["full_memory_coordinator_metadata"], false);
-    assert_eq!(report["storage_metadata_memory_resident"], true);
+    assert_eq!(report["storage_metadata_memory_resident"], false);
+    assert_eq!(report["storage_recovery"]["mode"], "disk-blob-metadata-v1");
+    assert_eq!(report["storage_recovery"]["validation"]["groups"], 4);
+    assert_eq!(report["storage_recovery"]["resident_blob_references"], 0);
     assert_eq!(report["warmup"]["queries"], 96);
     assert_eq!(report["warmup"]["successes"], 96);
     let samples = report["samples"].as_array().unwrap();

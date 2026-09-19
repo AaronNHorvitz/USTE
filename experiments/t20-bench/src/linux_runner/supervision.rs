@@ -308,7 +308,8 @@ fn finalize_report(
     if matches!(mode, SampleMode::Disk) {
         expect_bool(object, "full_memory_graph_state", false)?;
         expect_bool(object, "full_memory_coordinator_metadata", false)?;
-        expect_bool(object, "storage_metadata_memory_resident", true)?;
+        expect_bool(object, "storage_metadata_memory_resident", false)?;
+        expect_disk_storage_report(object, profile)?;
         expect_string(
             object,
             "authenticated_io_accounting",
@@ -386,6 +387,45 @@ fn finalize_report(
         finalized = finalized.replacen(old, "qualification-candidate-environment-unverified", 1);
     }
     Ok(finalized)
+}
+
+fn expect_disk_storage_report(
+    object: &serde_json::Map<String, serde_json::Value>,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    let storage = object
+        .get("storage_recovery")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+    expect_string(storage, "mode", "disk-blob-metadata-v1")?;
+    expect_string(
+        storage,
+        "measurement_scope",
+        "last-storage-owner-cold-open-only",
+    )?;
+    expect_bool(storage, "complete_filesystem_io_accounting", false)?;
+    for key in [
+        "resident_certificate_entries",
+        "resident_blob_references",
+        "resident_inventory_ids",
+        "resident_namespace_totals",
+    ] {
+        expect_u64(storage, key, 0)?;
+    }
+    for phase in ["validation", "replay"] {
+        let pass = storage
+            .get(phase)
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+        expect_u64(
+            pass,
+            "groups",
+            crate::materialization_revision_count(profile),
+        )?;
+        expect_u64(pass, "reference_bindings", 0)?;
+        expect_u64(pass, "verified_logical_blob_bytes", 0)?;
+    }
+    Ok(())
 }
 
 fn expect_string(
@@ -619,11 +659,30 @@ mod tests {
             "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
             "entities": 20, "relationships": 200, "warmup": { "queries": 96 },
             "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
-            "storage_metadata_memory_resident": true, "authenticated_io_accounting": "partial-cached-primitives",
+            "storage_metadata_memory_resident": false, "authenticated_io_accounting": "partial-cached-primitives",
+            "storage_recovery": { "mode": "disk-blob-metadata-v1",
+                "measurement_scope": "last-storage-owner-cold-open-only", "complete_filesystem_io_accounting": false,
+                "resident_certificate_entries": 0, "resident_blob_references": 0,
+                "resident_inventory_ids": 0, "resident_namespace_totals": 0,
+                "validation": { "groups": 4, "reference_bindings": 0, "verified_logical_blob_bytes": 0 },
+                "replay": { "groups": 4, "reference_bindings": 0, "verified_logical_blob_bytes": 0 } },
             "budget_evaluation": "not-performed", "samples": [{ "timed_executions": 768, "rounds": 1,
                 "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12 }],
         });
         let profile = Bm01Profile::new(20).unwrap();
+        for pointer in [
+            "/storage_metadata_memory_resident",
+            "/storage_recovery/mode",
+            "/storage_recovery/resident_blob_references",
+            "/storage_recovery/validation/groups",
+            "/storage_recovery/replay/reference_bindings",
+        ] {
+            let mut wrong = report.clone();
+            *wrong.pointer_mut(pointer).unwrap() = serde_json::Value::Null;
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+            );
+        }
         for wrong_accounting in ["not-measured", "complete", "physical-device"] {
             let mut wrong = report.clone();
             wrong["authenticated_io_accounting"] = wrong_accounting.into();

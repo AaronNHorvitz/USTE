@@ -78,6 +78,7 @@ pub struct BlobMetadataAdmissionReport {
     pub run_pages: u64,
     pub run_entries: u64,
     pub lookup_pages: u64,
+    pub lookup_cache_hits: u64,
     pub lookup_fragments: u64,
     pub lookup_result_bytes: u64,
     pub certificate_bytes: u64,

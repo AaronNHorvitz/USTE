@@ -62,6 +62,7 @@ pub struct DiskDevelopmentVerification {
     pub queries: usize,
     pub output_digest: [u8; 32],
     pub cache_report: uste_txn::AuthorizedDiskCacheReport,
+    pub storage_metadata_memory_resident: bool,
 }
 
 /// Nonqualifying memory-adapter correctness check. The independent oracle is deliberately
@@ -231,6 +232,8 @@ pub fn verify_disk_development_profile(
         queries: queries.len(),
         output_digest: *outputs.finalize().as_bytes(),
         cache_report: reader.cache_report(&principal).map_err(debug)?,
+        storage_metadata_memory_resident: disk.certificate_anchor_residency().0
+            || disk.blob_metadata_residency().0,
     })
 }
 
@@ -241,14 +244,15 @@ fn open_disk(
 ) -> Result<Disk, String> {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
     let entropy = ENTROPY.fetch_add(1_000_000, std::sync::atomic::Ordering::Relaxed);
-    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
         fs,
         name,
         scope(),
         CounterEntropy(entropy),
         CounterEntropy(entropy + 500_000),
         &mut TestKeyAdapter,
-        limits.certificates,
+        limits.blob_recovery,
+        &mut PageCache::new(limits::CACHE_BYTES).map_err(debug)?,
     )
     .map_err(debug)?;
     admit_development_disk(
@@ -579,6 +583,7 @@ mod tests {
         let report = verify_disk_development_profile(Bm01Profile::new(20).unwrap()).unwrap();
         assert_eq!(report.recovered_revision, 4);
         assert_eq!(report.queries, 384);
+        assert!(!report.storage_metadata_memory_resident);
         assert_eq!(report.cache_report.budget_bytes, 64 * 1024 * 1024);
         assert!(report.cache_report.hits > 0);
         assert!(report.cache_report.misses > 0);

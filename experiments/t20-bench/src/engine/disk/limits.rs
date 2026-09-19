@@ -13,7 +13,7 @@ pub(crate) struct DiskProfileLimits {
     pub groups: u64,
     pub prefix_bytes: u64,
     pub suffix_bytes: u64,
-    pub certificates: uste_storage::journal::CertificateAnchorReadLimits,
+    pub blob_recovery: uste_storage::journal::BlobRecoveryLimits,
     pub transaction_run: IndexRunReadLimits,
     pub metadata: uste_txn::CoordinatorMetadataLoadLimits,
     pub graph: GraphDiskBaseAdmissionLimits,
@@ -33,6 +33,35 @@ impl DiskProfileLimits {
         let largest_family = *counts.iter().max().ok_or("missing fixture families")?;
         let groups = materialization_revision_count(profile);
         let proof_bytes = |count: u64| mul(mul(count, add(count, 1)?)? / 2, 4_161);
+        let prefix_bytes = add(mul(groups, MAX_CERTIFIED_GROUP)?, proof_bytes(groups)?)?;
+        // This closed graph fixture prohibits blob inventories. The storage catalog therefore
+        // has exactly one metadata entry, not a hidden all-history blob map or a relaxed cap.
+        let blob_run = IndexRunReadLimits::new(1, 1, 68).map_err(debug)?;
+        let blob_recovery = uste_storage::journal::BlobRecoveryLimits {
+            catalog: uste_storage::journal::BlobMetadataRebuildLimits {
+                admission: uste_storage::journal::BlobMetadataAdmissionLimits {
+                    maximum_blobs: 0,
+                    maximum_namespaces: 0,
+                    maximum_inventories: 0,
+                    maximum_reference_bindings: 0,
+                    run: blob_run,
+                    // One binary-search visit plus one entry-read visit, even on cache hit.
+                    lookup: IndexGetLimits::new(2, 48).map_err(debug)?,
+                    certificates: uste_storage::journal::CertificateAnchorReadLimits::new(
+                        groups,
+                        mul(groups, 4_161)?,
+                    )
+                    .map_err(debug)?,
+                    maximum_journal_groups: groups,
+                    maximum_journal_encoded_bytes: prefix_bytes,
+                },
+                merge: IndexRunMergeLimits::new(blob_run, 1, 68, 1, 68).map_err(debug)?,
+                maximum_merge_output_bytes: 68,
+            },
+            catalog_recovery: uste_storage::journal::BlobCatalogRecovery::AdmitOrRebuild,
+            maximum_verified_blob_bytes_per_pass: 0,
+            maximum_uncommitted_segment_tails: usize::try_from(groups).map_err(debug)?,
+        };
         let transaction_run =
             IndexRunReadLimits::new(add(mul(groups, 2)?, 16)?, groups, mul(groups, 256)?)
                 .map_err(debug)?;
@@ -106,16 +135,12 @@ impl DiskProfileLimits {
         .map_err(debug)?;
         Ok(Self {
             groups,
-            prefix_bytes: add(mul(groups, MAX_CERTIFIED_GROUP)?, proof_bytes(groups)?)?,
+            prefix_bytes,
             suffix_bytes: add(
                 mul(groups - 1, MAX_CERTIFIED_GROUP)?,
                 proof_bytes(groups - 1)?,
             )?,
-            certificates: uste_storage::journal::CertificateAnchorReadLimits::new(
-                groups,
-                mul(groups, 4_161)?,
-            )
-            .map_err(debug)?,
+            blob_recovery,
             transaction_run,
             metadata,
             graph,
@@ -136,6 +161,34 @@ mod tests {
         }
         let limits = DiskProfileLimits::new(Bm01Profile::qualifying()).unwrap();
         assert_eq!(limits.groups, 212);
+        assert_eq!(limits.blob_recovery.catalog.admission.maximum_blobs, 0);
+        assert_eq!(
+            limits
+                .blob_recovery
+                .catalog
+                .admission
+                .maximum_reference_bindings,
+            0
+        );
+        assert_eq!(limits.blob_recovery.maximum_verified_blob_bytes_per_pass, 0);
+        assert_eq!(limits.blob_recovery.catalog.maximum_merge_output_bytes, 68);
+        assert_eq!(
+            limits
+                .blob_recovery
+                .catalog
+                .admission
+                .lookup
+                .maximum_page_visits(),
+            2
+        );
+        assert_eq!(
+            limits
+                .blob_recovery
+                .catalog
+                .admission
+                .maximum_journal_encoded_bytes,
+            limits.prefix_bytes
+        );
         assert_eq!(limits.prefix_bytes, 212 * 16_785_538 + 212 * 213 / 2 * 4161);
         assert_eq!(limits.suffix_bytes, 211 * 16_785_538 + 211 * 212 / 2 * 4161);
         assert_eq!(limits.transaction_run.maximum_entries(), 212);

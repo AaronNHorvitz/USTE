@@ -241,6 +241,7 @@ where
         let (value, stats) =
             self.index_get_bounded(filesystem, root, family, key, limits, cache)?;
         report.lookup_pages = checked_add(report.lookup_pages, stats.pages_read)?;
+        report.lookup_cache_hits = checked_add(report.lookup_cache_hits, stats.cache_hits)?;
         report.lookup_fragments = checked_add(report.lookup_fragments, stats.fragments_visited)?;
         report.lookup_result_bytes = checked_add(report.lookup_result_bytes, stats.result_bytes)?;
         Ok(value)

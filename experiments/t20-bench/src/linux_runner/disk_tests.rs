@@ -226,7 +226,7 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
         assert_eq!(json["frontier"], 4);
         assert_eq!(json["full_memory_graph_state"], false);
         assert_eq!(json["full_memory_coordinator_metadata"], false);
-        assert_eq!(json["storage_metadata_memory_resident"], true);
+        assert_eq!(json["storage_metadata_memory_resident"], false);
         assert_eq!(
             json["suffix_recovery"]["certificate_anchor_residency"]["full_history_resident"],
             false
@@ -248,6 +248,28 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
         let opened: serde_json::Value =
             serde_json::from_str(&fixture.run("open").unwrap()).unwrap();
         let admission = &opened["cold_admission"];
+        let storage = &opened["storage_recovery"];
+        assert_eq!(storage["mode"], "disk-blob-metadata-v1");
+        assert_eq!(storage["validation"]["groups"], 4);
+        assert_eq!(storage["replay"]["groups"], 4);
+        assert_eq!(storage["validation"]["reference_bindings"], 0);
+        let catalog = if storage["catalog_admission"].is_null() {
+            &storage["catalog_rebuild"]["admission"]
+        } else {
+            &storage["catalog_admission"]
+        };
+        assert_eq!(catalog["lookup_pages"], 1);
+        assert_eq!(catalog["lookup_cache_hits"], 1);
+        assert_eq!(catalog["lookup_result_bytes"], 48);
+        assert_eq!(catalog["run_entries"], 1);
+        for key in [
+            "resident_certificate_entries",
+            "resident_blob_references",
+            "resident_inventory_ids",
+            "resident_namespace_totals",
+        ] {
+            assert_eq!(storage[key], 0, "{key}");
+        }
         assert_eq!(admission["graph_revision"], 4);
         assert_eq!(admission["metadata_revision"], 4);
         assert_eq!(admission["state_counts"], json["final_state_counts"]);
@@ -388,7 +410,12 @@ fn native_disk_queries_match_separate_summary_and_reject_substitution() {
     assert_eq!(json["oracle_adjacency_memory_resident"], false);
     assert_eq!(json["full_memory_graph_state"], false);
     assert_eq!(json["full_memory_coordinator_metadata"], false);
-    assert_eq!(json["storage_metadata_memory_resident"], true);
+    assert_eq!(json["storage_metadata_memory_resident"], false);
+    assert_eq!(json["storage_recovery"]["validation"]["groups"], 4);
+    assert_eq!(
+        json["storage_recovery"]["replay"]["verified_logical_blob_bytes"],
+        0
+    );
     assert_eq!(json["engine_benchmark"], false);
     assert_eq!(json["preemptive_deadline_enforced"], false);
     assert_eq!(json["cache_budget_bytes"], 64 * 1024 * 1024);

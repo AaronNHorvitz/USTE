@@ -60,6 +60,80 @@ fn open(fs: &mut Fs, name: &EntryName, scope: NamespaceRef) -> Recovery {
 }
 
 #[test]
+fn disk_blob_recovery_captures_exact_transaction_inventory_and_streams_without_history_maps() {
+    use uste_storage::journal::{
+        BlobCatalogRecovery, BlobMetadataAdmissionLimits, BlobMetadataRebuildLimits,
+        BlobRecoveryLimits, CertificateAnchorReadLimits,
+    };
+    use uste_storage::{IndexGetLimits, IndexRunMergeLimits, IndexRunReadLimits, PageCache};
+    let (mut fs, name, outcomes, inventory) = fixture();
+    let run = IndexRunReadLimits::new(8, 8, 1024).unwrap();
+    let limits = BlobRecoveryLimits {
+        catalog: BlobMetadataRebuildLimits {
+            admission: BlobMetadataAdmissionLimits {
+                maximum_blobs: 1,
+                maximum_namespaces: 1,
+                maximum_inventories: 1,
+                maximum_reference_bindings: 1,
+                run,
+                lookup: IndexGetLimits::new(8, 136).unwrap(),
+                certificates: CertificateAnchorReadLimits::new(3, 3 * 4161).unwrap(),
+                maximum_journal_groups: 3,
+                maximum_journal_encoded_bytes: 1_000_000,
+            },
+            merge: IndexRunMergeLimits::new(run, 8, 1024, 8, 1024).unwrap(),
+            maximum_merge_output_bytes: 1024,
+        },
+        catalog_recovery: BlobCatalogRecovery::AdmitOrRebuild,
+        maximum_verified_blob_bytes_per_pass: inventory.references()[0].byte_len(),
+        maximum_uncommitted_segment_tails: 3,
+    };
+    let (recovery, report, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+        &mut fs,
+        &name,
+        scope(),
+        CounterEntropy(914),
+        CounterEntropy(915),
+        &mut TestKeyAdapter,
+        limits,
+        &mut PageCache::new(64 * 1024).unwrap(),
+    )
+    .unwrap();
+    let frontier = frontier.unwrap();
+    assert_eq!(report.frontier, Some(outcomes[2].revision));
+    assert_eq!(frontier.outcome(), outcomes[2]);
+    assert_eq!(frontier.blob_inventory(), Some(&inventory));
+    let bytes = RANGE_BYTES + 6 * 4161;
+    let mut cursor = recovery
+        .open_transaction_cursor(CommitRevision::FIRST, outcomes[2].revision, 3, bytes)
+        .unwrap();
+    for (index, outcome) in outcomes.iter().enumerate() {
+        let transaction = recovery
+            .next_recovered_transaction(&mut fs, &mut cursor)
+            .unwrap()
+            .unwrap();
+        assert_eq!(transaction.outcome(), *outcome);
+        assert_eq!(
+            transaction.blob_inventory(),
+            (index == 2).then_some(&inventory)
+        );
+    }
+    assert!(
+        recovery
+            .next_recovered_transaction(&mut fs, &mut cursor)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        recovery.finish_transaction_cursor(cursor).unwrap(),
+        JournalRangeReadReport {
+            groups: 3,
+            encoded_bytes: bytes
+        }
+    );
+}
+
+#[test]
 fn transaction_cursor_exact_budgets_owned_inventory_and_terminal_report() {
     let (mut fs, name, outcomes, inventory) = fixture();
     let recovery = open(&mut fs, &name, scope());

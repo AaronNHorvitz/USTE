@@ -54,6 +54,33 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `eb7c229` plus this increment: [Decision 0100](docs/decisions/0100-native-disk-storage-recovery.md)
+  connects map-free storage cold open to authenticated transaction recovery and both disk
+  development drivers. Reports use actual residency modes and separate last-owner cold work;
+  sampler supervision requires mode/count consistency. The nonempty transaction/inventory cursor
+  test passes (0.13s). First native run had seven ResourceLimit/open failures because the new
+  one-page catalog lookup allowed only one visit; the existing primitive needs binary search
+  plus entry-read visits. Two visits fixed those paths; a new report assertion then distinguished
+  one physical/authenticated read from one cache hit, now exposed explicitly. The next native run
+  exposed the process-loss test's all-manifest assumption: optional storage catalog reconstruction
+  can precede refused graph recovery. The test now requires all old graph/coordinator manifests
+  byte-identical, exactly one added catalog, and no changes on another refused open.
+  Under `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M`,
+  with 36 GiB available RAM/3.9 GiB free swap and one job/thread, verification passed:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --locked --offline blob_metadata --
+  --test-threads=1 --skip blob_metadata_rebuild_faults_preserve_admissible_durable_fallback
+  --skip disk_blob_cold_recovery_faults_keep_journal_authority_and_restart_exactly`
+  (11 tests, 16.47s); those two fault sweeps passed in D99 and were not rerun for this counter-only
+  storage change. `CARGO_BUILD_JOBS=1 cargo test -p uste-txn --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed. Final native gate:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1`: 51 active unit tests (42.96s), three owned-process tests
+  (12.42s), two unchanged exact-scale oracle ignores. Strict Clippy passed for workspace
+  all-target/all-feature (6.02s) and experiment all-target (1.79s), both locked/offline with
+  `-- -D warnings`; strict storage/transaction Rustdoc passed (1.98s). Both format checks,
+  whitespace, documentation (173 links) and task graph (68 tasks) pass. No benchmark target or
+  execution ceiling is lowered; T-20/T-19 and qualification remain open.
+
 - Tested on pushed `6ae070a` plus this increment: [Decision 0099](docs/decisions/0099-disk-blob-cold-recovery.md)
   adds opt-in cold storage recovery without resident certificate/blob/inventory/namespace maps.
   Both physical scans verify payloads with explicit repeated-byte and tail-descriptor admission;
@@ -1665,8 +1692,8 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: integrate Decision 0099's verified cold-storage mode into authenticated transaction/
-native recovery, then complete bounded disk-aware inventory append. Decisions
+Current action: Decision 0100 transaction/native integration is locally verified; next complete
+bounded disk-aware inventory append. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

@@ -26,8 +26,10 @@ mod index_work;
 mod io;
 mod query;
 mod sampling;
+mod storage_work;
 pub use query::query_correctness;
 pub use sampling::sample_worker;
+use storage_work::{storage_recovery_json, storage_resident};
 
 pub(super) const MAX_NATIVE_DEVELOPMENT_ENTITIES: u64 = 10_000;
 
@@ -128,17 +130,18 @@ fn prepare_session_with_observer(
         .map_err(|_| error("USTE_BM01_DATABASE_CREATE"))?;
         bootstrap(raw, &mut fs, observer)?;
     }
-    let (recovery, report, frontier) =
-        AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
-            &mut fs,
-            &name,
-            scope(),
-            OsEntropy,
-            OsEntropy,
-            &mut adapter,
-            limits.certificates,
-        )
-        .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
+    let (recovery, report, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+        &mut fs,
+        &name,
+        scope(),
+        OsEntropy,
+        OsEntropy,
+        &mut adapter,
+        limits.blob_recovery,
+        &mut uste_storage::PageCache::new(64 * 1024 * 1024)
+            .map_err(|_| error("USTE_BM01_LIMITS"))?,
+    )
+    .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
     let recovered_revision = report.frontier.map_or(0, |revision| revision.get());
     if recovered_revision > materialization_revision_count(profile) {
         return Err(error("USTE_BM01_FRONTIER_MISMATCH"));
@@ -156,17 +159,18 @@ fn prepare_session_with_observer(
             )
             .map_err(|_| error("USTE_BM01_BOOTSTRAP_RECOVERY"))?;
         bootstrap(raw, &mut fs, observer)?;
-        let (recovery, _, frontier) =
-            AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
-                &mut fs,
-                &name,
-                scope(),
-                OsEntropy,
-                OsEntropy,
-                &mut adapter,
-                limits.certificates,
-            )
-            .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
+        let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+            &mut fs,
+            &name,
+            scope(),
+            OsEntropy,
+            OsEntropy,
+            &mut adapter,
+            limits.blob_recovery,
+            &mut uste_storage::PageCache::new(64 * 1024 * 1024)
+                .map_err(|_| error("USTE_BM01_LIMITS"))?,
+        )
+        .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
         (recovery, frontier)
     } else {
         (recovery, frontier)
@@ -278,12 +282,13 @@ fn prepare_session_with_observer(
             "\"engine_benchmark\":false,\"qualification\":\"nonqualifying-development-profile\",",
             "\"filesystem_profile\":\"linux-x86_64-btrfs\",\"phase\":\"{}\",",
             "\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,",
-            "\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},",
+            "\"storage_metadata_memory_resident\":{},\"entities\":{},\"relationships\":{},",
             "\"frontier\":{},\"recovered_revision\":{},\"elapsed_milliseconds\":{},",
             "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{},",
-            "\"cold_admission\":{},\"suffix_recovery\":{},\"final_state_counts\":{},\"setup_adapter_io\":{},\"development_entity_limit\":{}}}"
+            "\"cold_admission\":{},\"suffix_recovery\":{},\"storage_recovery\":{},\"final_state_counts\":{},\"setup_adapter_io\":{},\"development_entity_limit\":{}}}"
         ),
         phase,
+        storage_resident(&disk),
         profile.entities(),
         profile.relationships(),
         frontier,
@@ -293,6 +298,7 @@ fn prepare_session_with_observer(
         report.ignored_uncommitted_journal_bytes,
         admission_json,
         suffix_json,
+        storage_recovery_json(&disk)?,
         serde_json::json!(final_counts),
         fs.snapshot()?.json()?,
         MAX_NATIVE_DEVELOPMENT_ENTITIES

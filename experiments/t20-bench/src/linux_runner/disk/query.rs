@@ -132,7 +132,7 @@ pub(super) fn query_correctness_with_cache_budget(
             "\"qualification\":\"nonqualifying-development-correctness\",",
             "\"filesystem_profile\":\"linux-x86_64-btrfs\",\"oracle_adjacency_memory_resident\":false,",
             "\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,",
-            "\"storage_metadata_memory_resident\":true,\"uste_page_cache\":\"cleared-before-each-query\",",
+            "\"storage_metadata_memory_resident\":{},\"storage_recovery\":{},\"uste_page_cache\":\"cleared-before-each-query\",",
             "\"kernel_filesystem_device_cache\":\"uncontrolled\",\"preemptive_deadline_enforced\":false,",
             "\"entities\":{},\"relationships\":{},\"frontier\":{},\"queries\":{},",
             "\"successful_queries\":{},\"expected_visit_limits\":{},\"expected_result_limits\":{},",
@@ -143,6 +143,8 @@ pub(super) fn query_correctness_with_cache_budget(
             "\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{},",
             "\"setup_adapter_io\":{},\"query_adapter_io\":{},\"cached_index_work\":{},\"development_entity_limit\":{}}}"
         ),
+        storage_resident(&session.coordinator),
+        storage_recovery_json(&session.coordinator)?,
         profile.entities(),
         profile.relationships(),
         session.frontier,
