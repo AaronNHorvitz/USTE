@@ -54,6 +54,26 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0090](docs/decisions/0090-immutable-cached-page-layouts.md) retains fixed structural
+  offsets for immutable authenticated cached pages. Every hit rechecks complete header context,
+  especially family; failed parsing never installs a layout and eviction/clear discard it.
+  No cache budget/capacity increase, format change or authorization relaxation. Initial compile
+  caught two uncached-cursor field accesses after the layout refactor; corrected to use the
+  layout fields, retaining full uncached parsing. The initial 9 index tests passed (2.76s).
+  Tested on `fd9db90` plus this increment: all 11 index tests passed (4.90s), including new
+  mutation/memoization/substitution/replacement cases. `CARGO_BUILD_JOBS=1 cargo test --workspace
+  --all-targets --all-features --locked --offline -- --test-threads=1` passed, including 69
+  storage tests (179.41s), 9 disk graph tests (31.72s), 9 checkpoint/first-owner fault tests
+  (82.99s), 17 coordinator tests (6.02s) and M1 process recovery/corruption tests (31.11s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 50 unit tests (38.92s, 2 existing exact-profile
+  ignores) and 3 CLI tests (9.95s). Workspace all-target/all-feature and experiment all-target
+  strict clippy passed. Format/docs/task checks passed (163 links, 68 tasks). Gates ran
+  sequentially under 3G/4G/512M, one job/thread; sampled peak 2,038,661,120 bytes, zero swap;
+  preflight 30 GiB available RAM, 3.9 GiB free swap. Next remeasure the changed native query
+  code against the retained 10,000-entity
+  fixture with its pinned separate oracle; no qualifying campaign is implied.
+
 - [Decision 0089](docs/decisions/0089-allocation-free-page-validation.md) replaces temporary
   page-fragment vectors with complete allocation-free validation and a retained last-key slice.
   No cache-hit validation, format, cryptography, budgets or authorization checks are removed.

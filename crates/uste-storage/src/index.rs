@@ -658,6 +658,30 @@ struct CacheKey {
 struct CachedPage {
     bytes: Zeroizing<Box<[u8]>>,
     last_used: u64,
+    layout: Option<PageLayout>,
+}
+
+impl CachedPage {
+    fn parsed(
+        &mut self,
+        root: &RecoveredIndexRoot,
+        run: &IndexRunDescriptor,
+        page_index: u64,
+    ) -> Result<ParsedPage<'_>, StorageError> {
+        let layout = if let Some(layout) = self.layout {
+            // Context (especially family) must still match on every immutable cache hit.
+            ParsedPage::validate_context(&self.bytes, root, run, page_index)?;
+            layout
+        } else {
+            let layout = ParsedPage::new(&self.bytes, root, run, page_index)?.layout;
+            self.layout = Some(layout);
+            layout
+        };
+        Ok(ParsedPage {
+            bytes: &self.bytes,
+            layout,
+        })
+    }
 }
 
 /// Fixed logical-byte-budget decrypted page cache with logarithmic-time LRU maintenance.
@@ -810,6 +834,7 @@ impl PageCache {
             CachedPage {
                 bytes,
                 last_used: self.clock,
+                layout: None,
             },
         );
         self.recency.insert(self.clock, key);
@@ -1129,7 +1154,7 @@ where
         let mut value = Vec::new();
         let mut expected_len = None;
         while page_index < run.page_count {
-            let page = load_get_page(
+            let parsed = load_get_page(
                 filesystem,
                 context,
                 vault,
@@ -1141,7 +1166,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, page_index)?;
             for fragment in parsed.fragments() {
                 let fragment = fragment?;
                 stats.fragments_visited = stats.fragments_visited.saturating_add(1);
@@ -1222,7 +1246,7 @@ where
         let mut high = run.page_count;
         while low < high {
             let middle = low + (high - low) / 2;
-            let page = load_predecessor_page(
+            let parsed = load_predecessor_page(
                 filesystem,
                 context,
                 vault,
@@ -1234,7 +1258,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, middle)?;
             if parsed.last_key() < upper_bound {
                 low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
             } else {
@@ -1250,7 +1273,7 @@ where
         };
         let mut start = probe.saturating_sub(1);
         loop {
-            let page = load_predecessor_page(
+            let parsed = load_predecessor_page(
                 filesystem,
                 context,
                 vault,
@@ -1262,7 +1285,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, start)?;
             let first = parsed
                 .fragments()
                 .next()
@@ -1282,7 +1304,7 @@ where
         let mut page_index = start;
         let mut finished = false;
         while page_index < run.page_count && !finished {
-            let page = load_predecessor_page(
+            let parsed = load_predecessor_page(
                 filesystem,
                 context,
                 vault,
@@ -1294,7 +1316,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, page_index)?;
             for fragment in parsed.fragments() {
                 let fragment = fragment?;
                 stats.fragments_visited = stats.fragments_visited.saturating_add(1);
@@ -1354,7 +1375,7 @@ where
         let mut selected = None;
         page_index = start;
         while page_index < run.page_count && selected.is_none() {
-            let page = load_predecessor_page(
+            let parsed = load_predecessor_page(
                 filesystem,
                 context,
                 vault,
@@ -1366,7 +1387,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, page_index)?;
             for fragment in parsed.fragments() {
                 let fragment = fragment?;
                 stats.fragments_visited = stats.fragments_visited.saturating_add(1);
@@ -1473,10 +1493,9 @@ where
         let mut current_total = None;
         let mut entries = 0_u64;
         for page_index in 0..run.page_count {
-            let page = load_page(
+            let parsed = load_page(
                 filesystem, context, vault, root, run, page_index, cache, &mut stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, page_index)?;
             for fragment in parsed.fragments() {
                 let fragment = fragment?;
                 if current_total.is_none() {
@@ -1729,9 +1748,9 @@ where
         }
         self.stats.pages_read = self.stats.pages_read.saturating_add(1);
         let parsed = ParsedPage::new(plaintext.as_slice(), &self.root, &self.run, page_index)?;
-        self.page_used = parsed.used;
+        self.page_used = parsed.layout.used;
         self.fragment_offset = PAGE_HEADER_BYTES;
-        self.fragments_remaining = parsed.fragment_count;
+        self.fragments_remaining = parsed.layout.fragment_count;
         self.page = Some(plaintext);
         Ok(())
     }
@@ -2498,7 +2517,7 @@ where
         let mut current_total = None;
         let mut finished = false;
         while page_index < run.page_count && !finished {
-            let page = load_get_page(
+            let parsed = load_get_page(
                 filesystem,
                 context,
                 vault,
@@ -2510,7 +2529,6 @@ where
                 cache,
                 stats,
             )?;
-            let parsed = ParsedPage::new(page, root, run, page_index)?;
             for fragment in parsed.fragments() {
                 let fragment = fragment?;
                 stats.fragments_visited = stats.fragments_visited.saturating_add(1);
@@ -3268,7 +3286,7 @@ where
     let mut high = run.page_count;
     while low < high {
         let middle = low + (high - low) / 2;
-        let page = load_get_page(
+        let parsed = load_get_page(
             filesystem,
             context,
             vault,
@@ -3280,7 +3298,6 @@ where
             cache,
             stats,
         )?;
-        let parsed = ParsedPage::new(page, root, run, middle)?;
         if parsed.last_key() < key {
             low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
         } else {
@@ -3302,7 +3319,7 @@ fn load_get_page<'a, F, W, E>(
     page_visits: &mut u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<&'a [u8], StorageError>
+) -> Result<ParsedPage<'a>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3329,7 +3346,7 @@ fn load_predecessor_page<'a, F, W, E>(
     page_visits: &mut u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<&'a [u8], StorageError>
+) -> Result<ParsedPage<'a>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3354,7 +3371,7 @@ fn load_page<'a, F, W, E>(
     page_index: u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<&'a [u8], StorageError>
+) -> Result<ParsedPage<'a>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3411,9 +3428,9 @@ where
     }
     cache
         .pages
-        .get(&key)
-        .map(|page| page.bytes.as_ref())
-        .ok_or(StorageError::IntegrityFailure)
+        .get_mut(&key)
+        .ok_or(StorageError::IntegrityFailure)?
+        .parsed(root, run, page_index)
 }
 
 fn validate_read<D>(
@@ -3432,9 +3449,16 @@ fn validate_read<D>(
 
 struct ParsedPage<'a> {
     bytes: &'a [u8],
+    layout: PageLayout,
+}
+
+// Structural facts about one immutable plaintext page; no allocation or borrowed plaintext.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PageLayout {
     used: usize,
     fragment_count: usize,
-    last_key: &'a [u8],
+    last_key_start: usize,
+    last_key_end: usize,
 }
 
 #[cfg(test)]
@@ -3442,12 +3466,12 @@ struct ParsedPage<'a> {
 mod parser_tests;
 
 impl<'a> ParsedPage<'a> {
-    fn new(
-        bytes: &'a [u8],
+    fn validate_context(
+        bytes: &[u8],
         root: &RecoveredIndexRoot,
         run: &IndexRunDescriptor,
         page_index: u64,
-    ) -> Result<Self, StorageError> {
+    ) -> Result<(), StorageError> {
         if bytes.len() != INDEX_PAGE_BYTES
             || &bytes[..4] != PAGE_MAGIC
             || bytes[4] != MAJOR
@@ -3461,6 +3485,16 @@ impl<'a> ParsedPage<'a> {
         {
             return Err(StorageError::IntegrityFailure);
         }
+        Ok(())
+    }
+
+    fn new(
+        bytes: &'a [u8],
+        root: &RecoveredIndexRoot,
+        run: &IndexRunDescriptor,
+        page_index: u64,
+    ) -> Result<Self, StorageError> {
+        Self::validate_context(bytes, root, run, page_index)?;
         let fragment_count =
             usize::try_from(read_u32(bytes, 24)?).map_err(|_| StorageError::ResourceLimit)?;
         let used =
@@ -3491,23 +3525,33 @@ impl<'a> ParsedPage<'a> {
         if count != fragment_count {
             return Err(StorageError::IntegrityFailure);
         }
+        let last = previous.ok_or(StorageError::IntegrityFailure)?;
+        let last_key_end = used
+            .checked_sub(last.value.len())
+            .ok_or(StorageError::IntegrityFailure)?;
+        let last_key_start = last_key_end
+            .checked_sub(last.key.len())
+            .ok_or(StorageError::IntegrityFailure)?;
         Ok(Self {
             bytes,
-            used,
-            fragment_count,
-            last_key: previous.ok_or(StorageError::IntegrityFailure)?.key,
+            layout: PageLayout {
+                used,
+                fragment_count,
+                last_key_start,
+                last_key_end,
+            },
         })
     }
 
     fn fragments(&self) -> FragmentIter<'a> {
         FragmentIter {
-            remaining: &self.bytes[PAGE_HEADER_BYTES..self.used],
-            remaining_count: self.fragment_count,
+            remaining: &self.bytes[PAGE_HEADER_BYTES..self.layout.used],
+            remaining_count: self.layout.fragment_count,
         }
     }
 
     fn last_key(&self) -> &'a [u8] {
-        self.last_key
+        &self.bytes[self.layout.last_key_start..self.layout.last_key_end]
     }
 }
 

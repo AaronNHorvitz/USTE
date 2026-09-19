@@ -189,3 +189,79 @@ fn dense_fragment_page_is_fully_validated_including_its_tail() {
     bytes[28..32].copy_from_slice(&(used + 1).to_be_bytes());
     assert!(ParsedPage::new(&bytes, &root, &run, 0).is_err());
 }
+
+#[test]
+fn cached_layout_matches_full_validation_and_never_memoizes_malformed_pages() {
+    let (root, run, mut bytes) = fixture();
+    for offset in 0..bytes.len() {
+        bytes[offset] ^= 0xff;
+        let expected = reference(&bytes, &root, &run, 0).map(<[u8]>::to_vec);
+        let mut cached = CachedPage {
+            bytes: Zeroizing::new(bytes.clone().into_boxed_slice()),
+            last_used: 0,
+            layout: None,
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                cached
+                    .parsed(&root, &run, 0)
+                    .map(|page| page.last_key().to_vec()),
+                expected,
+                "byte {offset}"
+            );
+            assert_eq!(cached.layout.is_some(), expected.is_ok());
+        }
+        bytes[offset] ^= 0xff;
+    }
+}
+
+#[test]
+fn memoized_layout_revalidates_context_and_dies_with_its_immutable_page() {
+    let (root, run, bytes) = fixture();
+    let key = CacheKey {
+        database: root.scope.database(),
+        namespace: root.scope.namespace(),
+        epoch: run.epoch,
+        writer: run.writer,
+        revision: root.revision,
+        index_profile: root.index_profile,
+        generation: root.generation,
+        object_id: run.object_id,
+        page: 0,
+    };
+    let mut cache = PageCache::new(MIN_INDEX_CACHE_BYTES).unwrap();
+    cache.insert(key, bytes.clone()).unwrap();
+    let page = cache.pages.get_mut(&key).unwrap();
+    assert!(page.layout.is_none());
+    assert_eq!(page.parsed(&root, &run, 0).unwrap().last_key(), b"b");
+    let layout = page.layout.unwrap();
+    for case in 0..4 {
+        let mut candidate_root = root.clone();
+        let mut candidate_run = run;
+        match case {
+            0 => candidate_run.family += 1,
+            1 => candidate_run.object_id[0] ^= 1,
+            2 => candidate_root.revision = CommitRevision::new(2).unwrap(),
+            _ => candidate_root.index_profile[0] ^= 1,
+        }
+        assert!(page.parsed(&candidate_root, &candidate_run, 0).is_err());
+        assert_eq!(page.layout, Some(layout));
+    }
+    assert!(page.parsed(&root, &run, 1).is_err());
+    assert_eq!(page.parsed(&root, &run, 0).unwrap().last_key(), b"b");
+    let mut corrupt = bytes.clone();
+    corrupt[132] = b'a'; // Locally non-increasing fragment offset after the earlier `a`.
+    cache.clear();
+    cache.insert(key, corrupt.clone()).unwrap();
+    let page = cache.pages.get_mut(&key).unwrap();
+    assert!(page.layout.is_none());
+    assert!(page.parsed(&root, &run, 0).is_err());
+    cache.insert(CacheKey { page: 1, ..key }, bytes).unwrap();
+    assert_eq!(cache.evictions(), 1);
+    cache.insert(key, corrupt).unwrap();
+    assert_eq!(cache.evictions(), 2);
+    let page = cache.pages.get_mut(&key).unwrap();
+    assert!(page.layout.is_none());
+    assert!(page.parsed(&root, &run, 0).is_err());
+    assert_eq!(cache.accounted_bytes(), MIN_INDEX_CACHE_BYTES);
+}
