@@ -58,6 +58,38 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `16e9e9d` plus this increment: [Decision 0105](docs/decisions/0105-reverse-metadata-correspondence.md)
+  applies authenticated reverse scanning to storage catalog and final coordinator retry/reference
+  correspondence. Ordered construction/replay and compatibility first-owner discovery stay forward.
+  The new exact/minus-one catalog budget test passes (0.42s), and the extended resident/disk
+  first-reference claim/read-fault matrix passes (2.17s). Focused commands, under 3G/4G/512M with
+  one Cargo job and one test thread: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --locked
+  --offline blob_metadata_reverse_admission -- --test-threads=1` and `CARGO_BUILD_JOBS=1 cargo
+  test -p uste-replay --locked --offline first_reference_claims -- --test-threads=1`. The full
+  affected gate passed in the same resource scope: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage
+  --locked --offline blob_metadata -- --test-threads=1` (21 tests, 503.09s, including all affected
+  catalog fault matrices), then `CARGO_BUILD_JOBS=1 cargo test -p uste-txn -p uste-replay
+  -p uste-graph --all-targets --all-features --locked --offline -- --test-threads=1`
+  (16 graph disk-index tests, 533.19s; 17 coordinator/replay tests, 193.21s; 26 transaction tests,
+  8.09s; 13 authorization tests, 0.90s; all other selected tests pass). The unchanged shared
+  range primitive already passed complete storage regression in `16e9e9d`. Native release
+  gate `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 51 active unit tests (43.30s) and three CLI/process
+  tests (12.17s); two unchanged exact-scale oracle ignores remain. Strict workspace all-target/
+  all-feature Clippy (3.18s) and native all-target Clippy (1.26s) passed with one job, locked/offline
+  and `-- -D warnings`. Format/whitespace, evidence JSON, docs (178 links) and task graph (68 tasks)
+  pass. Host headroom remained 36 GiB RAM/3.9 GiB free swap; sampled scope peak 833,388,544 bytes,
+  zero sampled swap (not the final whole-run peak). No task or qualification gate is newly complete.
+  Unwired `crates/uste-storage/src/index_sparse.rs` is next-increment preparation, excluded from
+  this increment's verification and commit scope.
+
+- Pushed `16e9e9d` [native reopen comparison](docs/evidence/native-disk-reverse-validation-development.json)
+  preserves revision 23, all state counts and zero resident history maps. Exactly 275 certificate
+  reads / 1,144,275 adapter bytes were removed, matching `(23*24/2 - 1)*4161`. Time 11.99s,
+  peak RSS 265,088 KiB, zero swaps, exit 0; versus prior reuse 11.88s, so no speedup is claimed.
+  Release build and command match the preceding native observation under the same 3G/4G/512M
+  scope, with 36 GiB available RAM and 3.9 GiB free swap. No qualifying campaign ran.
+
 - Tested on pushed `ec1dbca` plus this increment: [Decision 0104](docs/decisions/0104-authenticated-reverse-journal-validation.md)
   adds constant-state reverse certificate-chain validation and uses it for order-independent
   transaction-ID admission. Forward replay/cursor semantics remain unchanged. Three focused
@@ -1802,9 +1834,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0104 reverse authenticated validation is locally verified. Measure its
-native I/O change and continue T-20 order-independent metadata validation, scalable accounting
-and qualifying campaign prerequisites. Decisions
+Current action: Decision 0105's additional reverse correspondence passes are locally verified.
+Capture an exact-version native query baseline, then wire and verify bounded sparse page search;
+continue T-20 scalable construction/accounting and qualifying campaign prerequisites. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

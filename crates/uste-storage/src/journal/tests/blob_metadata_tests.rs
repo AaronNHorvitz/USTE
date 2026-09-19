@@ -176,6 +176,45 @@ fn blob_metadata_rebuild_preserves_first_references_repeats_and_empty_namespaces
 }
 
 #[test]
+fn blob_metadata_reverse_admission_has_exact_linear_certificate_budget() {
+    let mut f = Fixture::new(false);
+    let mut cache = Fixture::cache();
+    let (_, report) = f
+        .store
+        .rebuild_blob_metadata(&mut f.fs, limits(), &mut cache)
+        .unwrap();
+    // Five one-frame groups/certificates plus one proof of the terminal certificate.
+    let bytes = 11 * SMALL_ENVELOPE_BYTES;
+    assert_eq!(report.admission.journal.encoded_bytes, bytes);
+    // Construction still walks forward and explicitly accounts its separate proof rereads.
+    assert!(report.journal.encoded_bytes > bytes);
+    let scope = NamespaceRef::new(
+        f.store.database,
+        uste_types::NamespaceId::from_bytes([0; 16]),
+    );
+    let root = f
+        .store
+        .load_index_root_manifests(&mut f.fs, scope, BLOB_METADATA_PROFILE_V1)
+        .unwrap()
+        .remove(0);
+    let mut admitted = limits().admission;
+    admitted.maximum_journal_encoded_bytes = bytes;
+    let (base, work) = f
+        .store
+        .admit_blob_metadata(&mut f.fs, root.clone(), admitted, &mut cache)
+        .unwrap();
+    assert_eq!(base.counts().blobs, 2);
+    assert_eq!(base.counts().reference_bindings, 4);
+    assert_eq!(work.journal.encoded_bytes, bytes);
+    admitted.maximum_journal_encoded_bytes -= 1;
+    assert!(matches!(
+        f.store
+            .admit_blob_metadata(&mut f.fs, root, admitted, &mut cache),
+        Err(StorageError::ResourceLimit)
+    ));
+}
+
+#[test]
 fn blob_metadata_empty_catalog_and_prepublication_limits() {
     let mut f = Fixture::new(true);
     let (base, _) = f

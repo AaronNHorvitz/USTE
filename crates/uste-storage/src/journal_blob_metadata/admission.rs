@@ -157,7 +157,9 @@ where
         let mut first_blobs = 0_u64;
         let mut first_inventories = 0_u64;
         let mut bindings = 0_u64;
-        report.journal = self.visit_committed_range_report(
+        // Each declared first revision must match exactly once and precede every use. These
+        // correspondence/count checks are order-independent; construction remains forward.
+        report.journal = self.visit_committed_range_reverse_report(
             filesystem,
             CommitRevision::FIRST,
             root.revision(),

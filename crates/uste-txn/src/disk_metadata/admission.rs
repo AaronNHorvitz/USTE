@@ -512,7 +512,9 @@ where
         budget.add(&report)?;
     }
     let mut first_matches = 0_u64;
-    recovery.visit_transactions(
+    // Exact retry/reference correspondence and first-revision counts are order-independent.
+    // The compatibility first-owner discovery above deliberately remains forward ordered.
+    recovery.visit_transactions_reverse(
         filesystem,
         CommitRevision::FIRST,
         candidate.revision(),

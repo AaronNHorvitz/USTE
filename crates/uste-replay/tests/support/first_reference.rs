@@ -7,7 +7,10 @@ use uste_txn::{COORDINATOR_FIRST_REFERENCE_PROFILE_V1, CoordinatorFirstReference
 fn first_reference_claims_require_an_actual_earliest_match_and_all_reads_succeed() {
     // The first owner appears at revision two. Claiming revision one must not pass merely
     // because it precedes every reference; the terminal exact first-match count proves existence.
-    for claimed in [0_u64, 1, 2, 3, 4, 5] {
+    for (disk, claimed) in [false, true]
+        .into_iter()
+        .flat_map(|disk| (0_u64..=5).map(move |claimed| (disk, claimed)))
+    {
         let scope = scope();
         let name = EntryName::new("first-reference-proof").unwrap();
         let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
@@ -109,15 +112,30 @@ fn first_reference_claims_require_an_actual_earliest_match_and_all_reads_succeed
             .unwrap();
         drop(coordinator);
         fs.restart().unwrap();
-        let (recovery, _) = uste_txn::AuthenticatedIndexRecovery::open(
-            &mut fs,
-            &name,
-            scope,
-            CounterEntropy::new(920_000),
-            CounterEntropy::new(930_000),
-            &mut TestKeyAdapter,
-        )
-        .unwrap();
+        let recovery = if disk {
+            uste_txn::AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+                &mut fs,
+                &name,
+                scope,
+                CounterEntropy::new(920_000),
+                CounterEntropy::new(930_000),
+                &mut TestKeyAdapter,
+                uste_storage::journal::CertificateAnchorReadLimits::new(2, 2 * 4161).unwrap(),
+            )
+            .unwrap()
+            .0
+        } else {
+            uste_txn::AuthenticatedIndexRecovery::open(
+                &mut fs,
+                &name,
+                scope,
+                CounterEntropy::new(920_000),
+                CounterEntropy::new(930_000),
+                &mut TestKeyAdapter,
+            )
+            .unwrap()
+            .0
+        };
         let lookup = IndexGetLimits::new(16, 136).unwrap();
         let run_limits = IndexRunReadLimits::new(16, 10, 4096).unwrap();
         let mut reads = 0;
@@ -179,7 +197,8 @@ fn first_reference_claims_require_an_actual_earliest_match_and_all_reads_succeed
                     metadata: CoordinatorMetadataLoadLimits::new(2, 1, 4, 32, 4096).unwrap(),
                     lookup,
                     maximum_total_journal_groups: 2,
-                    maximum_encoded_bytes_per_pass: 1_000_000,
+                    // Two one-frame groups/certificates, plus one terminal proof in disk mode.
+                    maximum_encoded_bytes_per_pass: (4 + u64::from(disk)) * 4161,
                 },
                 &mut cache,
             );
