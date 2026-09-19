@@ -8,6 +8,9 @@ use uste_storage::fault::{
 };
 use uste_txn::{AuthorizedDiskReader, AuthorizedReadState};
 
+#[path = "disk_writes.rs"]
+mod disk_writes;
+
 struct Identity;
 impl uste_policy::TrustedPrincipalAdapter for Identity {
     type Credential = u8;
@@ -44,14 +47,20 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         GraphState::new(scope()),
     )
     .unwrap();
-    let quotas = QuotaLimits::new(100, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap();
+    let quotas = QuotaLimits::new(1024 * 1024, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap();
     let mut policy = NamespacePolicy::new(scope(), PolicyVersion::new(1).unwrap(), quotas);
     for who in [1, 2, 3] {
-        let actions = if who == 3 {
+        let mut actions = if who == 3 {
             vec![Action::ReadRecord]
         } else {
             vec![Action::ReadRecord, Action::ReadHistory, Action::ExpandGraph]
         };
+        if who != 3 {
+            actions.push(Action::Commit);
+        }
+        if who == 1 {
+            actions.push(Action::ManagePolicy);
+        }
         let mut grant = NamespaceGrant::new(PermissionSet::from_actions(actions), quotas);
         if who == 2 {
             for hidden in [record(3), record(15)] {
@@ -146,6 +155,7 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         ),
     );
     let snapshot = coordinator.read_view().unwrap().state().clone();
+    let mut reference_state = coordinator.reducer_state_for_checkpoint().unwrap().clone();
     publish_graph_state_root(&mut coordinator, &mut filesystem, &snapshot).unwrap();
     publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
     uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
@@ -214,14 +224,14 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         &mut cache,
     )
     .unwrap();
-    let disk = uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
+    let mut disk = uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
         recovery,
         &mut filesystem,
         metadata,
         GraphDiskLiveState::new(base),
         RetentionDays::new(30).unwrap(),
         uste_txn::DiskCoordinatorRecoveryLimits {
-            overlay: uste_txn::CoordinatorRecoveryLimits::new(0, 0).unwrap(),
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(4, 0).unwrap(),
             lookup,
             maximum_encoded_bytes: 0,
         },
@@ -446,4 +456,38 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
             .is_err()
     );
     assert_eq!(filesystem.pending_faults(), 0);
+    drop(fresh);
+    drop(exact);
+    drop(reader);
+    disk_writes::verify(
+        &mut disk,
+        &mut filesystem,
+        &mut kernel,
+        &admin,
+        &bob,
+        &mut reference_state,
+    );
+    drop(disk);
+    filesystem.restart().unwrap();
+    let (reopened, report) = CommitCoordinator::open(
+        &mut filesystem,
+        &name,
+        scope(),
+        RetentionDays::new(30).unwrap(),
+        CounterEntropy(640_000),
+        CounterEntropy(650_000),
+        &mut TestKeyAdapter,
+        GraphState::new(scope()),
+    )
+    .unwrap();
+    assert_eq!(report.frontier, Some(CommitRevision::new(4).unwrap()));
+    assert_eq!(
+        reopened.read_view().unwrap().state(),
+        &uste_txn::TransactionState::snapshot(&reference_state)
+    );
+    for (principal, _, outcome) in reopened.checkpoint_outcomes() {
+        if outcome.revision.get() >= 3 {
+            assert_eq!(principal, admin.digest());
+        }
+    }
 }

@@ -3223,7 +3223,7 @@ pub enum GraphError {
 }
 
 impl GraphError {
-    const fn into_apply_error(self) -> ApplyError {
+    pub(crate) const fn into_apply_error(self) -> ApplyError {
         match self {
             Self::PreconditionFailed(_)
             | Self::PredicateWasFalse(_)

@@ -19,7 +19,7 @@ pub use authorized::{
 };
 pub use authorized_disk::{
     AuthorizedDiskMetadata, AuthorizedDiskPolicyState, AuthorizedDiskReadState,
-    AuthorizedDiskReader,
+    AuthorizedDiskReader, AuthorizedDiskWriteError, AuthorizedDiskWriteState, AuthorizedDiskWriter,
 };
 pub use disk_metadata::{
     COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,

@@ -3,7 +3,9 @@
 use std::sync::Mutex;
 
 mod read;
+mod write;
 pub use read::{AuthorizedDiskReadState, AuthorizedDiskReader};
+pub use write::{AuthorizedDiskWriteError, AuthorizedDiskWriteState, AuthorizedDiskWriter};
 
 use uste_crypto::EntropySource;
 use uste_policy::{Action, AuthenticatedPrincipal, NamespacePolicy, PolicyKernel, Target};

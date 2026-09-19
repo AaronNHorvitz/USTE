@@ -946,7 +946,10 @@ remaining mixed workload have not passed.
   metadata rebase. Decision 0064 connects the ready/one-pending graph suffix path; its dedicated
   full authorization facade remains incomplete. Dedicated suffix read-fault/certificate-corruption
   and terminal-publication model cases now pass. Decision 0065 adds
-  only restricted authorized own-outcome and committed-usage reads against a ready durable policy.
+  restricted authorized own-outcome and committed-usage reads against a ready durable policy;
+  Decisions 0067–0070 add bounded graph reads and inventory-free authorized graph writes with
+  explicit certified-versus-repair outcomes. Blob inventories and staging remain unsupported by
+  that writer; this is not a complete consumer interface.
   Storage's own certificate/blob collections remain memory-resident, first-owner admission is
   read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
   the legacy publication API retains its compatibility scrub.
@@ -1039,8 +1042,26 @@ Commands under the established 3G/4G/512M scope, one Cargo job/test thread:
 -- --test-threads=1` passed; `cargo clippy -p uste-txn -p uste-replay -p uste-graph --all-targets
 --locked --offline -- -D warnings` passed. Preflight host headroom improved to 29 GiB available RAM
 and 2.7 GiB free swap, but the implementation boundary still does not justify qualifying campaigns.
-Next implement authorized disk commits and staged-upload reconciliation without duplicating
-retry/owner rules; preserve explicit distinction between a certified commit and derived-root repair.
+Decision 0070 implements authorized inventory-free disk graph commits, tested on `a507b36` plus
+the writer increment. The facade authorizes namespace/targets, quota and scope before clock/I/O;
+shared preflight handles retry/collision before bounded proof preparation. One clock observation
+is reused. Certified policy changes synchronize before root repair, and errors after certification
+carry the exact durable outcome. A revoked principal cannot continue while root repair is pending.
+Review found hidden dependency counts in raw graph preparation errors; the writer now uses the
+existing content-free reducer error classification, covered by a hidden-dependency delete test.
+Tests also cover foreign authentication, byte refusal, precommit I/O failure, exact retry with
+cancellation/tiny proof budget, expiry/collision, root budget/I/O repair failure, journal-sync
+uncertainty, independent reference digests and cold replay with authenticated principal identity.
+Initial fixture compile mistakes (merge argument count and private-anchor access) were corrected
+using the supported manifest read API. Final scoped commands (3G/4G/512M, one job/thread):
+`CARGO_BUILD_JOBS=1 cargo test -p uste-txn -p uste-graph -p uste-replay -p uste-memory
+-p uste-memory-adapter --all-targets --locked --offline -- --test-threads=1`;
+`CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+-- -D warnings`; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace
+--all-features --no-deps --locked --offline` all exited 0, including M1 real-process tests.
+Docs/task checks pass (143 links, 68 tasks). Host preflight: 38 GiB available RAM, 3.9 GiB free
+swap. No qualifying benchmark ran. Next add disk-aware staged-upload accounting/reconciliation
+and inventory admission, then remove scalable first-owner/storage recovery metadata bottlenecks.
 
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and
@@ -1056,8 +1077,8 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-aware authorization beyond metadata, point/history and bounded graph
-reads (writes and upload quota/reconciliation),
+next extend disk-aware authorization beyond metadata, bounded graph reads and inventory-free
+graph writes (blob inventory admission and upload quota/reconciliation),
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.
