@@ -278,6 +278,12 @@ sorted deltas across all eight families. Only complete staging yields a new type
 failed private cache writes leave the old base unchanged. Newly staged states have no cached v1
 digest; streaming compatibility export remains available. Live publication and cold graph semantic
 admission remain separate integration requirements.
+Decision 0155 installs an opaque ready packed graph reducer paired with its exact published root
+and journal owner. A certified write retains one bounded pending plan and becomes repair-only;
+exact coordinator retries remain available. Private family staging and terminal root publication
+must succeed before ready state and current policy are exposed again. Metadata rebase then binds
+the new ordered graph commitment. This is raw trusted maintenance, not an authorized consumer
+write facade or cold packed graph recovery.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

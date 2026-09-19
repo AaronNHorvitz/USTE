@@ -25,6 +25,7 @@ where
         return Err(TransactionError::IntegrityFailure);
     }
     quota.validate_live_pair(&recovery.journal, primary)?;
+    state.validate_packed_owner(&recovery.journal)?;
     for (root, profile, families) in [
         (
             primary_root,

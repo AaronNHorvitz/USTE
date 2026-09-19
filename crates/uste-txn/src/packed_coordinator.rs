@@ -21,6 +21,19 @@ use uste_storage::{
 /// Implementations must check scope, revision/certificate, reducer and state commitment profile
 /// and digest. Pending/unpublished domain states must fail. Generation is publication-local.
 pub trait PackedCoordinatorState: TransactionState {
+    /// Rebind retained disk capabilities to this exact exclusive owner. Pure reducers need none.
+    fn validate_packed_owner<F, W, E, I>(
+        &self,
+        _journal: &JournalStore<F, W, E, I>,
+    ) -> Result<(), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        Ok(())
+    }
     fn validate_packed_metadata(
         &self,
         scope: NamespaceRef,
@@ -110,6 +123,20 @@ where
             return Err(TransactionError::OutcomeUnknown);
         }
         Ok(&self.inner.state)
+    }
+    pub fn reducer_and_index_maintenance(
+        &mut self,
+    ) -> Result<ReducerIndexMaintenance<'_, S, F, W, E, I>, TransactionError> {
+        self.inner.reducer_and_index_maintenance()
+    }
+    pub fn install_postcommit_publication(
+        &mut self,
+        publication: S::Publication,
+    ) -> Result<(), TransactionError>
+    where
+        S: PostCommitStateMaintenance,
+    {
+        self.inner.install_postcommit_publication(publication)
     }
     /// Resident post-base outcomes and first owners only; not complete storage residency.
     pub fn overlay_counts(&self) -> (usize, usize) {

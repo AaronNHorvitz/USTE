@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — certified packed graph delta staging (Decision 0154)
+## Latest verified increment — packed live graph state and repair (Decision 0155)
+
+Implemented on pushed `b4b2c0e` plus this increment: exact published-root installation, explicit
+proof-prepared commits, one certified pending graph plan, private staging/terminal publication and
+opaque postcommit installation. Pending state exposes no current graph base or durable-policy
+read, rejects fresh preparation and metadata rebase, and preserves exact coordinator retries.
+Ready state supplies the distinct ordered commitment for paired primary/quota metadata rebase.
+Snapshots are metadata-only; no v1 checkpoint trait or global in-memory graph is introduced.
+Coordinator installation now independently rechecks retained reducer disk capabilities against
+its journal owner; earlier caller-side validation alone cannot authorize foreign-owner handles.
+
+Six tests cover six commit/repair/rebase cycles against independent full-reducer outcomes,
+171 observed repair I/O/error/crash cases with cold replay, in-place I/O-error repair without
+recertification, foreign owner installation, policy readiness, altered request and stale plans,
+and commit-sync uncertainty quarantine. Cold replay here is explicitly the full test oracle,
+not a claim of implemented packed cold semantic recovery. Two initial fixture compile errors
+(fault-arm method and private limit fields) were fixed using supported APIs. Focused session
+36733 / `run-p673581-i21650271.scope` passed six tests in 1.70 s and Clippy in 0.31 s.
+
+Full gate session 45381 / `run-p674050-i21642769.scope` exited 0: 601 tests across 47 executables
+(graph disk 45/43.86 s; transaction integration 93/100.37 s), Clippy 0.06 s and graph/transaction
+docs 2.52 s. Preflight: 31 GiB available RAM / 5.7 GiB free swap. Sampled scope peak
+1,524,744,192 bytes / zero swap. Format, diff, documentation and task graph checks passed.
+Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d155-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+```
+
+Next verify cold packed graph semantic admission, then integrate authenticated packed suffix
+recovery and authorized consumer writes. Decision 0156 and unregistered `packed/admission.rs` /
+`packed_admission.rs` drafts are excluded from this increment. T-20/T-19, full I/O accounting and
+qualifying campaigns remain open. Native standalone remains last tested at `42f9abb`; M1's pinned
+implementation/handoff is unchanged. This section supersedes historical next-step text below.
+
+## Prior verified increment — certified packed graph delta staging (Decision 0154)
 
 Implemented on pushed `4d57b8d` plus this increment: the same bounded graph delta algorithm
 now supplies receipt-bound private staging of all eight packed families. Exact canonical request,

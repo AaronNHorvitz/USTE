@@ -1,11 +1,31 @@
 //! Receipt-bound private graph staging. Publication remains a separate terminal operation.
 use super::*;
+mod live;
+pub use live::{
+    GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState,
+    publish_packed_graph_live_base,
+};
 
 pub struct PackedGraphDelta {
     prepared: PackedPreparedGraph,
     data: GraphStateFamilyDelta,
 }
 impl PackedGraphDelta {
+    fn matches_base(&self, base: &PackedGraphBase) -> bool {
+        let p = &self.prepared;
+        p.prepared.scope == base.scope
+            && p.base_anchor == base.anchor
+            && p.base_digest == base.publication_claims().state_digest
+            && p.base_counts == base.counts
+            && p.base_policy == base.policy
+            && p.prepared.base_revision == Some(base.anchor.0)
+            && p.prepared.base_policy_version == base.policy.as_ref().map(NamespacePolicy::version)
+            && self.data.scope == base.scope
+            && self.data.base_revision == base.anchor.0
+            && Some(self.data.revision) == base.anchor.0.checked_next().ok()
+            && self.data.revision == p.prepared.revision
+            && self.data.result_digest == p.prepared.result_digest
+    }
     pub fn revision(&self) -> CommitRevision {
         self.data.revision
     }
@@ -87,13 +107,22 @@ where
             transaction.revision(),
         )
         .map_err(|_| GraphDiskError::RootStateMismatch)?;
+    admit_stage(plan, limits)?;
+    let mut maintenance = recovery.packed_indexes_with_io(fs, transaction, limits.certificates)?;
+    stage_on_maintenance(&mut maintenance, fs, base, plan, limits)
+}
+
+fn admit_stage(
+    plan: &PackedGraphDelta,
+    limits: PackedGraphStageLimits,
+) -> Result<u64, GraphDiskError> {
     if limits.deltas_per_batch == 0
         || limits.deltas_per_batch > MAX_BATCH_DELTAS
         || limits.deltas_per_batch > limits.batch.maximum_deltas
     {
         return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
     }
-    let required = data.families.iter().try_fold(0_u64, |sum, family| {
+    let required = plan.data.families.iter().try_fold(0_u64, |sum, family| {
         checked_sum(
             sum,
             family.len().max(1).div_ceil(limits.deltas_per_batch) as u64,
@@ -102,12 +131,33 @@ where
     if required > limits.maximum_batches {
         return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
     }
+    Ok(required)
+}
+
+fn stage_on_maintenance<F, W, E, I>(
+    maintenance: &mut PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    base: &PackedGraphBase,
+    plan: &PackedGraphDelta,
+    limits: PackedGraphStageLimits,
+) -> Result<(PackedGraphBase, PackedGraphStageReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if !plan.matches_base(base) || maintenance.anchor().0 != plan.revision() {
+        return Err(GraphDiskError::RootStateMismatch);
+    }
+    let required = admit_stage(plan, limits)?;
+    let prepared = &plan.prepared;
+    let data = &plan.data;
     let expected_counts = parse_metadata(
         &metadata_value_from_counts(data.revision, data.target_counts),
         data.revision,
     )?
     .family_counts()?;
-    let mut maintenance = recovery.packed_indexes_with_io(fs, transaction, limits.certificates)?;
     for tree in &base.trees {
         maintenance.validate_tree_binding(tree)?;
     }
@@ -163,7 +213,7 @@ where
     Ok((
         PackedGraphBase {
             scope: base.scope,
-            anchor: (data.revision, *transaction.certificate_digest()),
+            anchor: maintenance.anchor(),
             reducer: base.reducer,
             trees,
             counts: data.target_counts,

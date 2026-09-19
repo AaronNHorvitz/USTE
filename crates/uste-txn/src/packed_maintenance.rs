@@ -105,6 +105,22 @@ where
             .admit_packed_tree(filesystem, root, family, limits)
             .map_err(TransactionError::Storage)
     }
+    /// Check scope, target ordering and live certificate ownership, without I/O or tree admission.
+    pub fn validate_root_binding(
+        &self,
+        root: &CertifiedPackedRoot,
+    ) -> Result<(), TransactionError> {
+        let manifest = root.manifest();
+        self.check(TreeReadContext {
+            scope: manifest.context().scope,
+            profile: manifest.context().profile,
+            family: 1,
+            revision: manifest.claims().revision,
+        })?;
+        self.journal
+            .validate_packed_root_certificate(root)
+            .map_err(TransactionError::Storage)
+    }
     /// Check scope, target ordering, live certificate ownership and key availability, without I/O.
     pub fn validate_tree_binding(
         &self,

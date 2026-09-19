@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_live.rs"]
+mod live;
 use uste_graph::{
     PackedGraphBase, PackedGraphDelta, PackedGraphStageLimits, prepare_packed_graph_delta,
     stage_packed_graph_delta,
