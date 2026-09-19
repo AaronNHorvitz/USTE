@@ -58,6 +58,36 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `3f793a6` plus this increment: [Decision 0121](docs/decisions/0121-streamed-primary-owner-recovery.md)
+  extends paired-base private staging to primary blob owners. Only one inventory's new-owner
+  deltas are retained; earlier references are checked against disk and preserve their first
+  principals. Explicit revision/owner/reference/merge bounds and attached-projection refusal
+  preserve the existing inventory-free API and general recovery behavior. Six focused tests
+  cover populated/empty initial owner families, absent later inventories, exact retry/transaction
+  outcomes, cold terminal admission, bounds, first-reference refusal and late corruption.
+  The 552-case I/O matrix includes 548 failures and four optional no-crash boundaries.
+  Initial compilation corrected imports/accessor use; fixture failures corrected an invalid
+  `Some(empty_inventory)` to `None` and admitted the documented `(owners + 1) * revisions`
+  legacy correspondence passes. No production limit or assertion was weakened.
+  Focused scope `run-p449957-i21447666.scope` exited 0 (6 tests, 11.28s).
+  Final scope `run-p450349-i21424420.scope` exited 0 under MemoryHigh=3G, MemoryMax=4G,
+  MemorySwapMax=512M, one Cargo job/test thread; preflight 35 GiB RAM/3.9 GiB free swap.
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 416 tests/46 executables, no failures/ignores
+  (graph disk 24/27.29s, replay 33/20.31s, storage 123/18.52s, M1 process 2/2.71s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/45.18s, BM-01 process 3/11.82s,
+  BM-06 CLI 2/0.50s and BM-06 process 8/73.74s; two previous exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (0.26s), `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (2.29s)
+  and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked
+  --offline` (0.99s) pass. Sampled peak 1,598,427,136 bytes, zero swap, not a final run peak.
+  Formatting/whitespace, docs (195 links), task graph (68 tasks) pass. M1 sources and lockfiles
+  unchanged; no qualification campaign. Next: inventory-bearing genesis bootstrap, optional
+  owner projections and remaining rewrite/accounting scalability. T-20/T-19 remain open.
+
 - Implemented on pushed `9378599` plus this increment: [Decision 0120](docs/decisions/0120-streamed-inventory-free-recovery-metadata.md)
   adds opt-in private per-revision retry/transaction-ID staging for paired, inventory-free
   domain/metadata bases. Native BM-06 origin rebuild now uses zero outcome/transaction/owner
@@ -2363,15 +2393,14 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0108 is pushed as `0d5eeeb`; native 20,000-entity construction passed.
-The independent-oracle baseline passed with measured cache evictions. Decision 0109 is pushed
-as `d1da3c2`; consume its in-flight exact-version native comparison and check query outcomes,
-cache/page work and measured resources on the same fixture before starting another heavy job.
-Preserve partial fixtures and investigate any refusal
-without weakening limits. Scalable accounting and qualifying campaign prerequisites remain. Decisions
-0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
-do not restart them. The entries below preserve chronological implementation evidence, not a
-request to repeat completed work.
+Current action: T-20 remains the priority. Decisions 0108–0120, including the retained native
+20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
+`3f793a6`; their evidence is recorded above, not in flight. Decision 0121 extends primary-owner
+suffix staging. Next implement bounded inventory-bearing genesis bootstrap and maintain optional
+owner projections on the new streaming path, then address immutable-family rewrite scaling and
+complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
+M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
+preserve chronological implementation evidence, not requests to repeat completed work.
 
 T-20 bounded prefix-scan increment (Decision 0066), tested on `d8fd8fa` plus this increment:
 storage and both coordinators now admit prefix-scan page visits (including cache hits), entry

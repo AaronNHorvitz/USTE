@@ -142,6 +142,10 @@ Decisions 0119–0120 connect explicit native inventory-free origin rebuild to p
 coordinator staging with zero cumulative outcome overlays. This requires paired domain/metadata
 bases and refuses inventories/optional owner projections; existing general recovery remains
 unchanged. Whole-family rewrite costs and qualifying recovery campaigns remain open.
+Decision 0121 adds a separate inventory-bearing primary-metadata streaming API. It retains only
+one inventory's new-owner deltas, preserves first principals through disk lookups and stages the
+owner family at every step. Attached first-reference/quota projections explicitly refuse on this
+path; ordinary general recovery remains available. Generic origin bootstrap and scaling are open.
 
 ## Indexing and bounded resources
 

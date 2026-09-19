@@ -12,6 +12,7 @@ pub use blob_reads::DiskBlobReadLimits;
 pub use commit_check::DiskCommitCheck;
 pub use inventory_free_recovery::{
     InventoryFreeMetadataRecoveryLimits, InventoryFreeMetadataRecoveryReport,
+    PrimaryMetadataRecoveryLimits, PrimaryMetadataRecoveryReport,
 };
 pub use streaming::DiskRecoveryDomain;
 

@@ -1,6 +1,6 @@
-//! Opt-in map-free suffix metadata recovery for inventory-free reducers.
+//! Opt-in per-revision primary metadata staging, with a closed inventory-free wrapper.
 use super::*;
-use uste_storage::{IndexRunMergeLimits, IndexRunMergeReport};
+use uste_storage::{IndexRunMergeLimits, IndexRunMergeReport, MAX_COMMITTED_BLOBS_PER_JOURNAL};
 
 /// Total suffix and per-family private merge bounds. This path does not retain suffix maps.
 #[derive(Clone, Copy, Debug)]
@@ -8,6 +8,19 @@ pub struct InventoryFreeMetadataRecoveryLimits {
     pub maximum_revisions: u64,
     pub merge: IndexRunMergeLimits,
 }
+
+/// Paired-base primary metadata recovery bounds. Optional first-reference/quota projections
+/// are not maintained by this path and must not be attached to the admitted base.
+#[derive(Clone, Copy, Debug)]
+pub struct PrimaryMetadataRecoveryLimits {
+    pub maximum_revisions: u64,
+    pub maximum_blob_owners: u64,
+    pub maximum_inventory_references: usize,
+    pub merge: IndexRunMergeLimits,
+}
+
+/// Diagnostics for private primary metadata staging, with the same partial-I/O semantics.
+pub type PrimaryMetadataRecoveryReport = InventoryFreeMetadataRecoveryReport;
 
 /// Trusted private-merge diagnostics, not consumer cardinalities or complete physical I/O.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -60,16 +73,78 @@ where
     /// current authorization remain the normal coordinator/facade responsibility.
     #[allow(clippy::too_many_arguments)]
     pub fn recover_with_inventory_free_streaming_domain<D: DiskRecoveryDomain<S, F, W, E, I>>(
-        mut recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
         filesystem: &mut F,
-        mut base: CoordinatorDiskBase,
-        mut state: S,
+        base: CoordinatorDiskBase,
+        state: S,
         retention: RetentionDays,
         limits: DiskCoordinatorRecoveryLimits,
         metadata_limits: InventoryFreeMetadataRecoveryLimits,
         cache: &mut PageCache,
         domain: &mut D,
     ) -> Result<(Self, InventoryFreeMetadataRecoveryReport), TransactionError> {
+        Self::recover_primary_metadata(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            PrimaryMetadataRecoveryLimits {
+                maximum_revisions: metadata_limits.maximum_revisions,
+                maximum_blob_owners: 0,
+                maximum_inventory_references: 0,
+                merge: metadata_limits.merge,
+            },
+            false,
+            cache,
+            domain,
+        )
+    }
+
+    /// Stage retry, transaction-ID and primary first-owner metadata after each certified step.
+    /// Only the current bounded inventory's new owners are retained, never cumulative suffix
+    /// maps. Repeated exact references preserve the first principal. Optional owner projections
+    /// refuse explicitly; publication, authorization and retry rules are unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_with_primary_metadata_streaming_domain<D: DiskRecoveryDomain<S, F, W, E, I>>(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        metadata_limits: PrimaryMetadataRecoveryLimits,
+        cache: &mut PageCache,
+        domain: &mut D,
+    ) -> Result<(Self, PrimaryMetadataRecoveryReport), TransactionError> {
+        Self::recover_primary_metadata(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            metadata_limits,
+            true,
+            cache,
+            domain,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn recover_primary_metadata<D: DiskRecoveryDomain<S, F, W, E, I>>(
+        mut recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        mut base: CoordinatorDiskBase,
+        mut state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        metadata_limits: PrimaryMetadataRecoveryLimits,
+        inventories: bool,
+        cache: &mut PageCache,
+        domain: &mut D,
+    ) -> Result<(Self, PrimaryMetadataRecoveryReport), TransactionError> {
         let (scope, revision, certificate) =
             state.journal_base_anchor().map_err(map_apply_error)?;
         let frontier = recovery
@@ -90,7 +165,7 @@ where
         {
             return Err(TransactionError::IntegrityFailure);
         }
-        if base.owner_count() != 0
+        if (!inventories && base.owner_count() != 0)
             || base.has_first_reference_evidence()
             || base.has_blob_usage_index()
         {
@@ -99,6 +174,8 @@ where
         let revisions = frontier.0.get() - revision.get();
         if revisions > metadata_limits.maximum_revisions
             || frontier.0.get() > MAX_OUTCOMES_PER_NAMESPACE as u64
+            || base.owner_count() > metadata_limits.maximum_blob_owners
+            || metadata_limits.maximum_blob_owners > MAX_COMMITTED_BLOBS_PER_JOURNAL as u64
         {
             return Err(TransactionError::ResourceLimit);
         }
@@ -121,8 +198,42 @@ where
             while let Some(transaction) =
                 recovery.next_recovered_transaction(filesystem, &mut cursor)?
             {
-                if transaction.blob_inventory.is_some() {
+                if !inventories && transaction.blob_inventory.is_some() {
                     return Err(TransactionError::InvalidRequest);
+                }
+                let mut owners = BTreeMap::new();
+                if let Some(inventory) = transaction.blob_inventory.as_ref() {
+                    if inventory.references().len() > metadata_limits.maximum_inventory_references {
+                        return Err(TransactionError::ResourceLimit);
+                    }
+                    for reference in inventory.references() {
+                        if reference.scope() != scope {
+                            return Err(TransactionError::IntegrityFailure);
+                        }
+                        match base.owner_from_journal(
+                            &recovery.journal,
+                            filesystem,
+                            reference.id(),
+                            limits.lookup,
+                            cache,
+                        )? {
+                            Some((stored, _)) if stored != *reference => {
+                                return Err(TransactionError::IntegrityFailure);
+                            }
+                            Some(_) => {}
+                            None => {
+                                let count = base
+                                    .owner_count()
+                                    .checked_add(owners.len() as u64)
+                                    .and_then(|n| n.checked_add(1))
+                                    .ok_or(TransactionError::ResourceLimit)?;
+                                if count > metadata_limits.maximum_blob_owners {
+                                    return Err(TransactionError::ResourceLimit);
+                                }
+                                owners.insert(reference.id(), (*reference, transaction.principal));
+                            }
+                        }
+                    }
                 }
                 if base
                     .retry_from_journal(
@@ -152,7 +263,7 @@ where
                 state
                     .validate_external_prepared(
                         &transaction.canonical_request,
-                        None,
+                        transaction.blob_inventory.as_ref(),
                         transaction.revision,
                         &prepared,
                     )
@@ -174,13 +285,14 @@ where
                 let input = domain
                     .initial_metadata_input(&state, anchor)
                     .map_err(map_apply_error)?;
-                let (next, step) = disk_metadata::stage_inventory_free_metadata_step(
+                let (next, step) = disk_metadata::stage_primary_metadata_step(
                     &mut recovery,
                     filesystem,
                     &base,
                     &transaction,
                     input,
                     metadata_limits.merge,
+                    &owners,
                 )?;
                 report.add(&step)?;
                 base = next;

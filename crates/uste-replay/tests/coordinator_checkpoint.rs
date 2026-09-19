@@ -10,6 +10,8 @@ mod disk_inventory_writes;
 mod first_reference;
 #[path = "support/first_reference_rebase.rs"]
 mod first_reference_rebase;
+#[path = "support/streamed_owner_recovery.rs"]
+mod streamed_owner_recovery;
 use uste_replay::{ReplayError, capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
     BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName, IndexEntry, IndexRootInput,

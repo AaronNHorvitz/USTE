@@ -49,6 +49,7 @@ pub use disk_coordinator::{
     CommittedBlobUsage, DiskBlobAccountingLimits, DiskBlobReadLimits, DiskCommitCheck,
     DiskCommitCoordinator, DiskCoordinatorRecoveryLimits, DiskCoordinatorState, DiskRecoveryDomain,
     InventoryFreeMetadataRecoveryLimits, InventoryFreeMetadataRecoveryReport,
+    PrimaryMetadataRecoveryLimits, PrimaryMetadataRecoveryReport,
 };
 
 use std::collections::BTreeMap;
