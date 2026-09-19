@@ -54,6 +54,33 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on `5b19bcb` plus this increment: [Decision 0098](docs/decisions/0098-storage-blob-disk-catalog.md)
+  adds the journal-derived encrypted storage blob catalog, bounded one-inventory rebuild and
+  independent disk/journal admission. The initial five focused tests pass (3.76s), including
+  exact first references, repeated inventories, zero-byte namespace accounting, codec shapes,
+  cold-owner rejection, exact aggregate rewrite budgets and five authenticated false catalogs.
+  The first implementation incorrectly retained old-revision descriptors for unchanged families;
+  index-v1 correctly rejected this. Rebuild now rewrites and budgets every nonempty family at
+  each staged revision. Initial module-path/type/lint errors were repaired without suppression.
+  Final mutation coverage passes all 108 observed boundaries/324 attempts, with 323 reported
+  failures and one optional absent-file RemoveFile/1/CrashAfter non-crash. All restarted roots
+  admit exactly. Selected early/middle/late admission reads add 27 fail-closed fault attempts;
+  terminal certificate and later-inventory corruption also fail closed. This is not an exhaustive
+  read-boundary sweep. Final gate exited 0 under `systemd-run --user --scope -p MemoryHigh=3G
+  -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '...'`, one job/thread:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --all-targets --all-features --locked --offline
+  -- --test-threads=1 --nocapture` (96 unit tests, 358.40s; all integration/process tests pass,
+  including portable recovery 14.68s); `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets
+  --all-features --locked --offline -- -D warnings` (7.10s); `CARGO_BUILD_JOBS=1
+  RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage --no-deps --locked --offline` (0.91s).
+  Formatting, whitespace, docs (171 links) and task graph (68 tasks) checks pass. Host preflight
+  showed 37 GiB available RAM/3.9 GiB free swap; sampled scope peak 529,092,608 bytes and zero
+  sampled swap (not the final whole-run peak). No qualifying benchmark ran. M1 source crates
+  remain unchanged from `b9689f3`; lock SHA-256 remains
+  `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`.
+  Journal open/append still retain resident blob collections; tests explicitly isolate only the
+  new capability. T-20, T-19 and benchmark/release gates remain unchecked.
+
 - [Decision 0097](docs/decisions/0097-disk-coordinator-blob-reads.md) connects admitted disk
   owner/first-reference metadata to bounded certificate/inventory proofs and raw committed reads.
   It uses no resident storage blob-map lookup. Base first-reference roots avoid discovery; overlay
@@ -1605,6 +1632,12 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
+Current action: integrate Decision 0098's verified catalog into storage cold recovery and bounded
+append/suffix metadata. Decisions
+0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
+do not restart them. The entries below preserve chronological implementation evidence, not a
+request to repeat completed work.
+
 T-20 bounded prefix-scan increment (Decision 0066), tested on `d8fd8fa` plus this increment:
 storage and both coordinators now admit prefix-scan page visits (including cache hits), entry
 count and key-plus-value bytes. Fragmented entries are admitted before entry allocation.
@@ -1721,8 +1754,10 @@ verified private multi-revision graph/coordinator recovery. Decision 0093 integr
 resume with explicit fixture-derived limits and separate suffix diagnostics. Native
 process coverage of stale-root gaps is now passing. Next address remaining resident storage
 metadata. Decision 0094 supplies bounded authenticated disk certificate proofs and exact live-owner
-binding for proven reads/cursors/staging. Next integrate proof-bound root handles and map-free
-certificate recovery, without hiding proof read amplification; blob collections still remain.
+binding for proven reads/cursors/staging. Decision 0095 integrated proof-bound handles and map-free
+certificate recovery; Decisions 0096–0097 added committed blob proofs and disk-coordinator reads.
+Decision 0098 adds the verified bounded catalog rebuild/admission; resident blob recovery/append
+collections still remain.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

@@ -49,6 +49,12 @@ pub use certificate_proof::{
 #[path = "journal_blob_proof.rs"]
 mod blob_proof;
 pub use blob_proof::{BlobReferenceProof, BlobReferenceProofLimits, BlobReferenceProofReport};
+#[path = "journal_blob_metadata.rs"]
+mod blob_metadata;
+pub use blob_metadata::{
+    BLOB_METADATA_PROFILE_V1, BlobMetadataAdmissionLimits, BlobMetadataAdmissionReport,
+    BlobMetadataBase, BlobMetadataCounts, BlobMetadataRebuildLimits, BlobMetadataRebuildReport,
+};
 
 const STORAGE_MAJOR: u8 = 1;
 const STORAGE_MINOR: u8 = 0;
@@ -2966,6 +2972,7 @@ fn read_array<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], St
 
 #[cfg(test)]
 mod tests {
+    mod blob_metadata_tests;
     mod blob_proof_tests;
     mod certificate_proof_tests;
     mod index_stage_tests;
