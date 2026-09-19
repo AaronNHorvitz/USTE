@@ -1,6 +1,7 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
 //! Every signaled process is a child created and owned by this test.
 use std::{
+    collections::BTreeMap,
     fs,
     io::{BufRead, BufReader, Write},
     os::unix::{
@@ -74,6 +75,40 @@ impl Fixture {
         assert_eq!(report["kernel_filesystem_device_cache"], "uncontrolled");
         assert!(!String::from_utf8_lossy(&output.stdout).contains(self.root.to_str().unwrap()));
         report
+    }
+    fn database(&self) -> PathBuf {
+        self.root.join("bm06-linux-disk-engine")
+    }
+    fn roots(&self) -> BTreeMap<String, Vec<u8>> {
+        let mut roots = BTreeMap::new();
+        for entry in fs::read_dir(self.database()).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if !name.starts_with("x-") {
+                continue;
+            }
+            assert_eq!(name.len(), 66);
+            assert!(
+                name[2..]
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            );
+            assert!(entry.file_type().unwrap().is_file());
+            assert_eq!(entry.metadata().unwrap().len(), 4177);
+            assert!(roots.len() < 10);
+            roots.insert(name, fs::read(entry.path()).unwrap());
+        }
+        assert!((6..=10).contains(&roots.len()));
+        roots
+    }
+    fn replace_root(&self, name: &str, bytes: &[u8]) {
+        assert_eq!(bytes.len(), 4177);
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(self.database().join(name))
+            .unwrap();
+        file.write_all_at(bytes, 0).unwrap();
+        file.sync_all().unwrap();
     }
 }
 impl Drop for Fixture {
@@ -239,4 +274,110 @@ fn bm06_native_tail_and_open_preserve_explicit_phase_frontiers() {
     assert_eq!(fixture.run("recover")["verified_history_versions"], 100);
     assert!(!complete(fixture.command("tail")).status.success());
     assert_eq!(fixture.run("open")["verified_payload_bytes"], 409600);
+}
+
+#[test]
+fn bm06_native_corrupt_or_missing_terminal_caches_rebuild_from_retained_roots() {
+    for missing in [false, true] {
+        let fixture = Fixture::new(2);
+        fixture.run("create");
+        let before = fixture.roots();
+        fixture.run("tail");
+        fixture.run("recover");
+        let certificates = fs::read(fixture.database().join("CERTIFICATES")).unwrap();
+        let terminal = fixture.roots();
+        let changed: Vec<_> = terminal
+            .iter()
+            .filter(|(name, bytes)| before.get(*name) != Some(*bytes))
+            .collect();
+        assert!((3..=5).contains(&changed.len()));
+        let saved = fixture.root.join("saved-terminal-cache-roots");
+        fs::DirBuilder::new().mode(0o700).create(&saved).unwrap();
+        for (name, bytes) in changed {
+            if missing {
+                fs::rename(fixture.database().join(name), saved.join(name)).unwrap();
+            } else {
+                let mut corrupt = bytes.clone();
+                corrupt[100] ^= 1;
+                fixture.replace_root(name, &corrupt);
+            }
+        }
+        fs::File::open(&saved).unwrap().sync_all().unwrap();
+        fs::File::open(fixture.database())
+            .unwrap()
+            .sync_all()
+            .unwrap();
+        assert!(!complete(fixture.command("open")).status.success());
+        let repaired = fixture.run("recover");
+        assert_eq!(repaired["initial_graph_revision"], 100);
+        assert_eq!(repaired["initial_metadata_revision"], 100);
+        assert_eq!(repaired["frontier"], 101);
+        assert_eq!(repaired["verified_history_versions"], 200);
+        assert_eq!(
+            fs::read(fixture.database().join("CERTIFICATES")).unwrap(),
+            certificates
+        );
+        assert_eq!(fixture.run("open")["frontier"], 101);
+    }
+}
+
+#[test]
+fn bm06_native_no_valid_graph_base_fails_closed_without_history_rollback() {
+    let fixture = Fixture::new(2);
+    fixture.run("create");
+    fixture.run("tail");
+    fixture.run("recover");
+    let certificates = fs::read(fixture.database().join("CERTIFICATES")).unwrap();
+    let roots = fixture.roots();
+    for (name, bytes) in &roots {
+        let mut corrupt = bytes.clone();
+        corrupt[100] ^= 1;
+        fixture.replace_root(name, &corrupt);
+    }
+    for phase in ["open", "recover"] {
+        let output = complete(fixture.command(phase));
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+    assert_eq!(
+        fs::read(fixture.database().join("CERTIFICATES")).unwrap(),
+        certificates
+    );
+    // Restore only the fixture's captured derived roots; no journal/source history is touched.
+    for (name, bytes) in roots {
+        fixture.replace_root(&name, &bytes);
+    }
+    assert_eq!(fixture.run("recover")["verified_history_versions"], 200);
+}
+
+#[test]
+fn bm06_native_incomplete_tails_are_reported_and_repaired_without_losing_commits() {
+    let fixture = Fixture::new(2);
+    fixture.run("create");
+    fixture.run("tail");
+    fixture.run("recover");
+    let certificate_path = fixture.database().join("CERTIFICATES");
+    let certificates = fs::read(&certificate_path).unwrap();
+    let segments: Vec<_> = fs::read_dir(fixture.database())
+        .unwrap()
+        .map(Result::unwrap)
+        .filter(|entry| entry.file_name().to_str().unwrap().starts_with("j-"))
+        .collect();
+    assert_eq!(segments.len(), 1); // This bounded profile cannot roll over a 256 MiB segment.
+    let segment_path = segments[0].path();
+    let segment = fs::read(&segment_path).unwrap();
+    for path in [&certificate_path, &segment_path] {
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        file.write_all(b"torn-tail").unwrap();
+        file.sync_all().unwrap();
+    }
+    let recovered = fixture.run("recover");
+    assert_eq!(recovered["repaired_certificate_tail_bytes"], 9);
+    assert_eq!(recovered["ignored_uncommitted_journal_bytes"], 9);
+    assert_eq!(recovered["frontier"], 101);
+    assert_eq!(fs::read(certificate_path).unwrap(), certificates);
+    assert_eq!(fs::read(segment_path).unwrap(), segment);
+    let opened = fixture.run("open");
+    assert_eq!(opened["repaired_certificate_tail_bytes"], 0);
+    assert_eq!(opened["ignored_uncommitted_journal_bytes"], 0);
 }

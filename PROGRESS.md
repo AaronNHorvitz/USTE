@@ -58,6 +58,27 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `134f116` plus this increment: [native BM-06 recovery controls](docs/evidence/native-bm06-recovery-controls.md)
+  cover corrupted and missing terminal cache manifests, retained-root suffix rebuild, complete
+  graph-base-loss refusal and exact incomplete certificate/journal tails. Reports now expose
+  both storage repair-byte counters. Corrupt/missing terminal roots recover from graph/metadata
+  revision 100 and preserve the entire certificate file while verifying all 200 versions at 101.
+  Complete root loss fails closed; restoring only captured derived manifests restores verified
+  access. Nine appended bytes in each authority file are reported/repaired exactly, preserving
+  both committed files byte-for-byte; the next open reports zero repair. The six native tests
+  retain SIGKILL, ownership, wrong-key/profile, committed-corruption, retry and phase guards.
+  `run-p412685-i21380063.scope` exited 0 under 3G/4G/512M, one Cargo job/test thread:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline --test recovery_process -- --test-threads=1 --nocapture` passes six tests
+  (30.25s); `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml
+  --all-targets --locked --offline -- -D warnings` passes (1.00s). Sampled scope peak 381,009,920
+  bytes, zero swap, not final whole-run peak. The preceding full native gate remains recorded
+  below; this focused increment changes only native reports and their recovery controls, not
+  production crates. Formatting/whitespace, documentation and task-graph checks pass. Preflight:
+  35 GiB available RAM, 3.9 GiB free swap. Next: native arbitrary-prefix materialization resume,
+  then complete cache-loss rebuild and construction/recovery scaling. No BM-06 qualification,
+  authoritative baseline promotion or T-20/T-19 completion is claimed.
+
 - Verified on pushed `8749793` plus this increment: [Decision 0116](docs/decisions/0116-native-bm06-recovery-phases.md)
   adds native Btrfs create/tail/recover/open phases and an owned-child durable-tail SIGKILL probe.
   OS entropy, portable recovery, current authorization and durable flushes remain enabled; the

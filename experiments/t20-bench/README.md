@@ -54,6 +54,10 @@ is retained. Tests run `tail-crash-probe` as an owned child and SIGKILL it only 
 durable-tail marker, then recover in fresh processes. Do not launch the probe without a supervising
 parent: it waits indefinitely by design. Reports separate verified history from recovery work and
 disclose partial adapter accounting, uncontrolled host caches and zero qualifying trials.
+Native tests also corrupt/remove terminal cache manifests while retaining an earlier valid pair,
+refuse complete graph-base loss, and repair exact incomplete certificate/journal tails. Reports
+include `repaired_certificate_tail_bytes` and `ignored_uncommitted_journal_bytes`; committed
+certificate corruption remains fatal. See the [control evidence](../../docs/evidence/native-bm06-recovery-controls.md).
 
 ## BM-01 materialization
 

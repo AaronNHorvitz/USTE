@@ -77,18 +77,19 @@ pub fn run(
         drop(snapshot);
         drop(raw);
     }
-    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
-        &mut fs,
-        &name,
-        scope(),
-        OsEntropy,
-        OsEntropy,
-        &mut adapter,
-        limits.blob_recovery,
-        &mut uste_storage::PageCache::new(64 * 1024 * 1024)
-            .map_err(|_| error("USTE_BM06_LIMITS"))?,
-    )
-    .map_err(|_| error("USTE_BM06_OPEN"))?;
+    let (recovery, storage_report, frontier) =
+        AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+            &mut fs,
+            &name,
+            scope(),
+            OsEntropy,
+            OsEntropy,
+            &mut adapter,
+            limits.blob_recovery,
+            &mut uste_storage::PageCache::new(64 * 1024 * 1024)
+                .map_err(|_| error("USTE_BM06_LIMITS"))?,
+        )
+        .map_err(|_| error("USTE_BM06_OPEN"))?;
     let frontier = frontier.ok_or_else(|| error("USTE_BM06_FRONTIER"))?;
     let expected = match phase {
         "create" => 1,
@@ -187,6 +188,8 @@ pub fn run(
         "filesystem_profile": "linux-x86_64-btrfs", "recovery_profile": "portable-argon2id-v1",
         "initial_graph_revision": admission.graph_revision, "initial_metadata_revision": admission.metadata_revision,
         "frontier": final_revision, "verified_history_versions": verified,
+        "repaired_certificate_tail_bytes": storage_report.repaired_certificate_tail_bytes,
+        "ignored_uncommitted_journal_bytes": storage_report.ignored_uncommitted_journal_bytes,
         "verified_history_revision": 1 + versions * profile.batches_per_version(),
         "verified_payload_bytes": verified * crate::recovery_materialization::PAYLOAD_BYTES as u64,
         "open_repair_or_construction_milliseconds": recovery_or_construction_ms,
