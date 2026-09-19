@@ -58,6 +58,30 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `3a2a361` plus this increment: [Decision 0129](docs/decisions/0129-encrypted-packed-index-pages.md)
+  adds the separate encrypted packed-page carrier: one 16 KiB zeroizing builder, at most 128
+  borrowed records, exact slot/padding validation and an object-format-2 encryption context.
+  Five tests cover literal framing, exact/minus-one byte and slot capacity, atomic append
+  refusal, every ciphertext-byte mutation/truncation, authenticated malformed headers/directories,
+  context and v1 substitution, wrong key, lock and entropy refusal. An initial compile caught a
+  test-only overlapping vault borrow; corrected before testing. Focused scope
+  `run-p500356-i21493241.scope` passed five tests/0.32s and strict workspace Clippy/8.85s.
+  Final scope `run-p501050-i21504416.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 454 tests/46 executables, no failures/ignores
+  (graph disk 24/25.67s, replay 50/116.30s, storage 139/18.29s, coordinator 37/0.54s).
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/0.04s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc
+  -p uste-storage --no-deps --locked --offline` passed/1.02s. Preflight 34 GiB RAM/3.9 GiB swap;
+  sampled scope peak 1,537,359,872 bytes/zero swap, not a final peak. Documentation/task checks
+  passed 203 links/68 tasks before the following unregistered draft was added; diff check passed.
+  No native matrix rerun for this unused framing module; latest native verification remains
+  `42f9abb`. No benchmark, root publication, typed node admission, task completion or changed
+  M1/lockfile is claimed. Unregistered `packed_index_pack.rs` and Decision 0130 are next-package
+  drafts, explicitly excluded from this tested commit. Next wire and verify bounded durable pack
+  writes/reads, then typed copy-on-write traversal and publication/recovery integration.
+
 - Implemented on pushed `42f9abb` plus this increment: [Decision 0128](docs/decisions/0128-canonical-ordered-content-commitments.md)
   adds canonical ordered content commitments, bounded borrowed membership/absence proofs and exact
   compare-and-swap insert/replace/delete root transitions. This is a storage-free, opt-in primitive,
@@ -2595,8 +2619,9 @@ references on that path; Decision 0124 maintains quota projections (pushed `746c
 0125 applies streamed metadata to native paired-base recovery (pushed `de67ff3`). Decision 0126
 removes duplicate staging proofs (pushed `fa3897a`). Decision 0127 adds bounded certificate
 windows to private forward recovery (pushed `42f9abb`). Decision 0128 adds locally verified
-canonical ordered commitments without changing any persisted v1 profile. Next implement the
-separately versioned copy-on-write carrier, bounded admission and domain integration, and
+canonical ordered commitments (pushed `3a2a361`) without changing any persisted v1 profile.
+Decision 0129 adds the encrypted packed-page framing carrier. Next wire and verify bounded
+durable pack I/O, then typed copy-on-write traversal, root admission and domain integration, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

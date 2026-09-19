@@ -169,6 +169,11 @@ complete accounting/qualification remain open; the paired-base paths do not remo
 
 ## Indexing and bounded resources
 
+Decision 0129 adds a distinct encrypted packed-page framing carrier for future copy-on-write
+records: fixed 16 KiB zeroizing plaintext buffers, at most 128 nonempty records, strict slot and
+padding checks, and a separate object-format cryptographic context. Framing alone does not validate
+tree nodes, authorize access, publish a root or provide crash recovery. Existing v1 paths are unchanged.
+
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
 compare-and-swap deltas. It changes no v1 digest or persisted format and is not a live disk index

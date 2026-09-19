@@ -15,6 +15,7 @@ pub mod journal;
 pub mod linux;
 pub mod memory;
 pub mod ordered_commitment;
+pub mod packed_index_page;
 
 pub use adapter::{
     AdapterError, AdapterErrorKind, Clock, ClockObservation, EntryName, EntryNameError,
