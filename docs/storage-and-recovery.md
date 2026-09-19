@@ -202,6 +202,10 @@ Decision 0136 frames separate encrypted packed-root manifests with at most sixte
 commitments/locators and an explicit state-commitment profile. Exact certificate and reducer claims
 are carried but not admitted by the codec. No frozen v1 state digest is reinterpreted, and no new
 publication/discovery or commit authority follows from a successful manifest decode.
+Decision 0137 verifies the packed primitives on Linux/Btrfs using owned child-process SIGKILL at
+pack-write, pack-sync, partial-manifest and complete-manifest-sync boundaries. Both old and synced
+new trees reopen exactly. The synthetic harness is not production publication or journal admission,
+and process loss is not power-loss or broader filesystem qualification.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

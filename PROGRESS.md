@@ -58,6 +58,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `d5f866b` plus this increment: [Decision 0137](docs/decisions/0137-packed-storage-process-loss-evidence.md)
+  adds a real Linux/Btrfs process-loss test spanning four owned-child SIGKILL boundaries: first
+  successful pack write before sync, complete pack sync without a manifest, partial synced test
+  manifest, and complete manifest/file/directory sync. A new adapter/vault reopens the exact old
+  tree at every boundary; only the complete new manifest recovers the exact changed tree with
+  unchanged old-pack links. Synthetic claims/key wrapping/names do not grant production authority.
+  The readiness pipe has a ten-second parent timeout; the child exits on parent-pipe EOF and an
+  RAII guard kills/reaps only the owned child. Cleanup is restricted to known files in each uniquely
+  created test directory. No engine runtime code changes in this increment.
+  Scope `run-p550554-i21553750.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --test packed_process_restart
+  --locked --offline -- --test-threads=1` passed one test/all four process boundaries in 0.13s;
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/0.10s. Formatting, diff, documentation and task checks passed. Preflight
+  33 GiB RAM/4.0 GiB swap. `findmnt -T . -o FSTYPE,SOURCE,OPTIONS` confirms Btrfs on NVMe with
+  `compress=zstd:1`; ext4, power-loss behavior and other platforms were not exercised. The full
+  workspace baseline remains the 504-test/46-executable D0136 gate, not a newly claimed full run;
+  native baseline remains `42f9abb`. No benchmark, M1/lockfile change, task completion or production
+  root publication is claimed. Next implement certificate-bound packed-root publication/discovery
+  without full-family rewriting, then domain integration, complete accounting and qualification.
+
 - Implemented on pushed `a5e9a40` plus this increment: [Decision 0136](docs/decisions/0136-packed-root-manifest-framing.md)
   adds separately versioned encrypted packed-root manifests with fixed 2,048-byte plaintext,
   4,161-byte envelopes, up to sixteen sorted family commitments/locators and explicit state-commitment
