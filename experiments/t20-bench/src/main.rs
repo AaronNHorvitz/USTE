@@ -2,6 +2,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 
 use uste_t20_bench::{
     Bm01Manifest, Bm01Profile, OracleBundle, OracleSummary, verify_development_profile,
+    verify_disk_development_profile,
 };
 
 fn run() -> Result<(), String> {
@@ -29,6 +30,7 @@ fn run() -> Result<(), String> {
         && command != "oracle-summary"
         && command != "oracle-bundle"
         && command != "engine-check"
+        && command != "disk-engine-check"
         && !linux_command
     {
         return Err("unsupported command".into());
@@ -89,6 +91,19 @@ fn run() -> Result<(), String> {
         print!("{}", OracleSummary::build(profile)?.to_tsv());
     } else if command == "oracle-bundle" {
         print!("{}", OracleBundle::build(profile)?.to_tsv());
+    } else if command == "disk-engine-check" {
+        let report = verify_disk_development_profile(profile)?;
+        println!(
+            "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-disk-development-equivalence\",\"filesystem_profile\":\"durable-memory-model\",\"oracle_memory_resident\":true,\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},\"recovered_revision\":{},\"queries\":{},\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_hits\":{},\"cache_misses\":{}}}",
+            report.entities,
+            report.relationships,
+            report.recovered_revision,
+            report.queries,
+            hex(&report.output_digest),
+            report.cache_report.budget_bytes,
+            report.cache_report.hits,
+            report.cache_report.misses,
+        );
     } else if command == "engine-check" {
         let report = verify_development_profile(profile)?;
         println!(
@@ -181,7 +196,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     println!(
-        "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check> [--entities COUNT]\n\
+        "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
@@ -193,7 +208,7 @@ fn print_usage() {
          oracle-bundle emits disjoint warm-up plus measured expectations for sampling;\n\
          linux-sample uses one development round at scaled sizes and a fixed qualifying\n\
          plan of one warm-up plus five samples of at least 60 seconds at exact size;\n\
-         engine-check accepts at most 1000 entities and is always nonqualifying;\n\
+         both engine checks accept at most 1000 entities and are always nonqualifying;\n\
          Linux phases require an existing Btrfs directory and owner-only password file"
     );
 }

@@ -30,6 +30,7 @@ cargo run --release --locked --offline -- manifest --entities 1000
 cargo run --release --locked --offline -- oracle-summary --entities 20 > ORACLE
 cargo run --release --locked --offline -- oracle-bundle --entities 20 > ORACLE_BUNDLE
 cargo run --release --locked --offline -- engine-check --entities 20
+cargo run --release --locked --offline -- disk-engine-check --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo run --release --locked --offline -- linux-sample --root ROOT \
@@ -48,6 +49,14 @@ then accepts them in a separate durable revision. After encrypted index publicat
 durable memory adapter, replays the journal, loads the persisted authorized root and compares all
 384 measured query shapes with the independent oracle. The 20-entity/200-relationship golden output
 digest is `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`.
+
+`disk-engine-check` preserves that same cap, fixture, 384-query corpus and golden digest. Only a
+policy-only bootstrap uses `GraphState`; all fixture writes and the final cold-admitted reads use
+the disk-backed graph/coordinator capabilities. It selects the accepted 64 MiB USTE cache and
+reports maintenance-authorized cache counters. It still uses the memory fault-model adapter and
+development keys, holds the independent oracle in process and retains storage-level certificate/
+blob metadata in memory. It is semantic evidence, not performance or bounded total-RSS evidence.
+The existing Linux commands are not silently switched by this development command.
 
 `oracle-summary` is intended to run separately from `linux-query`, so the independent oracle's
 adjacency arrays do not enter the query process. The bounded 256 KiB summary pins profile/query

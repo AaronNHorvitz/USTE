@@ -17,8 +17,8 @@ pub mod query;
 pub mod synthetic;
 
 pub use engine::{
-    DevelopmentVerification, engine_mapping_digest, materialization_revision_count,
-    verify_development_profile,
+    DevelopmentVerification, DiskDevelopmentVerification, engine_mapping_digest,
+    materialization_revision_count, verify_development_profile, verify_disk_development_profile,
 };
 pub use manifest::Bm01Manifest;
 pub use materialization::{

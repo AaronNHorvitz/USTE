@@ -4,6 +4,16 @@ use super::*;
 use crate::{AuthorizedReadError, Cancellation};
 use uste_policy::AuthorizationRequirements;
 
+/// Cardinality-sensitive cache counters, available only with current maintenance authority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AuthorizedDiskCacheReport {
+    pub budget_bytes: usize,
+    pub accounted_bytes: usize,
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+}
+
 /// Trusted reducer contract. Implementations must filter embedded/candidate references with
 /// `authorize_candidate` and return no partial successful result on error.
 pub trait AuthorizedDiskReadState<F, W, E, I>: AuthorizedDiskPolicyState + Sized
@@ -32,7 +42,7 @@ where
     ) -> Result<Self::ReadOutput, Self::ReadError>;
 }
 
-/// Restricted domain read capability. Cache and work diagnostics remain private.
+/// Restricted domain read capability. Cache diagnostics/clearing require maintenance authority.
 pub struct AuthorizedDiskReader<'a, S, F, W, E, I>
 where
     S: AuthorizedDiskReadState<F, W, E, I>,
@@ -59,10 +69,51 @@ where
         policy: &'a PolicyKernel,
         limits: S::ReadLimits,
     ) -> Result<Self, AuthorizedError> {
+        Self::new_with_cache_budget(inner, policy, limits, 64 * 1024)
+    }
+
+    /// Trusted adapter construction, not a consumer-controlled work-budget knob.
+    /// Storage's fixed cache caps still apply; query admission remains independent of cache hits.
+    pub fn new_with_cache_budget(
+        inner: &'a DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a PolicyKernel,
+        limits: S::ReadLimits,
+        cache_bytes: usize,
+    ) -> Result<Self, AuthorizedError> {
         Ok(Self {
-            metadata: AuthorizedDiskMetadata::new(inner, policy)?,
+            metadata: AuthorizedDiskMetadata::new_with_cache_budget(inner, policy, cache_bytes)?,
             limits,
         })
+    }
+
+    pub fn cache_report(
+        &self,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<AuthorizedDiskCacheReport, AuthorizedError> {
+        self.metadata.authorize(principal, Action::ManageSchema)?;
+        let cache = self
+            .metadata
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?;
+        Ok(AuthorizedDiskCacheReport {
+            budget_bytes: cache.budget(),
+            accounted_bytes: cache.accounted_bytes(),
+            hits: cache.hits(),
+            misses: cache.misses(),
+            evictions: cache.evictions(),
+        })
+    }
+
+    /// Clear only USTE's decrypted page cache. Counters remain cumulative; no host-cache claim.
+    pub fn clear_cache(&self, principal: &AuthenticatedPrincipal) -> Result<(), AuthorizedError> {
+        self.metadata.authorize(principal, Action::ManageSchema)?;
+        self.metadata
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?
+            .clear();
+        Ok(())
     }
 
     pub fn read(

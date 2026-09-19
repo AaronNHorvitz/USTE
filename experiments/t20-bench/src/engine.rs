@@ -1,5 +1,8 @@
 //! Production-engine equivalence check for bounded, explicitly nonqualifying development sizes.
 
+mod disk;
+pub use disk::{DiskDevelopmentVerification, verify_disk_development_profile};
+
 use std::collections::BTreeSet;
 
 use uste_crypto::{
@@ -287,6 +290,18 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    execute_query_with(materializer, query, |request| {
+        coordinator
+            .read_indexed(filesystem, principal, view, root, request)
+            .map_err(|error| EngineQueryError::Engine(debug(error)))
+    })
+}
+
+pub(crate) fn execute_query_with(
+    materializer: Materializer,
+    query: QuerySpec,
+    mut read: impl FnMut(&GraphReadRequest) -> Result<GraphReadOutput, EngineQueryError>,
+) -> Result<OracleOutput, EngineQueryError> {
     let limits = OracleLimits::default();
     let mut visits = 0_usize;
     let mut relationships = BTreeSet::new();
@@ -296,19 +311,11 @@ where
     for _ in 0..query.depth {
         let mut next = BTreeSet::new();
         for entity in frontier {
-            let output = coordinator
-                .read_indexed(
-                    filesystem,
-                    principal,
-                    view,
-                    root,
-                    &GraphReadRequest::Adjacent {
-                        entity: entity_ref(scope(), materializer, entity),
-                        direction: direction(query.direction),
-                        maximum: limits.maximum_results,
-                    },
-                )
-                .map_err(|error| EngineQueryError::Engine(debug(error)))?;
+            let output = read(&GraphReadRequest::Adjacent {
+                entity: entity_ref(scope(), materializer, entity),
+                direction: direction(query.direction),
+                maximum: limits.maximum_results,
+            })?;
             let GraphReadOutput::Adjacent(candidates) = output else {
                 return Err(EngineQueryError::Invalid(
                     "adjacency request returned another output kind",

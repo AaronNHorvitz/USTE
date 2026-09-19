@@ -18,8 +18,9 @@ pub use authorized::{
     DurablePolicyChange, MAX_STAGED_UPLOAD_RESERVATIONS, QuotaUsage, open_authorized,
 };
 pub use authorized_disk::{
-    AuthorizedDiskMetadata, AuthorizedDiskPolicyState, AuthorizedDiskReadState,
-    AuthorizedDiskReader, AuthorizedDiskWriteError, AuthorizedDiskWriteState, AuthorizedDiskWriter,
+    AuthorizedDiskCacheReport, AuthorizedDiskMetadata, AuthorizedDiskPolicyState,
+    AuthorizedDiskReadState, AuthorizedDiskReader, AuthorizedDiskWriteError,
+    AuthorizedDiskWriteState, AuthorizedDiskWriter,
 };
 pub use disk_metadata::{
     COORDINATOR_FIRST_REFERENCE_PROFILE_V1, COORDINATOR_METADATA_PROFILE_V1,

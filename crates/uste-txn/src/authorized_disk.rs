@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 mod read;
 mod write;
-pub use read::{AuthorizedDiskReadState, AuthorizedDiskReader};
+pub use read::{AuthorizedDiskCacheReport, AuthorizedDiskReadState, AuthorizedDiskReader};
 pub use write::{AuthorizedDiskWriteError, AuthorizedDiskWriteState, AuthorizedDiskWriter};
 
 use uste_crypto::EntropySource;
@@ -56,10 +56,18 @@ where
         inner: &'a DiskCommitCoordinator<S, F, W, E, I>,
         policy: &'a PolicyKernel,
     ) -> Result<Self, AuthorizedError> {
+        Self::new_with_cache_budget(inner, policy, 64 * 1024)
+    }
+
+    fn new_with_cache_budget(
+        inner: &'a DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a PolicyKernel,
+        cache_bytes: usize,
+    ) -> Result<Self, AuthorizedError> {
         let facade = Self {
             inner,
             policy,
-            cache: Mutex::new(PageCache::new(64 * 1024).map_err(TransactionError::Storage)?),
+            cache: Mutex::new(PageCache::new(cache_bytes).map_err(TransactionError::Storage)?),
         };
         facade.validate_policy()?;
         Ok(facade)

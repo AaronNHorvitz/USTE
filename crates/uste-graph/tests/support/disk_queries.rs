@@ -255,7 +255,25 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
     let bob = kernel.authenticate(&mut Identity, &2).unwrap();
     let no_history = kernel.authenticate(&mut Identity, &3).unwrap();
     let ample = GraphDiskExpansionLimits::new(1000, 100, 1024 * 1024, 100).unwrap();
-    let reader = AuthorizedDiskReader::new(&disk, &kernel, limits(ample)).unwrap();
+    assert!(
+        AuthorizedDiskReader::new_with_cache_budget(&disk, &kernel, limits(ample), usize::MAX)
+            .is_err()
+    );
+    let reader =
+        AuthorizedDiskReader::new_with_cache_budget(&disk, &kernel, limits(ample), 128 * 1024)
+            .unwrap();
+    let before = reader.cache_report(&admin).unwrap();
+    assert_eq!(before.budget_bytes, 128 * 1024);
+    assert_eq!(before.accounted_bytes, 0);
+    assert!(matches!(
+        reader.cache_report(&bob),
+        Err(uste_txn::AuthorizedError::Unauthorized)
+    ));
+    assert!(matches!(
+        reader.clear_cache(&bob),
+        Err(uste_txn::AuthorizedError::Unauthorized)
+    ));
+    assert_eq!(reader.cache_report(&admin).unwrap(), before);
     let requests = [
         GraphReadRequest::Adjacent {
             entity: record(1),
@@ -305,6 +323,19 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
             }
         }
     }
+    let before_clear = reader.cache_report(&admin).unwrap();
+    assert!(before_clear.accounted_bytes > 0);
+    assert!(before_clear.hits > 0);
+    assert!(matches!(
+        reader.clear_cache(&bob),
+        Err(uste_txn::AuthorizedError::Unauthorized)
+    ));
+    assert_eq!(reader.cache_report(&admin).unwrap(), before_clear);
+    reader.clear_cache(&admin).unwrap();
+    let cleared = reader.cache_report(&admin).unwrap();
+    assert_eq!(cleared.accounted_bytes, 0);
+    assert_eq!(cleared.hits, before_clear.hits);
+    assert_eq!(cleared.misses, before_clear.misses);
     assert!(
         reader
             .read(

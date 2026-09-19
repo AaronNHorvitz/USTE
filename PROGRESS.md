@@ -51,6 +51,27 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0074 adds runnable `disk-engine-check` using disk graph/coordinator state after a
+  policy-only bootstrap, bounded authorized writes/rebase and independent cold root admission.
+  All 384 existing 20/200 oracle queries match the frozen digest; no fixture/target was changed.
+  Trusted reader construction can select the accepted 64 MiB cache; report/clear require current
+  `ManageSchema`, denial leaves cache unchanged, and clearing retains cumulative counters.
+  The initial exploratory 64 KiB-cache debug run was intentionally SIGINTed in its own scope
+  (exit 130, no test result); the same corpus passed with the accepted 64 MiB setting in 30.44s.
+  Capped commands (one job/thread, MemoryHigh=3G/MemoryMax=4G/MemorySwapMax=512M):
+  `cargo test -p uste-graph -p uste-txn --all-targets --locked --offline -- --test-threads=1`,
+  `cargo test --manifest-path experiments/t20-bench/Cargo.toml --locked --offline --
+  --test-threads=1` (32 passed, two pre-existing exact-profile tests ignored), workspace all-feature
+  and experiment all-target strict clippy, and workspace warnings-denied rustdoc all passed.
+  `CARGO_BUILD_JOBS=1 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- disk-engine-check --entities 20` exited 0: revision 4, 384 queries,
+  digest `46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`, 67,108,864-byte
+  cache, 580,665 hits and 8 misses. This is memory-adapter semantic evidence, not BM qualification;
+  reports disclose the in-process oracle and resident storage metadata. Docs/task checks pass
+  (147 links, 68 tasks); host preflight 36 GiB available RAM, 3.9 GiB free swap.
+  Next port this path to the Linux runner with bounded bootstrap and pending-root resume, preserving
+  ownership and all existing oracle/sample/deadline contracts. M1 handoff remains pinned unchanged.
+
 - Decision 0073 retains admitted first-reference roots and advances them with one authenticated,
   owner/group/byte-bounded suffix pass plus a native insertion-only merge. Three-root publication
   retains the old base/overlays until terminal success; exact retry and cold repair survive every
