@@ -2,7 +2,40 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed graph proof preparation (Decision 0153)
+## Latest verified increment — certified packed graph delta staging (Decision 0154)
+
+Implemented on pushed `4d57b8d` plus this increment: the same bounded graph delta algorithm
+now supplies receipt-bound private staging of all eight packed families. Exact canonical request,
+result, predecessor certificate/commitment/counts/policy and live tree bindings are checked before
+cache mutation. Bounded batches preserve old roots; only complete staging returns a typed base.
+No graph root is published by staging. The opt-in `source_v1_digest()` accessor is now optional:
+new staged states require the existing streaming compatibility export for their frozen v1 digest.
+Unchanged trees and complete deletion legitimately require zero output pages, even at an exhausted
+aggregate write budget; neither bypasses compare-and-swap or authenticated reads.
+
+Four tests cover partition-independent exact old/new v1 exports, 333 observed staging I/O/error/
+crash cases with restart, exact/minus-one ceilings, altered-request/same-result rejection,
+corruption and foreign-owner refusal. Focused session 8382 / `run-p667592-i21621784.scope`
+passed 15 packed graph tests in 16.53 s and Clippy in 1.93 s. Full gate session 21686 /
+`run-p668282-i21676548.scope` exited 0: 595 tests across 47 executables, transaction integration
+93/99.05 s, Clippy 0.04 s and graph docs 1.08 s. Preflight: 31 GiB available RAM and 5.7 GiB
+free swap. One Cargo job/test thread; scope limits 3G high / 4G max / 512M swap. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d154-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline'
+```
+
+Next implement packed live repair-only state and coordinator integration, followed by cold
+semantic/recovery integration. Decision 0155 is an excluded next-increment contract draft.
+T-20/T-19 and qualifying campaigns remain open. Native standalone remains last tested at
+`42f9abb`; M1's pinned implementation and handoff are unchanged. Earlier next-step paragraphs
+below are historical; this section is the authoritative continuation point.
+
+## Prior verified increment — packed graph proof preparation (Decision 0153)
 
 Implemented on pushed `30f9aa1` plus this increment: explicit packed current/history/reverse reads
 construct only the bounded transaction proof closure and invoke the unchanged pure graph reducer.

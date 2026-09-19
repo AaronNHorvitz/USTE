@@ -2,8 +2,9 @@
 use super::*;
 mod preparation;
 pub use preparation::{
-    PackedGraphPreparationLimits, PackedGraphReadReport, PackedPreparedGraph,
-    prepare_packed_graph_transaction,
+    PackedGraphDelta, PackedGraphPreparationLimits, PackedGraphReadReport, PackedGraphStageLimits,
+    PackedGraphStageReport, PackedPreparedGraph, prepare_packed_graph_delta,
+    prepare_packed_graph_transaction, stage_packed_graph_delta,
 };
 use uste_storage::{
     journal::{CanonicalPackedTree, CertificateAnchorReadLimits},
@@ -29,7 +30,7 @@ pub struct PackedGraphBase {
     trees: [CanonicalPackedTree; 8],
     counts: [u64; 8],
     policy: Option<NamespacePolicy>,
-    source_v1_digest: [u8; 32],
+    source_v1_digest: Option<[u8; 32]>,
 }
 impl PackedGraphBase {
     pub fn scope(&self) -> NamespaceRef {
@@ -41,8 +42,9 @@ impl PackedGraphBase {
     pub fn namespace_policy(&self) -> Option<&NamespacePolicy> {
         self.policy.as_ref()
     }
-    pub fn source_v1_digest(&self) -> &[u8; 32] {
-        &self.source_v1_digest
+    /// Present only for an exact v1 bridge; later staged states require streaming export.
+    pub fn source_v1_digest(&self) -> Option<&[u8; 32]> {
+        self.source_v1_digest.as_ref()
     }
     pub fn families(&self) -> [PackedRootFamily; 8] {
         core::array::from_fn(|i| self.trees[i].family_descriptor())
@@ -306,7 +308,7 @@ where
             trees,
             counts: source.counts,
             policy: source.current_policy.clone(),
-            source_v1_digest: *root.logical_state_digest(),
+            source_v1_digest: Some(*root.logical_state_digest()),
         },
         report,
     ))

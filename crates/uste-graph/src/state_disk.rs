@@ -3126,6 +3126,37 @@ fn build_graph_state_root_delta_from_base(
     prepared: &PreparedGraph,
     limits: GraphStateDeltaLimits,
 ) -> Result<GraphStateRootDelta, GraphDiskError> {
+    let data = build_graph_family_deltas(base_counts, base_policy, prepared, limits)?;
+    Ok(GraphStateRootDelta {
+        scope: data.scope,
+        base_anchor,
+        base_revision: data.base_revision,
+        revision: data.revision,
+        result_digest: data.result_digest,
+        target_counts: data.target_counts,
+        families: data.families,
+        deltas: data.deltas,
+        logical_bytes: data.logical_bytes,
+    })
+}
+
+/// Storage-independent exact graph delta data; no v1 or packed root authority.
+struct GraphStateFamilyDelta {
+    scope: NamespaceRef,
+    base_revision: CommitRevision,
+    revision: CommitRevision,
+    result_digest: [u8; 32],
+    target_counts: [u64; 8],
+    families: [Vec<IndexDelta>; FAMILY_COUNT as usize],
+    deltas: u64,
+    logical_bytes: u64,
+}
+fn build_graph_family_deltas(
+    base_counts: [u64; 8],
+    base_policy: Option<&NamespacePolicy>,
+    prepared: &PreparedGraph,
+    limits: GraphStateDeltaLimits,
+) -> Result<GraphStateFamilyDelta, GraphDiskError> {
     let mandatory_deltas = count(prepared.changes.len())?
         .checked_mul(2)
         .and_then(|value| value.checked_add(1))
@@ -3287,9 +3318,8 @@ fn build_graph_state_root_delta_from_base(
         return Err(GraphDiskError::IndexCorrupt);
     }
 
-    Ok(GraphStateRootDelta {
+    Ok(GraphStateFamilyDelta {
         scope: prepared.scope,
-        base_anchor,
         base_revision: prepared
             .base_revision
             .ok_or(GraphDiskError::RootStateMismatch)?,

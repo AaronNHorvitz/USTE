@@ -1,5 +1,10 @@
 //! Explicit-I/O proof closure, with the existing pure graph reducer as semantic authority.
 use super::*;
+mod staging;
+pub use staging::{
+    PackedGraphDelta, PackedGraphStageLimits, PackedGraphStageReport, prepare_packed_graph_delta,
+    stage_packed_graph_delta,
+};
 use uste_storage::packed_tree_lookup::{PackedLookupValue, TreeLookupLimits, TreeLookupReport};
 use uste_txn::PackedIndexMaintenance;
 

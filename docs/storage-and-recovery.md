@@ -273,6 +273,11 @@ Decision 0153 loads only the packed current/history/reverse proof closure needed
 graph transaction, then uses the existing pure reducer. Prepared results bind the exact ordered
 base without a fabricated v1 anchor. Logical proof and packed read budgets are separate; preparation
 neither appends a journal transaction nor authorizes a consumer or publishes a root.
+Decision 0154 binds those prepared results to exact authenticated transactions and stages bounded
+sorted deltas across all eight families. Only complete staging yields a new typed graph base;
+failed private cache writes leave the old base unchanged. Newly staged states have no cached v1
+digest; streaming compatibility export remains available. Live publication and cold graph semantic
+admission remain separate integration requirements.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

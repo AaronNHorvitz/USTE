@@ -196,7 +196,7 @@ fn packed_graph_bridge_partition_independence_and_exact_v1_export() {
             base.anchor(),
             (transaction.revision(), *transaction.certificate_digest())
         );
-        assert_eq!(base.source_v1_digest(), &digest);
+        assert_eq!(base.source_v1_digest(), Some(&digest));
         assert_eq!(base.namespace_policy(), source.namespace_policy());
         assert!(report.peak_batch_entries <= batch);
         assert_eq!(

@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_staging.rs"]
+mod staging;
 use uste_graph::{PackedGraphPreparationLimits, prepare_packed_graph_transaction};
 use uste_storage::packed_tree_lookup::TreeLookupLimits;
 use uste_txn::TransactionState;
