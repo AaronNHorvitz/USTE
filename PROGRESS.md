@@ -51,6 +51,22 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0077 adds `linux-disk-query`: a bounded, separately generated oracle summary drives
+  native authorized disk queries without full graph/coordinator recovery or oracle adjacency
+  construction in the query process. All 384 native queries, aggregate digest and total logical
+  bytes/visits match the independent expectations. Warm-up/wrong-profile/truncated summaries
+  fail before database I/O. Cache/report checks preserve the accepted 64 MiB USTE cache and
+  disclose storage residency, uncontrolled host caches and the absence of a preemptive deadline
+  in this single-pass correctness command. This is not the supervised sampler or qualification.
+  Verified on top of pushed `080024c` under the 3G/4G/512M scope, one Cargo job/test thread:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 35 tests, with the two existing exact-profile
+  oracle tests ignored, in 23.09s. Experiment all-target strict clippy and docs/task checks
+  (150 links, 68 tasks) passed. Host preflight
+  remained 35 GiB available RAM and 3.9 GiB free swap. Next connect native disk sampling to
+  preemptive worker supervision and add process-loss/resume coverage, then qualify the larger
+  profile and remove remaining storage metadata residency. T-20 and full roadmap remain open.
+
 - Decision 0076 adds native `linux-disk-create/resume/open` development commands, distinct from
   the legacy database/commands. Shared fixture generation and authorized disk writes preserve
   the oracle and deterministic batch plan. Recovery selects paired metadata roots, admits a
@@ -1202,8 +1218,8 @@ metadata base with exact first-owner proofs and explicit read amplification. Tha
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
 Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
-Decisions 0074–0076 connect the independent development oracle and native construction/recovery
-commands to the implemented disk path. Next connect native disk queries and supervised sampling,
+Decisions 0074–0077 connect the independent development oracle and native construction/recovery/query
+commands to the implemented disk path. Next connect native disk supervised sampling,
 qualifying-profile admission, and remove remaining resident storage metadata. Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

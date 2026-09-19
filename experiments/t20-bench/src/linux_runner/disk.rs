@@ -19,6 +19,18 @@ type Disk = DiskCommitCoordinator<
     OsEntropy,
 >;
 
+mod query;
+pub use query::query_correctness;
+
+struct DiskSession {
+    filesystem: LinuxFileSystem,
+    coordinator: Disk,
+    policy: PolicyKernel,
+    principal: AuthenticatedPrincipal,
+    frontier: u64,
+    setup_elapsed: std::time::Duration,
+}
+
 /// These commands intentionally retain the existing development ceiling. Their limits and
 /// measurements are not substituted for the accepted exact-size BM-01/BM-06 campaigns.
 pub fn run(
@@ -27,6 +39,15 @@ pub fn run(
     profile: Bm01Profile,
     phase: &str,
 ) -> Result<String, LinuxRunnerError> {
+    prepare_session(root, password_file, profile, phase).map(|(_, report)| report)
+}
+
+fn prepare_session(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    phase: &str,
+) -> Result<(DiskSession, String), LinuxRunnerError> {
     if profile.entities() > crate::engine::MAX_DEVELOPMENT_ENTITIES {
         return Err(error("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
     }
@@ -162,7 +183,7 @@ pub fn run(
         .get();
     require_expected_frontier(profile, frontier)?;
     require_binding(&disk, &mut fs, &policy, &principal, profile)?;
-    Ok(format!(
+    let report = format!(
         concat!(
             "{{\"schema\":\"bm01-linux-disk-development-v1\",",
             "\"engine_benchmark\":false,\"qualification\":\"nonqualifying-development-profile\",",
@@ -180,6 +201,17 @@ pub fn run(
         started.elapsed().as_millis(),
         report.repaired_certificate_tail_bytes,
         report.ignored_uncommitted_journal_bytes
+    );
+    Ok((
+        DiskSession {
+            filesystem: fs,
+            coordinator: disk,
+            policy,
+            principal,
+            frontier,
+            setup_elapsed: started.elapsed(),
+        },
+        report,
     ))
 }
 

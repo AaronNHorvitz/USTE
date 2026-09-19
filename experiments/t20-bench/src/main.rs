@@ -22,6 +22,7 @@ fn run() -> Result<(), String> {
             | "linux-disk-create"
             | "linux-disk-resume"
             | "linux-disk-open"
+            | "linux-disk-query"
             | "linux-create-crash-probe"
             | "linux-resume"
             | "linux-open"
@@ -140,6 +141,12 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-disk-query" => uste_t20_bench::linux_runner::disk::query_correctness(
+                    &root,
+                    &password_file,
+                    &oracle_file.ok_or("--oracle-file is required")?,
+                    profile,
+                ),
                 "linux-disk-create" | "linux-disk-resume" | "linux-disk-open" => {
                     uste_t20_bench::linux_runner::disk::run(
                         &root,
@@ -218,6 +225,8 @@ fn print_usage() {
          --pause-after-revision REVISION [--entities COUNT]\n\
          uste-t20-bench <linux-query|linux-sample> --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
+         uste-t20-bench linux-disk-query --root DIR --password-file FILE \
+         --oracle-file FILE --entities COUNT (at most 1000; nonqualifying)\n\
          default COUNT=100000 creates the exact qualifying-size fixture manifest;\n\
          oracle-summary emits content-free expectations for a separate query process;\n\
          oracle-bundle emits disjoint warm-up plus measured expectations for sampling;\n\

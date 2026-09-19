@@ -37,6 +37,8 @@ cargo run --release --locked --offline -- linux-disk-resume --root ROOT \
   --password-file PASSWORD --entities 20
 cargo run --release --locked --offline -- linux-disk-open --root ROOT \
   --password-file PASSWORD --entities 20
+cargo run --release --locked --offline -- linux-disk-query --root ROOT \
+  --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo run --release --locked --offline -- linux-sample --root ROOT \
@@ -73,6 +75,13 @@ Open requires completed, repaired roots and validates the fixture Evidence bindi
 do not yet run the disk query sampler or qualify BM-01/BM-06; storage metadata remains resident.
 The native tests require the experiment's `target` directory to reside on Btrfs:
 `CARGO_BUILD_JOBS=1 cargo test --release --locked --offline native_disk -- --test-threads=1`.
+
+`linux-disk-query` consumes the same separately generated bounded oracle summary as `linux-query`,
+but uses native disk state and authorized reads throughout. It checks all exact outcomes, visits,
+result sizes and digests, with a 64 MiB USTE cache cleared before each query. The query process
+does not build oracle adjacency arrays. Its single-pass latency/RSS diagnostics are not sampling
+or qualification: host caches remain uncontrolled, storage metadata remains resident, and this
+command does not enforce the sampler's preemptive deadline. Reports state these limits explicitly.
 
 `oracle-summary` is intended to run separately from `linux-query`, so the independent oracle's
 adjacency arrays do not enter the query process. The bounded 256 KiB summary pins profile/query
