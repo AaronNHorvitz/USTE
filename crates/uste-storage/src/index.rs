@@ -246,6 +246,53 @@ pub struct RecoveredIndexRoot {
     runs: Vec<IndexRunDescriptor>,
 }
 
+/// Provisional recovery-only read handle. No root slot or durable manifest publishes this root.
+/// Drop does not reclaim its orphanable runs; only terminal current-frontier publication can
+/// make a recovered result discoverable. This is not domain or consumer authorization.
+pub struct StagedIndexRoot {
+    root: RecoveredIndexRoot,
+}
+
+impl StagedIndexRoot {
+    /// Borrow the bounded run manifest for trusted recovery reads, never as durability evidence.
+    #[must_use]
+    pub fn read_root(&self) -> &RecoveredIndexRoot {
+        &self.root
+    }
+}
+
+impl core::fmt::Debug for StagedIndexRoot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StagedIndexRoot")
+            .field("revision", &self.root.revision)
+            .finish_non_exhaustive()
+    }
+}
+
+pub(crate) fn stage_root<D>(
+    context: &IndexContext<'_, D>,
+    input: IndexRootInput,
+    runs: &[IndexRunDescriptor],
+) -> Result<StagedIndexRoot, StorageError> {
+    if input.scope.database() != context.database {
+        return Err(StorageError::InvalidState);
+    }
+    validate_run_bindings(runs, input, context)?;
+    Ok(StagedIndexRoot {
+        root: RecoveredIndexRoot {
+            scope: input.scope,
+            revision: input.revision,
+            // Zero is reserved here for a handle with no published root-slot generation.
+            generation: 0,
+            certificate_digest: input.certificate_digest,
+            reducer_profile: input.reducer_profile,
+            logical_state_digest: input.logical_state_digest,
+            index_profile: input.index_profile,
+            runs: runs.to_vec(),
+        },
+    })
+}
+
 impl core::fmt::Debug for RecoveredIndexRoot {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter

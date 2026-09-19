@@ -36,6 +36,10 @@ use crate::{
     read_exact_at, write_all_at,
 };
 
+#[path = "journal_index_stage.rs"]
+mod index_stage;
+pub use index_stage::IndexRecoveryStage;
+
 const STORAGE_MAJOR: u8 = 1;
 const STORAGE_MINOR: u8 = 0;
 const SMALL_ENVELOPE_BYTES: u64 = 4_161;
@@ -2814,6 +2818,8 @@ fn read_array<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], St
 
 #[cfg(test)]
 mod tests {
+    mod index_stage_tests;
+
     use std::fmt::Write as _;
 
     use uste_crypto::{EntropyFailure, SecretKeyMaterial};

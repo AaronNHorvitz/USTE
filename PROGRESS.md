@@ -54,6 +54,24 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0091](docs/decisions/0091-unpublished-certified-recovery-roots.md) adds bounded
+  certified-revision scratch merges and explicitly unpublished read roots for multi-step recovery.
+  Durable root slots still require the exact current frontier; intermediate stages are never
+  discoverable and failures leave only orphanable derived files. Three initial stage tests passed
+  in 0.84s, including every observed merge I/O occurrence with error/crash-before/crash-after.
+  All four focused stage tests passed (0.86s), including binding/corruption/poison/visitor cases.
+  Tested on `77b3ba0` plus this increment: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage
+  -p uste-txn -p uste-replay -p uste-graph --all-targets --all-features --locked --offline
+  -- --test-threads=1` passed, including 73 storage tests (178.23s), 9 checkpoint/first-owner
+  fault tests (83.55s), 17 coordinator tests (6.03s), disk graph and real-process recovery.
+  Workspace all-target/all-feature strict clippy and `RUSTDOCFLAGS="-D warnings" cargo doc
+  -p uste-storage --no-deps --locked --offline` passed. Gates used the established 3G/4G/512M
+  scope, one job/thread; sampled peak 982,634,496 bytes, zero swap; preflight 28 GiB available
+  RAM and 3.9 GiB free swap. Docs/task checks passed (164 links, 68 tasks). Archived layout
+  observation matches its retained raw output and all prior result/work counters exactly.
+  Graph/coordinator integration and resident storage metadata remain open. Next connect private
+  staged graph replay to terminal coordinator validation/publication.
+
 - [Decision 0090](docs/decisions/0090-immutable-cached-page-layouts.md) retains fixed structural
   offsets for immutable authenticated cached pages. Every hit rechecks complete header context,
   especially family; failed parsing never installs a layout and eviction/clear discard it.
@@ -70,9 +88,18 @@ unverified external distribution prerequisite.
   ignores) and 3 CLI tests (9.95s). Workspace all-target/all-feature and experiment all-target
   strict clippy passed. Format/docs/task checks passed (163 links, 68 tasks). Gates ran
   sequentially under 3G/4G/512M, one job/thread; sampled peak 2,038,661,120 bytes, zero swap;
-  preflight 30 GiB available RAM, 3.9 GiB free swap. Next remeasure the changed native query
-  code against the retained 10,000-entity
-  fixture with its pinned separate oracle; no qualifying campaign is implied.
+  preflight 30 GiB available RAM, 3.9 GiB free swap.
+  The separate native query observation at pushed `77b3ba0` (binary SHA-256
+  `d323e9fd06d0986a15db8186c8112f8df8bde9bb3f7de2a440fc9ab2851fca3c`) passed all 384
+  queries on the retained 10,000-entity fixture: 266.46s elapsed, setup/query 11,925/254,454ms,
+  peak RSS 265,084 KiB, zero swaps. Same scoped `linux-disk-query` command, oracle and 900s
+  timeout as Decision 0087, with separate `query-layout-*` output files; sampled scope peak
+  277,655,552 bytes. Query time was about 2.64x lower than the earlier 672,641ms observation.
+  Output/oracle digests, cache hits/misses/residency, enumerated fragments, adapter read bytes
+  and zero evictions are unchanged. [Pinned raw evidence](docs/evidence/native-disk-layout-development.json)
+  records this single uncontrolled-cache development comparison, not a qualifying latency or
+  larger-than-memory pass. Next implement unpublished certified-revision scratch roots for
+  multi-step graph recovery; preserve the exact-current-frontier rule for durable root slots.
 
 - [Decision 0089](docs/decisions/0089-allocation-free-page-validation.md) replaces temporary
   page-fragment vectors with complete allocation-free validation and a retained last-key slice.
@@ -1518,9 +1545,11 @@ Native commands remain capped pending qualification readiness. Cached primitive 
 adapter counters, but uncached/recovery/publication accounting is incomplete. Decision 0086
 addresses ordered cache eviction and explicit logical accounting; Decision 0087's larger native
 development run matches every oracle query but records zero query evictions. Decision 0088 adds
-resumable authenticated transaction ranges, not multi-revision graph publication. Next remove
-repeated page-parser work, test actual native cache evictions and address remaining resident
-storage metadata and graph suffix publication.
+resumable authenticated transaction ranges. Decisions 0089–0090 remove repeated page-parser
+allocation/validation and add actual native one-page eviction regression; the pinned larger
+development comparison preserves all results and work counts with reduced CPU time. Decision
+0091 supplies unpublished certified-revision storage roots. Next integrate these stages with
+multi-revision graph/coordinator recovery, then address remaining resident storage metadata.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

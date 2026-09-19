@@ -1,0 +1,214 @@
+{
+  "schema": "uste-native-disk-layout-development-observation-v1",
+  "tested_commit": "77b3ba0bf19022a45c40103b917effe511d5c548",
+  "binary_sha256": "d323e9fd06d0986a15db8186c8112f8df8bde9bb3f7de2a440fc9ab2851fca3c",
+  "cargo_lock_sha256": "7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b",
+  "comparison": "native-disk-10000-development.json",
+  "qualification": "nonqualifying-development-correctness",
+  "boundaries": [
+    "One observation per version, not a repeated controlled performance campaign",
+    "Kernel/filesystem/device caches uncontrolled",
+    "No 16-CPU/24-GiB qualification reservation",
+    "Query evictions zero; separate one-page regression supplies component pressure only",
+    "Not larger than RAM; no BM-01/BM-06 or release pass"
+  ],
+  "artifact_directory": "experiments/t20-bench/target/native-pressure.kedpTk",
+  "command": "uste-t20-bench linux-disk-query --root <artifact-directory> --password-file <artifact-directory>/password --oracle-file <artifact-directory>/oracle-summary --entities 10000",
+  "process_scope": {
+    "MemoryHigh": "3G",
+    "MemoryMax": "4G",
+    "MemorySwapMax": "512M",
+    "heavy_workloads": 1,
+    "sampled_peak_bytes": 277655552
+  },
+  "timeout_seconds": 900,
+  "elapsed_seconds": 266.46,
+  "user_seconds": 262.87,
+  "system_seconds": 2.79,
+  "maximum_rss_kib": 265084,
+  "swaps": 0,
+  "exit_status": 0,
+  "report": {
+    "schema": "bm01-linux-disk-query-v1",
+    "engine_benchmark": false,
+    "qualification": "nonqualifying-development-correctness",
+    "filesystem_profile": "linux-x86_64-btrfs",
+    "oracle_adjacency_memory_resident": false,
+    "full_memory_graph_state": false,
+    "full_memory_coordinator_metadata": false,
+    "storage_metadata_memory_resident": true,
+    "uste_page_cache": "cleared-before-each-query",
+    "kernel_filesystem_device_cache": "uncontrolled",
+    "preemptive_deadline_enforced": false,
+    "entities": 10000,
+    "relationships": 100000,
+    "frontier": 23,
+    "queries": 384,
+    "successful_queries": 384,
+    "expected_visit_limits": 0,
+    "expected_result_limits": 0,
+    "visits": 16112925,
+    "logical_result_bytes": 96409472,
+    "setup_milliseconds": 11925,
+    "query_milliseconds": 254454,
+    "p50_nanoseconds": 107695280,
+    "p95_nanoseconds": 2994575494,
+    "p99_nanoseconds": 3052083572,
+    "current_rss_kib": 61964,
+    "process_peak_rss_kib": 265084,
+    "oracle_summary_digest": "ab89a63a5f0ce71e4b943d785351223f065e4f7d256e412d9e87765eba136649",
+    "output_digest": "1330498a4b131c827113fd3a067e807eec804d83babb62d5d1fa64edebe83367",
+    "cache_budget_bytes": 67108864,
+    "cache_accounted_bytes": 57228288,
+    "cache_hits": 420631561,
+    "cache_misses": 806885,
+    "cache_evictions": 0,
+    "setup_adapter_io": {
+      "complete_authenticated_index_io": false,
+      "measurement_scope": "filesystem-adapter-calls",
+      "operations": {
+        "create_directory": {
+          "calls": 0,
+          "failures": 0
+        },
+        "create_new": {
+          "calls": 0,
+          "failures": 0
+        },
+        "metadata": {
+          "calls": 204,
+          "failures": 0
+        },
+        "open_directory": {
+          "calls": 1,
+          "failures": 0
+        },
+        "open_existing": {
+          "calls": 3182,
+          "failures": 2
+        },
+        "read_at": {
+          "calls": 14392,
+          "failures": 0
+        },
+        "remove_file": {
+          "calls": 0,
+          "failures": 0
+        },
+        "rename_no_replace": {
+          "calls": 0,
+          "failures": 0
+        },
+        "set_len": {
+          "calls": 0,
+          "failures": 0
+        },
+        "sync_all": {
+          "calls": 0,
+          "failures": 0
+        },
+        "sync_data": {
+          "calls": 1,
+          "failures": 0
+        },
+        "sync_directory": {
+          "calls": 0,
+          "failures": 0
+        },
+        "try_lock_exclusive": {
+          "calls": 1,
+          "failures": 0
+        },
+        "write_at": {
+          "calls": 0,
+          "failures": 0
+        }
+      },
+      "physical_device_io": false,
+      "read_requested_bytes": 513090655,
+      "read_returned_bytes": 513090655,
+      "write_requested_bytes": 0,
+      "write_returned_bytes": 0
+    },
+    "query_adapter_io": {
+      "complete_authenticated_index_io": false,
+      "measurement_scope": "filesystem-adapter-calls",
+      "operations": {
+        "create_directory": {
+          "calls": 0,
+          "failures": 0
+        },
+        "create_new": {
+          "calls": 0,
+          "failures": 0
+        },
+        "metadata": {
+          "calls": 0,
+          "failures": 0
+        },
+        "open_directory": {
+          "calls": 0,
+          "failures": 0
+        },
+        "open_existing": {
+          "calls": 806885,
+          "failures": 0
+        },
+        "read_at": {
+          "calls": 806885,
+          "failures": 0
+        },
+        "remove_file": {
+          "calls": 0,
+          "failures": 0
+        },
+        "rename_no_replace": {
+          "calls": 0,
+          "failures": 0
+        },
+        "set_len": {
+          "calls": 0,
+          "failures": 0
+        },
+        "sync_all": {
+          "calls": 0,
+          "failures": 0
+        },
+        "sync_data": {
+          "calls": 0,
+          "failures": 0
+        },
+        "sync_directory": {
+          "calls": 0,
+          "failures": 0
+        },
+        "try_lock_exclusive": {
+          "calls": 0,
+          "failures": 0
+        },
+        "write_at": {
+          "calls": 0,
+          "failures": 0
+        }
+      },
+      "physical_device_io": false,
+      "read_requested_bytes": 16577452325,
+      "read_returned_bytes": 16577452325,
+      "write_requested_bytes": 0,
+      "write_returned_bytes": 0
+    },
+    "cached_index_work": {
+      "authenticated_pages_loaded": 806885,
+      "cache_page_hits": 420631561,
+      "complete_authenticated_index_io": false,
+      "completed_operations": 33776054,
+      "enumerated_fragments": 1080841044,
+      "failed_operations": 0,
+      "includes_work_before_primitive_errors": true,
+      "measurement_scope": "cached-exact-predecessor-prefix-primitives",
+      "physical_device_io": false,
+      "primitive_result_bytes": 10734249679
+    },
+    "development_entity_limit": 10000
+  }
+}
