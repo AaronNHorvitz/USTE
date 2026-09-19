@@ -14,17 +14,49 @@ fn suffix() -> CoordinatorFirstReferenceLimits {
 }
 
 fn reopen(fs: &mut Fs, name: &EntryName, state: CounterState) -> FaultDiskCounter {
+    reopen_certificate_mode(fs, name, state, false)
+}
+
+fn reopen_certificate_mode(
+    fs: &mut Fs,
+    name: &EntryName,
+    state: CounterState,
+    disk_certificates: bool,
+) -> FaultDiskCounter {
+    reopen_with_admission_passes(fs, name, state, disk_certificates, 1)
+}
+
+fn reopen_with_admission_passes(
+    fs: &mut Fs,
+    name: &EntryName,
+    state: CounterState,
+    disk_certificates: bool,
+    admission_passes: u64,
+) -> FaultDiskCounter {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(2_000_000);
     let entropy = ENTROPY.fetch_add(10_000, std::sync::atomic::Ordering::Relaxed);
     let revision = state.revision.unwrap();
-    let (recovery, _) = uste_txn::AuthenticatedIndexRecovery::open(
-        fs,
-        name,
-        scope(),
-        CounterEntropy::new(entropy),
-        CounterEntropy::new(entropy + 5_000),
-        &mut TestKeyAdapter,
-    )
+    let (recovery, _) = if disk_certificates {
+        uste_txn::AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+            fs,
+            name,
+            scope(),
+            CounterEntropy::new(entropy),
+            CounterEntropy::new(entropy + 5_000),
+            &mut TestKeyAdapter,
+            uste_storage::journal::CertificateAnchorReadLimits::new(4, 4 * 4161).unwrap(),
+        )
+        .map(|(recovery, report, _)| (recovery, report))
+    } else {
+        uste_txn::AuthenticatedIndexRecovery::open(
+            fs,
+            name,
+            scope(),
+            CounterEntropy::new(entropy),
+            CounterEntropy::new(entropy + 5_000),
+            &mut TestKeyAdapter,
+        )
+    }
     .unwrap();
     let lookup = IndexGetLimits::new(16, 136).unwrap();
     let run = IndexRunReadLimits::new(16, 10, 4096).unwrap();
@@ -71,7 +103,7 @@ fn reopen(fs: &mut Fs, name: &EntryName, state: CounterState) -> FaultDiskCounte
         )
         .unwrap(),
         lookup,
-        maximum_total_journal_groups: revision.get(),
+        maximum_total_journal_groups: revision.get() * admission_passes,
         maximum_encoded_bytes_per_pass: 1_000_000,
     };
     let has_first = first.is_some();
@@ -319,6 +351,350 @@ fn first_reference_rebase_preserves_three_roots_through_every_publication_fault(
             }
         }
     }
+}
+
+fn blob_read_limits(groups: u64) -> uste_txn::DiskBlobReadLimits {
+    uste_txn::DiskBlobReadLimits {
+        lookup: IndexGetLimits::new(16, 136).unwrap(),
+        certificate: uste_storage::journal::CertificateAnchorReadLimits::new(4, 4 * 4161).unwrap(),
+        inventory: uste_storage::journal::BlobReferenceProofLimits::new(2, 2 * 4161).unwrap(),
+        maximum_discovery_groups: groups,
+        maximum_discovery_encoded_bytes: 1_000_000,
+    }
+}
+
+#[test]
+fn disk_blob_reads_use_base_first_reference_or_bounded_overlay_and_survive_rebase() {
+    let (mut fs, name, mut disk, _, inventory) = fixture(true);
+    let old_bytes = b"first owner remains principal one";
+    let new_bytes = b"new owner is principal two";
+    let old = *inventory
+        .references()
+        .iter()
+        .find(|r| r.byte_len() == old_bytes.len() as u64)
+        .unwrap();
+    let new = *inventory
+        .references()
+        .iter()
+        .find(|r| r.byte_len() == new_bytes.len() as u64)
+        .unwrap();
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    let mut output = [0x55; 64];
+    let read = disk
+        .read_blob_range(
+            &mut fs,
+            old,
+            0,
+            &mut output,
+            blob_read_limits(0),
+            &mut cache,
+        )
+        .unwrap();
+    assert_eq!(&output[..read], old_bytes);
+    output.fill(0x55);
+    assert!(
+        disk.read_blob_range(
+            &mut fs,
+            new,
+            0,
+            &mut output,
+            blob_read_limits(0),
+            &mut cache
+        )
+        .is_err()
+    );
+    assert_eq!(output, [0x55; 64]);
+    let read = disk
+        .read_blob_range(
+            &mut fs,
+            new,
+            0,
+            &mut output,
+            blob_read_limits(1),
+            &mut cache,
+        )
+        .unwrap();
+    assert_eq!(&output[..read], new_bytes);
+    disk.rebase_metadata_with_first_references(&mut fs, metadata_rebase_limits(), suffix())
+        .unwrap();
+    assert_eq!(disk.overlay_counts(), (0, 0));
+    let state = disk.state().unwrap().clone();
+    drop(disk);
+    fs.restart().unwrap();
+    let disk = reopen_certificate_mode(&mut fs, &name, state, true);
+    assert_eq!(disk.certificate_anchor_residency(), (false, 0));
+    for (reference, bytes) in [(old, old_bytes.as_slice()), (new, new_bytes.as_slice())] {
+        let read = disk
+            .read_blob_range(
+                &mut fs,
+                reference,
+                0,
+                &mut output,
+                blob_read_limits(0),
+                &mut cache,
+            )
+            .unwrap();
+        assert_eq!(&output[..read], bytes);
+    }
+    let changed = uste_storage::BlobReference::new(
+        old.scope(),
+        old.id(),
+        old.byte_len() + 1,
+        old.chunk_count(),
+        old.content_digest(),
+    )
+    .unwrap();
+    output.fill(0x55);
+    assert!(matches!(
+        disk.read_blob_range(
+            &mut fs,
+            changed,
+            0,
+            &mut output,
+            blob_read_limits(0),
+            &mut cache
+        ),
+        Err(TransactionError::InvalidRequest)
+    ));
+    assert_eq!(output, [0x55; 64]);
+}
+
+#[test]
+fn disk_blob_reads_every_io_failure_returns_no_success_then_reopens_exactly() {
+    disk_blob_read_fault_matrix(false);
+    disk_blob_read_fault_matrix(true);
+}
+
+fn disk_blob_fixture() -> (Fs, EntryName, FaultDiskCounter, CounterState, BlobInventory) {
+    let (mut fs, name, disk, state, inventory) = fixture(true);
+    drop(disk);
+    let disk = reopen_certificate_mode(&mut fs, &name, state.clone(), true);
+    assert_eq!(disk.certificate_anchor_residency(), (false, 0));
+    (fs, name, disk, state, inventory)
+}
+
+fn disk_blob_read_fault_matrix(overlay: bool) {
+    let expected = if overlay {
+        b"new owner is principal two".as_slice()
+    } else {
+        b"first owner remains principal one".as_slice()
+    };
+    let (mut baseline, _, disk, _, inventory) = disk_blob_fixture();
+    let reference = *inventory
+        .references()
+        .iter()
+        .find(|r| r.byte_len() == expected.len() as u64)
+        .unwrap();
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    baseline.arm(FaultPlan::default()).unwrap();
+    disk.read_blob_range(
+        &mut baseline,
+        reference,
+        0,
+        &mut [0; 64],
+        blob_read_limits(1),
+        &mut cache,
+    )
+    .unwrap();
+    for operation in [
+        Operation::OpenExisting,
+        Operation::Metadata,
+        Operation::ReadAt,
+    ] {
+        let count = baseline.operation_count(operation);
+        assert!(count > 0);
+        eprintln!(
+            "disk_blob_read overlay={overlay} operation={operation:?} boundaries={count} fault_cases={}",
+            count * 3
+        );
+        for occurrence in 1..=count {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                let (mut fs, name, disk, state, inventory) = disk_blob_fixture();
+                let reference = *inventory
+                    .references()
+                    .iter()
+                    .find(|r| r.byte_len() == expected.len() as u64)
+                    .unwrap();
+                let mut cache = PageCache::new(64 * 1024).unwrap();
+                fs.arm(
+                    FaultPlan::new([FaultPoint {
+                        operation,
+                        occurrence,
+                        action,
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+                assert!(
+                    disk.read_blob_range(
+                        &mut fs,
+                        reference,
+                        0,
+                        &mut [0; 64],
+                        blob_read_limits(1),
+                        &mut cache
+                    )
+                    .is_err()
+                );
+                assert_eq!(fs.pending_faults(), 0);
+                drop(disk);
+                fs.restart().unwrap();
+                let disk = reopen_certificate_mode(&mut fs, &name, state, true);
+                let mut output = [0; 64];
+                let read = disk
+                    .read_blob_range(
+                        &mut fs,
+                        reference,
+                        0,
+                        &mut output,
+                        blob_read_limits(1),
+                        &mut cache,
+                    )
+                    .unwrap();
+                assert_eq!(&output[..read], expected);
+            }
+        }
+    }
+}
+
+#[test]
+fn disk_blob_reads_legacy_base_requires_bounded_prefix_and_rejects_scope_before_io() {
+    let (mut fs, name, mut disk, _, inventory) = fixture(false);
+    let reference = inventory.references()[0];
+    disk.rebase_metadata(&mut fs, metadata_rebase_limits())
+        .unwrap();
+    let state = disk.state().unwrap().clone();
+    drop(disk);
+    fs.restart().unwrap();
+    // One legacy owner requires a correspondence pass plus an earliest-owner pass. This
+    // admission allowance is separate from the read's independently tested discovery bound.
+    let disk = reopen_with_admission_passes(&mut fs, &name, state, true, 2);
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    let mut output = [0x55; 64];
+    assert!(
+        disk.read_blob_range(
+            &mut fs,
+            reference,
+            0,
+            &mut output,
+            blob_read_limits(1),
+            &mut cache
+        )
+        .is_err()
+    );
+    assert_eq!(output, [0x55; 64]);
+    let read = disk
+        .read_blob_range(
+            &mut fs,
+            reference,
+            0,
+            &mut output,
+            blob_read_limits(2),
+            &mut cache,
+        )
+        .unwrap();
+    assert_eq!(&output[..read], b"new owner is principal two");
+    let foreign = uste_storage::BlobReference::new(
+        NamespaceRef::new(scope().database(), NamespaceId::from_bytes([0xee; 16])),
+        reference.id(),
+        reference.byte_len(),
+        reference.chunk_count(),
+        reference.content_digest(),
+    )
+    .unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    assert!(matches!(
+        disk.read_blob_range(
+            &mut fs,
+            foreign,
+            0,
+            &mut output,
+            blob_read_limits(2),
+            &mut cache
+        ),
+        Err(TransactionError::InvalidRequest)
+    ));
+    assert!(matches!(
+        disk.read_blob_range(
+            &mut fs,
+            reference,
+            reference.byte_len() + 1,
+            &mut output,
+            blob_read_limits(2),
+            &mut cache
+        ),
+        Err(TransactionError::ResourceLimit)
+    ));
+    assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+    assert_eq!(fs.operation_count(Operation::OpenExisting), 0);
+}
+
+#[test]
+fn disk_blob_reads_uncertain_commit_refuses_before_io_and_restart_restores_reads() {
+    let (mut fs, name, mut disk, state, inventory) = disk_blob_fixture();
+    let reference = inventory.references()[0];
+    let mut cache = PageCache::new(64 * 1024).unwrap();
+    fs.arm(
+        FaultPlan::new([FaultPoint {
+            operation: Operation::SyncData,
+            occurrence: 2,
+            action: FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+        }])
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        disk.commit(
+            &mut fs,
+            request(3, &3_u64.to_be_bytes()),
+            &mut TestClock(20),
+            &NeverCancel,
+            IndexGetLimits::new(16, 136).unwrap(),
+            &mut cache,
+        ),
+        Err(TransactionError::OutcomeUnknown)
+    );
+    assert_eq!(fs.pending_faults(), 0);
+    fs.arm(FaultPlan::default()).unwrap();
+    let mut output = [0x55; 64];
+    assert!(matches!(
+        disk.read_blob_range(
+            &mut fs,
+            reference,
+            0,
+            &mut output,
+            blob_read_limits(2),
+            &mut cache
+        ),
+        Err(TransactionError::OutcomeUnknown)
+    ));
+    assert_eq!(output, [0x55; 64]);
+    assert_eq!(fs.operation_count(Operation::OpenExisting), 0);
+    assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+    drop(disk);
+    fs.restart().unwrap();
+    let disk = reopen_certificate_mode(&mut fs, &name, state, true);
+    let read = disk
+        .read_blob_range(
+            &mut fs,
+            reference,
+            0,
+            &mut output,
+            blob_read_limits(2),
+            &mut cache,
+        )
+        .unwrap();
+    assert_eq!(read as u64, reference.byte_len());
+    let expected = if reference.byte_len() == b"new owner is principal two".len() as u64 {
+        b"new owner is principal two".as_slice()
+    } else {
+        b"first owner remains principal one".as_slice()
+    };
+    assert_eq!(&output[..read], expected);
 }
 
 #[test]

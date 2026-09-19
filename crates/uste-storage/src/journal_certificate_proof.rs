@@ -98,6 +98,33 @@ where
         certificate_digest: [u8; 32],
         limits: CertificateAnchorReadLimits,
     ) -> Result<CertificateAnchorProof, StorageError> {
+        self.authenticate_certificate_internal(
+            filesystem,
+            revision,
+            Some(certificate_digest),
+            limits,
+        )
+    }
+
+    /// Resolve an exact revision directly against the pinned terminal certificate. Callers with
+    /// an independently expected digest should use `authenticate_certificate_anchor` instead.
+    /// This performs the same bounded chain authentication, without a preliminary digest read.
+    pub fn authenticate_certificate_revision(
+        &self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        limits: CertificateAnchorReadLimits,
+    ) -> Result<CertificateAnchorProof, StorageError> {
+        self.authenticate_certificate_internal(filesystem, revision, None, limits)
+    }
+
+    fn authenticate_certificate_internal(
+        &self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        mut certificate_digest: Option<[u8; 32]>,
+        limits: CertificateAnchorReadLimits,
+    ) -> Result<CertificateAnchorProof, StorageError> {
         let frontier = self.checkpoint_anchor().ok_or(StorageError::InvalidState)?;
         if self.poisoned || revision > frontier.0 {
             return Err(StorageError::InvalidState);
@@ -125,6 +152,12 @@ where
                 SMALL_ENVELOPE_BYTES,
             )?;
             let digest = sha256(&encoded);
+            if sequence == revision.get() {
+                if certificate_digest.is_some_and(|expected| digest != expected) {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                certificate_digest = Some(digest);
+            }
             let certificate = decode_certificate(
                 &self.vault,
                 self.database,
@@ -137,7 +170,6 @@ where
             if certificate.revision != sequence
                 || certificate.group_sequence != sequence
                 || previous.is_some_and(|prior| certificate.previous_digest != prior)
-                || (sequence == revision.get() && digest != certificate_digest)
                 || (sequence == 1 && certificate.previous_digest != [0; 32])
             {
                 return Err(StorageError::IntegrityFailure);
@@ -153,7 +185,10 @@ where
             epoch: self.epoch,
             writer: self.writer,
             log: self.certificate_log_id,
-            anchor: (revision, certificate_digest),
+            anchor: (
+                revision,
+                certificate_digest.ok_or(StorageError::IntegrityFailure)?,
+            ),
             frontier,
             report: CertificateAnchorReadReport {
                 certificates,

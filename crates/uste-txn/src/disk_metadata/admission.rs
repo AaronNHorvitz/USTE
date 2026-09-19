@@ -168,6 +168,39 @@ impl CoordinatorDiskBase {
             .transpose()
     }
 
+    /// Privileged exact revision from an independently admitted first-reference root.
+    pub(crate) fn first_reference_from_journal<F, W, E, I>(
+        &self,
+        journal: &uste_storage::journal::JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        id: BlobId,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<Option<CommitRevision>, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        let Some(root) = self.first_references.as_ref() else {
+            return Ok(None);
+        };
+        let (value, _) = journal
+            .index_get_bounded(filesystem, root, 1, &id.as_bytes(), limits, cache)
+            .map_err(TransactionError::Storage)?;
+        value
+            .map(|value| {
+                first_reference::decode_first_reference(
+                    &id.as_bytes(),
+                    &value,
+                    self.metadata.revision(),
+                )
+                .map_err(TransactionError::Storage)
+            })
+            .transpose()
+    }
+
     /// Trusted recovery-only raw first-owner lookup; it is not a blob-read capability.
     pub fn owner_at_base<F, W, E, I>(
         &self,

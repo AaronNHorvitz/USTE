@@ -42,8 +42,8 @@ pub use index_recovery::{
 
 mod disk_coordinator;
 pub use disk_coordinator::{
-    CommittedBlobUsage, DiskBlobAccountingLimits, DiskCommitCheck, DiskCommitCoordinator,
-    DiskCoordinatorRecoveryLimits, DiskCoordinatorState, DiskRecoveryDomain,
+    CommittedBlobUsage, DiskBlobAccountingLimits, DiskBlobReadLimits, DiskCommitCheck,
+    DiskCommitCoordinator, DiskCoordinatorRecoveryLimits, DiskCoordinatorState, DiskRecoveryDomain,
 };
 
 use std::collections::BTreeMap;

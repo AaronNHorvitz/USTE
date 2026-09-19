@@ -2,9 +2,11 @@
 
 use super::*;
 
+mod blob_reads;
 mod commit_check;
 mod index_reads;
 mod streaming;
+pub use blob_reads::DiskBlobReadLimits;
 pub use commit_check::DiskCommitCheck;
 pub use streaming::DiskRecoveryDomain;
 

@@ -2,6 +2,65 @@ use super::*;
 
 mod bound_roots;
 
+#[test]
+fn certificate_revision_lookup_matches_exact_proofs_without_preliminary_reads() {
+    let mut f = Fixture::new(false);
+    f.store.certificate_anchors.clear();
+    for index in 0..3 {
+        let expected = f.proof(index).unwrap();
+        f.fs.arm(FaultPlan::default()).unwrap();
+        let actual = f
+            .store
+            .authenticate_certificate_revision(
+                &mut f.fs,
+                f.commits[index].revision,
+                CertificateAnchorReadLimits::new(3, 3 * SMALL_ENVELOPE_BYTES).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(actual.anchor(), expected.anchor());
+        assert_eq!(actual.report(), expected.report());
+        assert_eq!(f.fs.operation_count(Operation::ReadAt), 3 - index as u64);
+    }
+    f.fs.arm(FaultPlan::default()).unwrap();
+    for revision in [CommitRevision::FIRST, CommitRevision::new(4).unwrap()] {
+        assert!(
+            f.store
+                .authenticate_certificate_revision(
+                    &mut f.fs,
+                    revision,
+                    CertificateAnchorReadLimits::new(1, SMALL_ENVELOPE_BYTES).unwrap()
+                )
+                .is_err()
+        );
+    }
+    assert_eq!(f.fs.operation_count(Operation::ReadAt), 0);
+    let mut fork = Fixture::new(true);
+    for sequence in 2..=3 {
+        let bytes = read_bounded(
+            &mut fork.fs,
+            &fork.store.certificate_file,
+            sequence * SMALL_ENVELOPE_BYTES,
+            SMALL_ENVELOPE_BYTES,
+        )
+        .unwrap();
+        write_all_at(
+            &mut f.fs,
+            &f.store.certificate_file,
+            sequence * SMALL_ENVELOPE_BYTES,
+            &bytes,
+        )
+        .unwrap();
+    }
+    assert!(matches!(
+        f.store.authenticate_certificate_revision(
+            &mut f.fs,
+            CommitRevision::new(2).unwrap(),
+            CertificateAnchorReadLimits::new(3, 3 * SMALL_ENVELOPE_BYTES).unwrap()
+        ),
+        Err(StorageError::IntegrityFailure)
+    ));
+}
+
 struct Fixture {
     fs: FaultFileSystem<MemoryFileSystem>,
     store: FaultStore,

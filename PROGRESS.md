@@ -54,6 +54,35 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0097](docs/decisions/0097-disk-coordinator-blob-reads.md) connects admitted disk
+  owner/first-reference metadata to bounded certificate/inventory proofs and raw committed reads.
+  It uses no resident storage blob-map lookup. Base first-reference roots avoid discovery; overlay
+  owners require a bounded suffix, and legacy bases require a bounded prefix. Every path preserves
+  uncertainty, scope, exact-reference and partial-output refusal. Consumer authorization remains a
+  separate capability, not an implicit expansion of the metadata facade. Revision-only certificate
+  proofs now derive the digest in the authenticated chain pass, with no uncharged preliminary read.
+  Initial certificate tests passed 11 (0.79s), then 2 coordinator tests passed (16.38s, including
+  51 resident-certificate overlay fault cases). A new test's unnecessary qualification compile
+  error was fixed. Its legacy cold setup then correctly refused a one-pass allowance: a legacy
+  owner needs a correspondence pass plus earliest-owner validation. The new fixture now explicitly
+  admits those two passes; original fixture limits and independent read-refusal cases are unchanged.
+  Expanded disk-certificate base/overlay coverage passed 3 tests (41.38s), including 31 boundaries/
+  93 injected I/O failures. The new uncertain-commit case passed separately (0.43s).
+  Final `aed1062` plus this increment passed `CARGO_BUILD_JOBS=1 cargo test -p uste-storage
+  -p uste-txn -p uste-replay --all-targets --all-features --locked --offline -- --test-threads=1`:
+  89 storage tests (173.76s), 13 coordinator recovery tests (119.32s), 17 transaction tests (5.74s),
+  13 authorization tests (0.90s), and real adapter/process recovery. `CARGO_BUILD_JOBS=1 cargo test
+  --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`
+  passed 51 unit tests (42.75s; 2 unchanged oracle ignores) and 3 CLI tests (11.85s). Workspace
+  all-target/all-feature and native all-target strict clippy passed; `CARGO_BUILD_JOBS=1
+  RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn --no-deps --locked --offline`
+  passed. Format/whitespace/docs (170 links)/task graph (68 tasks) passed. Heavy commands used one
+  job/thread and 3G/4G/512M systemd limits; preflight 37 GiB available RAM/3.9 GiB free swap;
+  sampled scope peak 341,057,536 bytes and zero sampled swap (not a final whole-run peak).
+  T-20 remains open. Next replace remaining storage blob/inventory/namespace recovery and append
+  accounting collections with authenticated disk metadata and bounded overlays; the separate
+  authorized disk-blob consumer capability and all qualifying performance/resource campaigns remain.
+
 - [Decision 0096](docs/decisions/0096-committed-blob-reference-proofs.md) adds a bounded
   committed-blob proof/read path that does not consult resident blob maps. It rechecks an exact
   certificate and inventory, admits encoded bytes before reads and authenticated reference count

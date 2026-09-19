@@ -190,6 +190,7 @@ returning a truncated answer.
   there is no native multi-hop engine request yet.
 - `qualification: qualifying-fixture-size` describes only exact fixture dimensions. It is not a
   performance or release claim.
-- BM-01 still needs the exact sampler campaign under the accepted host reservation and removal of
-  the full-memory graph boundary. BM-06 and streaming
-  larger-than-memory recovery are outside this fixture increment.
+- BM-01 still needs the exact sampler campaign under the accepted host reservation. The legacy
+  sampler retains its full-memory graph boundary; the native disk driver now uses disk-backed
+  graph/coordinator bases, bounded suffix recovery and disk certificate proofs. Storage blob and
+  inventory collections remain resident. BM-06 and larger-than-memory qualification remain open.
