@@ -58,6 +58,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `746ca3d` plus this increment: [Decision 0125](docs/decisions/0125-native-paired-metadata-streaming.md)
+  connects ordinary paired-base native/model recovery to private per-revision metadata staging.
+  Both ready-open suffix ceilings are zero. Mismatched graph/metadata bases retain the existing
+  bounded overlay path; live capacity for subsequent writes is unchanged. BM-01/BM-06 diagnostics
+  distinguish these paths and capacities. Added assertions cover paired zero/one/multi-step
+  suffixes, mismatched bases, retained-root repair and owned-child SIGKILL/resume. No workspace
+  library or M1 source/lock changed from the 433-test verified `746ca3d` baseline.
+  Initial native gate `run-p474925-i21449285.scope` exited 0. Final gate after BM-01 diagnostics,
+  `run-p476520-i21472800.scope`, exited 0 under MemoryHigh=3G/MemoryMax=4G/MemorySwapMax=512M:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/45.55s, BM-01 process 3/11.95s,
+  BM-06 CLI 2/0.50s and BM-06 process 8/74.16s; two prior exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings` passes. Preflight 35 GiB available RAM/3.9 GiB free swap;
+  sampled peak 320,430,080 bytes/zero swap, not final whole-run peak. Formatting/whitespace,
+  docs (199 links) and task graph (68 tasks) pass. No qualifying benchmark; T-20/T-19 remain open.
+  Next reduce duplicate certificate proof work in recovery staging while preserving exact owner,
+  frontier, corruption and budget semantics; immutable-family rewrite scaling/accounting remain.
+
 - Implemented on pushed `b3650cd` plus this increment: [Decision 0124](docs/decisions/0124-streamed-quota-recovery.md)
   maintains admitted quota and first-reference projections through private per-revision metadata
   staging, and provides private genesis quota candidates including the zero-owner head. Only new
@@ -2487,8 +2506,9 @@ Current action: T-20 remains the priority. Decisions 0108–0120, including the 
 20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
 `3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
 suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
-references on that path; Decision 0124 maintains quota projections. Next apply streamed metadata
-to native paired-base recovery, then address immutable-family rewrite scaling and
+references on that path; Decision 0124 maintains quota projections (pushed `746ca3d`). Decision
+0125 applies streamed metadata to native paired-base recovery. Next reduce duplicate certificate
+proof work in recovery staging, then address immutable-family rewrite scaling and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

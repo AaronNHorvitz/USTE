@@ -200,6 +200,12 @@ pub fn verify_disk_recovery(
     let (mut disk, admission) = reopen(&mut fs, &name, limits, true)?;
     if admission.graph_revision != profile.checkpoint_revision()
         || admission.metadata_revision != profile.checkpoint_revision()
+        || disk.overlay_counts() != (0, 0)
+        || admission
+            .metadata_suffix
+            .as_ref()
+            .map(|report| (report.revisions, report.staged_runs))
+            != Some((1, 3))
     {
         return Err("BM-06 recovery did not start at selected base".into());
     }
@@ -230,6 +236,8 @@ pub fn verify_disk_recovery(
     let (disk, terminal) = reopen(&mut fs, &name, limits, false)?;
     if terminal.graph_revision != sequence
         || disk.overlay_counts() != (0, 0)
+        || terminal.metadata_suffix
+            != Some(uste_txn::InventoryFreeMetadataRecoveryReport::default())
         || terminal.state_counts != [profile.records(), profile.events(), 0, 0, 0, 0, 1, 1]
     {
         return Err("BM-06 terminal cardinality mismatch".into());

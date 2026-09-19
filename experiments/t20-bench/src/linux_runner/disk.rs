@@ -272,6 +272,14 @@ fn prepare_session_with_observer(
         "pages_read": admission.suffix.pages_read,
         "maximum_revisions": if phase == "open" { 0 } else { limits.groups - 1 },
         "maximum_encoded_journal_bytes": limits.suffix_bytes,
+        "metadata_recovery_model": if admission.metadata_suffix.is_some() { "private-per-revision-disk-staging" } else { "disk-base-plus-bounded-suffix-overlays" },
+        "maximum_recovery_metadata_overlay_outcomes": if admission.metadata_suffix.is_some() { 0 } else { limits.groups },
+        "maximum_live_metadata_overlay_outcomes": limits.groups,
+        "private_metadata_suffix": admission.metadata_suffix.as_ref().map(|report| serde_json::json!({
+            "revisions": report.revisions, "staged_runs": report.staged_runs,
+            "output_entries": report.output_entries, "output_logical_bytes": report.output_logical_bytes,
+            "merge_pages_read": report.pages_read, "complete_authenticated_io": false,
+        })),
         "certificate_anchor_residency": {
             "full_history_resident": disk.certificate_anchor_residency().0,
             "resident_entries": disk.certificate_anchor_residency().1,

@@ -277,10 +277,23 @@ fn bm06_native_sigkill_tail_recovers_exact_history_and_rejects_substitution() {
     let recovered = fixture.run("recover");
     assert_eq!(recovered["initial_graph_revision"], 100);
     assert_eq!(recovered["initial_metadata_revision"], 100);
+    assert_eq!(recovered["maximum_metadata_overlay_outcomes"], 101);
+    assert_eq!(recovered["maximum_recovery_metadata_overlay_outcomes"], 0);
+    assert_eq!(recovered["admitted_metadata_overlay_outcomes"], 0);
+    assert_eq!(
+        recovered["metadata_recovery_model"],
+        "private-per-revision-disk-staging"
+    );
+    assert_eq!(recovered["private_metadata_suffix"]["revisions"], 1);
+    assert_eq!(recovered["private_metadata_suffix"]["staged_runs"], 3);
     assert_eq!(recovered["frontier"], 101);
     assert_eq!(recovered["verified_history_versions"], 200);
     assert_eq!(recovered["verified_payload_bytes"], 819200);
-    assert_eq!(fixture.run("open")["initial_graph_revision"], 101);
+    let opened = fixture.run("open");
+    assert_eq!(opened["initial_graph_revision"], 101);
+    assert_eq!(opened["maximum_recovery_metadata_overlay_outcomes"], 0);
+    assert_eq!(opened["private_metadata_suffix"]["revisions"], 0);
+    assert_eq!(opened["private_metadata_suffix"]["staged_runs"], 0);
     assert_eq!(fixture.run("recover")["initial_graph_revision"], 101);
     let wrong = fixture.root.join("wrong-password");
     fs::OpenOptions::new()
@@ -380,6 +393,9 @@ fn bm06_native_corrupt_or_missing_terminal_caches_rebuild_from_retained_roots() 
         let repaired = fixture.run("recover");
         assert_eq!(repaired["initial_graph_revision"], 100);
         assert_eq!(repaired["initial_metadata_revision"], 100);
+        assert_eq!(repaired["maximum_recovery_metadata_overlay_outcomes"], 0);
+        assert_eq!(repaired["admitted_metadata_overlay_outcomes"], 0);
+        assert_eq!(repaired["private_metadata_suffix"]["revisions"], 1);
         assert_eq!(repaired["frontier"], 101);
         assert_eq!(repaired["verified_history_versions"], 200);
         assert_eq!(

@@ -245,6 +245,26 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
             if prefix >= 3 { 2 } else { 1 }
         );
         assert_eq!(json["cold_admission"]["metadata_revision"], 1);
+        let suffix = &json["suffix_recovery"];
+        assert_eq!(suffix["maximum_live_metadata_overlay_outcomes"], 4);
+        if prefix >= 3 {
+            assert_eq!(
+                suffix["metadata_recovery_model"],
+                "disk-base-plus-bounded-suffix-overlays"
+            );
+            assert_eq!(suffix["maximum_recovery_metadata_overlay_outcomes"], 4);
+            assert!(suffix["private_metadata_suffix"].is_null());
+        } else {
+            assert_eq!(
+                suffix["metadata_recovery_model"],
+                "private-per-revision-disk-staging"
+            );
+            assert_eq!(suffix["maximum_recovery_metadata_overlay_outcomes"], 0);
+            assert_eq!(
+                suffix["private_metadata_suffix"]["revisions"],
+                u64::from(prefix == 2)
+            );
+        }
         let opened: serde_json::Value =
             serde_json::from_str(&fixture.run("open").unwrap()).unwrap();
         let admission = &opened["cold_admission"];
@@ -358,6 +378,18 @@ fn native_disk_multi_revision_suffix_repairs_only_on_resume_and_matches_oracle()
         assert_eq!(resumed["cold_admission"]["graph_revision"], 1);
         assert_eq!(resumed["cold_admission"]["metadata_revision"], 1);
         assert_eq!(resumed["suffix_recovery"]["revisions"], revisions);
+        assert_eq!(
+            resumed["suffix_recovery"]["maximum_recovery_metadata_overlay_outcomes"],
+            0
+        );
+        assert_eq!(
+            resumed["suffix_recovery"]["private_metadata_suffix"]["revisions"],
+            revisions
+        );
+        assert_eq!(
+            resumed["suffix_recovery"]["private_metadata_suffix"]["staged_runs"],
+            revisions * 3
+        );
         assert_eq!(resumed["suffix_recovery"]["maximum_revisions"], 3);
         assert_eq!(
             resumed["suffix_recovery"]["maximum_encoded_journal_bytes"],

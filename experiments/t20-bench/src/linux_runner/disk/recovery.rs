@@ -264,8 +264,9 @@ fn run_observed(
         "private_graph_suffix_revisions": admission.suffix.revisions,
         "private_graph_suffix_output_logical_bytes": admission.suffix.output_logical_bytes,
         "maximum_metadata_overlay_outcomes": if phase == "rebuild" { 0 } else { limits.groups },
+        "maximum_recovery_metadata_overlay_outcomes": if admission.metadata_suffix.is_some() { 0 } else { limits.groups },
         "admitted_metadata_overlay_outcomes": admitted_metadata_overlay_outcomes,
-        "metadata_recovery_model": if phase == "rebuild" { "private-per-revision-disk-staging" } else { "disk-base-plus-bounded-suffix-overlays" },
+        "metadata_recovery_model": if admission.metadata_suffix.is_some() { "private-per-revision-disk-staging" } else { "disk-base-plus-bounded-suffix-overlays" },
         "private_metadata_suffix": admission.metadata_suffix.as_ref().map(|report| serde_json::json!({
             "revisions": report.revisions, "staged_runs": report.staged_runs,
             "output_entries": report.output_entries, "output_logical_bytes": report.output_logical_bytes,

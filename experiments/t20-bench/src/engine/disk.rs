@@ -436,7 +436,9 @@ where
         )
         .map_err(debug)?,
     };
-    if origin {
+    // A paired domain/metadata anchor permits private per-revision advancement without
+    // accumulated outcome overlays. Retain bounded legacy recovery for mismatched bases.
+    if measurement.graph_revision == metadata_revision {
         return uste_graph::recover_graph_disk_suffix_with_streamed_metadata(
             recovery,
             fs,
@@ -446,7 +448,7 @@ where
             coordinator_limits,
             suffix_limits,
             uste_txn::InventoryFreeMetadataRecoveryLimits {
-                maximum_revisions: profile_limits.groups - 1,
+                maximum_revisions: if repair { profile_limits.groups - 1 } else { 0 },
                 merge: profile_limits.merge,
             },
             &mut cache,
