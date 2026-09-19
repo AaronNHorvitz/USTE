@@ -129,7 +129,7 @@ pub fn query_correctness(
             "\"current_rss_kib\":{},\"process_peak_rss_kib\":{},\"oracle_summary_digest\":\"{}\",",
             "\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_accounted_bytes\":{},",
             "\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{},",
-            "\"setup_adapter_io\":{},\"query_adapter_io\":{}}}"
+            "\"setup_adapter_io\":{},\"query_adapter_io\":{},\"cached_index_work\":{}}}"
         ),
         profile.entities(),
         profile.relationships(),
@@ -155,6 +155,12 @@ pub fn query_correctness(
         cache.misses,
         cache.evictions,
         setup_io.json()?,
-        session.filesystem.snapshot()?.delta(setup_io)?.json()?
+        session.filesystem.snapshot()?.delta(setup_io)?.json()?,
+        index_work::IndexWork::from(
+            reader
+                .index_read_report(&session.principal)
+                .map_err(|_| error("USTE_BM01_INDEX_REPORT"))?
+        )
+        .json()
     ))
 }

@@ -3386,6 +3386,10 @@ mod tests {
             .unwrap();
         assert_eq!(read.as_deref(), Some(large.as_slice()));
         assert!(cold.pages_read >= 3);
+        let first_report = cache.read_telemetry().unwrap();
+        assert_eq!(first_report.completed_operations, 1);
+        assert_eq!(first_report.failed_operations, 0);
+        assert_eq!(first_report.work, cold);
         assert!(cache.accounted_bytes() <= cache.budget());
         assert!(cache.evictions() > 0);
         let (bounded_read, bounded_stats) = store
@@ -3400,6 +3404,7 @@ mod tests {
             .unwrap();
         assert_eq!(bounded_read.as_deref(), Some(large.as_slice()));
         assert_eq!(bounded_stats.result_bytes, large.len() as u64);
+        let before_failures = cache.read_telemetry().unwrap();
         assert_eq!(
             store.index_get_bounded(
                 &mut filesystem,
@@ -3424,6 +3429,20 @@ mod tests {
         );
 
         let predecessor_limits = IndexPredecessorLimits::new(32, large.len() + 16).unwrap();
+        let failed = cache.read_telemetry().unwrap();
+        assert_eq!(
+            failed.completed_operations,
+            before_failures.completed_operations
+        );
+        assert_eq!(
+            failed.failed_operations,
+            before_failures.failed_operations + 2
+        );
+        assert!(
+            failed.work.pages_read + failed.work.cache_hits
+                > before_failures.work.pages_read + before_failures.work.cache_hits
+        );
+        assert_eq!(failed.work.result_bytes, before_failures.work.result_bytes);
         let between = store
             .index_get_predecessor(
                 &mut filesystem,
@@ -3528,6 +3547,9 @@ mod tests {
         let scan = store
             .index_scan_prefix(&mut filesystem, &roots[0], 1, b"g", 1, 64, &mut cache)
             .unwrap();
+        let after_predecessors_and_scan = cache.read_telemetry().unwrap();
+        assert_eq!(after_predecessors_and_scan.completed_operations, 6);
+        assert_eq!(after_predecessors_and_scan.failed_operations, 5);
         assert_eq!(
             scan.entries,
             vec![IndexScanEntry {
@@ -3566,6 +3588,38 @@ mod tests {
             .unwrap();
         assert_eq!(collected, comparison.entries);
         assert_eq!(visit_stats, comparison.stats);
+        assert_eq!(visit_cache.read_telemetry().unwrap().work, visit_stats);
+        assert_eq!(
+            comparison_cache.read_telemetry().unwrap().work,
+            comparison.stats
+        );
+        let before_visitor_error = visit_cache.read_telemetry().unwrap();
+        assert_eq!(
+            store.index_scan_prefix_visit(
+                &mut filesystem,
+                &roots[0],
+                1,
+                b"g",
+                1,
+                64,
+                &mut visit_cache,
+                &mut |_| Err(StorageError::InvalidState),
+            ),
+            Err(StorageError::InvalidState)
+        );
+        let visitor_error = visit_cache.read_telemetry().unwrap();
+        assert_eq!(
+            visitor_error.completed_operations,
+            before_visitor_error.completed_operations
+        );
+        assert_eq!(
+            visitor_error.failed_operations,
+            before_visitor_error.failed_operations + 1
+        );
+        assert_eq!(
+            visitor_error.work.result_bytes,
+            before_visitor_error.work.result_bytes + 9
+        );
 
         assert_eq!(
             IndexScanLimits::new(0, 1, 1),

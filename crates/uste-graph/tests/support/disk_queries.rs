@@ -265,6 +265,15 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
     let before = reader.cache_report(&admin).unwrap();
     assert_eq!(before.budget_bytes, 128 * 1024);
     assert_eq!(before.accounted_bytes, 0);
+    let initial_index_work = reader.index_read_report(&admin).unwrap();
+    assert_eq!(
+        initial_index_work,
+        uste_storage::IndexReadTelemetry::default()
+    );
+    assert!(matches!(
+        reader.index_read_report(&bob),
+        Err(uste_txn::AuthorizedError::Unauthorized)
+    ));
     assert!(matches!(
         reader.cache_report(&bob),
         Err(uste_txn::AuthorizedError::Unauthorized)
@@ -274,6 +283,10 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         Err(uste_txn::AuthorizedError::Unauthorized)
     ));
     assert_eq!(reader.cache_report(&admin).unwrap(), before);
+    assert_eq!(
+        reader.index_read_report(&admin).unwrap(),
+        initial_index_work
+    );
     let requests = [
         GraphReadRequest::Adjacent {
             entity: record(1),
@@ -324,6 +337,10 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         }
     }
     let before_clear = reader.cache_report(&admin).unwrap();
+    let before_clear_work = reader.index_read_report(&admin).unwrap();
+    assert!(before_clear_work.completed_operations > 0);
+    assert!(before_clear_work.work.pages_read > 0);
+    assert!(before_clear_work.work.cache_hits > 0);
     assert!(before_clear.accounted_bytes > 0);
     assert!(before_clear.hits > 0);
     assert!(matches!(
@@ -336,6 +353,7 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
     assert_eq!(cleared.accounted_bytes, 0);
     assert_eq!(cleared.hits, before_clear.hits);
     assert_eq!(cleared.misses, before_clear.misses);
+    assert_eq!(reader.index_read_report(&admin).unwrap(), before_clear_work);
     assert!(
         reader
             .read(
@@ -346,12 +364,14 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
             )
             .is_ok()
     );
+    let before_denied = reader.index_read_report(&admin).unwrap();
     assert!(matches!(
         reader.read(&mut filesystem, &no_history, &requests[5], &NeverCancel),
         Err(uste_txn::AuthorizedReadError::Authorization(
             uste_txn::AuthorizedError::Unauthorized
         ))
     ));
+    assert_eq!(reader.index_read_report(&admin).unwrap(), before_denied);
     assert_eq!(
         reader
             .read(&mut filesystem, &bob, &requests[4], &NeverCancel)
@@ -466,6 +486,11 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
                 .is_err()
         );
         assert_eq!(filesystem.pending_faults(), 0);
+        let failed_work = fresh.index_read_report(&admin).unwrap();
+        assert_eq!(failed_work.failed_operations, 1);
+        if occurrence == 1 {
+            assert_eq!(failed_work.work.pages_read, 0);
+        }
         filesystem.arm(FaultPlan::default()).unwrap();
         assert_eq!(
             fresh
@@ -473,6 +498,12 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
                 .unwrap(),
             expected
         );
+        let repaired_work = fresh.index_read_report(&admin).unwrap();
+        assert_eq!(
+            repaired_work.failed_operations,
+            failed_work.failed_operations
+        );
+        assert!(repaired_work.completed_operations > failed_work.completed_operations);
     }
     filesystem
         .arm(
@@ -492,6 +523,10 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         ))
     ));
     assert_eq!(filesystem.operation_count(FaultOperation::ReadAt), 0);
+    assert_eq!(
+        fresh.index_read_report(&admin).unwrap(),
+        uste_storage::IndexReadTelemetry::default()
+    );
     assert!(
         fresh
             .read(&mut filesystem, &admin, all, &NeverCancel)

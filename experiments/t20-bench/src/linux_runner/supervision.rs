@@ -311,7 +311,11 @@ fn finalize_report(
         expect_bool(object, "full_memory_graph_state", false)?;
         expect_bool(object, "full_memory_coordinator_metadata", false)?;
         expect_bool(object, "storage_metadata_memory_resident", true)?;
-        expect_string(object, "authenticated_io_accounting", "not-measured")?;
+        expect_string(
+            object,
+            "authenticated_io_accounting",
+            "partial-cached-primitives",
+        )?;
         expect_string(
             object,
             "qualification",
@@ -617,11 +621,18 @@ mod tests {
             "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
             "entities": 20, "relationships": 200, "warmup": { "queries": 96 },
             "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
-            "storage_metadata_memory_resident": true, "authenticated_io_accounting": "not-measured",
+            "storage_metadata_memory_resident": true, "authenticated_io_accounting": "partial-cached-primitives",
             "budget_evaluation": "not-performed", "samples": [{ "timed_executions": 768, "rounds": 1,
                 "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12 }],
         });
         let profile = Bm01Profile::new(20).unwrap();
+        for wrong_accounting in ["not-measured", "complete", "physical-device"] {
+            let mut wrong = report.clone();
+            wrong["authenticated_io_accounting"] = wrong_accounting.into();
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Disk).is_err()
+            );
+        }
         assert!(
             finalize_report(&report.to_string(), profile, 864, super::SampleMode::Disk).is_ok()
         );

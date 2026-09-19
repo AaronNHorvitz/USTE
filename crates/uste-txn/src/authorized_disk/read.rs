@@ -105,6 +105,21 @@ where
         })
     }
 
+    /// Cached primitive work including failed attempts; current maintenance authority is required.
+    /// This does not include uncached cursors, publication, scrubs or pre-primitive rejection.
+    pub fn index_read_report(
+        &self,
+        principal: &AuthenticatedPrincipal,
+    ) -> Result<uste_storage::IndexReadTelemetry, AuthorizedError> {
+        self.metadata.authorize(principal, Action::ManageSchema)?;
+        self.metadata
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?
+            .read_telemetry()
+            .map_err(|_| AuthorizedError::ResourceLimit)
+    }
+
     /// Clear only USTE's decrypted page cache. Counters remain cumulative; no host-cache claim.
     pub fn clear_cache(&self, principal: &AuthenticatedPrincipal) -> Result<(), AuthorizedError> {
         self.metadata.authorize(principal, Action::ManageSchema)?;

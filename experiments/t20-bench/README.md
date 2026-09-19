@@ -87,8 +87,14 @@ history, outgoing, incoming, provenance, reverse, policy history, current policy
 setup measurements exclude coordinator journal passes, suffix preparation, publication and query
 work; they are not complete authenticated-I/O counters. Construction
 and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
-Native reports also include fixed-size filesystem-adapter observation: call/failure counts and
-requested/returned read/write bytes. Setup, query, warm-up and paired sample populations are
+Native reports distinguish filesystem-adapter observation from authenticated cached-index work.
+Decision 0085 adds cached primitive operation/error, page, hit, fragment and result-byte totals, including
+work before errors, with separate warm-up and paired sample deltas. These maintenance-only
+counters exclude uncached cursor/recovery/publication work and are not complete I/O or device
+traffic measurements; `authenticated_io_accounting` is `partial-cached-primitives`.
+
+The adapter observation retains call/failure counts and requested/returned read/write bytes.
+Setup, query, warm-up and paired sample populations are
 separate. These exclude credential/oracle-file I/O, internal syscalls and handle drops, and are
 neither physical-device traffic nor complete authenticated-index statistics. Observation never
 changes storage results; overflow invalidates measurements. No path or payload is retained.

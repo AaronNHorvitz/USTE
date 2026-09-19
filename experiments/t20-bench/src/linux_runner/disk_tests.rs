@@ -305,6 +305,11 @@ fn native_disk_queries_match_separate_summary_and_reject_substitution() {
     assert_eq!(json["preemptive_deadline_enforced"], false);
     assert_eq!(json["cache_budget_bytes"], 64 * 1024 * 1024);
     let io = &json["query_adapter_io"];
+    let index = &json["cached_index_work"];
+    assert_eq!(index["failed_operations"], 0);
+    assert_eq!(index["complete_authenticated_index_io"], false);
+    assert!(index["completed_operations"].as_u64().unwrap() > 0);
+    assert!(index["authenticated_pages_loaded"].as_u64().unwrap() > 0);
     assert_eq!(io["measurement_scope"], "filesystem-adapter-calls");
     assert_eq!(io["complete_authenticated_index_io"], false);
     assert!(io["read_returned_bytes"].as_u64().unwrap() > 0);

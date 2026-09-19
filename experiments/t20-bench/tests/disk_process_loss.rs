@@ -239,7 +239,10 @@ fn disk_cli_supervised_sampling_preserves_oracle_cache_pairs_and_deadline_claim(
     assert_eq!(report["query_deadline_postchecked"], true);
     assert_eq!(report["query_deadline_seconds"], 30);
     assert_eq!(report["budget_evaluation"], "not-performed");
-    assert_eq!(report["authenticated_io_accounting"], "not-measured");
+    assert_eq!(
+        report["authenticated_io_accounting"],
+        "partial-cached-primitives"
+    );
     assert_eq!(report["full_memory_graph_state"], false);
     assert_eq!(report["full_memory_coordinator_metadata"], false);
     assert_eq!(report["storage_metadata_memory_resident"], true);
@@ -264,6 +267,37 @@ fn disk_cli_supervised_sampling_preserves_oracle_cache_pairs_and_deadline_claim(
     assert_eq!(cache[0]["successful_visits"], cache[1]["successful_visits"]);
     assert_eq!(report["adapter_io_accounting"], "filesystem-adapter-calls");
     let io = sample["adapter_io"].as_array().unwrap();
+    let index = sample["cached_index_work"].as_array().unwrap();
+    assert_eq!(index.len(), 2);
+    for (item, adapter) in index.iter().zip(io) {
+        assert_eq!(item["cache"], adapter["cache"]);
+        assert_eq!(item["work"]["complete_authenticated_index_io"], false);
+        assert_eq!(item["work"]["physical_device_io"], false);
+        assert_eq!(item["work"]["failed_operations"], 0);
+        assert!(item["work"]["completed_operations"].as_u64().unwrap() > 0);
+        assert!(item["work"]["primitive_result_bytes"].as_u64().unwrap() > 0);
+    }
+    assert!(
+        index[0]["work"]["authenticated_pages_loaded"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(index[1]["work"]["authenticated_pages_loaded"], 0);
+    assert_eq!(
+        index[0]["work"]["enumerated_fragments"],
+        index[1]["work"]["enumerated_fragments"]
+    );
+    assert_eq!(
+        index[0]["work"]["primitive_result_bytes"],
+        index[1]["work"]["primitive_result_bytes"]
+    );
+    assert!(
+        report["warmup_cached_index_work"]["completed_operations"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(io.len(), 2);
     for (work, cache) in io.iter().zip(cache) {
         assert_eq!(work["cache"], cache["cache"]);

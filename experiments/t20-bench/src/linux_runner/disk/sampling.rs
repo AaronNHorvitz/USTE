@@ -79,6 +79,7 @@ fn sample(
         }] += 1;
     }
     let warmup_io = engine.filesystem.snapshot()?.delta(setup_io)?;
+    let warmup_index_work = engine.index_report()?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
@@ -91,9 +92,10 @@ fn sample(
         "result_size_profile": "bm01-result-v1", "oracle_adjacency_memory_resident": false,
         "cache_pairing": "empty-then-retained-identical-query", "kernel_filesystem_device_cache": "uncontrolled",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
-        "storage_metadata_memory_resident": true, "authenticated_io_accounting": "not-measured",
+        "storage_metadata_memory_resident": true, "authenticated_io_accounting": "partial-cached-primitives",
         "adapter_io_accounting": "filesystem-adapter-calls",
         "setup_adapter_io": setup_io.json()?, "warmup_adapter_io": warmup_io.json()?,
+        "warmup_cached_index_work": warmup_index_work.json(),
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
         "budget_evaluation": "not-performed", "entities": profile.entities(),
@@ -120,6 +122,12 @@ impl Engine<'_> {
     fn report(&self) -> Result<AuthorizedDiskCacheReport, LinuxRunnerError> {
         self.reader
             .cache_report(self.principal)
+            .map_err(|_| error("USTE_BM01_INDEX_REPORT"))
+    }
+    fn index_report(&self) -> Result<index_work::IndexWork, LinuxRunnerError> {
+        self.reader
+            .index_read_report(self.principal)
+            .map(index_work::IndexWork::from)
             .map_err(|_| error("USTE_BM01_INDEX_REPORT"))
     }
     fn execute(
@@ -154,6 +162,7 @@ impl Engine<'_> {
         let mut executions = 0;
         let mut work = [CacheWork::default(); 2];
         let mut io_work = [io::IoSnapshot::default(); 2];
+        let mut index_work = [index_work::IndexWork::default(); 2];
         let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
         aggregate.update(&(ordinal as u64).to_be_bytes());
         loop {
@@ -165,10 +174,13 @@ impl Engine<'_> {
                     }
                     let before = self.report()?;
                     let before_io = self.filesystem.snapshot()?;
+                    let before_index = self.index_report()?;
                     let (outcome, elapsed) = self.execute(expected, observer)?;
                     work[cache.index()].add(outcome, before, self.report()?)?;
                     io_work[cache.index()]
                         .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
+                    index_work[cache.index()]
+                        .accumulate(self.index_report()?.delta(before_index)?)?;
                     executions += 1;
                     aggregate.update(&[
                         cache.code(),
@@ -214,6 +226,10 @@ impl Engine<'_> {
                 "adapter_io": [
                     {"cache": CacheState::Empty.name(), "work": io_work[0].json()?},
                     {"cache": CacheState::Retained.name(), "work": io_work[1].json()?},
+                ],
+                "cached_index_work": [
+                    {"cache": CacheState::Empty.name(), "work": index_work[0].json()},
+                    {"cache": CacheState::Retained.name(), "work": index_work[1].json()},
                 ],
                 "latency_groups": latencies,
             }),

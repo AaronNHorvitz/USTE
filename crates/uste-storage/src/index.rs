@@ -333,6 +333,37 @@ pub struct IndexReadStats {
     pub result_bytes: u64,
 }
 
+/// Cumulative cached exact/predecessor/prefix operation work, including work before errors.
+/// Excludes uncached cursors, scrubs, publication and checks before entering these primitives.
+/// Result bytes on failed scans can include provisional visitor output, not accepted results.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IndexReadTelemetry {
+    pub completed_operations: u64,
+    pub failed_operations: u64,
+    pub work: IndexReadStats,
+}
+
+impl IndexReadTelemetry {
+    fn record(&mut self, stats: &IndexReadStats, success: bool) -> Option<()> {
+        let mut next = self.clone();
+        let count = if success {
+            &mut next.completed_operations
+        } else {
+            &mut next.failed_operations
+        };
+        *count = count.checked_add(1)?;
+        next.work.pages_read = next.work.pages_read.checked_add(stats.pages_read)?;
+        next.work.cache_hits = next.work.cache_hits.checked_add(stats.cache_hits)?;
+        next.work.fragments_visited = next
+            .work
+            .fragments_visited
+            .checked_add(stats.fragments_visited)?;
+        next.work.result_bytes = next.work.result_bytes.checked_add(stats.result_bytes)?;
+        *self = next;
+        Some(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IndexScan {
     pub entries: Vec<IndexScanEntry>,
@@ -634,6 +665,8 @@ pub struct PageCache {
     misses: u64,
     evictions: u64,
     pages: BTreeMap<CacheKey, CachedPage>,
+    read_telemetry: IndexReadTelemetry,
+    read_telemetry_overflowed: bool,
 }
 
 impl core::fmt::Debug for PageCache {
@@ -663,6 +696,8 @@ impl PageCache {
             misses: 0,
             evictions: 0,
             pages: BTreeMap::new(),
+            read_telemetry: IndexReadTelemetry::default(),
+            read_telemetry_overflowed: false,
         })
     }
 
@@ -689,6 +724,26 @@ impl PageCache {
     #[must_use]
     pub const fn evictions(&self) -> u64 {
         self.evictions
+    }
+
+    /// Privileged diagnostics; overflow invalidates measurement, never the storage operation.
+    pub fn read_telemetry(&self) -> Result<IndexReadTelemetry, StorageError> {
+        if self.read_telemetry_overflowed {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(self.read_telemetry.clone())
+    }
+
+    fn observe_read<T>(
+        &mut self,
+        read: impl FnOnce(&mut Self, &mut IndexReadStats) -> Result<T, StorageError>,
+    ) -> Result<T, StorageError> {
+        let mut stats = IndexReadStats::default();
+        let result = read(self, &mut stats);
+        if self.read_telemetry.record(&stats, result.is_ok()).is_none() {
+            self.read_telemetry_overflowed = true;
+        }
+        result
     }
 
     pub fn clear(&mut self) {
@@ -1053,83 +1108,84 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    validate_read(root, context, key)?;
-    let run = root.run(family)?;
-    let mut stats = IndexReadStats::default();
-    let mut page_visits = 0_u64;
-    let start = lower_bound_page_bounded(
-        filesystem,
-        context,
-        vault,
-        root,
-        run,
-        key,
-        limits,
-        &mut page_visits,
-        cache,
-        &mut stats,
-    )?;
-    let Some(mut page_index) = start else {
-        return Ok((None, stats));
-    };
-    let mut value = Vec::new();
-    let mut expected_len = None;
-    while page_index < run.page_count {
-        let page = load_get_page(
+    cache.observe_read(|cache, stats| {
+        validate_read(root, context, key)?;
+        let run = root.run(family)?;
+        let mut page_visits = 0_u64;
+        let start = lower_bound_page_bounded(
             filesystem,
             context,
             vault,
             root,
             run,
-            page_index,
+            key,
             limits,
             &mut page_visits,
             cache,
-            &mut stats,
+            stats,
         )?;
-        let parsed = ParsedPage::new(page, root, run, page_index)?;
-        for fragment in parsed.fragments() {
-            let fragment = fragment?;
-            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
-            match fragment.key.cmp(key) {
-                core::cmp::Ordering::Less => continue,
-                core::cmp::Ordering::Greater if expected_len.is_some() => {
+        let Some(mut page_index) = start else {
+            return Ok((None, stats.clone()));
+        };
+        let mut value = Vec::new();
+        let mut expected_len = None;
+        while page_index < run.page_count {
+            let page = load_get_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                page_index,
+                limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, page_index)?;
+            for fragment in parsed.fragments() {
+                let fragment = fragment?;
+                stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+                match fragment.key.cmp(key) {
+                    core::cmp::Ordering::Less => continue,
+                    core::cmp::Ordering::Greater if expected_len.is_some() => {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    core::cmp::Ordering::Greater => return Ok((None, stats.clone())),
+                    core::cmp::Ordering::Equal => {}
+                }
+                if expected_len.is_none() {
+                    if fragment.offset != 0 {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    if fragment.total_len > limits.maximum_result_bytes {
+                        return Err(StorageError::ResourceLimit);
+                    }
+                    expected_len = Some(fragment.total_len);
+                    value
+                        .try_reserve_exact(fragment.total_len)
+                        .map_err(|_| StorageError::ResourceLimit)?;
+                }
+                if expected_len != Some(fragment.total_len) || fragment.offset != value.len() {
                     return Err(StorageError::IntegrityFailure);
                 }
-                core::cmp::Ordering::Greater => return Ok((None, stats)),
-                core::cmp::Ordering::Equal => {}
-            }
-            if expected_len.is_none() {
-                if fragment.offset != 0 {
-                    return Err(StorageError::IntegrityFailure);
+                value.extend_from_slice(fragment.value);
+                if value.len() == fragment.total_len {
+                    stats.result_bytes =
+                        u64::try_from(value.len()).map_err(|_| StorageError::ResourceLimit)?;
+                    return Ok((Some(value), stats.clone()));
                 }
-                if fragment.total_len > limits.maximum_result_bytes {
-                    return Err(StorageError::ResourceLimit);
-                }
-                expected_len = Some(fragment.total_len);
-                value
-                    .try_reserve_exact(fragment.total_len)
-                    .map_err(|_| StorageError::ResourceLimit)?;
             }
-            if expected_len != Some(fragment.total_len) || fragment.offset != value.len() {
-                return Err(StorageError::IntegrityFailure);
-            }
-            value.extend_from_slice(fragment.value);
-            if value.len() == fragment.total_len {
-                stats.result_bytes =
-                    u64::try_from(value.len()).map_err(|_| StorageError::ResourceLimit)?;
-                return Ok((Some(value), stats));
-            }
+            page_index = page_index
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
         }
-        page_index = page_index
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-    }
-    if expected_len.is_some() {
-        Err(StorageError::IntegrityFailure)
-    } else {
-        Ok((None, stats))
-    }
+        if expected_len.is_some() {
+            Err(StorageError::IntegrityFailure)
+        } else {
+            Ok((None, stats.clone()))
+        }
+    })
 }
 
 /// Return the greatest complete key with `prefix` that is at or before `upper_bound`.
@@ -1154,213 +1210,218 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    validate_read(root, context, prefix)?;
-    validate_read(root, context, upper_bound)?;
-    if !upper_bound.starts_with(prefix) {
-        return Err(StorageError::InvalidState);
-    }
-    let run = root.run(family)?;
-    let mut stats = IndexReadStats::default();
-    let mut page_visits = 0_u64;
+    cache.observe_read(|cache, stats| {
+        validate_read(root, context, prefix)?;
+        validate_read(root, context, upper_bound)?;
+        if !upper_bound.starts_with(prefix) {
+            return Err(StorageError::InvalidState);
+        }
+        let run = root.run(family)?;
+        let mut page_visits = 0_u64;
 
-    let mut low = 0_u64;
-    let mut high = run.page_count;
-    while low < high {
-        let middle = low + (high - low) / 2;
-        let page = load_predecessor_page(
-            filesystem,
-            context,
-            vault,
-            root,
-            run,
-            middle,
-            limits,
-            &mut page_visits,
-            cache,
-            &mut stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, middle)?;
-        if parsed.last_key()? < upper_bound {
-            low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
+        let mut low = 0_u64;
+        let mut high = run.page_count;
+        while low < high {
+            let middle = low + (high - low) / 2;
+            let page = load_predecessor_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                middle,
+                limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, middle)?;
+            if parsed.last_key()? < upper_bound {
+                low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
+            } else {
+                high = middle;
+            }
+        }
+        let probe = if low < run.page_count {
+            low
         } else {
-            high = middle;
-        }
-    }
-    let probe = if low < run.page_count {
-        low
-    } else {
-        run.page_count
-            .checked_sub(1)
-            .ok_or(StorageError::IntegrityFailure)?
-    };
-    let mut start = probe.saturating_sub(1);
-    loop {
-        let page = load_predecessor_page(
-            filesystem,
-            context,
-            vault,
-            root,
-            run,
-            start,
-            limits,
-            &mut page_visits,
-            cache,
-            &mut stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, start)?;
-        let first = parsed
-            .fragments()
-            .next()
-            .ok_or(StorageError::IntegrityFailure)??;
-        if first.offset == 0 || start == 0 {
-            break;
-        }
-        start = start.checked_sub(1).ok_or(StorageError::IntegrityFailure)?;
-    }
-
-    // First pass proves the terminal matching key without retaining any value. This prevents an
-    // earlier large match from consuming the result budget or coexisting with the final value.
-    let mut candidate_key = None;
-    let mut scan_key = Vec::new();
-    let mut scan_total = None;
-    let mut scan_offset = 0_usize;
-    let mut page_index = start;
-    let mut finished = false;
-    while page_index < run.page_count && !finished {
-        let page = load_predecessor_page(
-            filesystem,
-            context,
-            vault,
-            root,
-            run,
-            page_index,
-            limits,
-            &mut page_visits,
-            cache,
-            &mut stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, page_index)?;
-        for fragment in parsed.fragments() {
-            let fragment = fragment?;
-            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
-            if scan_total.is_some() && scan_key.as_slice() != fragment.key {
-                return Err(StorageError::IntegrityFailure);
-            }
-            if fragment.key > upper_bound {
-                if scan_total.is_some() {
-                    return Err(StorageError::IntegrityFailure);
-                }
-                finished = true;
+            run.page_count
+                .checked_sub(1)
+                .ok_or(StorageError::IntegrityFailure)?
+        };
+        let mut start = probe.saturating_sub(1);
+        loop {
+            let page = load_predecessor_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                start,
+                limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, start)?;
+            let first = parsed
+                .fragments()
+                .next()
+                .ok_or(StorageError::IntegrityFailure)??;
+            if first.offset == 0 || start == 0 {
                 break;
             }
-            if !fragment.key.starts_with(prefix) {
-                continue;
-            }
-            if scan_total.is_none() {
-                if fragment.offset != 0 {
-                    return Err(StorageError::IntegrityFailure);
-                }
-                scan_key.extend_from_slice(fragment.key);
-                scan_total = Some(fragment.total_len);
-                scan_offset = 0;
-            }
-            if scan_key.as_slice() != fragment.key
-                || scan_total != Some(fragment.total_len)
-                || scan_offset != fragment.offset
-            {
-                return Err(StorageError::IntegrityFailure);
-            }
-            scan_offset = scan_offset
-                .checked_add(fragment.value.len())
-                .filter(|offset| *offset <= fragment.total_len)
-                .ok_or(StorageError::IntegrityFailure)?;
-            if scan_offset == fragment.total_len {
-                candidate_key = Some(core::mem::take(&mut scan_key));
-                scan_total = None;
-                scan_offset = 0;
-            }
+            start = start.checked_sub(1).ok_or(StorageError::IntegrityFailure)?;
         }
-        page_index = page_index
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-    }
-    if scan_total.is_some() {
-        return Err(StorageError::IntegrityFailure);
-    }
 
-    let Some(mut candidate_key) = candidate_key else {
-        return Ok(IndexPredecessor { entry: None, stats });
-    };
-    let mut current_value = Vec::new();
-    let mut expected_total = None;
-    let mut selected = None;
-    page_index = start;
-    while page_index < run.page_count && selected.is_none() {
-        let page = load_predecessor_page(
-            filesystem,
-            context,
-            vault,
-            root,
-            run,
-            page_index,
-            limits,
-            &mut page_visits,
-            cache,
-            &mut stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, page_index)?;
-        for fragment in parsed.fragments() {
-            let fragment = fragment?;
-            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
-            match fragment.key.cmp(candidate_key.as_slice()) {
-                core::cmp::Ordering::Less => continue,
-                core::cmp::Ordering::Greater => {
+        // First pass proves the terminal matching key without retaining any value. This prevents an
+        // earlier large match from consuming the result budget or coexisting with the final value.
+        let mut candidate_key = None;
+        let mut scan_key = Vec::new();
+        let mut scan_total = None;
+        let mut scan_offset = 0_usize;
+        let mut page_index = start;
+        let mut finished = false;
+        while page_index < run.page_count && !finished {
+            let page = load_predecessor_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                page_index,
+                limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, page_index)?;
+            for fragment in parsed.fragments() {
+                let fragment = fragment?;
+                stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+                if scan_total.is_some() && scan_key.as_slice() != fragment.key {
                     return Err(StorageError::IntegrityFailure);
                 }
-                core::cmp::Ordering::Equal => {}
-            }
-            if expected_total.is_none() {
-                if fragment.offset != 0 {
+                if fragment.key > upper_bound {
+                    if scan_total.is_some() {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    finished = true;
+                    break;
+                }
+                if !fragment.key.starts_with(prefix) {
+                    continue;
+                }
+                if scan_total.is_none() {
+                    if fragment.offset != 0 {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    scan_key.extend_from_slice(fragment.key);
+                    scan_total = Some(fragment.total_len);
+                    scan_offset = 0;
+                }
+                if scan_key.as_slice() != fragment.key
+                    || scan_total != Some(fragment.total_len)
+                    || scan_offset != fragment.offset
+                {
                     return Err(StorageError::IntegrityFailure);
                 }
-                let result_bytes = candidate_key
-                    .len()
-                    .checked_add(fragment.total_len)
-                    .ok_or(StorageError::ResourceLimit)?;
-                if result_bytes > limits.maximum_result_bytes {
-                    return Err(StorageError::ResourceLimit);
+                scan_offset = scan_offset
+                    .checked_add(fragment.value.len())
+                    .filter(|offset| *offset <= fragment.total_len)
+                    .ok_or(StorageError::IntegrityFailure)?;
+                if scan_offset == fragment.total_len {
+                    candidate_key = Some(core::mem::take(&mut scan_key));
+                    scan_total = None;
+                    scan_offset = 0;
                 }
-                expected_total = Some(fragment.total_len);
-                current_value
-                    .try_reserve_exact(fragment.total_len)
-                    .map_err(|_| StorageError::ResourceLimit)?;
             }
-            if expected_total != Some(fragment.total_len) || current_value.len() != fragment.offset
-            {
-                return Err(StorageError::IntegrityFailure);
-            }
-            current_value.extend_from_slice(fragment.value);
-            if current_value.len() == fragment.total_len {
-                stats.result_bytes = u64::try_from(candidate_key.len() + current_value.len())
-                    .map_err(|_| StorageError::ResourceLimit)?;
-                selected = Some(IndexScanEntry {
-                    key: core::mem::take(&mut candidate_key),
-                    value: core::mem::take(&mut current_value),
-                });
-                expected_total = None;
-                break;
-            }
+            page_index = page_index
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
         }
-        page_index = page_index
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-    }
-    if selected.is_none() || expected_total.is_some() {
-        return Err(StorageError::IntegrityFailure);
-    }
-    Ok(IndexPredecessor {
-        entry: selected,
-        stats,
+        if scan_total.is_some() {
+            return Err(StorageError::IntegrityFailure);
+        }
+
+        let Some(mut candidate_key) = candidate_key else {
+            return Ok(IndexPredecessor {
+                entry: None,
+                stats: stats.clone(),
+            });
+        };
+        let mut current_value = Vec::new();
+        let mut expected_total = None;
+        let mut selected = None;
+        page_index = start;
+        while page_index < run.page_count && selected.is_none() {
+            let page = load_predecessor_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                page_index,
+                limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, page_index)?;
+            for fragment in parsed.fragments() {
+                let fragment = fragment?;
+                stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+                match fragment.key.cmp(candidate_key.as_slice()) {
+                    core::cmp::Ordering::Less => continue,
+                    core::cmp::Ordering::Greater => {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    core::cmp::Ordering::Equal => {}
+                }
+                if expected_total.is_none() {
+                    if fragment.offset != 0 {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    let result_bytes = candidate_key
+                        .len()
+                        .checked_add(fragment.total_len)
+                        .ok_or(StorageError::ResourceLimit)?;
+                    if result_bytes > limits.maximum_result_bytes {
+                        return Err(StorageError::ResourceLimit);
+                    }
+                    expected_total = Some(fragment.total_len);
+                    current_value
+                        .try_reserve_exact(fragment.total_len)
+                        .map_err(|_| StorageError::ResourceLimit)?;
+                }
+                if expected_total != Some(fragment.total_len)
+                    || current_value.len() != fragment.offset
+                {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                current_value.extend_from_slice(fragment.value);
+                if current_value.len() == fragment.total_len {
+                    stats.result_bytes = u64::try_from(candidate_key.len() + current_value.len())
+                        .map_err(|_| StorageError::ResourceLimit)?;
+                    selected = Some(IndexScanEntry {
+                        key: core::mem::take(&mut candidate_key),
+                        value: core::mem::take(&mut current_value),
+                    });
+                    expected_total = None;
+                    break;
+                }
+            }
+            page_index = page_index
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
+        }
+        if selected.is_none() || expected_total.is_some() {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(IndexPredecessor {
+            entry: selected,
+            stats: stats.clone(),
+        })
     })
 }
 
@@ -2409,121 +2470,125 @@ where
     W: DurableKeyEnvelope,
     E: EntropySource,
 {
-    validate_read(root, context, prefix)?;
-    let run = root.run(family)?;
-    let mut stats = IndexReadStats::default();
-    let mut page_visits = 0;
-    let page_limits = IndexGetLimits {
-        maximum_page_visits: limits.maximum_page_visits,
-        maximum_result_bytes: MAX_INDEX_VALUE_BYTES,
-    };
-    let Some(mut page_index) = lower_bound_page_bounded(
-        filesystem,
-        context,
-        vault,
-        root,
-        run,
-        prefix,
-        page_limits,
-        &mut page_visits,
-        cache,
-        &mut stats,
-    )?
-    else {
-        return Ok(stats);
-    };
-    let mut entry_count = 0_usize;
-    let mut current_key = Vec::new();
-    let mut current_value = Vec::new();
-    let mut current_total = None;
-    let mut finished = false;
-    while page_index < run.page_count && !finished {
-        let page = load_get_page(
+    cache.observe_read(|cache, stats| {
+        validate_read(root, context, prefix)?;
+        let run = root.run(family)?;
+        let mut page_visits = 0;
+        let page_limits = IndexGetLimits {
+            maximum_page_visits: limits.maximum_page_visits,
+            maximum_result_bytes: MAX_INDEX_VALUE_BYTES,
+        };
+        let Some(mut page_index) = lower_bound_page_bounded(
             filesystem,
             context,
             vault,
             root,
             run,
-            page_index,
+            prefix,
             page_limits,
             &mut page_visits,
             cache,
-            &mut stats,
-        )?;
-        let parsed = ParsedPage::new(page, root, run, page_index)?;
-        for fragment in parsed.fragments() {
-            let fragment = fragment?;
-            stats.fragments_visited = stats.fragments_visited.saturating_add(1);
-            if fragment.key < prefix {
-                continue;
-            }
-            if !fragment.key.starts_with(prefix) {
-                finished = true;
-                break;
-            }
-            if current_total.is_none() {
-                if fragment.offset != 0 {
+            stats,
+        )?
+        else {
+            return Ok(stats.clone());
+        };
+        let mut entry_count = 0_usize;
+        let mut current_key = Vec::new();
+        let mut current_value = Vec::new();
+        let mut current_total = None;
+        let mut finished = false;
+        while page_index < run.page_count && !finished {
+            let page = load_get_page(
+                filesystem,
+                context,
+                vault,
+                root,
+                run,
+                page_index,
+                page_limits,
+                &mut page_visits,
+                cache,
+                stats,
+            )?;
+            let parsed = ParsedPage::new(page, root, run, page_index)?;
+            for fragment in parsed.fragments() {
+                let fragment = fragment?;
+                stats.fragments_visited = stats.fragments_visited.saturating_add(1);
+                if fragment.key < prefix {
+                    continue;
+                }
+                if !fragment.key.starts_with(prefix) {
+                    finished = true;
+                    break;
+                }
+                if current_total.is_none() {
+                    if fragment.offset != 0 {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    let next_bytes = fragment
+                        .key
+                        .len()
+                        .checked_add(fragment.total_len)
+                        .and_then(|next| {
+                            usize::try_from(stats.result_bytes).ok()?.checked_add(next)
+                        })
+                        .ok_or(StorageError::ResourceLimit)?;
+                    if entry_count == limits.maximum_results
+                        || next_bytes > limits.maximum_result_bytes
+                    {
+                        return Err(StorageError::ResourceLimit);
+                    }
+                    current_key.extend_from_slice(fragment.key);
+                    current_total = Some(fragment.total_len);
+                    current_value
+                        .try_reserve_exact(fragment.total_len)
+                        .map_err(|_| StorageError::ResourceLimit)?;
+                }
+                if current_key.as_slice() != fragment.key
+                    || current_total != Some(fragment.total_len)
+                    || current_value.len() != fragment.offset
+                {
                     return Err(StorageError::IntegrityFailure);
                 }
-                let next_bytes = fragment
-                    .key
-                    .len()
-                    .checked_add(fragment.total_len)
-                    .and_then(|next| usize::try_from(stats.result_bytes).ok()?.checked_add(next))
-                    .ok_or(StorageError::ResourceLimit)?;
-                if entry_count == limits.maximum_results || next_bytes > limits.maximum_result_bytes
-                {
-                    return Err(StorageError::ResourceLimit);
+                current_value.extend_from_slice(fragment.value);
+                if current_value.len() == fragment.total_len {
+                    if entry_count == limits.maximum_results {
+                        return Err(StorageError::ResourceLimit);
+                    }
+                    let next_bytes = current_key
+                        .len()
+                        .checked_add(current_value.len())
+                        .and_then(|value| {
+                            usize::try_from(stats.result_bytes)
+                                .ok()
+                                .and_then(|current| current.checked_add(value))
+                        })
+                        .ok_or(StorageError::ResourceLimit)?;
+                    if next_bytes > limits.maximum_result_bytes {
+                        return Err(StorageError::ResourceLimit);
+                    }
+                    stats.result_bytes =
+                        u64::try_from(next_bytes).map_err(|_| StorageError::ResourceLimit)?;
+                    visitor(IndexScanEntry {
+                        key: core::mem::take(&mut current_key),
+                        value: core::mem::take(&mut current_value),
+                    })?;
+                    entry_count = entry_count
+                        .checked_add(1)
+                        .ok_or(StorageError::ResourceLimit)?;
+                    current_total = None;
                 }
-                current_key.extend_from_slice(fragment.key);
-                current_total = Some(fragment.total_len);
-                current_value
-                    .try_reserve_exact(fragment.total_len)
-                    .map_err(|_| StorageError::ResourceLimit)?;
             }
-            if current_key.as_slice() != fragment.key
-                || current_total != Some(fragment.total_len)
-                || current_value.len() != fragment.offset
-            {
-                return Err(StorageError::IntegrityFailure);
-            }
-            current_value.extend_from_slice(fragment.value);
-            if current_value.len() == fragment.total_len {
-                if entry_count == limits.maximum_results {
-                    return Err(StorageError::ResourceLimit);
-                }
-                let next_bytes = current_key
-                    .len()
-                    .checked_add(current_value.len())
-                    .and_then(|value| {
-                        usize::try_from(stats.result_bytes)
-                            .ok()
-                            .and_then(|current| current.checked_add(value))
-                    })
-                    .ok_or(StorageError::ResourceLimit)?;
-                if next_bytes > limits.maximum_result_bytes {
-                    return Err(StorageError::ResourceLimit);
-                }
-                stats.result_bytes =
-                    u64::try_from(next_bytes).map_err(|_| StorageError::ResourceLimit)?;
-                visitor(IndexScanEntry {
-                    key: core::mem::take(&mut current_key),
-                    value: core::mem::take(&mut current_value),
-                })?;
-                entry_count = entry_count
-                    .checked_add(1)
-                    .ok_or(StorageError::ResourceLimit)?;
-                current_total = None;
-            }
+            page_index = page_index
+                .checked_add(1)
+                .ok_or(StorageError::ResourceLimit)?;
         }
-        page_index = page_index
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-    }
-    if current_total.is_some() {
-        return Err(StorageError::IntegrityFailure);
-    }
-    Ok(stats)
+        if current_total.is_some() {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(stats.clone())
+    })
 }
 
 struct RunWriter<F>
@@ -3676,6 +3741,70 @@ const fn index_crypto_error(error: CryptoError) -> StorageError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_read_telemetry_preserves_errors_clear_and_overflow_semantics() {
+        let mut cache = PageCache::default();
+        let work = IndexReadStats {
+            pages_read: 2,
+            cache_hits: 3,
+            fragments_visited: 5,
+            result_bytes: 7,
+        };
+        assert_eq!(
+            cache.observe_read(|_, stats| {
+                *stats = work.clone();
+                Ok(42)
+            }),
+            Ok(42)
+        );
+        assert_eq!(
+            cache.observe_read::<()>(|_, stats| {
+                *stats = work.clone();
+                Err(StorageError::IntegrityFailure)
+            }),
+            Err(StorageError::IntegrityFailure)
+        );
+        let report = cache.read_telemetry().unwrap();
+        assert_eq!(
+            (report.completed_operations, report.failed_operations),
+            (1, 1)
+        );
+        assert_eq!(
+            report.work,
+            IndexReadStats {
+                pages_read: 4,
+                cache_hits: 6,
+                fragments_visited: 10,
+                result_bytes: 14
+            }
+        );
+        cache.clear();
+        assert_eq!(cache.read_telemetry().unwrap(), report);
+        for field in 0..6 {
+            let mut overflowing = report.clone();
+            match field {
+                0 => overflowing.completed_operations = u64::MAX,
+                1 => overflowing.failed_operations = u64::MAX,
+                2 => overflowing.work.pages_read = u64::MAX,
+                3 => overflowing.work.cache_hits = u64::MAX,
+                4 => overflowing.work.fragments_visited = u64::MAX,
+                _ => overflowing.work.result_bytes = u64::MAX,
+            }
+            let before = overflowing.clone();
+            assert_eq!(overflowing.record(&work, field != 1), None);
+            assert_eq!(overflowing, before, "overflow must not partially aggregate");
+        }
+        cache.read_telemetry.completed_operations = u64::MAX;
+        assert_eq!(cache.observe_read(|_, _| Ok(99)), Ok(99));
+        assert_eq!(cache.read_telemetry(), Err(StorageError::ResourceLimit));
+        assert_eq!(
+            cache.observe_read::<()>(|_, _| Err(StorageError::IntegrityFailure)),
+            Err(StorageError::IntegrityFailure)
+        );
+        cache.clear();
+        assert_eq!(cache.read_telemetry(), Err(StorageError::ResourceLimit));
+    }
 
     #[test]
     fn page_cache_debug_redacts_keys_and_plaintext() {

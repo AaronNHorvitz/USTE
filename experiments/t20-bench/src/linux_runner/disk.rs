@@ -22,6 +22,7 @@ type DiskFileSystem = io::ObservedFileSystem<LinuxFileSystem>;
 type DiskRaw =
     CommitCoordinator<GraphState, DiskFileSystem, RecoveryEnvelope, OsEntropy, OsEntropy>;
 
+mod index_work;
 mod io;
 mod query;
 mod sampling;

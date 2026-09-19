@@ -41,8 +41,8 @@ journal frontier as either the ready base or exactly one revalidated pending suf
 reconstructing `GraphState`. Decision 0059 at `8885da4` removes the hidden absolute-maximum root
 pre-scrub from graph recovery: fixed manifest discovery now precedes one caller-bounded semantic
 scan. Decisions 0060–0073 add the opt-in disk coordinator, bounded overlays and maintained
-first-reference roots; Decisions 0074–0084 connect native development construction, recovery,
-supervised queries, profile-derived work limits and adapter I/O observation. T-20 remains open
+first-reference roots; Decisions 0074–0085 connect native development construction, recovery,
+supervised queries, profile-derived work limits and partial adapter/index I/O observation. T-20 remains open
 pending remaining scalability/accounting work, larger-than-memory qualification and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -53,6 +53,31 @@ every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 rem
 unverified external distribution prerequisite.
 
 ## Completed this increment
+
+- [Decision 0085](docs/decisions/0085-cached-index-operation-telemetry.md) retains fixed-size
+  cached exact/predecessor/prefix primitive work on successes and failures. Checked cumulative
+  overflow invalidates only diagnostics, never changes a read result, and cache clearing preserves
+  counters. The authorized reader requires current maintenance authority for reports. Native query,
+  warm-up and paired sample counters explicitly exclude uncached/recovery/publication work and
+  retain false completeness/device flags. Oracle and workload thresholds are unchanged.
+  On pushed `8e13001` plus this increment, scoped one-job/thread `cargo test -p uste-storage
+  --lib --locked --offline -- --test-threads=1` passed 61 tests in 171.61s;
+  `cargo test -p uste-graph --test disk_index --locked --offline -- --test-threads=1` passed
+  9 tests in 31.15s, including the adapter-fault, authorization and reference matrices.
+  Workspace all-target/all-feature strict clippy passed. Initial clippy rejected redundant
+  mutable borrows introduced by instrumentation; these were removed without lint suppression.
+  Scope limits were MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M; sampled peak 355,876,864
+  bytes, zero swap. Scoped `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 48 unit tests
+  (2 existing exact-profile ignores) in 28.01s and 3 CLI tests in 12.73s. The first native run
+  caught the supervisor's obsolete `not-measured` label; worker/validator now agree on partial
+  cached primitives and the validator rejects obsolete/complete/device labels. Experiment strict
+  all-target clippy and `RUSTDOCFLAGS='-D warnings' cargo doc -p uste-storage -p uste-txn
+  --no-deps --locked --offline` passed. Sampled final native scope peak 310,415,360 bytes,
+  zero swap. Docs/task checks pass (158 links, 68 tasks).
+  Host preflight: 35 GiB available RAM, 3.9 GiB free swap. T-20/T-19 remain open; no qualifying
+  campaign ran. Next address cache eviction complexity/accounting and remaining resident storage
+  metadata while preserving authenticated recovery and campaign prerequisites.
 
 - [Decision 0084](docs/decisions/0084-native-adapter-io-observation.md) adds fixed-size native
   adapter-call/failure and requested/returned-byte observation. Forwarded results and durability
@@ -1363,11 +1388,12 @@ metadata base with exact first-owner proofs and explicit read amplification. Tha
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
 Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
-Decisions 0074–0084 connect independent development oracles, native construction/recovery/query,
+Decisions 0074–0085 connect independent development oracles, native construction/recovery/query,
 real process-loss tests and supervised sampling to the disk path. Profile-derived limits now
 validate across the accepted size range, and the 1,000/10,000 development oracle check passes.
-Native commands remain capped pending qualification readiness. Next complete index-operation
-accounting alongside the adapter counters and address remaining resident storage metadata.
+Native commands remain capped pending qualification readiness. Cached primitive work now complements
+adapter counters, but uncached/recovery/publication accounting is incomplete. Next address cache
+eviction complexity/accounting and remaining resident storage metadata.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference
