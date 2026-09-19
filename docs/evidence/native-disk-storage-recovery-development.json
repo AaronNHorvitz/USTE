@@ -1,0 +1,28 @@
+{
+  "schema": "uste-native-disk-storage-recovery-development-observation-v1",
+  "tested_commit": "ec1dbca0c95c2a06053476568773cf66366c6e7b",
+  "binary_sha256": "ff6fee671f0f5c484bbaa9545296080ed6beae7f53d0d2408ec60ac0cc4e7721",
+  "cargo_lock_sha256": "7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b",
+  "qualification": "nonqualifying-development-recovery",
+  "artifact_directory": "experiments/t20-bench/target/native-pressure.kedpTk",
+  "command": "uste-t20-bench linux-disk-open --root <artifact-directory> --password-file <artifact-directory>/password --entities 10000",
+  "measurement": "Selected fields from two successful reports and /usr/bin/time -v, not full report archives",
+  "process_scope": { "MemoryHigh": "3G", "MemoryMax": "4G", "MemorySwapMax": "512M", "heavy_workloads": 1 },
+  "entities": 10000,
+  "relationships": 100000,
+  "frontier": 23,
+  "final_state_counts": [110001, 210001, 100000, 100000, 100000, 300000, 1, 1],
+  "resident_history_entries": { "certificates": 0, "blob_references": 0, "inventory_ids": 0, "namespace_totals": 0 },
+  "validation_and_replay_each": { "groups": 23, "encoded_group_certificate_bytes": 55593902, "reference_bindings": 0, "verified_logical_blob_bytes": 0 },
+  "observations": [
+    { "used_existing_catalog": false, "elapsed_seconds": 11.90, "report_elapsed_milliseconds": 11905, "maximum_rss_kib": 265132, "user_seconds": 11.61, "system_seconds": 0.25, "swaps": 0, "exit_status": 0, "adapter_read_bytes": 856288220, "adapter_write_bytes": 24722, "catalog_merge_output_logical_bytes": 68 },
+    { "used_existing_catalog": true, "elapsed_seconds": 11.88, "report_elapsed_milliseconds": 11881, "maximum_rss_kib": 264800, "user_seconds": 11.62, "system_seconds": 0.23, "swaps": 0, "exit_status": 0, "adapter_read_bytes": 799454356, "adapter_write_bytes": 0 }
+  ],
+  "limitations": [
+    "Optional derived catalog was rebuilt on first observation and reused on second",
+    "No user-cache/kernel-cache/device-cache controlled repeated campaign",
+    "Not larger than RAM; no 16-CPU/24-GiB/200-GiB qualifying reservation",
+    "No BM-01/BM-06, latency target, physical-device-I/O or production qualification",
+    "These observations precede Decision 0104 reverse-validation implementation"
+  ]
+}

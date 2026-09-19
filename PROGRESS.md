@@ -42,7 +42,11 @@ reconstructing `GraphState`. Decision 0059 at `8885da4` removes the hidden absol
 pre-scrub from graph recovery: fixed manifest discovery now precedes one caller-bounded semantic
 scan. Decisions 0060–0073 add the opt-in disk coordinator, bounded overlays and maintained
 first-reference roots; Decisions 0074–0086 connect native development construction, recovery,
-supervised queries, profile-derived work limits and partial adapter/index I/O observation. T-20 remains open
+supervised queries, profile-derived work limits and partial adapter/index I/O observation.
+Decisions 0087–0103 add the 10,000-entity native development profile, bounded cache refinements,
+multi-revision private recovery stages, map-free certificate/blob catalog recovery, bounded
+inventory publication and authorized upload charge transfer. These capabilities are locally
+verified, not qualifying benchmark results. T-20 remains open
 pending remaining scalability/accounting work, larger-than-memory qualification and qualifying
 BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
@@ -53,6 +57,41 @@ every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 rem
 unverified external distribution prerequisite.
 
 ## Completed this increment
+
+- Tested on pushed `ec1dbca` plus this increment: [Decision 0104](docs/decisions/0104-authenticated-reverse-journal-validation.md)
+  adds constant-state reverse certificate-chain validation and uses it for order-independent
+  transaction-ID admission. Forward replay/cursor semantics remain unchanged. Three focused
+  storage tests pass (1.22s), including 57 injected read/open/metadata faults with restart, every
+  subrange and exact/minus-one budgets, authentic forks and callback-time corruption. Command:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --locked --offline reverse_certificate_range
+  -- --test-threads=1 --nocapture`. Initial strict lint found a test-only unnecessary `vec!`;
+  corrected to an array. The full gate passed under the established 3G/4G/512M scope:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn -p uste-replay -p uste-graph
+  --all-targets --all-features --locked --offline -- --test-threads=1` (112 storage unit tests,
+  713.34s, with no fault-matrix skips; 16 graph disk-index tests, 526.76s; 17 coordinator/replay
+  tests, 192.59s; 26 transaction integration tests, 8.05s; 13 authorization tests, 0.89s; all other
+  selected unit, adapter and process tests pass). Then `CARGO_BUILD_JOBS=1 cargo test --release
+  --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed
+  51 active native unit tests (42.76s) and three CLI/process-loss tests (12.34s), with two unchanged
+  exact-scale oracle ignores. `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets
+  --all-features --locked --offline -- -D warnings` passed (4.35s), as did
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings` (2.18s) and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage -p uste-txn --no-deps --locked --offline` (2.10s). Format/whitespace,
+  evidence JSON, docs (177 links) and task graph (68 tasks) pass. Preflight: 36 GiB available RAM,
+  3.9 GiB free swap, one job/thread/heavy workload. Sampled scope peak 1,124,913,152 bytes, zero
+  sampled swap (not the final whole-run peak). No task or qualification gate is newly complete.
+
+- Before those code changes, pushed `ec1dbca` reopened the retained 10,000-entity/100,000-relationship
+  native fixture twice at revision 23. [Selected exact-version measurements](docs/evidence/native-disk-storage-recovery-development.json)
+  record optional catalog rebuild then reuse, 11.90s/11.88s wall time, 265,132/264,800 KiB peak RSS,
+  and zero resident certificate/blob/inventory/namespace history entries. Command under the same
+  memory scope: `/usr/bin/time -v experiments/t20-bench/target/release/uste-t20-bench linux-disk-open
+  --root experiments/t20-bench/target/native-pressure.kedpTk --password-file
+  experiments/t20-bench/target/native-pressure.kedpTk/password --entities 10000`; release rebuilt
+  using `CARGO_BUILD_JOBS=1 cargo build --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline`. Both exit 0. These are uncontrolled development observations, not BM-06,
+  larger-than-memory or qualifying resource reservations. Retained synthetic fixtures are intact.
 
 - Tested on pushed `ee20df7` plus this increment: [Decision 0103](docs/decisions/0103-authorized-disk-inventory-commits.md)
   adds opt-in authorized ordinary inventory commits with exact first ownership, current target
@@ -1763,9 +1802,9 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0103 authorized upload charge transfer and generic ordinary consumer
-inventory publication are locally verified. Continue T-20 scalable accounting/native recovery
-measurement and qualifying campaign prerequisites. Decisions
+Current action: Decision 0104 reverse authenticated validation is locally verified. Measure its
+native I/O change and continue T-20 order-independent metadata validation, scalable accounting
+and qualifying campaign prerequisites. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

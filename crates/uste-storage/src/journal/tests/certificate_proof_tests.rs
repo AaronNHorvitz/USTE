@@ -1,6 +1,7 @@
 use super::*;
 
 mod bound_roots;
+mod reverse;
 
 #[test]
 fn certificate_revision_lookup_matches_exact_proofs_without_preliminary_reads() {

@@ -131,6 +131,37 @@ fn disk_blob_recovery_captures_exact_transaction_inventory_and_streams_without_h
             encoded_bytes: bytes
         }
     );
+    let mut reverse = Vec::new();
+    recovery
+        .visit_transactions_reverse(
+            &mut fs,
+            CommitRevision::FIRST,
+            outcomes[2].revision,
+            3,
+            RANGE_BYTES + 4161,
+            |_, transaction| {
+                assert_eq!(
+                    transaction.blob_inventory(),
+                    (transaction.revision().get() == 3).then_some(&inventory)
+                );
+                reverse.push(transaction.outcome());
+                Ok(())
+            },
+        )
+        .unwrap();
+    assert_eq!(reverse, outcomes.into_iter().rev().collect::<Vec<_>>());
+    assert!(
+        recovery
+            .visit_transactions_reverse(
+                &mut fs,
+                CommitRevision::FIRST,
+                outcomes[2].revision,
+                3,
+                RANGE_BYTES + 4160,
+                |_, _| Ok(()),
+            )
+            .is_err()
+    );
 }
 
 #[test]

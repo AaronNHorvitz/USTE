@@ -397,6 +397,34 @@ where
         self.finish_transaction_cursor(cursor).map(|_| ())
     }
 
+    /// Order-independent validation in descending revision order. Every transaction is bound
+    /// to the authenticated frontier before exposure, without per-revision suffix proof scans.
+    /// Never use this for ordered reducer replay. Results remain provisional until success.
+    pub fn visit_transactions_reverse<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        mut visitor: V,
+    ) -> Result<(), TransactionError>
+    where
+        V: FnMut(&mut F, RecoveredFrontierTransaction) -> Result<(), StorageError>,
+    {
+        self.journal
+            .visit_committed_range_reverse_report(
+                filesystem,
+                first,
+                last,
+                maximum_groups,
+                maximum_encoded_bytes,
+                |filesystem, group| visitor(filesystem, capture_group(self.scope, group)?),
+            )
+            .map(|_| ())
+            .map_err(map_open_error)
+    }
+
     /// Admit an inclusive range before I/O. This is a trusted recovery capability, not a
     /// consumer-authorized read, and does not establish domain or coordinator validity.
     pub fn open_transaction_cursor(

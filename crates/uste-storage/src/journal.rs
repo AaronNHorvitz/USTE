@@ -1147,6 +1147,60 @@ where
         last: CommitRevision,
         maximum_groups: u64,
         maximum_encoded_bytes: u64,
+        visitor: V,
+    ) -> Result<JournalRangeReadReport, StorageError>
+    where
+        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        self.visit_committed_range_ordered(
+            filesystem,
+            first,
+            last,
+            maximum_groups,
+            maximum_encoded_bytes,
+            false,
+            visitor,
+        )
+    }
+
+    /// Visit an inclusive range in descending revision order. This is for order-independent
+    /// validation, never forward reducer replay. Authenticate the last certificate to the pinned
+    /// frontier once, then follow its authenticated predecessor digests backward. Each group is
+    /// bound before its callback, with constant retained certificate state and linear certificate
+    /// reads. The shared byte allowance includes the initial proof and selected groups/certificates.
+    /// As with forward visits, callback results remain provisional until the whole call succeeds.
+    pub fn visit_committed_range_reverse_report<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        visitor: V,
+    ) -> Result<JournalRangeReadReport, StorageError>
+    where
+        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        self.visit_committed_range_ordered(
+            filesystem,
+            first,
+            last,
+            maximum_groups,
+            maximum_encoded_bytes,
+            true,
+            visitor,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn visit_committed_range_ordered<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        reverse: bool,
         mut visitor: V,
     ) -> Result<JournalRangeReadReport, StorageError>
     where
@@ -1159,7 +1213,37 @@ where
             return Err(StorageError::ResourceLimit);
         }
         let mut remaining = maximum_encoded_bytes;
-        for sequence in first.get()..=last.get() {
+        let mut reverse_expected = if reverse {
+            if let Some(limits) = self.certificate_read_limits {
+                let proof = self.authenticate_certificate_revision(
+                    filesystem,
+                    last,
+                    CertificateAnchorReadLimits::new(
+                        limits.maximum_certificates(),
+                        limits.maximum_encoded_bytes().min(remaining),
+                    )?,
+                )?;
+                remaining = remaining
+                    .checked_sub(proof.report().encoded_bytes)
+                    .ok_or(StorageError::ResourceLimit)?;
+                Some(proof.anchor().1)
+            } else {
+                Some(
+                    *self
+                        .certificate_anchors
+                        .get(&last)
+                        .ok_or(StorageError::IntegrityFailure)?,
+                )
+            }
+        } else {
+            None
+        };
+        for position in 0..=last.get() - first.get() {
+            let sequence = if reverse {
+                last.get() - position
+            } else {
+                first.get() + position
+            };
             let revision =
                 CommitRevision::new(sequence).map_err(|_| StorageError::IntegrityFailure)?;
             remaining = remaining
@@ -1175,7 +1259,11 @@ where
                 SMALL_ENVELOPE_BYTES,
             )?;
             let certificate_digest = sha256(&encoded);
-            if let Some(limits) = self.certificate_read_limits {
+            if let Some(expected) = reverse_expected {
+                if certificate_digest != expected {
+                    return Err(StorageError::IntegrityFailure);
+                }
+            } else if let Some(limits) = self.certificate_read_limits {
                 let proof = self.authenticate_certificate_anchor(
                     filesystem,
                     revision,
@@ -1202,6 +1290,12 @@ where
             )?;
             if certificate.revision != sequence || certificate.group_sequence != sequence {
                 return Err(StorageError::IntegrityFailure);
+            }
+            if reverse {
+                if sequence == 1 && certificate.previous_digest != [0; 32] {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                reverse_expected = Some(certificate.previous_digest);
             }
             validate_group_encoded_length(certificate.group_length)?;
             remaining = remaining

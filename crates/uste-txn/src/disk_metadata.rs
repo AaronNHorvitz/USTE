@@ -117,7 +117,7 @@ where
         }
         Ok(())
     })?;
-    recovery.visit_transactions(
+    recovery.visit_transactions_reverse(
         filesystem,
         CommitRevision::FIRST,
         root.revision(),
