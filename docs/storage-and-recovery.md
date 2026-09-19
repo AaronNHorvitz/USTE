@@ -217,6 +217,10 @@ precedes admission, journal-owned lookup/cursors recheck certificate ownership a
 and proven-target private batches preserve canonicality without rescanning unchanged subtrees.
 Staged capabilities do not publish roots or validate reducer semantics; current/historical policy
 and domain admission remain facade responsibilities.
+Decision 0140 exposes these operations through exclusive namespace/target-bound coordinator and
+recovery maintenance. Historical recovery handles cannot read future trees or publish any root;
+retained transaction proofs are reused only under their original live owner. Consumer policy and
+domain semantics are not conferred by these privileged maintenance handles.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

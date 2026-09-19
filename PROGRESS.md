@@ -58,6 +58,33 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `dbdf4a1` plus this increment: [Decision 0140](docs/decisions/0140-scoped-packed-index-maintenance.md)
+  adds exclusive namespace/certificate-target maintenance to ordinary coordinator and authenticated
+  recovery paths. Retained proofs are reused without I/O, never silently replaced after rejection;
+  unbound transactions require explicitly bounded certificate authentication. Admission, lookup,
+  staging and sticky-error cursors reject future revisions or other namespaces before tree I/O.
+  No root publication or consumer authorization is exposed by the private staging handle.
+  Three tests cover chained historical stages, foreign-owner/future-tree refusals, cursor poisoning,
+  exact retries/transaction collisions, certificate-budget refusal and all three applicable
+  certificate ReadAt error/crash cases. Initial fixture compilation was corrected to use public
+  value/delta APIs and the Metadata fault name. The fault test initially assumed certificate
+  reopens/metadata calls; inspection confirmed its retained handle performs only ReadAt, and the
+  final test injects every applicable operation rather than assuming nonexecuted faults occurred.
+  Focused scope `run-p566893-i21566447.scope`: 3 tests/0.01s and strict workspace Clippy/5.13s passed.
+  Full scope `run-p567468-i21566472.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 521 tests/47 executables (replay 50/115.82s).
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/0.06s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-txn --no-deps --locked --offline` passed/1.10s. Log:
+  `/tmp/uste-d140-workspace-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap; sampled peak
+  1,556,697,088 bytes/zero swap, not final peak. Formatting, diff, documentation/task checks passed.
+  No native matrix rerun (baseline `42f9abb`), benchmark/M1/lockfile change or task completion.
+  Unregistered `packed_root_maintenance.rs`, `packed_roots.rs` test draft and Decision 0141 are
+  excluded next-package work. Next connect scoped root discovery/terminal publication, then
+  versioned domain integration, complete accounting and qualification.
+
 - Implemented on pushed `687be92` plus this increment: [Decision 0139](docs/decisions/0139-certificate-bound-packed-tree-capabilities.md)
   adds opaque live-owner canonical packed-tree admission, lookup, sticky-error cursors and private
   certificate-targeted copy-on-write staging. Historical base capabilities survive same-owner

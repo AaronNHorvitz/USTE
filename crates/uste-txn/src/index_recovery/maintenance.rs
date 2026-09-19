@@ -26,6 +26,35 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Pin private packed-family construction to one authenticated recovery transaction.
+    /// Bound receipts never fall back to I/O after owner/frontier rejection.
+    pub fn packed_indexes_with_io(
+        &mut self,
+        filesystem: &mut F,
+        transaction: &RecoveredFrontierTransaction,
+        limits: uste_storage::journal::CertificateAnchorReadLimits,
+    ) -> Result<crate::PackedIndexMaintenance<'_, F, W, E, I>, TransactionError> {
+        if transaction.scope != self.scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let target = if let Some(proof) = &transaction.certificate_proof {
+            if proof.anchor() != (transaction.revision, transaction.certificate_digest) {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            proof.clone()
+        } else {
+            self.journal
+                .authenticate_certificate_anchor(
+                    filesystem,
+                    transaction.revision,
+                    transaction.certificate_digest,
+                    limits,
+                )
+                .map_err(map_open_error)?
+        };
+        crate::PackedIndexMaintenance::new(self.scope, &mut self.journal, target)
+    }
+
     /// Reuse a cursor's exact live-owner certificate evidence when present; otherwise use the
     /// explicit-I/O proof path. A bound transaction never falls back after proof rejection.
     pub fn stage_indexes_with_io(
