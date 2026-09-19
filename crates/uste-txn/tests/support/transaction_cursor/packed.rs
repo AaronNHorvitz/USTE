@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_roots.rs"]
+mod roots;
 use uste_storage::{
     IndexDelta, journal::CertificateAnchorReadLimits, packed_index_pack::PackWriteLimits,
     packed_tree_batch::TreeBatchLimits, packed_tree_cursor::TreeCursorLimits,

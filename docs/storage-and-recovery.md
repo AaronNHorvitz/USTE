@@ -221,6 +221,9 @@ Decision 0140 exposes these operations through exclusive namespace/target-bound 
 recovery maintenance. Historical recovery handles cannot read future trees or publish any root;
 retained transaction proofs are reused only under their original live owner. Consumer policy and
 domain semantics are not conferred by these privileged maintenance handles.
+Decision 0141 adds namespace-fixed coordinator discovery and terminal publication, plus explicit
+bounded historical-revision recovery discovery. Publication remains outside private staging and
+requires the exact live frontier. Cold discovery still requires canonical and domain admission.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

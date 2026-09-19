@@ -11,6 +11,7 @@ mod commit_admission;
 mod disk_metadata;
 mod index_recovery;
 mod packed_maintenance;
+mod packed_root_maintenance;
 pub use packed_maintenance::{PackedIndexMaintenance, ScopedPackedCursor};
 
 pub use authorized::{

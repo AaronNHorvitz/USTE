@@ -58,6 +58,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `3197fe9` plus this increment: [Decision 0141](docs/decisions/0141-scoped-packed-root-publication.md)
+  adds namespace-fixed packed-root publication/discovery to ordinary and recovery maintenance.
+  Current discovery authenticates the frontier; historical recovery discovery takes an explicit
+  revision and separate certificate/manifest limits. Storage rejects intermediate publication
+  before creation. Three tests cover current-only discovery, wrong-certificate rejection, cold
+  reopen/admission of unchanged historical packs, old-owner rejection, empty families and all
+  scope-bound operations (including sticky cursor rejection), without claiming domain validation.
+  Final scope `run-p571919-i21407265.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 65 tests/3 executables (43 coordinator/0.54s).
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/0.22s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-txn --no-deps --locked --offline` passed/1.11s. Log:
+  `/tmp/uste-d141-txn-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap. Full workspace baseline
+  remains D0140's 521/47; native remains `42f9abb`. No benchmark/M1/lockfile change or task completion.
+  Next implement bounded packed coordinator metadata prefix construction and journal-correspondence
+  admission, then live/domain integration, complete accounting and qualification.
+
 - Implemented on pushed `dbdf4a1` plus this increment: [Decision 0140](docs/decisions/0140-scoped-packed-index-maintenance.md)
   adds exclusive namespace/certificate-target maintenance to ordinary coordinator and authenticated
   recovery paths. Retained proofs are reused without I/O, never silently replaced after rejection;
