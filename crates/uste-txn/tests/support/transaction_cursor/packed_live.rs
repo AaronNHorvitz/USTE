@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_read_only.rs"]
+mod read_only;
 #[path = "packed_live_rebase.rs"]
 mod rebase;
 use uste_storage::PageCache;
@@ -545,6 +547,10 @@ fn packed_live_every_observed_commit_fault_preserves_cold_exact_retry() {
                 assert_eq!(fs.pending_faults(), 0);
                 assert!(result.is_err(), "{operation:?}/{occurrence}/{action:?}");
                 if result == Err(TransactionError::OutcomeUnknown) {
+                    assert!(matches!(
+                        live.packed_index_reader(),
+                        Err(TransactionError::OutcomeUnknown)
+                    ));
                     assert!(matches!(
                         live.state(),
                         Err(TransactionError::OutcomeUnknown)

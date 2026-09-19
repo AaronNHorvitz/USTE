@@ -22,7 +22,7 @@ pub use packed_coordinator::{
     PackedMetadataRebaseLimits, PackedMetadataRebaseReport,
 };
 mod packed_root_maintenance;
-pub use packed_maintenance::{PackedIndexMaintenance, ScopedPackedCursor};
+pub use packed_maintenance::{PackedIndexMaintenance, PackedIndexReader, ScopedPackedCursor};
 
 pub use authorized::{
     AuthorizedBlobUpload, AuthorizedCoordinator, AuthorizedDiskInventoryError,

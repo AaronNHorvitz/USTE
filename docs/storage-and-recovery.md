@@ -304,6 +304,11 @@ preparation; fresh writes use bounded packed graph preparation and publication. 
 policy changes synchronize before root repair, including failed repair, so revocation is immediate.
 Committed repair errors preserve their durable outcome; uncertainty remains quarantined. This does
 not expose raw maintenance or provide packed queries, upload reservations or native qualification.
+Decision 0159 separates trusted immutable packed access from staging/publication: an owned current
+coordinator or authenticated maintenance target supplies a read-only scoped borrow. Existing
+maintenance reads delegate to the same owner/key/revision checks. Exhausted cursors still recheck
+authority, and failures remain sticky. This is neither caller authorization nor concurrent snapshot
+support; native query integration and packed page caching remain separate.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

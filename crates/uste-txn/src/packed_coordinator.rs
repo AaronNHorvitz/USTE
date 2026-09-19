@@ -130,6 +130,24 @@ where
     ) -> Result<ReducerIndexMaintenance<'_, S, F, W, E, I>, TransactionError> {
         self.inner.reducer_and_index_maintenance()
     }
+    /// Trusted immutable access to already-admitted families; not caller authorization.
+    pub fn packed_index_reader(
+        &self,
+    ) -> Result<PackedIndexReader<'_, F, W, E, I>, TransactionError> {
+        if self.inner.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        let anchor = self
+            .inner
+            .journal
+            .checkpoint_anchor()
+            .ok_or(TransactionError::InvalidRequest)?;
+        Ok(PackedIndexReader::new(
+            self.inner.scope,
+            &self.inner.journal,
+            anchor,
+        ))
+    }
     pub fn install_postcommit_publication(
         &mut self,
         publication: S::Publication,

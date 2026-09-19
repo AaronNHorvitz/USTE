@@ -2,7 +2,41 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — authorized packed writes (Decision 0158)
+## Latest verified increment — read-only packed access (Decision 0159)
+
+Implemented on pushed `664f6c4` plus this increment: immutable scoped packed index readers from
+the current coordinator or authenticated maintenance target. Maintenance delegates exact lookup,
+binding validation and forward/reverse traversal to the same implementation. No staging/publication
+or caller authorization capability is exposed; uncertainty blocks construction. Existing checks
+remain active even for exhausted cursors, and failures remain sticky.
+
+Two new tests cover lookup/traversal equivalence, exact and three narrower lookup bounds, foreign
+owners including exhausted cursors, no writes, and all 45 observed cursor I/O/error/crash cases.
+Existing uncertain commit cases now also assert reader refusal; existing future/wrong-namespace
+maintenance tests exercise the delegated path. An initial fixture used `FileLen` instead of the
+fault adapter's `Metadata` operation; corrected before execution. Focused session 67113 /
+`run-p698005-i21652082.scope` passed two tests (0.34 s) and Clippy (0.42 s).
+
+Full gate session 18972 / `run-p698433-i21717236.scope` exited 0: 619 tests across 47 executables,
+zero failed/ignored (graph disk 61/119.34 s; transaction integration 95/100.95 s), Clippy 0.06 s,
+graph/transaction docs 2.64 s. Preflight 31 GiB available RAM / 5.7 GiB free swap; sampled scope
+peak 1,653,665,792 bytes / zero swap. Format, diff, docs and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d159-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+```
+
+Next implement authorized packed point/history reads, then bounded graph expansion, caching and
+native qualification readiness. Decision 0160 and unregistered transaction `authorized_packed/read.rs`,
+graph `live/authorized_read.rs` and `packed_authorized_reads.rs` test drafts are excluded here.
+T-20/T-19 remain open. Native standalone remains last tested at `42f9abb`; M1's pinned interface
+and qualification evidence are unchanged. This section supersedes earlier next-step text below.
+
+## Prior verified increment — authorized packed writes (Decision 0158)
 
 Implemented on pushed `497ce72` plus this increment: restricted inventory-free packed writes,
 typed target authorization and quotas before clock/storage, shared exact retry/collision checks,

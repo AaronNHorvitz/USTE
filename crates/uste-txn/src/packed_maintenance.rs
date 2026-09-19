@@ -1,5 +1,7 @@
 //! Privileged derived-cache maintenance, never consumer authorization.
 use super::*;
+mod reader;
+pub use reader::PackedIndexReader;
 use uste_storage::journal::{
     CanonicalPackedTree, CertificateAnchorProof, CertificateAnchorReadLimits, CertifiedPackedRoot,
     CertifiedPackedTreeCursor, CertifiedPackedTreeStage,
@@ -81,6 +83,9 @@ where
     pub fn anchor(&self) -> (CommitRevision, [u8; 32]) {
         self.target.anchor()
     }
+    pub fn as_reader(&self) -> PackedIndexReader<'_, F, W, E, I> {
+        PackedIndexReader::new(self.scope, self.journal, self.anchor())
+    }
     fn check(&self, context: TreeReadContext) -> Result<(), TransactionError> {
         if context.scope != self.scope || context.revision > self.target.anchor().0 {
             return Err(TransactionError::InvalidRequest);
@@ -126,10 +131,7 @@ where
         &self,
         tree: &CanonicalPackedTree,
     ) -> Result<(), TransactionError> {
-        self.check(tree.context())?;
-        self.journal
-            .validate_packed_tree_binding(tree)
-            .map_err(TransactionError::Storage)
+        self.as_reader().validate_tree_binding(tree)
     }
     pub fn stage(
         &mut self,
@@ -163,10 +165,7 @@ where
         key: &[u8],
         limits: TreeLookupLimits,
     ) -> Result<TreeLookupResult, TransactionError> {
-        self.check(tree.context())?;
-        self.journal
-            .packed_tree_get(filesystem, tree, key, limits)
-            .map_err(TransactionError::Storage)
+        self.as_reader().get(filesystem, tree, key, limits)
     }
     pub fn cursor(
         &self,
@@ -175,15 +174,7 @@ where
         upper: Option<&[u8]>,
         limits: TreeCursorLimits,
     ) -> Result<ScopedPackedCursor, TransactionError> {
-        self.check(tree.context())?;
-        let inner = self
-            .journal
-            .open_packed_tree_cursor(tree, lower, upper, limits)
-            .map_err(TransactionError::Storage)?;
-        Ok(ScopedPackedCursor {
-            inner,
-            failed: false,
-        })
+        self.as_reader().cursor(tree, lower, upper, limits)
     }
     /// Descending `(lower, upper]` traversal; all owner/scope checks match the forward cursor.
     pub fn reverse_cursor(
@@ -193,32 +184,13 @@ where
         upper: Option<&[u8]>,
         limits: TreeCursorLimits,
     ) -> Result<ScopedPackedCursor, TransactionError> {
-        self.check(tree.context())?;
-        let inner = self
-            .journal
-            .open_reverse_packed_tree_cursor(tree, lower, upper, limits)
-            .map_err(TransactionError::Storage)?;
-        Ok(ScopedPackedCursor {
-            inner,
-            failed: false,
-        })
+        self.as_reader().reverse_cursor(tree, lower, upper, limits)
     }
     pub fn next(
         &self,
         filesystem: &mut F,
         cursor: &mut ScopedPackedCursor,
     ) -> Result<Option<PackedCursorEntry>, TransactionError> {
-        if cursor.failed {
-            return Err(TransactionError::Storage(StorageError::NeedsRecovery));
-        }
-        let result = self.check(cursor.inner.context()).and_then(|()| {
-            self.journal
-                .next_packed_tree_entry(filesystem, &mut cursor.inner)
-                .map_err(TransactionError::Storage)
-        });
-        if result.is_err() {
-            cursor.failed = true;
-        }
-        result
+        self.as_reader().next(filesystem, cursor)
     }
 }
