@@ -22,6 +22,16 @@ streaming committed charges. Foreign-kernel identities are denied, and another a
 principal sees no outcome. Existing expiry semantics are preserved. Staging reservations are
 not represented by committed-byte usage and must not be inferred to be zero.
 
+Security hardening: the facade owns a private 64 KiB page cache and exposes no cache statistics.
+Outcome lookup work limits are fixed at 64 page visits and 136 value bytes, not consumer-tunable.
+The v1 format permits at most 2^24 pages and fixed-width retry/transaction outcomes; binary search
+and their entry fragments fit this bound. An undersized consumer-selected budget could otherwise
+distinguish another principal's transaction from absence before ownership filtering. Authorization
+precedes locking the private cache, clock sampling and disk access. Cache-lock poisoning fails
+closed. This removes those explicit telemetry/admission channels; it does not claim constant-time
+execution or conceal storage corruption from the trusted adapter. Committed accounting limits
+remain explicit under `InspectQuota`, which authorizes namespace usage disclosure.
+
 Immutable Rust borrows prevent policy/domain mutation during an operation. The trusted adapter
 must create a new facade after durable policy publication and supply the matching current kernel.
 No persistent read-view lease is introduced. Missing or mismatched policy fails closed; no stale

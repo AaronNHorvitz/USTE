@@ -983,8 +983,22 @@ Verification: `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G
 -p uste-graph --all-targets --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1
 cargo clippy -p uste-storage -p uste-txn -p uste-graph --all-targets --locked --offline
 -- -D warnings'` exited 0. Host check after completion: 17 GiB available RAM, 1.5 GiB free
-swap. No qualifying benchmark ran. Next harden the restricted metadata facade: caller-owned
-cache telemetry and adjustable outcome lookup limits must not cross its authorization boundary.
+swap. No qualifying benchmark ran.
+
+T-20 metadata authorization hardening, tested on `8e85535` plus this increment: the restricted
+facade now owns its private 64 KiB cache and fixes outcome admission at 64 visits/136 bytes.
+Consumers cannot inspect cache telemetry or choose undersized budgets that reveal another
+principal's transaction before ownership filtering. Decision 0065 records the interface change;
+the pinned M1 interface is unchanged. Existing base/overlay isolation and denial-before-I/O tests
+pass, as do new missing-versus-foreign transaction checks before and after expiry.
+Commands under the same 3G/4G/512M scope: `CARGO_BUILD_JOBS=1 cargo test -p uste-graph
+--test disk_index --locked --offline -- --test-threads=1` (8 passed), then the same command
+with filter `cold_root_pair_reconstructs_seed_and_replays_graph_suffix` after the final assertions
+(1 passed); `CARGO_BUILD_JOBS=1 cargo clippy -p uste-txn -p uste-graph --all-targets
+--locked --offline -- -D warnings` passed. `python3 scripts/check_docs.py` and
+`python3 scripts/check_task_graph.py` passed (139 links, 68 tasks).
+Next implement bounded disk graph reads behind current-policy and candidate authorization;
+writes and staged-upload reconciliation remain separate unfinished consumer capabilities.
 
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and

@@ -318,8 +318,6 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
             .unwrap(),
         )
         .unwrap();
-    let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
-    let mut cache = PageCache::new(64 * 1024).unwrap();
     let mut unused_clock = ScriptedClock::new([]);
     assert_eq!(
         facade.outcome(
@@ -327,8 +325,6 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
             &principal,
             IdempotencyKey::from_bytes([2; 16]),
             &mut unused_clock,
-            lookup,
-            &mut cache
         ),
         Err(uste_txn::AuthorizedError::Unauthorized)
     );
@@ -338,8 +334,6 @@ fn assert_metadata_denial_precedes_disk_io(disk: &Disk, filesystem: &mut FaultFs
             &principal,
             TransactionId::from_bytes([34; 16]),
             &mut unused_clock,
-            lookup,
-            &mut cache
         ),
         Err(uste_txn::AuthorizedError::Unauthorized)
     );

@@ -1,5 +1,7 @@
 //! Read-only consumer metadata capabilities over the privileged disk coordinator.
 
+use std::sync::Mutex;
+
 use uste_crypto::EntropySource;
 use uste_policy::{Action, AuthenticatedPrincipal, NamespacePolicy, PolicyKernel, Target};
 use uste_storage::{
@@ -32,6 +34,8 @@ where
 {
     inner: &'a DiskCommitCoordinator<S, F, W, E, I>,
     policy: &'a PolicyKernel,
+    // Consumer-visible cache statistics would disclose privileged query work.
+    cache: Mutex<PageCache>,
 }
 
 impl<'a, S, F, W, E, I> AuthorizedDiskMetadata<'a, S, F, W, E, I>
@@ -47,7 +51,11 @@ where
         inner: &'a DiskCommitCoordinator<S, F, W, E, I>,
         policy: &'a PolicyKernel,
     ) -> Result<Self, AuthorizedError> {
-        let facade = Self { inner, policy };
+        let facade = Self {
+            inner,
+            policy,
+            cache: Mutex::new(PageCache::new(64 * 1024).map_err(TransactionError::Storage)?),
+        };
         facade.validate_policy()?;
         Ok(facade)
     }
@@ -77,37 +85,46 @@ where
         self.validate_policy()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn outcome(
         &self,
         filesystem: &mut F,
         principal: &AuthenticatedPrincipal,
         key: IdempotencyKey,
         clock: &mut impl Clock,
-        limits: IndexGetLimits,
-        cache: &mut PageCache,
     ) -> Result<Option<TransactionOutcome>, AuthorizedError> {
         self.authorize(principal, Action::ReadOwnOutcome)?;
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?;
         let now = clock
             .observe()
             .map_err(|_| TransactionError::RetryableUnavailable)?
             .wall_utc;
         self.inner
-            .outcome(filesystem, principal.digest(), key, now, limits, cache)
+            .outcome(
+                filesystem,
+                principal.digest(),
+                key,
+                now,
+                outcome_limits()?,
+                &mut cache,
+            )
             .map_err(Into::into)
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn transaction_outcome(
         &self,
         filesystem: &mut F,
         principal: &AuthenticatedPrincipal,
         transaction: TransactionId,
         clock: &mut impl Clock,
-        limits: IndexGetLimits,
-        cache: &mut PageCache,
     ) -> Result<Option<TransactionOutcome>, AuthorizedError> {
         self.authorize(principal, Action::ReadOwnOutcome)?;
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?;
         let now = clock
             .observe()
             .map_err(|_| TransactionError::RetryableUnavailable)?
@@ -118,8 +135,8 @@ where
                 principal.digest(),
                 transaction,
                 now,
-                limits,
-                cache,
+                outcome_limits()?,
+                &mut cache,
             )
             .map_err(Into::into)
     }
@@ -136,4 +153,14 @@ where
             .committed_blob_usage(filesystem, principal.digest(), limits)
             .map_err(Into::into)
     }
+}
+
+// Fixed-width v1 outcomes need at most 136 value bytes. The format admits at most 2^24
+// pages: binary search plus the fixed-width entry's fragments fit within 64 visits.
+// Caller-selected undersized budgets could distinguish another principal's transaction
+// from absence before the ownership filter. Do not expose that tuning knob here.
+fn outcome_limits() -> Result<IndexGetLimits, AuthorizedError> {
+    IndexGetLimits::new(64, 136)
+        .map_err(TransactionError::Storage)
+        .map_err(Into::into)
 }

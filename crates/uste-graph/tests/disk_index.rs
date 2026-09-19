@@ -2827,82 +2827,59 @@ fn assert_authorized_disk_metadata(
     let foreign_kernel = uste_policy::PolicyKernel::new();
     let foreign = foreign_kernel.authenticate(&mut Identity, &0x90).unwrap();
     let facade = uste_txn::AuthorizedDiskMetadata::new(disk, &kernel).unwrap();
-    let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
-    let mut cache = PageCache::new(64 * 1024).unwrap();
+    // Missing and another principal's transactions stay indistinguishable, including expiry.
+    for now in [3, 10_000_000] {
+        for transaction in [
+            TransactionId::from_bytes([33; 16]),
+            TransactionId::from_bytes([99; 16]),
+        ] {
+            assert_eq!(
+                facade
+                    .transaction_outcome(filesystem, &bob, transaction, &mut clock(now))
+                    .unwrap(),
+                None
+            );
+        }
+    }
     for revision in [1_u8, 2] {
         let key = IdempotencyKey::from_bytes([revision; 16]);
         let transaction = TransactionId::from_bytes([revision + 32; 16]);
         let outcome = facade
-            .outcome(filesystem, &alice, key, &mut clock(3), lookup, &mut cache)
+            .outcome(filesystem, &alice, key, &mut clock(3))
             .unwrap()
             .unwrap();
         assert_eq!(outcome.revision.get(), u64::from(revision));
         assert_eq!(
             facade
-                .transaction_outcome(
-                    filesystem,
-                    &alice,
-                    transaction,
-                    &mut clock(3),
-                    lookup,
-                    &mut cache
-                )
+                .transaction_outcome(filesystem, &alice, transaction, &mut clock(3),)
                 .unwrap(),
             Some(outcome)
         );
         assert_eq!(
             facade
-                .outcome(filesystem, &bob, key, &mut clock(3), lookup, &mut cache)
+                .outcome(filesystem, &bob, key, &mut clock(3))
                 .unwrap(),
             None
         );
         assert_eq!(
             facade
-                .transaction_outcome(
-                    filesystem,
-                    &bob,
-                    transaction,
-                    &mut clock(3),
-                    lookup,
-                    &mut cache
-                )
+                .transaction_outcome(filesystem, &bob, transaction, &mut clock(3),)
                 .unwrap(),
             None
         );
         for principal in [&denied, &foreign] {
             let mut unused_clock = ScriptedClock::new([]);
             assert_eq!(
-                facade.outcome(
-                    filesystem,
-                    principal,
-                    key,
-                    &mut unused_clock,
-                    lookup,
-                    &mut cache
-                ),
+                facade.outcome(filesystem, principal, key, &mut unused_clock,),
                 Err(uste_txn::AuthorizedError::Unauthorized)
             );
             assert_eq!(
-                facade.transaction_outcome(
-                    filesystem,
-                    principal,
-                    transaction,
-                    &mut unused_clock,
-                    lookup,
-                    &mut cache
-                ),
+                facade.transaction_outcome(filesystem, principal, transaction, &mut unused_clock,),
                 Err(uste_txn::AuthorizedError::Unauthorized)
             );
         }
         assert_eq!(
-            facade.outcome(
-                filesystem,
-                &alice,
-                key,
-                &mut clock(10_000_000),
-                lookup,
-                &mut cache
-            ),
+            facade.outcome(filesystem, &alice, key, &mut clock(10_000_000),),
             Err(uste_txn::AuthorizedError::Transaction(
                 uste_txn::TransactionError::IdempotencyExpired
             ))
