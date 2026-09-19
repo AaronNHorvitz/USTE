@@ -51,6 +51,27 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0075 adds an ownership-preserving, explicitly count/owner/byte-bounded bootstrap
+  replay handoff. The disk development check now restarts before bootstrap root publication and
+  admits only one policy outcome, zero blob owners and 1 MiB encoded bytes before building roots.
+  Tests cover empty genesis, short budgets before preparation, wrong reducer result, exact retry,
+  first ownership, exclusive-lock continuity, every read fault and post-open certificate corruption.
+  Initial corruption fixture targeted the log header; corrected it to revision one's certificate
+  after confirming the format offset. No runtime authentication requirement was weakened.
+  Under the existing 3G/4G/512M scope with one job/thread: txn all-target tests passed (5 unit,
+  13 authorization, 14 coordinator); the disk oracle passed in 30.86s; workspace all-feature and
+  experiment all-target strict clippy passed. Commands: `cargo test -p uste-txn --all-targets
+  --locked --offline -- --test-threads=1`; `cargo test --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline disk_engine_matches -- --test-threads=1`;
+  `cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings`;
+  corresponding experiment clippy. After extending the fault fixture to two revisions,
+  `cargo test -p uste-txn --test transaction_coordinator --locked --offline bounded_bootstrap
+  -- --test-threads=1` passed both tests (0.25s), followed by txn strict clippy and warnings-denied
+  rustdoc. Docs/task checks passed (148 links, 68 tasks). This is not larger-than-memory or Linux
+  benchmark qualification.
+  Next integrate bounded bootstrap and admitted-base/pending-suffix recovery into the Linux disk
+  runner. T-20 remains open; storage metadata remains resident; M1 remains pinned unchanged.
+
 - Decision 0074 adds runnable `disk-engine-check` using disk graph/coordinator state after a
   policy-only bootstrap, bounded authorized writes/rebase and independent cold root admission.
   All 384 existing 20/200 oracle queries match the frozen digest; no fixture/target was changed.

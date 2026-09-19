@@ -19,6 +19,9 @@ use uste_types::{
     UtcInstant,
 };
 
+#[path = "support/bounded_bootstrap.rs"]
+mod bounded_bootstrap;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct CounterState(i64);
 

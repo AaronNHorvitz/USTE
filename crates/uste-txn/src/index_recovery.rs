@@ -10,7 +10,8 @@ use uste_storage::{
 use uste_types::{CommitRevision, IdempotencyKey, NamespaceRef};
 
 use super::{
-    PrincipalDigest, TransactionError, TransactionOutcome, decode_group, map_open_error, sha256,
+    CommitCoordinator, CoordinatorRecoveryLimits, PrincipalDigest, RetentionDays, TransactionError,
+    TransactionOutcome, TransactionState, decode_group, map_open_error, sha256,
 };
 
 /// Opaque owned copy of the authenticated journal frontier transaction.
@@ -205,6 +206,68 @@ where
     #[must_use]
     pub const fn scope(&self) -> NamespaceRef {
         self.scope
+    }
+
+    /// Consume this exclusive owner into a deliberately bounded full-replay coordinator.
+    /// Intended for small bootstrap prefixes before any derived roots exist. The caller supplies
+    /// trusted genesis state; this is not the disk-backed large-history recovery path.
+    /// Counts are checked before reducer preparation/metadata insertion, and no provisional
+    /// coordinator escapes late authentication, resource or reducer failure. Storage metadata
+    /// and the supplied reducer's own memory behavior are not bounded by these count limits.
+    pub fn into_bounded_coordinator<S: TransactionState>(
+        self,
+        filesystem: &mut F,
+        mut state: S,
+        retention: RetentionDays,
+        limits: CoordinatorRecoveryLimits,
+        maximum_encoded_bytes: u64,
+    ) -> Result<CommitCoordinator<S, F, W, E, I>, TransactionError> {
+        let mut outcomes = std::collections::BTreeMap::new();
+        let mut transactions = std::collections::BTreeMap::new();
+        let mut owners = std::collections::BTreeMap::new();
+        if let Some(frontier) = self.journal.frontier() {
+            self.journal
+                .visit_committed_range(
+                    filesystem,
+                    CommitRevision::FIRST,
+                    frontier,
+                    limits.maximum_outcomes as u64,
+                    maximum_encoded_bytes,
+                    |_, group| {
+                        let decoded = super::decode_recovered_group(self.scope, group)?;
+                        super::admit_recovered_metadata(&outcomes, &owners, &decoded, limits)?;
+                        let prepared = state
+                            .prepare(decoded.request, decoded.blob_inventory, group.revision)
+                            .map_err(|error| match error {
+                                super::ApplyError::ResourceLimit => StorageError::ResourceLimit,
+                                _ => StorageError::IntegrityFailure,
+                            })?;
+                        if S::result_digest(&prepared) != decoded.outcome.result_digest {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        super::record_decoded_group_metadata(
+                            &mut outcomes,
+                            &mut transactions,
+                            &mut owners,
+                            &decoded,
+                        )?;
+                        state.publish(prepared);
+                        Ok(())
+                    },
+                )
+                .map_err(map_open_error)?;
+        }
+        Ok(CommitCoordinator {
+            scope: self.scope,
+            retention,
+            journal: self.journal,
+            state,
+            outcomes,
+            transactions,
+            committed_blob_owners: owners,
+            recovered: true,
+            uncertain: false,
+        })
     }
 
     /// Stream canonical transactions from an authenticated inclusive journal range, retaining

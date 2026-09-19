@@ -78,6 +78,28 @@ pub fn verify_disk_development_profile(
             &NeverCancel,
         )
         .map_err(debug)?;
+    // Exercise restart before any derived roots exist. Only this one-revision, owner-free
+    // bootstrap may use full replay; a larger prefix must never fall back to GraphState.
+    drop(bootstrap);
+    fs.restart().map_err(debug)?;
+    let (recovery, _) = AuthenticatedIndexRecovery::open(
+        &mut fs,
+        &name,
+        scope(),
+        CounterEntropy(200),
+        CounterEntropy(300),
+        &mut TestKeyAdapter,
+    )
+    .map_err(debug)?;
+    let mut bootstrap = recovery
+        .into_bounded_coordinator(
+            &mut fs,
+            GraphState::new(scope()),
+            RetentionDays::new(30).map_err(debug)?,
+            uste_txn::CoordinatorRecoveryLimits::new(1, 0).map_err(debug)?,
+            1_048_576,
+        )
+        .map_err(debug)?;
     // The only full graph snapshot contains policy, before any fixture records are admitted.
     let policy_snapshot = bootstrap.read_view().map_err(debug)?.state().clone();
     uste_graph::publish_graph_state_root(&mut bootstrap, &mut fs, &policy_snapshot)
