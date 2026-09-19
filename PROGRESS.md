@@ -58,6 +58,32 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `a5e9a40` plus this increment: [Decision 0136](docs/decisions/0136-packed-root-manifest-framing.md)
+  adds separately versioned encrypted packed-root manifests with fixed 2,048-byte plaintext,
+  4,161-byte envelopes, up to sixteen sorted family commitments/locators and explicit state-commitment
+  profile framing. Certificate/reducer/state claims remain raw data, not admission or commit
+  authority. Existing locator encoding now shares the byte-identical fixed-array encoder.
+  Four new tests pin literal fields, all slots, every plaintext/envelope truncation and ciphertext
+  byte mutation, reserved/unused bytes, malformed claims/locators, context/key/format/sequence
+  substitution and locked/pre-crypto refusal. The model transport test syncs two synthetic manifests,
+  restarts, validates and queries both old and copy-on-write trees, including reused old-pack links.
+  Synthetic names and state/certificate claims are explicitly not a production publication protocol.
+  Focused scope `run-p545088-i21526644.scope` passed four tests/0.03s and strict Clippy/6.24s.
+  Final scope `run-p546168-i21526686.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 504 tests/46 executables, no failures/ignores
+  (replay 50/115.76s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed/1.12s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.14s. Supplemental log:
+  `/tmp/uste-d136-workspace-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap; sampled scope peak
+  1,707,024,384 bytes/zero swap (not final peak). Formatting, diff, documentation and task checks
+  passed. No native matrix rerun (latest native baseline `42f9abb`), benchmark, M1/lockfile change,
+  production publication or task completion claimed. Unregistered `tests/packed_process/support.rs`
+  and Decision 0137 are excluded next-package work. Next verify real Linux process loss, then
+  journal/domain admission, production publication/discovery/recovery, complete accounting and
+  qualifying campaigns.
+
 - Implemented on pushed `5c9d43a` plus this increment: [Decision 0135](docs/decisions/0135-bounded-packed-tree-cursor.md)
   adds a raw streaming packed-tree range cursor with compressed-prefix lower-bound seek, ordered
   successors, exact terminal root proofs and complete value verification. Cumulative candidate,

@@ -198,6 +198,10 @@ Decision 0135 adds a bounded in-process range cursor over independently admitted
 including compressed-prefix lower-bound seek and ordered successors. It returns one completely
 verified zeroizing entry per step, accounts cumulative work, and permanently refuses continuation
 after errors. It does not grant consumer authorization or define a serialized resume token.
+Decision 0136 frames separate encrypted packed-root manifests with at most sixteen sorted family
+commitments/locators and an explicit state-commitment profile. Exact certificate and reducer claims
+are carried but not admitted by the codec. No frozen v1 state digest is reinterpreted, and no new
+publication/discovery or commit authority follows from a successful manifest decode.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

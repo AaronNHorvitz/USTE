@@ -17,6 +17,7 @@ pub mod memory;
 pub mod ordered_commitment;
 pub mod packed_index_pack;
 pub mod packed_index_page;
+pub mod packed_root_manifest;
 pub mod packed_tree_batch;
 pub mod packed_tree_cursor;
 pub mod packed_tree_lookup;

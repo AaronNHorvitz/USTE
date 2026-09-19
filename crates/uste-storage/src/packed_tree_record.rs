@@ -91,12 +91,27 @@ impl PackedLocator {
         Ok(())
     }
     fn encode(self, out: &mut Vec<u8>) {
-        out.extend(self.object);
-        out.extend(self.revision.get().to_be_bytes());
-        out.extend(self.epoch.get().to_be_bytes());
-        out.extend(self.writer.as_bytes());
-        out.extend(self.page.to_be_bytes());
-        out.extend(self.slot.to_be_bytes());
+        out.extend(self.encode_fixed());
+    }
+    pub(crate) fn encode_fixed(self) -> [u8; LOCATOR_BYTES] {
+        let mut out = [0; LOCATOR_BYTES];
+        out[..16].copy_from_slice(&self.object);
+        out[16..24].copy_from_slice(&self.revision.get().to_be_bytes());
+        out[24..32].copy_from_slice(&self.epoch.get().to_be_bytes());
+        out[32..48].copy_from_slice(self.writer.as_bytes());
+        out[48..52].copy_from_slice(&self.page.to_be_bytes());
+        out[52..54].copy_from_slice(&self.slot.to_be_bytes());
+        out
+    }
+    pub(crate) fn decode_fixed(
+        bytes: &[u8],
+        owner: PackedPageContext,
+    ) -> Result<Self, StorageError> {
+        owner.validate()?;
+        let mut input = Cursor(bytes);
+        let location = Self::decode(&mut input, owner)?;
+        input.finish()?;
+        Ok(location)
     }
     fn decode(input: &mut Cursor<'_>, owner: PackedPageContext) -> Result<Self, StorageError> {
         let value = Self {
