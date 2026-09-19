@@ -1,6 +1,7 @@
 //! Opt-in trusted live writes over admitted packed metadata; consumer authorization is separate.
 use super::*;
 mod admission;
+mod domain_recovery;
 use admission::validate_packed_base;
 mod recovery;
 pub use recovery::PackedCoordinatorRecoveryState;

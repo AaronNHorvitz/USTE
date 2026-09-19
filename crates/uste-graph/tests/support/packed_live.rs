@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_suffix.rs"]
+mod recovery;
 use uste_graph::{GraphPackedLiveState, publish_packed_graph_live_base};
 use uste_storage::journal::CertifiedPackedRoot;
 use uste_txn::{

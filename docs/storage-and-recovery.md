@@ -290,6 +290,13 @@ membership/counts and policy equality. Validation, sequential scanning and repea
 are separate. Cold admission recomputes and caches the frozen v1 compatibility digest while the
 published ordered commitment keeps its distinct profile. No full graph maps or cache writes are
 required. Paired packed graph suffix recovery and authorized consumer writes remain separate.
+Decision 0157 streams an authenticated suffix into private graph/primary/quota candidates from
+an independently admitted historical triple. Exact request/result and collision/owner semantics
+are preserved. Complete cursor exhaustion and matching terminal anchors precede all three root
+publications and installation with empty overlays. The three manifests are not an atomic file
+transaction; partial publication returns no live coordinator and old roots remain recoverable.
+Count admission composes with per-revision proof/staging bounds. Authorized packed writes, origin
+rebuild and native qualification remain separate work.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

@@ -2,7 +2,53 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — cold packed graph semantic admission (Decision 0156)
+## Latest verified increment — paired packed graph suffix recovery (Decision 0157)
+
+Implemented on pushed `df8f54c` plus this increment: common owner/receipt admission validates a
+historical graph/primary/quota triple, then an authenticated windowed cursor drives bounded graph
+proofs and private graph/metadata staging. Original requests/results, retry/transaction collisions
+and first-owner semantics remain enforced. Full exhaustion and exact terminal anchors precede
+three terminal manifests and installation with empty overlays. The manifests are individually
+durable, not an atomic three-file transaction; failed recovery returns no live coordinator.
+Per-revision proof/delta/staging limits compose with admitted revision count; diagnostic counters
+remain partial successful work, not complete authenticated/physical I/O accounting.
+
+Five tests cover zero/one/two-revision tails, cold triple admission and frozen reference digests,
+continued live writes/rebase, exact and seven narrower recovery limits, foreign ownership,
+609 observed I/O/error/crash cases with restart, late certificate/graph/primary/quota ciphertext
+corruption and authenticated retry/transaction collisions/false certified results. An initial test
+reused deterministic entropy after reopening and correctly hit `AlreadyExists`; distinct test
+sessions now use distinct entropy seeds, without changing production collision handling.
+Focused session 90489 / `run-p684215-i21677514.scope` passed three tests in 42.13 s and Clippy
+0.37 s; session 8454 / `run-p684901-i21674125.scope` passed the two added corruption/false-result
+tests and Clippy. No threshold was weakened.
+
+Full gate session 23834 / `run-p685385-i21705115.scope` exited 0: 612 tests across 47 executables
+(graph disk 56/117.57 s; transaction integration 93/100.16 s), Clippy 0.06 s and graph/transaction
+docs 2.58 s. Preflight: 31 GiB available RAM / 5.7 GiB free swap; sampled scope peak
+1,361,862,656 bytes / zero swap. Format, diff, docs and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d157-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+```
+
+After that gate, stronger assertions pin late private staging and exact false-result rejection.
+Session 97177 / `run-p689895-i21712961.scope`, same resource/profile settings, passed
+`cargo test -p uste-graph --test disk_index --locked --offline packed_graph_suffix_recovery_authenticated
+-- --test-threads=1` (1/0.19 s) and workspace Clippy (0.36 s).
+
+Next verify authorized packed writes, then query/native integration and qualification readiness.
+Decision 0158 and unregistered transaction `authorized_packed/write.rs`, graph
+`live/authorized_write.rs` and `packed_authorized_writes.rs` test drafts are excluded from this
+increment. T-20/T-19 and qualifying campaigns remain open. Native standalone remains last tested
+at `42f9abb`; M1's pinned implementation/handoff is unchanged. This section supersedes earlier
+next-step text below.
+
+## Prior verified increment — cold packed graph semantic admission (Decision 0156)
 
 Implemented on pushed `f95fe7e` plus this increment: canonical admission of eight explicit packed
 families followed by streamed history transitions, historical/current reference closure, terminal

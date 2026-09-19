@@ -3,7 +3,8 @@ use super::*;
 mod live;
 pub use live::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState,
-    publish_packed_graph_live_base,
+    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
+    publish_packed_graph_live_base, recover_packed_graph_suffix,
 };
 
 pub struct PackedGraphDelta {

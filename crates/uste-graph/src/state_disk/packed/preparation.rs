@@ -3,8 +3,9 @@ use super::*;
 mod staging;
 pub use staging::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphDelta,
-    PackedGraphStageLimits, PackedGraphStageReport, prepare_packed_graph_delta,
-    publish_packed_graph_live_base, stage_packed_graph_delta,
+    PackedGraphStageLimits, PackedGraphStageReport, PackedGraphSuffixRecoveryLimits,
+    PackedGraphSuffixRecoveryReport, prepare_packed_graph_delta, publish_packed_graph_live_base,
+    recover_packed_graph_suffix, stage_packed_graph_delta,
 };
 use uste_storage::packed_tree_lookup::{PackedLookupValue, TreeLookupLimits, TreeLookupReport};
 use uste_txn::PackedIndexMaintenance;

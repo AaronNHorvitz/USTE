@@ -1,5 +1,9 @@
 //! Ready or one-certified-pending graph state; no full-snapshot checkpoint impersonation.
 use super::*;
+mod recovery;
+pub use recovery::{
+    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport, recover_packed_graph_suffix,
+};
 use uste_storage::journal::{CertifiedPackedRoot, JournalStore};
 use uste_txn::{
     PackedCommitCoordinator, PackedCoordinatorPublicationState, PackedCoordinatorState,
