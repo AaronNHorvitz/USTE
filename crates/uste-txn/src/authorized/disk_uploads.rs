@@ -6,6 +6,23 @@ use uste_storage::{IndexGetLimits, PageCache};
 mod inventory;
 pub use inventory::AuthorizedDiskInventoryError;
 
+#[derive(Clone, Copy)]
+enum DiskUploadAccounting {
+    Streaming(DiskBlobAccountingLimits),
+    Indexed { maximum_total_owners: u64 },
+}
+
+impl DiskUploadAccounting {
+    fn maximum_total_owners(self) -> u64 {
+        match self {
+            Self::Streaming(limits) => limits.maximum_total_owners,
+            Self::Indexed {
+                maximum_total_owners,
+            } => maximum_total_owners,
+        }
+    }
+}
+
 /// Unknown abandoned staging is never represented as a proven zero usage.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct DiskUploadUsage {
@@ -36,7 +53,7 @@ where
     // Only the <=32 staging reservations are used. The legacy committed map stays empty.
     ledger: Arc<Mutex<QuotaLedger>>,
     allow_new_uploads: bool,
-    accounting: DiskBlobAccountingLimits,
+    accounting: DiskUploadAccounting,
     cache: PageCache,
     inventory_limits: Option<uste_storage::journal::DiskBlobAppendLimits>,
 }
@@ -55,6 +72,30 @@ where
         policy: &'a PolicyKernel,
         accounting: DiskBlobAccountingLimits,
     ) -> Result<Self, AuthorizedError> {
+        Self::configured(inner, policy, DiskUploadAccounting::Streaming(accounting))
+    }
+
+    /// Trusted staging-only setup using admitted disk quota totals. This does not enable
+    /// inventory commits or reopen uploads before complete-outbox reconciliation.
+    pub fn new_with_indexed_accounting(
+        inner: &'a mut DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a PolicyKernel,
+        maximum_total_owners: u64,
+    ) -> Result<Self, AuthorizedError> {
+        Self::configured(
+            inner,
+            policy,
+            DiskUploadAccounting::Indexed {
+                maximum_total_owners,
+            },
+        )
+    }
+
+    fn configured(
+        inner: &'a mut DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a PolicyKernel,
+        accounting: DiskUploadAccounting,
+    ) -> Result<Self, AuthorizedError> {
         let facade = Self {
             inner,
             policy,
@@ -65,7 +106,44 @@ where
             inventory_limits: None,
         };
         facade.validate_policy()?;
+        if matches!(accounting, DiskUploadAccounting::Indexed { .. }) {
+            if !facade.inner.has_blob_usage_index() {
+                return Err(TransactionError::InvalidRequest.into());
+            }
+            if accounting.maximum_total_owners()
+                > uste_storage::MAX_COMMITTED_BLOBS_PER_JOURNAL as u64
+            {
+                return Err(AuthorizedError::ResourceLimit);
+            }
+        }
         Ok(facade)
+    }
+
+    // Called only after the operation's current authorization. No missing-index fallback or
+    // zero estimate is permitted. The extra local cache is fixed at 64 KiB, not owner-sized.
+    fn committed_usage(
+        &self,
+        filesystem: &mut F,
+        principal: PrincipalDigest,
+    ) -> Result<crate::CommittedBlobUsage, AuthorizedError> {
+        match self.accounting {
+            DiskUploadAccounting::Streaming(limits) => self
+                .inner
+                .committed_blob_usage(filesystem, principal, limits)
+                .map_err(Into::into),
+            DiskUploadAccounting::Indexed {
+                maximum_total_owners,
+            } => self
+                .inner
+                .committed_blob_usage_indexed(
+                    filesystem,
+                    principal,
+                    maximum_total_owners,
+                    crate::authorized_disk::blob_usage_limits()?,
+                    &mut PageCache::new(64 * 1024).map_err(TransactionError::Storage)?,
+                )
+                .map_err(Into::into),
+        }
     }
 
     fn scope(&self) -> NamespaceRef {
@@ -107,9 +185,7 @@ where
     ) -> Result<DiskUploadUsage, AuthorizedError> {
         self.authorize(principal, Action::InspectQuota)?;
         let mut usage = self.lock_ledger()?.usage(Some(principal.digest()))?;
-        let committed =
-            self.inner
-                .committed_blob_usage(filesystem, principal.digest(), self.accounting)?;
+        let committed = self.committed_usage(filesystem, principal.digest())?;
         usage.namespace_committed_bytes = committed.namespace_bytes;
         usage.principal_committed_bytes = committed.principal_bytes;
         Ok(DiskUploadUsage {

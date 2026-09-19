@@ -33,6 +33,19 @@ where
         Ok(facade)
     }
 
+    /// Trusted opt-in to the independently admitted disk quota projection. Missing admission
+    /// fails; normal authorization, staging reconciliation and inventory limits are unchanged.
+    pub fn new_with_indexed_inventory_commits(
+        inner: &'a mut DiskCommitCoordinator<S, F, W, E, I>,
+        policy: &'a PolicyKernel,
+        maximum_total_owners: u64,
+        storage: DiskBlobAppendLimits,
+    ) -> Result<Self, AuthorizedError> {
+        let mut facade = Self::new_with_indexed_accounting(inner, policy, maximum_total_owners)?;
+        facade.inventory_limits = Some(storage);
+        Ok(facade)
+    }
+
     /// Authorize current targets and first ownership; project exact committed quotas; then
     /// certify and remove only this principal's exact finalized reservations. No complete
     /// committed ledger is reconstructed, and no fallible charge transfer follows certification.
@@ -158,15 +171,13 @@ where
         }
         if request.blob_inventory.is_some() {
             let committed = self
-                .inner
-                .committed_blob_usage(filesystem, principal.digest(), self.accounting)
-                .map_err(AuthorizedError::from)
+                .committed_usage(filesystem, principal.digest())
                 .map_err(auth)?;
             if committed
                 .owners
                 .checked_add(added_owners)
                 .ok_or_else(|| auth(AuthorizedError::ResourceLimit))?
-                > self.accounting.maximum_total_owners
+                > self.accounting.maximum_total_owners()
             {
                 return Err(auth(AuthorizedError::ResourceLimit));
             }

@@ -64,14 +64,20 @@ fn finish(
 
 #[test]
 fn authorized_disk_inventory_exact_quota_transfer_retry_and_cold_reconciliation() {
+    exact_quota_transfer_case(false);
+}
+
+#[test]
+fn authorized_indexed_inventory_exact_quota_transfer_retry_and_cold_reconciliation() {
+    exact_quota_transfer_case(true);
+}
+
+fn exact_quota_transfer_case(indexed: bool) {
     let (mut fs, name, mut disk, base, kernel, alice, bob) = fixture();
-    let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-        &mut disk,
-        &kernel,
-        accounting(),
-        append_limits(),
-    )
-    .unwrap();
+    if indexed {
+        usage::bootstrap(&mut fs, &mut disk);
+    }
+    let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
     uploads
         .complete_recovered_upload_reconciliation(&mut fs, &alice, &[])
         .unwrap();
@@ -159,13 +165,7 @@ fn authorized_disk_inventory_exact_quota_transfer_retry_and_cold_reconciliation(
     drop(disk);
     fs.restart().unwrap();
     let mut disk = reopen(&mut fs, &name, base);
-    let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-        &mut disk,
-        &kernel,
-        accounting(),
-        append_limits(),
-    )
-    .unwrap();
+    let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
     assert!(
         !uploads
             .quota_usage(&mut fs, &alice)
@@ -310,6 +310,15 @@ fn authorized_disk_inventory_denial_targets_foreign_identity_and_policy_changes_
 
 #[test]
 fn authorized_disk_inventory_uncertainty_retains_charge_until_recovered_commit() {
+    uncertainty_case(false);
+}
+
+#[test]
+fn authorized_indexed_inventory_uncertainty_retains_charge_until_recovered_commit() {
+    uncertainty_case(true);
+}
+
+fn uncertainty_case(indexed: bool) {
     for occurrence in [1, 2] {
         for action in [
             FaultAction::Error(AdapterErrorKind::Io),
@@ -317,13 +326,10 @@ fn authorized_disk_inventory_uncertainty_retains_charge_until_recovered_commit()
             FaultAction::CrashAfter,
         ] {
             let (mut fs, name, mut disk, base, kernel, alice, _) = fixture();
-            let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-                &mut disk,
-                &kernel,
-                accounting(),
-                append_limits(),
-            )
-            .unwrap();
+            if indexed {
+                usage::bootstrap(&mut fs, &mut disk);
+            }
+            let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
             uploads
                 .complete_recovered_upload_reconciliation(&mut fs, &alice, &[])
                 .unwrap();
@@ -376,13 +382,7 @@ fn authorized_disk_inventory_uncertainty_retains_charge_until_recovered_commit()
                     .get(),
                 if committed { 2 } else { 1 }
             );
-            let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-                &mut disk,
-                &kernel,
-                accounting(),
-                append_limits(),
-            )
-            .unwrap();
+            let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
             assert!(
                 !uploads
                     .quota_usage(&mut fs, &alice)
@@ -441,14 +441,20 @@ fn authorized_disk_inventory_uncertainty_retains_charge_until_recovered_commit()
 
 #[test]
 fn authorized_disk_inventory_current_revocation_denies_old_exact_retry() {
+    revocation_case(false);
+}
+
+#[test]
+fn authorized_indexed_inventory_current_revocation_denies_old_exact_retry() {
+    revocation_case(true);
+}
+
+fn revocation_case(indexed: bool) {
     let (mut fs, _, mut disk, _, mut kernel, alice, _) = fixture();
-    let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-        &mut disk,
-        &kernel,
-        accounting(),
-        append_limits(),
-    )
-    .unwrap();
+    if indexed {
+        usage::bootstrap(&mut fs, &mut disk);
+    }
+    let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
     uploads
         .complete_recovered_upload_reconciliation(&mut fs, &alice, &[])
         .unwrap();
@@ -478,13 +484,7 @@ fn authorized_disk_inventory_current_revocation_denies_old_exact_retry() {
     kernel
         .replace_namespace_policy(&alice, PolicyVersion::new(1).unwrap(), policy(2))
         .unwrap();
-    let mut uploads = AuthorizedDiskUploads::new_with_inventory_commits(
-        &mut disk,
-        &kernel,
-        accounting(),
-        append_limits(),
-    )
-    .unwrap();
+    let mut uploads = usage::inventory_facade(&mut disk, &kernel, indexed);
     fs.arm(FaultPlan::default()).unwrap();
     assert_eq!(
         uploads.commit_inventory(

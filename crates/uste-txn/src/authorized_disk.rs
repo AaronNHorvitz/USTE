@@ -166,6 +166,38 @@ where
             .committed_blob_usage(filesystem, principal.digest(), limits)
             .map_err(Into::into)
     }
+
+    /// Exact indexed committed charges, requiring current InspectQuota authority and an
+    /// admitted projection. Missing/corrupt caches never become a zero usage estimate.
+    pub fn committed_blob_usage_indexed(
+        &self,
+        filesystem: &mut F,
+        principal: &AuthenticatedPrincipal,
+        maximum_total_owners: u64,
+    ) -> Result<CommittedBlobUsage, AuthorizedError> {
+        self.authorize(principal, Action::InspectQuota)?;
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| AuthorizedError::IntegrityFailure)?;
+        self.inner
+            .committed_blob_usage_indexed(
+                filesystem,
+                principal.digest(),
+                maximum_total_owners,
+                blob_usage_limits()?,
+                &mut cache,
+            )
+            .map_err(Into::into)
+    }
+}
+
+// Metadata values are 24 bytes and principal aggregates 16. Fixed conservative page visits
+// cover index-v1's hard page ceiling; consumers cannot probe via undersized per-lookup caps.
+pub(crate) fn blob_usage_limits() -> Result<IndexGetLimits, AuthorizedError> {
+    IndexGetLimits::new(64, 24)
+        .map_err(TransactionError::Storage)
+        .map_err(Into::into)
 }
 
 // Fixed-width v1 outcomes need at most 136 value bytes. The format admits at most 2^24

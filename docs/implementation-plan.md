@@ -140,6 +140,15 @@ graph change without full-map reconstruction. Disk-aware authorization, dedicate
 fault/corruption coverage, scalable first-owner admission and storage metadata residency remain
 before larger-than-memory/BM-06 qualification.
 
+Subsequent implementation preserves those qualification requirements: Decisions 0065–0073 add
+disk-aware authorization and maintained first-reference evidence; Decisions 0092–0105 extend
+private multi-revision recovery, map-free storage metadata and authorized inventory publication.
+Decisions 0111–0112 add independently admitted disk principal quota totals, bounded new-owner
+projection updates and opt-in authorized accounting without complete owner scans. Legacy paths
+remain available with their explicit memory/work limitations. Populated-base quota bootstrap,
+immutable-run rewrite amplification, complete accounting evidence and qualifying BM-01/BM-06
+campaigns remain T-20 work, not implied acceptance from these local capabilities.
+
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
 only to a currently `ManageSchema`-authorized operator with an issuer-bound root capability. The

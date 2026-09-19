@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `eda0c88` plus this increment: [Decision 0112](docs/decisions/0112-authorized-indexed-blob-accounting.md)
+  connects explicit indexed accounting to authorized staging, inventory commits and quota
+  inspection. Missing admission refuses configuration; inspection requires current authority
+  before I/O. Legacy constructors retain streaming behavior. Staging-only mode cannot enable
+  inventory commits; complete-outbox reconciliation is still required. Fixed lookup allowances
+  and an additional local 64 KiB quota cache replace a complete ledger scan on the opt-in path.
+  The raw coordinator's retry ordering is unchanged; authorized inventory retries retain their
+  existing ownership/accounting checks. Exact charge release and uncertain-outcome handling
+  remain unchanged. Four normal unoptimized focused tests pass (2.00s), including all six selected
+  journal-sync failures in indexed mode, cold retry/reconciliation, current revocation, missing
+  admission, denied/foreign identity, precommit accounting read failure with retained charges,
+  populated principal aggregates and both actual inspection page-read failures. Commands:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-txn --test transaction_coordinator --locked --offline
+  authorized_indexed -- --test-threads=1 --nocapture` and `CARGO_BUILD_JOBS=1 cargo clippy
+  -p uste-txn --all-targets --all-features --locked --offline -- -D warnings` (0.18s), serially
+  under 3G/4G/512M. Full serial gate in `run-p389952-i21386402.scope` exited 0: assertion-enabled
+  optimized workspace/all-target/all-feature tests passed 395 tests across 46 executables,
+  with no failures or ignores (123 storage, 23 replay/coordinator, 31 transaction, 16 disk graph,
+  and all remaining suites including M1 process recovery). Native release tests passed 51 active
+  unit tests (43.27s) and three process tests (11.88s), retaining the two exact-profile oracle
+  ignores. Strict workspace/native Clippy (4.48s/1.92s) and txn rustdoc (0.97s) pass. Commands and
+  profile flags are the same full gate recorded for D0111/D0110 below. Sampled scope peak:
+  1,511,714,816 bytes, zero swap, not final whole-run peak. Format/whitespace, docs (185 links),
+  task graph (68 tasks) pass; M1 sources and lockfile still match the pinned implementation.
+  No benchmark or task completion is newly claimed. Available RAM/swap:
+  36 GiB / 3.9 GiB before builds. Next: bounded quota-cache bootstrap from a populated base,
+  remaining immutable construction/rewrite costs and qualifying benchmark prerequisites.
+
 - Verified on pushed `0b39864` plus this increment: [Decision 0111](docs/decisions/0111-disk-first-owner-quota-projection.md)
   adds optional disk principal totals and an independently validated principal/owner ordering.
   Empty-base bootstrap, bounded-overlay construction, quota-preserving rebase, cold admission
@@ -2023,8 +2051,10 @@ remaining mixed workload have not passed.
   that graph writer; Decisions 0102–0103 separately support ordinary disk-coordinator inventory
   commits and authorized staged-charge transfer. This is not a complete graph consumer interface.
   Decisions 0095–0101 add opt-in map-free certificate/storage-blob cold recovery and bounded
-  inventory append; legacy APIs retain their resident collections. Committed principal quota
-  accounting still streams all owners, catalog construction still rewrites immutable families,
+  inventory append; legacy APIs retain their resident collections. Decisions 0111–0112 add
+  opt-in admitted disk principal totals and authorized indexed accounting; legacy accounting
+  still streams all owners. Populated-base quota bootstrap remains open, and catalog construction
+  still rewrites immutable families,
   and compatibility first-owner discovery remains read-amplified. Decisions 0104–0105 make
   order-independent metadata correspondence use linear authenticated reverse certificate scans.
   Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
@@ -2190,7 +2220,9 @@ publisher remains a bounded legacy bridge, not larger-than-memory construction.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. The authenticated streaming suffix is now
 implemented; native failure qualification, full immutable-run rewrite amplification and
-principal quota accounting scalability remain open. Decisions 0104–0110 reduce authenticated
+populated-base quota construction and accounting qualification remain open. Decisions 0111–0112
+add admitted disk principal totals and authorized opt-in accounting without whole-ledger scans.
+Decisions 0104–0110 reduce authenticated
 reverse-scan, empty-catalog, point-lookup and cache-recency work without qualifying T-20.
 Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's

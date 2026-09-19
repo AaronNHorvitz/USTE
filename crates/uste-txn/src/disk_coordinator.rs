@@ -502,6 +502,10 @@ where
         )
     }
 
+    pub(crate) fn has_blob_usage_index(&self) -> bool {
+        self.base.has_blob_usage_index()
+    }
+
     /// Privileged exact accounting without materializing a complete owner ledger. Fully streams
     /// the base run and adds disjoint first-owner overlays. No partial total escapes late failure.
     /// O(total owners) reads per call; not an aggregate index or a scalability qualification.
