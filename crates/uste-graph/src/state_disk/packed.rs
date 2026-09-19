@@ -1,5 +1,10 @@
 //! Separately typed packed graph cache; never a v1 root or consumer authorization capability.
 use super::*;
+mod preparation;
+pub use preparation::{
+    PackedGraphPreparationLimits, PackedGraphReadReport, PackedPreparedGraph,
+    prepare_packed_graph_transaction,
+};
 use uste_storage::{
     journal::{CanonicalPackedTree, CertificateAnchorReadLimits},
     ordered_commitment::OrderedCommitment,

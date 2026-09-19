@@ -2,7 +2,43 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — streamed packed graph bridge (Decision 0152)
+## Latest verified increment — packed graph proof preparation (Decision 0153)
+
+Implemented on pushed `30f9aa1` plus this increment: explicit packed current/history/reverse reads
+construct only the bounded transaction proof closure and invoke the unchanged pure graph reducer.
+The opaque prepared result binds scope, exact base certificate, ordered commitment, counts and
+policy while preserving canonical request and journal-result digests. No v1 root anchor is forged.
+Cached admitted metadata/policy is charged to logical proof retention. Every tree's live owner/key
+binding is checked; the separate packed report, not zeroed legacy run/cache fields, records I/O.
+
+Four tests compare 21 accepted/rejected requests with the full reducer (references, history
+predicates, correction, cascade and policy replacement), cover exact and ten minus-one ceilings,
+270 observed read/error/crash cases with cold restart, current/history/reverse ciphertext corruption
+and foreign owner/scope refusal. Focused session 44918 / `run-p663038-i21642189.scope` passed four
+tests in 3.33 s and Clippy in 0.30 s; the subsequently added exact reference-visit ceiling case
+passed at the start of the full gate. No test or resource threshold was weakened.
+
+Full gate session 60175 / scope `run-p663497-i21672746.scope` exited 0: 591 tests across 47
+executables (graph disk 35/35.60 s; transaction integration 93/99.45 s), Clippy 1.89 s and docs
+1.13 s. Preflight: 31 GiB available RAM / 5.6 GiB free swap; sampled scope peak 924,303,360 bytes /
+zero swap. Format, diff, documentation and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+export CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true
+cargo test -p uste-graph --test disk_index --locked --offline packed_graph_preparation_exact -- --test-threads=1 &&
+cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d153-workspace-verification.log &&
+cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline'
+```
+
+Next implement receipt-bound graph delta staging, then live repair and cold semantic integration.
+Decision 0154, unregistered `packed/preparation/staging.rs` and `packed_staging.rs` test drafts
+are excluded from this increment. T-20/T-19, complete I/O accounting and qualifying campaigns remain
+open. Native standalone remains last tested at `42f9abb`; M1 remains pinned and unchanged.
+
+## Prior verified increment — streamed packed graph bridge (Decision 0152)
 
 Implemented on pushed `da64673` plus this increment: an independently admitted v1 graph base
 streams through bounded private batches into eight explicit canonical packed families. Every source

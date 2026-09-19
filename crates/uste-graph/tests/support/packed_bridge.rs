@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_preparation.rs"]
+mod preparation;
 use uste_graph::{
     GRAPH_ORDERED_STATE_PROFILE_V1, GRAPH_PACKED_PROFILE_V1, PackedGraphBridgeLimits,
     bridge_graph_base_to_packed, packed_graph_v1_digest,

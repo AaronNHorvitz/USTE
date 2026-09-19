@@ -269,6 +269,10 @@ families in bounded private batches. The separate ordered-state commitment exclu
 layout; bounded v1 digest export reproduces the unchanged canonical oracle. Source cursors must
 fully authenticate before a typed packed base escapes. This cache bridge is not authoritative
 migration, cold packed semantic admission, live graph integration or benchmark qualification.
+Decision 0153 loads only the packed current/history/reverse proof closure needed by a bounded
+graph transaction, then uses the existing pure reducer. Prepared results bind the exact ordered
+base without a fabricated v1 anchor. Logical proof and packed read budgets are separate; preparation
+neither appends a journal transaction nor authorizes a consumer or publishes a root.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
