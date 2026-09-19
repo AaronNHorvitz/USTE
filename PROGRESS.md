@@ -51,6 +51,24 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0078 adds the native disk crash-probe CLI and real process-loss integration matrix.
+  Prefix 1 pauses after policy certification before roots; prefixes 2/3 pause after each complete
+  graph/metadata publication. The test verifies the marker, SIGKILLs/reaps only its owned child,
+  and uses fresh CLI processes to resume the exact prefix, open revision 4, verify all 384 queries
+  against a separately generated oracle summary, and retry resume without advancing revision.
+  Invalid prefix arguments fail before filesystem access. Harness output has concurrent bounded
+  drains and deadlines; no unrelated process or application is modified.
+  Verified on pushed `d991263` plus this increment under the established 3G/4G/512M scope,
+  one job/thread: `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline --test disk_process_loss --
+  --test-threads=1` passed both tests in 10.42s. The complete release experiment suite then passed
+  35 unit tests (two pre-existing exact-profile oracle tests ignored) in 23.04s and both CLI
+  integration tests in 10.38s. Experiment all-target strict clippy and docs/task checks (151 links,
+  68 tasks) passed. Host preflight: 35 GiB available RAM, 3.9 GiB free swap. This verifies selected
+  process-loss cases only, not hardware power loss, larger-than-memory performance or production.
+  Next connect native disk supervised sampling without changing the accepted windows/deadline,
+  then qualifying-profile admission and remaining storage-metadata scalability. T-20 remains open.
+
 - Decision 0077 adds `linux-disk-query`: a bounded, separately generated oracle summary drives
   native authorized disk queries without full graph/coordinator recovery or oracle adjacency
   construction in the query process. All 384 native queries, aggregate digest and total logical

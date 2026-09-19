@@ -115,6 +115,14 @@ transaction is durable, and parks until an external parent SIGKILLs the exact pr
 `linux-resume` must recover the prefix and finish the deterministic suffix. Do not use the probe as
 an ordinary database creator.
 
+`linux-disk-create-crash-probe --pause-after-revision REVISION` applies the same explicit harness
+to the development disk path. Revision one pauses after policy certification but before bootstrap
+roots; later revisions pause after graph publication and metadata rebase. Resume with
+`linux-disk-resume`, then verify with `linux-disk-open` and `linux-disk-query`. The owned-child
+SIGKILL/reopen/oracle CLI matrix is reproducible on Btrfs with:
+`CARGO_BUILD_JOBS=1 cargo test --release --locked --offline --test disk_process_loss -- --test-threads=1`.
+This tests process loss at selected durable prefixes, not hardware power loss or every I/O boundary.
+
 ## Oracle semantics
 
 The oracle constructs independent outgoing and incoming adjacency arrays. For each depth level it

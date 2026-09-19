@@ -48,6 +48,44 @@ fn prepare_session(
     profile: Bm01Profile,
     phase: &str,
 ) -> Result<(DiskSession, String), LinuxRunnerError> {
+    prepare_session_with_observer(root, password_file, profile, phase, &mut |_| Ok(()))
+}
+
+/// Explicit process-loss harness. It never returns after the selected durable prefix marker.
+pub fn create_crash_probe(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    pause_after_revision: u64,
+) -> Result<String, LinuxRunnerError> {
+    use std::io::Write as _;
+    let final_revision = materialization_revision_count(profile);
+    if pause_after_revision == 0 || pause_after_revision >= final_revision {
+        return Err(error("USTE_BM01_CRASH_PROBE_REVISION"));
+    }
+    let mut observer = |revision| {
+        if revision == pause_after_revision {
+            let mut output = std::io::stdout().lock();
+            writeln!(output, "{}", crash_probe_marker(revision, final_revision))
+                .and_then(|()| output.flush())
+                .map_err(|_| error("USTE_BM01_CRASH_PROBE_SIGNAL"))?;
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok(())
+    };
+    let _ = prepare_session_with_observer(root, password_file, profile, "create", &mut observer)?;
+    Err(error("USTE_BM01_CRASH_PROBE_MISSED"))
+}
+
+fn prepare_session_with_observer(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    phase: &str,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<(DiskSession, String), LinuxRunnerError> {
     if profile.entities() > crate::engine::MAX_DEVELOPMENT_ENTITIES {
         return Err(error("USTE_BM01_DISK_DEVELOPMENT_LIMIT"));
     }
@@ -72,7 +110,7 @@ fn prepare_session(
             GraphState::new(scope()),
         )
         .map_err(|_| error("USTE_BM01_DATABASE_CREATE"))?;
-        bootstrap(raw, &mut fs)?;
+        bootstrap(raw, &mut fs, observer)?;
     }
     let (recovery, report, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
         &mut fs,
@@ -99,7 +137,7 @@ fn prepare_session(
                 1_048_576,
             )
             .map_err(|_| error("USTE_BM01_BOOTSTRAP_RECOVERY"))?;
-        bootstrap(raw, &mut fs)?;
+        bootstrap(raw, &mut fs, observer)?;
         let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
             &mut fs,
             &name,
@@ -171,7 +209,8 @@ fn prepare_session(
                 },
                 operations,
                 &mut clock,
-            )
+            )?;
+            observer(sequence).map_err(|error| error.code().to_owned())
         })
         .map_err(|_| error("USTE_BM01_DISK_MATERIALIZE"))?;
     }
@@ -215,8 +254,13 @@ fn prepare_session(
     ))
 }
 
-fn bootstrap(mut raw: LinuxRaw, fs: &mut LinuxFileSystem) -> Result<(), LinuxRunnerError> {
+fn bootstrap(
+    mut raw: LinuxRaw,
+    fs: &mut LinuxFileSystem,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<(), LinuxRunnerError> {
     install_policy(&mut raw, fs)?;
+    observer(1)?;
     let snapshot = raw
         .read_view()
         .map_err(|_| error("USTE_BM01_READ_VIEW"))?

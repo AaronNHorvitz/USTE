@@ -23,6 +23,7 @@ fn run() -> Result<(), String> {
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
+            | "linux-disk-create-crash-probe"
             | "linux-create-crash-probe"
             | "linux-resume"
             | "linux-open"
@@ -141,6 +142,14 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-disk-create-crash-probe" => {
+                    uste_t20_bench::linux_runner::disk::create_crash_probe(
+                        &root,
+                        &password_file,
+                        profile,
+                        pause_after_revision.ok_or("--pause-after-revision is required")?,
+                    )
+                }
                 "linux-disk-query" => uste_t20_bench::linux_runner::disk::query_correctness(
                     &root,
                     &password_file,
@@ -223,6 +232,8 @@ fn print_usage() {
          --root DIR --password-file FILE --entities COUNT (at most 1000; nonqualifying)\n\
          uste-t20-bench linux-create-crash-probe --root DIR --password-file FILE \
          --pause-after-revision REVISION [--entities COUNT]\n\
+         uste-t20-bench linux-disk-create-crash-probe --root DIR --password-file FILE \
+         --pause-after-revision REVISION --entities COUNT (at most 1000; nonqualifying)\n\
          uste-t20-bench <linux-query|linux-sample> --root DIR --password-file FILE \
          --oracle-file FILE [--entities COUNT]\n\
          uste-t20-bench linux-disk-query --root DIR --password-file FILE \
