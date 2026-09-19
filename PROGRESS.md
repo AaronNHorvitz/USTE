@@ -58,6 +58,40 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `a7ee52b` plus this increment: [Decision 0114](docs/decisions/0114-bm06-versioned-event-materialization.md)
+  adds an executable BM-06 materialization contract and bounded actual graph operation generator.
+  Exact fixture: 100,000 records, 100 retained 4096-byte versions each, ten million events,
+  19,601 revisions, checkpoint/root boundary 19,405 and 196 suffix revisions. History payload
+  alone is 40,960,000,000 bytes, a logical fixture dimension, not measured recovery scalability.
+  `bm06-manifest [--records N]` is explicitly fixture-only. Direct revision-to-batch construction
+  retains at most 512 distinct-record operations and does not generate previous batches.
+  The exact synthetic digest `c2d3b2fa0ce5d228213d03eb3fe4885fb11f41edcd6bc6935a8fb4b9702d5c3a`
+  matches the independent existing fixture generator; small request/payload goldens are pinned
+  in `acceptance/r1/bm06-materialization-v1.tsv` (SHA-256
+  `4ab6a5979cbc86814d56baf907151be057a47b491c3c394efed31c2ecad854bb`).
+  Under 3G/4G/512M, one Cargo job/test thread, scope `run-p404281-i21379536.scope` exited 0:
+  `CARGO_BUILD_JOBS=1 cargo run --release --manifest-path experiments/fixture-generator/Cargo.toml
+  --locked --offline -- digest events COUNT
+  8f41d0a52b40f13f4a77bc3beae2026a8bc42ad48d12ce53d92e29f612111006`, for COUNT=200 and 10000000;
+  `CARGO_BUILD_JOBS=1 cargo run --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- bm06-manifest`. These hash the 48-byte synthetic stream, not a materialized
+  40.96 GB database. Final serial native gate in `run-p404877-i21358918.scope` exited 0:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passes 56 active unit tests (44.67s), three existing
+  process tests (11.83s), one new CLI test (0.01s), retaining two unchanged exact-oracle ignores;
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings` passes (0.86s). Five new unit tests cover exact dimensions,
+  batch boundaries, version-precondition mapping, every small-fixture historical version,
+  checkpoint-plus-suffix equivalence, request/payload goldens and independent stream digest.
+  CLI tests refuse invalid/mixed/unbounded arguments and assert nonqualification fields.
+  Development corrected a wrong scoped-ID constructor and a rejected empty bootstrap; the test
+  now installs a real policy-only transaction. No production test was weakened. Native/workspace
+  locks and M1 sources are unchanged; production workspace remains at the preceding 400-test
+  verified tree. Native formatting/whitespace, documentation (187 links) and 68-task checks pass.
+  Preflight: 36 GiB available RAM, 3.9 GiB free swap. Next: BM-06 disk profile admission and
+  authorized native development materialization/recovery; immutable rewrite scaling, all recovery
+  controls, reserved-host trials and T-20/T-19 qualification remain open.
+
 - Verified on pushed `136ddc5` plus this increment: [Decision 0113](docs/decisions/0113-populated-base-quota-rebuild.md)
   implements populated-base quota projection rebuild with 1–4096-owner batches, independent
   terminal validation and no intermediate root publication. Explicit owner/batch/source/merge/

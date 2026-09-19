@@ -16,6 +16,27 @@ fn run() -> Result<(), String> {
         print_usage();
         return Ok(());
     }
+    if command == "bm06-manifest" {
+        let records = match arguments.next() {
+            None => 100_000,
+            Some(flag) if flag == "--records" => arguments
+                .next()
+                .ok_or("--records requires a value")?
+                .into_string()
+                .map_err(|_| "--records must be UTF-8")?
+                .parse::<u64>()
+                .map_err(|_| "--records must be an unsigned integer")?,
+            _ => return Err("bm06-manifest accepts only --records N".into()),
+        };
+        if arguments.next().is_some() {
+            return Err("unexpected bm06-manifest argument".into());
+        }
+        print!(
+            "{}",
+            uste_t20_bench::recovery_materialization::Bm06Profile::new(records)?.manifest()
+        );
+        return Ok(());
+    }
     let linux_command = matches!(
         command.as_str(),
         "linux-create"
@@ -245,6 +266,7 @@ fn run() -> Result<(), String> {
 fn print_usage() {
     println!(
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
+         uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-create|linux-disk-resume|linux-disk-open> \

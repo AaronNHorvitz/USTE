@@ -92,6 +92,13 @@ The standalone generator emits `engine_benchmark: false`; fixture dimensions and
 not satisfy BM-01 until the production encrypted/authorized/durable engine runs the required cold
 and warm samples and reports latency, visits, result bytes, RSS and environment evidence.
 
+Decision 0114 pins `bm06-materialization-v1` in
+`acceptance/r1/bm06-materialization-v1.tsv`: ten million versioned entity events, bounded
+512-record batches, 4096-byte historical payloads and an explicit 100,000-event checkpoint suffix.
+The executable manifest and small reducer/checkpoint oracle checks are fixture evidence only;
+native materialization, fault/control scenarios and all 30 reserved-host recovery trials remain
+required. The 120-second target and normal security/durability requirements are unchanged.
+
 Decision 0039 exposes cumulative authenticated page/fragment/result-byte work and explicit
 decrypted-page-cache clearing on that production authorized path. These candidate-dependent
 counters are cardinality-sensitive and require current `ManageSchema` authority plus an

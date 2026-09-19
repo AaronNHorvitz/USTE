@@ -14,6 +14,7 @@ pub mod oracle;
 pub mod oracle_bundle;
 pub mod oracle_summary;
 pub mod query;
+pub mod recovery_materialization;
 pub mod synthetic;
 
 pub use engine::{

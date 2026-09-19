@@ -1,5 +1,34 @@
 # T-20 benchmark fixture foundation
 
+## BM-06 materialization
+
+`bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
+a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
+with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`
+constructs at most 512 distinct-record creates/replacements at a requested durable revision,
+so a future native materializer can resume without retaining earlier requests. Revision one
+is reserved for the durable policy; the exact checkpoint/root boundary is 19,405 and the final
+frontier is 19,601. History payload alone is 40,960,000,000 bytes; that is logical fixture size,
+not measured memory/disk usage or proof of larger-than-memory recovery.
+
+```text
+cargo run --release --locked --offline -- bm06-manifest
+cargo run --release --locked --offline -- bm06-manifest --records 2
+cargo test --release --locked --offline bm06 -- --test-threads=1
+```
+
+The synthetic stream digest matches the independent fixture generator's `events` output at
+the unchanged BM-06 seed. The manifest does not hash 40.96 GB of canonical payload materialization;
+its `canonical_request_stream_digest` is null and `database_materialized` is false. The
+[pinned manifest](../../acceptance/r1/bm06-materialization-v1.tsv) also includes a small canonical
+request-stream golden (two records, database/namespace IDs each sixteen `0x06` bytes; revision-one
+policy excluded, each subsequent request prefixed with little-endian revision and byte length).
+Small reducer tests inspect all historical versions and compare sequential reduction to decoded
+checkpoint plus suffix. Native disk materialization, authorized durable recovery, cache-corruption
+controls and 30 reserved-host trials remain implementation work. No BM-06 result is claimed.
+
+## BM-01 materialization
+
 This standalone experiment pins `bm01-materialization-v1`. It prepares deterministic synthetic
 fixture semantics and an independent adjacency-array BFS oracle. Its bounded `engine-check`
 command also validates the mapping against production encrypted, authorized, durable graph/index
