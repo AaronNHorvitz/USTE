@@ -165,9 +165,9 @@ retries the unchanged deterministic plan. The suffix count is bounded by the fix
 revisions minus its policy bootstrap; one shared certificate/group byte allowance covers metadata
 replay, including all certificate-proof re-reads, with explicit per-revision proof/merge limits.
 Disk recovery no longer retains the complete certificate-anchor map; actual residency/counts
-appear in `suffix_recovery.certificate_anchor_residency`. Each range step currently proves its
-certificate to the frontier, so the declared byte bound includes a triangular proof term and
-does not imply constant-time cold recovery. Storage blob/inventory/namespace metadata now uses
+appear in `suffix_recovery.certificate_anchor_residency`. Suffix recovery now uses bounded
+authenticated certificate windows with selected-byte rechecks (Decision 0127); conservative
+admission bounds are not constant-time recovery or complete I/O measurements. Storage blob/inventory/namespace metadata now uses
 Decision 0099's disk catalog. This closed graph fixture admits zero blob bindings and a one-entry,
 68-logical-byte catalog; its exact point lookup allows two visits (one read plus one cache hit).
 Only an empty or policy-only bootstrap may use bounded full replay. Missing graph/coordinator
@@ -287,5 +287,6 @@ returning a truncated answer.
   performance or release claim.
 - BM-01 still needs the exact sampler campaign under the accepted host reservation. The legacy
   sampler retains its full-memory graph boundary; the native disk driver now uses disk-backed
-  graph/coordinator bases, bounded suffix recovery and disk certificate proofs. Storage blob and
-  inventory collections remain resident. BM-06 and larger-than-memory qualification remain open.
+  graph/coordinator bases, bounded suffix recovery, disk certificate proofs and bounded storage
+  blob/inventory catalogs. Packed-index native integration, BM-06 and larger-than-memory
+  qualification remain open.

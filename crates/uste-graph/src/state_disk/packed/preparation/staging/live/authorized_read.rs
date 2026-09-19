@@ -1,5 +1,7 @@
 use super::*;
+mod expansion;
 use crate::{GraphReadOutput, GraphReadRequest};
+pub use expansion::PackedGraphExpansionLimits;
 use uste_policy::{Action, AuthorizationRequirements, Target};
 use uste_storage::packed_tree_lookup::TreeLookupLimits;
 use uste_txn::{AuthorizedPackedReadState, AuthorizedReadState};
@@ -9,6 +11,8 @@ pub struct PackedGraphReadLimits {
     pub current: TreeLookupLimits,
     /// Candidate/key/value work includes the historical key's 24 bytes.
     pub historical: TreeCursorLimits,
+    /// None deliberately restricts the facade to point and historical reads.
+    pub expansion: Option<PackedGraphExpansionLimits>,
 }
 impl<F, W, E, I> AuthorizedPackedReadState<F, W, E, I> for GraphPackedLiveState
 where
@@ -91,7 +95,16 @@ where
                     })
                     .transpose()?
             }
-            _ => return Err(GraphDiskError::UnsupportedRequest),
+            GraphReadRequest::Adjacent { .. } | GraphReadRequest::SupportedBy { .. } => {
+                return expansion::read(
+                    &reader,
+                    fs,
+                    base,
+                    request,
+                    limits.expansion.ok_or(GraphDiskError::UnsupportedRequest)?,
+                    authorize,
+                );
+            }
         };
         Ok(GraphReadOutput::Record(crate::query::visible_record(
             record.as_ref(),

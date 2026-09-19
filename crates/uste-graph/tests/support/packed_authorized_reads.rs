@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_authorized_expansion.rs"]
+mod expansion;
 use uste_graph::{GraphReadOutput, GraphReadRequest, PackedGraphReadLimits};
 use uste_txn::{AuthorizedPackedReader, AuthorizedReadError, AuthorizedReadState};
 
@@ -6,6 +8,7 @@ fn read_limits() -> PackedGraphReadLimits {
     PackedGraphReadLimits {
         current: preparation_limits().lookup,
         historical: export_limits(),
+        expansion: None,
     }
 }
 

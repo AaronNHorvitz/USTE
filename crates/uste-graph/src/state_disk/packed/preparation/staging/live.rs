@@ -1,7 +1,7 @@
 //! Ready or one-certified-pending graph state; no full-snapshot checkpoint impersonation.
 use super::*;
 mod authorized_read;
-pub use authorized_read::PackedGraphReadLimits;
+pub use authorized_read::{PackedGraphExpansionLimits, PackedGraphReadLimits};
 mod authorized_write;
 pub use authorized_write::{PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits};
 mod recovery;

@@ -314,6 +314,11 @@ policy enforcement before I/O and all-or-nothing embedded-reference visibility. 
 returns the latest version at or before the requested certified revision; future views, pending
 repair and uncertainty are refused. Explicit lookup/cursor limits bound work, and observed
 cancellation prevents partial success. Graph expansion is not enabled by this point-read increment.
+Decision 0161 adds optional packed adjacency and evidence-support reads with one aggregate budget
+for pages, encoded bytes, candidate leaves, returned bytes and record lookups. It shares the v1
+reader's pure validation/visibility/order/result-limit rules; self-loops are deduplicated without
+collapsing parallel edges. No partial success or hidden-cardinality telemetry escapes. Packed cache
+and native integration remain separate; shared v1 semantics retain their existing API and budgets.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

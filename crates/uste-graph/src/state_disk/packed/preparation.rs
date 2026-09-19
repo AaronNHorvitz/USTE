@@ -3,8 +3,8 @@ use super::*;
 mod staging;
 pub use staging::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphDelta,
-    PackedGraphReadLimits, PackedGraphStageLimits, PackedGraphStageReport,
-    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
+    PackedGraphExpansionLimits, PackedGraphReadLimits, PackedGraphStageLimits,
+    PackedGraphStageReport, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
     PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits,
     prepare_packed_graph_delta, publish_packed_graph_live_base, recover_packed_graph_suffix,
     stage_packed_graph_delta,

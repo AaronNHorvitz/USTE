@@ -12,13 +12,13 @@ pub use state_disk::packed::{
     GRAPH_ORDERED_STATE_PROFILE_V1, GRAPH_PACKED_PROFILE_V1, GraphPackedLivePublication,
     GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphAdmissionLimits,
     PackedGraphAdmissionReport, PackedGraphBase, PackedGraphBridgeLimits, PackedGraphBridgeReport,
-    PackedGraphDelta, PackedGraphPreparationLimits, PackedGraphReadLimits, PackedGraphReadReport,
-    PackedGraphStageLimits, PackedGraphStageReport, PackedGraphSuffixRecoveryLimits,
-    PackedGraphSuffixRecoveryReport, PackedGraphWritePreparationLimits,
-    PackedGraphWritePublicationLimits, PackedPreparedGraph, admit_packed_graph_base,
-    bridge_graph_base_to_packed, packed_graph_v1_digest, prepare_packed_graph_delta,
-    prepare_packed_graph_transaction, publish_packed_graph_live_base, recover_packed_graph_suffix,
-    stage_packed_graph_delta,
+    PackedGraphDelta, PackedGraphExpansionLimits, PackedGraphPreparationLimits,
+    PackedGraphReadLimits, PackedGraphReadReport, PackedGraphStageLimits, PackedGraphStageReport,
+    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
+    PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits, PackedPreparedGraph,
+    admit_packed_graph_base, bridge_graph_base_to_packed, packed_graph_v1_digest,
+    prepare_packed_graph_delta, prepare_packed_graph_transaction, publish_packed_graph_live_base,
+    recover_packed_graph_suffix, stage_packed_graph_delta,
 };
 
 pub use codec::{

@@ -2,7 +2,53 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — authorized packed point/history reads (Decision 0160)
+## Latest verified increment — authorized packed graph expansion (Decision 0161)
+
+Implemented on pushed `05b797e` plus this increment: optional adjacency/evidence-support queries
+share the existing v1 reader's pure validation, ordering, visibility and result-limit semantics.
+Packed scans and record lookups share five aggregate budgets; callers cannot override them or
+obtain cardinality telemetry. Self-loops are deduplicated, parallel edges remain distinct, and no
+partial success escapes a limit/cancellation/corruption/I/O error. The v1 API and budgets are unchanged.
+
+Five tests cover full-replay/cold reference equality, all directions, parallel edges/self-loops,
+support and hidden references, disabled/unauthorized/cancelled reads, all five exact/narrower
+budgets, late secondary/current ciphertext corruption and 1,224 observed read-error/crash cases
+with cold recovery. The mixed-direction fixture's exact work is [89 pages, 1,828,505 encoded bytes,
+10 candidates, 3,326 returned bytes, 10 record lookups]; these are fixture work bounds, not a
+performance result. An initial temporary-borrow compilation error was fixed by retaining the
+record ID before borrowing its bytes. Focused session 95385 / `run-p709543-i21679255.scope` passed
+five tests (229.87 s) and Clippy (3.21 s).
+
+Full gate session 14647 / `run-p711185-i21713869.scope` exited 0: 630 tests across 47 executables,
+zero failed/ignored (graph disk 72/350.91 s; transaction integration 95/100.59 s), Clippy 0.07 s,
+graph/transaction docs 2.44 s. Preflight 31 GiB available RAM / 5.7 GiB free swap; sampled scope
+peak 793,317,376 bytes / zero swap. Format, diff, docs and task graph checks passed. Exact commands:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d161-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d161-native-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Native session 49286 / `run-p714391-i21675993.scope` exited 0: 58 unit tests/46.17 s, BM-01 process
+3/11.92 s, BM-06 CLI 2/0.51 s, BM-06 process 8/73.89 s; the two existing exact-profile oracle
+ignores are unchanged. Build 50.79 s; Clippy 3.38 s. Preflight 30 GiB available / 5.7 GiB swap,
+984 GiB disk available on Btrfs; sampled scope peak 546,172,928 bytes / zero swap. This updates
+native regression beyond `42f9abb` but does not integrate packed native fixtures or qualify BM-01/06.
+The native README's stale certificate-window/catalog descriptions are reconciled with implemented behavior.
+
+Next implement owner/session-bound packed caching, then graph cache configuration and native
+integration/qualification readiness. Decision 0162 and all unregistered vault-session, packed-cache,
+cached storage/transaction access and test drafts are excluded from this commit. T-20/T-19 remain
+open; M1 interfaces/evidence and lockfile are unchanged. This section supersedes earlier next steps.
+
+## Prior verified increment — authorized packed point/history reads (Decision 0160)
 
 Implemented on pushed `4d7c956` plus this increment: a restricted domain-read facade validates the
 exact current durable policy and typed target permissions before I/O. Current packed lookup and

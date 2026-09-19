@@ -7,6 +7,7 @@ use uste_txn::{AuthorizedDiskReadState, AuthorizedReadState, DiskCommitCoordinat
 
 mod expansion;
 pub use expansion::GraphDiskExpansionLimits;
+pub(crate) use expansion::{ExpansionRead, read_with};
 
 /// Trusted-adapter admission. Historical bytes include the 24-byte key.
 /// `None` deliberately disables graph expansion for a point-read-only capability.
