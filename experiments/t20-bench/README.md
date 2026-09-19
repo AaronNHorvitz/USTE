@@ -25,8 +25,8 @@ its `canonical_request_stream_digest` is null and `database_materialized` is fal
 request-stream golden (two records, database/namespace IDs each sixteen `0x06` bytes; revision-one
 policy excluded, each subsequent request prefixed with little-endian revision and byte length).
 Small reducer tests inspect all historical versions and compare sequential reduction to decoded
-checkpoint plus suffix. Native disk materialization, authorized durable recovery, cache-corruption
-controls and 30 reserved-host trials remain implementation work. No BM-06 result is claimed.
+checkpoint plus suffix. Bounded native development coverage follows below; scalable construction
+and 30 reserved-host qualifying trials remain implementation work. No BM-06 pass is claimed.
 
 Decision 0115 adds `bm06-disk-check`, explicitly capped at two records (200 real historical
 versions). It uses authorized encrypted disk-state writes, deliberately refuses only the last
@@ -49,8 +49,14 @@ cargo run --release --locked --offline -- bm06-linux-open --root ROOT --password
 
 Create stops at revision 100; tail certifies 101 with intentionally uncompleted derived publication;
 recover repairs it and checks exact retry; open requires the repaired frontier. Create never
-overwrites and arbitrary-prefix creation resume remains unsupported. A failed partial directory
-is retained. Tests run `tail-crash-probe` as an owned child and SIGKILL it only after its flushed
+overwrites. A failed partial directory is retained. Decision 0117 adds `bm06-linux-resume` with
+the same root/password/record arguments: it verifies a bound prefix before completing revision
+100, or repairs/verifies an already certified 101 without appending. New fixtures bind the record
+count in the authenticated bootstrap retry identity; legacy unbound fixtures remain readable by
+open/recover but cannot resume. Expired bootstrap retry evidence also refuses resume.
+The supervised `bm06-linux-create-crash-probe` additionally requires `--pause-after-revision N`
+(1–100). Tests exercise policy-only and populated prefixes with owned-child SIGKILL and resume.
+Tests run `tail-crash-probe` as an owned child and SIGKILL it only after its flushed
 durable-tail marker, then recover in fresh processes. Do not launch the probe without a supervising
 parent: it waits indefinitely by design. Reports separate verified history from recovery work and
 disclose partial adapter accounting, uncontrolled host caches and zero qualifying trials.

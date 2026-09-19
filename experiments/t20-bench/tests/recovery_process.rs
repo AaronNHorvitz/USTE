@@ -145,11 +145,77 @@ fn complete(mut command: Command) -> Output {
 }
 
 #[test]
+fn bm06_native_resumes_authenticated_prefixes_without_duplicate_commits() {
+    for pause in [1, 2, 50, 99, 100] {
+        let mut fixture = Fixture::new(2);
+        let mut child = OwnedChild(Some(
+            fixture
+                .command("create-crash-probe")
+                .args(["--pause-after-revision", &pause.to_string()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = sender.send(result);
+        });
+        let line = receiver
+            .recv_timeout(Duration::from_secs(30))
+            .unwrap()
+            .unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(marker["schema"], "bm06-durable-prefix-v1");
+        assert_eq!(marker["frontier"], pause);
+        child.0.as_mut().unwrap().kill().unwrap();
+        assert_eq!(child.0.as_mut().unwrap().wait().unwrap().signal(), Some(9));
+        child.0.take();
+        reader.join().unwrap();
+        let certificates = fixture.database().join("CERTIFICATES");
+        let prefix = fs::read(&certificates).unwrap();
+        fixture.records = 1;
+        assert!(!complete(fixture.command("resume")).status.success());
+        assert_eq!(fs::read(&certificates).unwrap(), prefix);
+        fixture.records = 2;
+        let resumed = fixture.run("resume");
+        assert_eq!(resumed["frontier"], 100);
+        assert_eq!(resumed["verified_history_versions"], 198);
+        let checkpoint = fs::read(&certificates).unwrap();
+        assert_eq!(fixture.run("resume")["frontier"], 100);
+        assert_eq!(fs::read(&certificates).unwrap(), checkpoint);
+        fixture.run("tail");
+        let terminal = fs::read(&certificates).unwrap();
+        let resumed = fixture.run("resume");
+        assert_eq!(resumed["frontier"], 101);
+        assert_eq!(resumed["verified_history_versions"], 200);
+        assert_eq!(fs::read(&certificates).unwrap(), terminal);
+        assert_eq!(fixture.run("open")["verified_history_versions"], 200);
+    }
+}
+
+#[test]
 fn bm06_native_profile_refuses_before_filesystem_or_credential_access() {
     use uste_t20_bench::{
         linux_runner::disk::recovery::run, recovery_materialization::Bm06Profile,
     };
     let missing = std::path::Path::new("/nonexistent-bm06-test-must-not-open");
+    for pause in [0, 101, u64::MAX] {
+        assert_eq!(
+            uste_t20_bench::linux_runner::disk::recovery::create_crash_probe(
+                missing,
+                missing,
+                Bm06Profile::new(2).unwrap(),
+                pause,
+            )
+            .unwrap_err()
+            .code(),
+            "USTE_BM06_PROBE_REVISION"
+        );
+    }
     for records in [3, 100_000] {
         assert_eq!(
             run(

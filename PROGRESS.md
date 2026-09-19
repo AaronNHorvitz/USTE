@@ -58,6 +58,32 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `19d2c36` plus this increment: [Decision 0117](docs/decisions/0117-native-bm06-prefix-resume.md)
+  adds native bounded materialization resume and a supervised durable-prefix crash probe. New
+  bootstrap retry/transaction identities bind the record count; legacy unbound or expired retry
+  evidence refuses resume while existing open/recover compatibility remains. A policy-only prefix
+  uses the explicit one-transaction/zero-owner/1 MiB bootstrap allowance; later prefixes stay on
+  disk-backed state. Current maintenance authorization and durable policy checks precede the
+  metadata binding lookup. Tests SIGKILL owned children at revisions 1, 2, 50, 99 and 100, refuse
+  wrong-profile resume without changing certificates, verify all 198 checkpoint history versions,
+  repeat resume without duplicate commits, then repair terminal 101 and verify all 200 versions.
+  Revision-one loss precedes derived root publication. Invalid probe frontiers refuse before I/O.
+  Focused scope `run-p414964-i21364736.scope` exited 0: seven native tests passed in 55.52s using
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline --test recovery_process -- --test-threads=1`, with MemoryHigh=3G,
+  MemoryMax=4G, MemorySwapMax=512M. Full scope `run-p415572-i21422102.scope` exited 0:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active unit tests (45.05s), three BM-01
+  process tests (11.90s), two BM-06 CLI tests (0.49s), seven BM-06 process tests (55.72s);
+  the same two exact-oracle tests retain their documented separate-command ignores.
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml
+  --all-targets --locked --offline -- -D warnings` passed (1.07s). Sampled scope peak
+  376,000,512 bytes, zero swap, not a final whole-run peak. Formatting/whitespace, docs
+  (191 links) and task graph (68 tasks) pass. Latest production workspace gate remains D0113.
+  Preflight: 35 GiB available RAM, 3.9 GiB free swap. T-20/T-19 remain open; no benchmark cap,
+  qualification threshold, M1 source or lockfile changed. Next: full graph-base-loss rebuild and
+  scalable construction/recovery, including native multi-revision retained-base controls.
+
 - Verified on pushed `134f116` plus this increment: [native BM-06 recovery controls](docs/evidence/native-bm06-recovery-controls.md)
   cover corrupted and missing terminal cache manifests, retained-root suffix rebuild, complete
   graph-base-loss refusal and exact incomplete certificate/journal tails. Reports now expose
@@ -2368,13 +2394,16 @@ publisher remains a bounded legacy bridge, not larger-than-memory construction.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. The authenticated streaming suffix is now
 implemented; native failure qualification, full immutable-run rewrite amplification and
-populated-base quota construction and accounting qualification remain open. Decisions 0111–0112
+accounting qualification remain open. Decision 0113 implements bounded populated-base quota
+construction. Decisions 0114–0117 pin BM-06 materialization and add bounded model/native recovery,
+cache-loss refusal/retained-root controls and authenticated prefix resume; exact-scale construction,
+complete graph-cache-loss rebuild and the 30-trial campaign remain open. Decisions 0111–0112
 add admitted disk principal totals and authorized opt-in accounting without whole-ledger scans.
 Decisions 0104–0110 reduce authenticated
 reverse-scan, empty-catalog, point-lookup and cache-recency work without qualifying T-20.
 Run the exact five-sample BM-01 campaign under the accepted host
-24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
-10-million-event protocol. Then return to T-19's
+24 GiB reservation once the implementation boundary is honest, and implement/run BM-06's
+pinned 10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.
 T-62 remains independent and must not be represented as complete without owner-administered
 evidence. BM-04 performance optimization remains later acceptance work and is not silently treated

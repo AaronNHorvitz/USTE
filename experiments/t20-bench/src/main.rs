@@ -20,6 +20,7 @@ fn run() -> Result<(), String> {
         let mut root = None;
         let mut password = None;
         let mut records = None;
+        let mut pause = None;
         while let Some(flag) = arguments.next() {
             let value = arguments
                 .next()
@@ -38,6 +39,15 @@ fn run() -> Result<(), String> {
                             .map_err(|_| "BM-06 record count must be unsigned")?,
                     )
                 }
+                Some("--pause-after-revision") if pause.is_none() => {
+                    pause = Some(
+                        value
+                            .into_string()
+                            .map_err(|_| "BM-06 pause must be UTF-8")?
+                            .parse::<u64>()
+                            .map_err(|_| "BM-06 pause must be unsigned")?,
+                    );
+                }
                 _ => return Err("unsupported or duplicate BM-06 native flag".into()),
             }
         }
@@ -46,15 +56,23 @@ fn run() -> Result<(), String> {
         let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(
             records.ok_or("BM-06 native command requires --records")?,
         )?;
+        if (phase == "create-crash-probe") != pause.is_some() {
+            return Err("only BM-06 create-crash-probe requires --pause-after-revision".into());
+        }
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-        println!(
-            "{}",
-            uste_t20_bench::linux_runner::disk::recovery::run(&root, &password, profile, phase)
-                .map_err(|error| error.to_string())?
-        );
+        {
+            let report = if let Some(pause) = pause {
+                uste_t20_bench::linux_runner::disk::recovery::create_crash_probe(
+                    &root, &password, profile, pause,
+                )
+            } else {
+                uste_t20_bench::linux_runner::disk::recovery::run(&root, &password, profile, phase)
+            };
+            println!("{}", report.map_err(|error| error.to_string())?);
+        }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = (root, password, profile, phase);
+            let _ = (root, password, profile, phase, pause);
             return Err("BM-06 native runner requires x86_64 Linux".into());
         }
         return Ok(());
@@ -322,8 +340,10 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench bm06-linux-<create|tail|recover|open|tail-crash-probe> \
+         uste-t20-bench bm06-linux-<create|resume|tail|recover|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
+         uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \
+         --records COUNT --pause-after-revision REVISION\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-create|linux-disk-resume|linux-disk-open> \

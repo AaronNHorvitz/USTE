@@ -13,12 +13,52 @@ pub fn run(
     profile: Bm06Profile,
     phase: &str,
 ) -> Result<String, LinuxRunnerError> {
+    run_observed(root, password_file, profile, phase, &mut |_| Ok(()))
+}
+
+pub fn create_crash_probe(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm06Profile,
+    pause: u64,
+) -> Result<String, LinuxRunnerError> {
+    if profile.records() > MAX_NATIVE_RECORDS {
+        return Err(error("USTE_BM06_DEVELOPMENT_LIMIT"));
+    }
+    if pause == 0 || pause > profile.checkpoint_revision() {
+        return Err(error("USTE_BM06_PROBE_REVISION"));
+    }
+    run_observed(root, password_file, profile, "create", &mut |revision| {
+        if revision == pause {
+            use std::io::Write;
+            let mut output = std::io::stdout().lock();
+            writeln!(
+                output,
+                "{{\"schema\":\"bm06-durable-prefix-v1\",\"frontier\":{revision}}}"
+            )
+            .and_then(|()| output.flush())
+            .map_err(|_| error("USTE_BM06_PROBE_SIGNAL"))?;
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok(())
+    })
+}
+
+fn run_observed(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm06Profile,
+    phase: &str,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<String, LinuxRunnerError> {
     if profile.records() > MAX_NATIVE_RECORDS {
         return Err(error("USTE_BM06_DEVELOPMENT_LIMIT"));
     }
     if !matches!(
         phase,
-        "create" | "tail" | "recover" | "open" | "tail-crash-probe"
+        "create" | "resume" | "tail" | "recover" | "open" | "tail-crash-probe"
     ) {
         return Err(error("USTE_BM06_PHASE"));
     }
@@ -32,7 +72,7 @@ pub fn run(
     if phase == "create" {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
             .map_err(|_| error("USTE_BM06_KEY_CREATE"))?;
-        let mut raw = CommitCoordinator::create(
+        let raw = CommitCoordinator::create(
             &mut fs,
             scope(),
             retention()?,
@@ -42,40 +82,7 @@ pub fn run(
             GraphState::new(scope()),
         )
         .map_err(|_| error("USTE_BM06_CREATE"))?;
-        let install = encode_transaction(&GraphTransaction::with_policy_mutation(
-            scope(),
-            Vec::new(),
-            uste_graph::DurablePolicyMutation::Install {
-                policy: policy.clone(),
-            },
-        ))
-        .map_err(|_| error("USTE_BM06_POLICY"))?;
-        raw.commit(
-            &mut fs,
-            TransactionRequest {
-                principal: PRINCIPAL,
-                idempotency_key: identity(1, IdempotencyKey::from_bytes),
-                transaction_id: identity(1, TransactionId::from_bytes),
-                canonical_request: &install,
-                blob_inventory: None,
-            },
-            &mut clock,
-            &NeverCancel,
-        )
-        .map_err(|_| error("USTE_BM06_BOOTSTRAP"))?;
-        let snapshot = raw
-            .read_view()
-            .map_err(|_| error("USTE_BM06_BOOTSTRAP"))?
-            .state()
-            .clone();
-        uste_graph::publish_graph_state_root(&mut raw, &mut fs, &snapshot)
-            .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
-        uste_txn::publish_coordinator_metadata_root(&mut raw, &mut fs)
-            .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
-        uste_txn::publish_coordinator_transaction_index(&mut raw, &mut fs)
-            .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
-        drop(snapshot);
-        drop(raw);
+        bootstrap(raw, &mut fs, profile, &mut clock, observer)?;
     }
     let (recovery, storage_report, frontier) =
         AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
@@ -90,22 +97,80 @@ pub fn run(
                 .map_err(|_| error("USTE_BM06_LIMITS"))?,
         )
         .map_err(|_| error("USTE_BM06_OPEN"))?;
+    let (recovery, frontier) = if phase == "resume"
+        && storage_report
+            .frontier
+            .is_none_or(|revision| revision.get() <= 1)
+    {
+        let raw = recovery
+            .into_bounded_coordinator(
+                &mut fs,
+                GraphState::new(scope()),
+                retention()?,
+                CoordinatorRecoveryLimits::new(1, 0).map_err(|_| error("USTE_BM06_LIMITS"))?,
+                1_048_576,
+            )
+            .map_err(|_| error("USTE_BM06_BOOTSTRAP_RECOVERY"))?;
+        bootstrap(raw, &mut fs, profile, &mut clock, observer)?;
+        let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_blob_metadata(
+            &mut fs,
+            &name,
+            scope(),
+            OsEntropy,
+            OsEntropy,
+            &mut adapter,
+            limits.blob_recovery,
+            &mut uste_storage::PageCache::new(64 * 1024 * 1024)
+                .map_err(|_| error("USTE_BM06_LIMITS"))?,
+        )
+        .map_err(|_| error("USTE_BM06_OPEN"))?;
+        (recovery, frontier)
+    } else {
+        (recovery, frontier)
+    };
     let frontier = frontier.ok_or_else(|| error("USTE_BM06_FRONTIER"))?;
+    let recovered_revision = frontier.revision().get();
     let expected = match phase {
         "create" => 1,
+        "resume" if recovered_revision <= profile.frontier() => recovered_revision,
         "tail" | "tail-crash-probe" => profile.checkpoint_revision(),
         _ => profile.frontier(),
     };
     if frontier.revision().get() != expected {
         return Err(error("USTE_BM06_FRONTIER"));
     }
-    let (mut disk, admission) =
-        admit_development_disk(&mut fs, recovery, frontier, limits, phase == "recover")
-            .map_err(|_| error("USTE_BM06_ADMISSION"))?;
+    let (mut disk, admission) = admit_development_disk(
+        &mut fs,
+        recovery,
+        frontier,
+        limits,
+        matches!(phase, "recover" | "resume"),
+    )
+    .map_err(|_| error("USTE_BM06_ADMISSION"))?;
     let mut kernel = kernel(policy).map_err(|_| error("USTE_BM06_POLICY"))?;
     let principal = authenticate(&kernel)?;
-    if phase == "create" {
-        for sequence in 2..=profile.checkpoint_revision() {
+    if matches!(phase, "create" | "resume") {
+        require_bootstrap_binding(&disk, &mut fs, &kernel, &principal, profile, &mut clock)?;
+        if recovered_revision > 1 {
+            verify_history(
+                &disk,
+                &mut fs,
+                &kernel,
+                &principal,
+                profile,
+                recovered_revision - 1,
+            )
+            .map_err(|_| error("USTE_BM06_HISTORY_ORACLE"))?;
+        }
+        disk.rebase_metadata(
+            &mut fs,
+            CoordinatorMetadataRebaseLimits {
+                merge: limits.merge,
+                reuse: limits.merge_read,
+            },
+        )
+        .map_err(|_| error("USTE_BM06_METADATA_REPAIR"))?;
+        for sequence in recovered_revision + 1..=profile.checkpoint_revision() {
             commit_batch(
                 &mut disk,
                 &mut fs,
@@ -116,6 +181,7 @@ pub fn run(
                 limits,
             )
             .map_err(|_| error("USTE_BM06_MATERIALIZE"))?;
+            observer(sequence)?;
         }
     } else if phase == "recover" {
         disk.rebase_metadata(
@@ -141,7 +207,9 @@ pub fn run(
     let recovery_or_construction_ms = start.elapsed().as_millis();
     let before_verification_io = fs.snapshot()?;
     let verification_start = Instant::now();
-    let versions = if matches!(phase, "create" | "tail" | "tail-crash-probe") {
+    let versions = if matches!(phase, "create" | "tail" | "tail-crash-probe")
+        || (phase == "resume" && recovered_revision < profile.frontier())
+    {
         VERSIONS - 1
     } else {
         VERSIONS
@@ -212,6 +280,120 @@ fn batch(profile: Bm06Profile, sequence: u64) -> Result<DiskBatch, LinuxRunnerEr
             .batch(scope(), sequence)
             .map_err(|_| error("USTE_BM06_BATCH"))?,
     })
+}
+
+fn bootstrap_identity<T>(profile: Bm06Profile, construct: impl FnOnce([u8; 16]) -> T) -> T {
+    let mut bytes = [0_u8; 16];
+    bytes[..8].copy_from_slice(b"BM06BT1\0");
+    bytes[8..].copy_from_slice(&profile.records().to_be_bytes());
+    construct(bytes)
+}
+
+fn bootstrap(
+    mut raw: DiskRaw,
+    fs: &mut DiskFileSystem,
+    profile: Bm06Profile,
+    clock: &mut SystemClock,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<(), LinuxRunnerError> {
+    let key = bootstrap_identity(profile, IdempotencyKey::from_bytes);
+    let transaction = bootstrap_identity(profile, TransactionId::from_bytes);
+    if let Some((revision, _)) = raw
+        .checkpoint_anchor()
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP_PROFILE"))?
+    {
+        let mut outcomes = raw.checkpoint_outcomes();
+        let Some((principal, stored_key, outcome)) = outcomes.next() else {
+            return Err(error("USTE_BM06_BOOTSTRAP_PROFILE"));
+        };
+        if revision.get() != 1
+            || outcome.revision != revision
+            || principal != PRINCIPAL
+            || stored_key != key
+            || outcome.transaction_id != transaction
+            || outcomes.next().is_some()
+        {
+            return Err(error("USTE_BM06_BOOTSTRAP_PROFILE"));
+        }
+    }
+    let policy = recovery_policy().map_err(|_| error("USTE_BM06_POLICY"))?;
+    let encoded = encode_transaction(&GraphTransaction::with_policy_mutation(
+        scope(),
+        Vec::new(),
+        uste_graph::DurablePolicyMutation::Install { policy },
+    ))
+    .map_err(|_| error("USTE_BM06_POLICY"))?;
+    let outcome = raw
+        .commit(
+            fs,
+            TransactionRequest {
+                principal: PRINCIPAL,
+                idempotency_key: key,
+                transaction_id: transaction,
+                canonical_request: &encoded,
+                blob_inventory: None,
+            },
+            clock,
+            &NeverCancel,
+        )
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP"))?;
+    if outcome.revision.get() != 1 {
+        return Err(error("USTE_BM06_BOOTSTRAP_PROFILE"));
+    }
+    observer(1)?; // Certificate acknowledged; derived bootstrap roots may still be absent.
+    let snapshot = raw
+        .read_view()
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP"))?
+        .state()
+        .clone();
+    uste_graph::publish_graph_state_root(&mut raw, fs, &snapshot)
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
+    uste_txn::publish_coordinator_metadata_root(&mut raw, fs)
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
+    uste_txn::publish_coordinator_transaction_index(&mut raw, fs)
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP_ROOT"))?;
+    Ok(())
+}
+
+fn require_bootstrap_binding(
+    disk: &Disk,
+    fs: &mut DiskFileSystem,
+    kernel: &PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    profile: Bm06Profile,
+    clock: &mut SystemClock,
+) -> Result<(), LinuxRunnerError> {
+    // Trusted fixture maintenance, gated by current authority and exact durable policy before
+    // its raw coordinator metadata lookup. This does not add a consumer metadata capability.
+    kernel
+        .authorize(
+            principal,
+            uste_policy::Action::ManageSchema,
+            uste_policy::Target::Namespace(scope()),
+        )
+        .map_err(|_| error("USTE_BM06_AUTHORIZATION"))?;
+    uste_txn::AuthorizedDiskMetadata::new(disk, kernel).map_err(|_| error("USTE_BM06_POLICY"))?;
+    let now = clock
+        .observe()
+        .map_err(|_| error("USTE_BM06_CLOCK"))?
+        .wall_utc;
+    let outcome = disk
+        .outcome(
+            fs,
+            PRINCIPAL,
+            bootstrap_identity(profile, IdempotencyKey::from_bytes),
+            now,
+            IndexGetLimits::new(64, 136).map_err(|_| error("USTE_BM06_LIMITS"))?,
+            &mut uste_storage::PageCache::new(64 * 1024).map_err(|_| error("USTE_BM06_LIMITS"))?,
+        )
+        .map_err(|_| error("USTE_BM06_BOOTSTRAP_PROFILE"))?
+        .ok_or_else(|| error("USTE_BM06_BOOTSTRAP_PROFILE"))?;
+    if outcome.revision.get() != 1
+        || outcome.transaction_id != bootstrap_identity(profile, TransactionId::from_bytes)
+    {
+        return Err(error("USTE_BM06_BOOTSTRAP_PROFILE"));
+    }
+    Ok(())
 }
 
 fn commit_unpublished_tail(
