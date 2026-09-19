@@ -304,6 +304,19 @@ fn native_disk_queries_match_separate_summary_and_reject_substitution() {
     assert_eq!(json["engine_benchmark"], false);
     assert_eq!(json["preemptive_deadline_enforced"], false);
     assert_eq!(json["cache_budget_bytes"], 64 * 1024 * 1024);
+    let io = &json["query_adapter_io"];
+    assert_eq!(io["measurement_scope"], "filesystem-adapter-calls");
+    assert_eq!(io["complete_authenticated_index_io"], false);
+    assert!(io["read_returned_bytes"].as_u64().unwrap() > 0);
+    assert!(io["operations"]["read_at"]["calls"].as_u64().unwrap() > 0);
+    assert_eq!(io["operations"]["read_at"]["failures"], 0);
+    assert_eq!(io["operations"]["write_at"]["calls"], 0);
+    assert!(
+        json["setup_adapter_io"]["read_returned_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert!(json["cache_hits"].as_u64().unwrap() > 0);
     assert!(json["cache_misses"].as_u64().unwrap() > 0);
     assert_eq!(json["oracle_summary_digest"], hex(&summary.digest()));

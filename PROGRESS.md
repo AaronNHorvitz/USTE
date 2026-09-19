@@ -40,8 +40,11 @@ base and one bounded pending terminal-root plan. Decision 0053 reopens that stat
 journal frontier as either the ready base or exactly one revalidated pending suffix, without
 reconstructing `GraphState`. Decision 0059 at `8885da4` removes the hidden absolute-maximum root
 pre-scrub from graph recovery: fixed manifest discovery now precedes one caller-bounded semantic
-scan. T-20 remains open pending disk-backed coordinator metadata, larger-than-memory qualification
-and qualifying BM-01/BM-06 results. Review was
+scan. Decisions 0060–0073 add the opt-in disk coordinator, bounded overlays and maintained
+first-reference roots; Decisions 0074–0084 connect native development construction, recovery,
+supervised queries, profile-derived work limits and adapter I/O observation. T-20 remains open
+pending remaining scalability/accounting work, larger-than-memory qualification and qualifying
+BM-01/BM-06 results. Review was
 performed by Codex agents and does not represent independent external security certification.
 
 T-49 is complete at its typed R1 transaction-contract scope. A T-19 audit found that its required
@@ -50,6 +53,28 @@ every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 rem
 unverified external distribution prerequisite.
 
 ## Completed this increment
+
+- [Decision 0084](docs/decisions/0084-native-adapter-io-observation.md) adds fixed-size native
+  adapter-call/failure and requested/returned-byte observation. Forwarded results and durability
+  ordering are unchanged, including short I/O/errors; overflow invalidates reports rather than
+  storage operations. Setup, query, warm-up and paired sample counters are separate and explicitly
+  are not physical-device or complete authenticated-index measurements. No path/payload is retained.
+  On pushed `5982002` plus this increment, the scoped release experiment suite passed 46 unit
+  tests (2 existing exact-profile oracle tests ignored) in 27.95s and all 3 real CLI tests in
+  12.81s; experiment all-target strict clippy passed. Command: `CARGO_BUILD_JOBS=1 cargo test
+  --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline --
+  --test-threads=1`, followed by the same manifest's all-target `cargo clippy --locked --offline
+  -- -D warnings`. Native sampling verified nonzero setup/empty-cache reads, zero query writes,
+  zero retained-cache returned bytes and the independent output digest.
+  Final verification includes the exact-count assertion and the certificate-inclusive maximum
+  journal-group boundary regression: `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G
+  -p MemorySwapMax=512M bash -lc 'CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_NET_OFFLINE=true
+  bash scripts/check.sh'` exited 0. Workspace tests, strict lint, documentation and prerequisite
+  checks passed; isolated experiment tests passed 47 unit tests (2 existing ignores) in 466.01s
+  and all 3 CLI tests in 254.79s. Sampled scope peak 2,586,546,176 bytes, zero swap.
+  Host preflight: 35 GiB available RAM, 3.9 GiB free swap. Docs/task checks pass (157 links,
+  68 tasks). Next retain authenticated index-operation
+  counters across failure paths under maintenance authorization. No qualifying campaign ran.
 
 - [Decision 0083](docs/decisions/0083-profile-derived-disk-driver-limits.md) routes both disk
   adapters through validated fixture/batch-derived admission, preparation and merge limits.
@@ -1338,9 +1363,11 @@ metadata base with exact first-owner proofs and explicit read amplification. Tha
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
 Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
-Decisions 0074–0079 connect independent development oracles, native construction/recovery/query,
-real process-loss tests and supervised sampling to the disk path. Next derive qualifying-profile
-admission, complete I/O accounting, and remove remaining resident storage metadata.
+Decisions 0074–0084 connect independent development oracles, native construction/recovery/query,
+real process-loss tests and supervised sampling to the disk path. Profile-derived limits now
+validate across the accepted size range, and the 1,000/10,000 development oracle check passes.
+Native commands remain capped pending qualification readiness. Next complete index-operation
+accounting alongside the adapter counters and address remaining resident storage metadata.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

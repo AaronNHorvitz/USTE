@@ -4,6 +4,8 @@ use super::*;
 pub(crate) const CACHE_BYTES: usize = 64 * 1024 * 1024;
 // Decision 0015: maximum 16 MiB plaintext plus one small encrypted envelope of padding/overhead.
 const MAX_ENCODED_GROUP: u64 = uste_crypto::MAX_PLAINTEXT_BYTES as u64 + 4_161;
+// visit_committed_range debits the fixed certificate as well as the group envelope.
+const MAX_CERTIFIED_GROUP: u64 = MAX_ENCODED_GROUP + 4_161;
 const ENTRY_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Copy)]
@@ -102,8 +104,8 @@ impl DiskProfileLimits {
         .map_err(debug)?;
         Ok(Self {
             groups,
-            prefix_bytes: mul(groups, MAX_ENCODED_GROUP)?,
-            suffix_bytes: mul(2, MAX_ENCODED_GROUP)?,
+            prefix_bytes: mul(groups, MAX_CERTIFIED_GROUP)?,
+            suffix_bytes: mul(2, MAX_CERTIFIED_GROUP)?,
             transaction_run,
             metadata,
             graph,
@@ -124,8 +126,8 @@ mod tests {
         }
         let limits = DiskProfileLimits::new(Bm01Profile::qualifying()).unwrap();
         assert_eq!(limits.groups, 212);
-        assert_eq!(limits.prefix_bytes, 212 * 16_781_377);
-        assert_eq!(limits.suffix_bytes, 2 * 16_781_377);
+        assert_eq!(limits.prefix_bytes, 212 * 16_785_538);
+        assert_eq!(limits.suffix_bytes, 2 * 16_785_538);
         assert_eq!(limits.transaction_run.maximum_entries(), 212);
         assert_eq!(limits.merge_read.maximum_entries(), 3_000_000);
         assert_eq!(
@@ -134,6 +136,63 @@ mod tests {
                 .unwrap()
         );
         assert!(limits.prefix_bytes > 128 * 1024 * 1024);
+    }
+
+    #[test]
+    fn certified_range_allowance_includes_the_maximum_group_and_its_certificate() {
+        use uste_storage::journal::{CommitInput, CreationOptions, JournalStore, StorageError};
+        let mut fs = MemoryFileSystem::new(128 * 1024 * 1024);
+        let vault =
+            KeyVault::create(scope().database(), &mut TestKeyAdapter, CounterEntropy(71)).unwrap();
+        let mut store = JournalStore::create(
+            &mut fs,
+            CreationOptions {
+                database: scope().database(),
+                final_name: EntryName::new("range-boundary").unwrap(),
+            },
+            vault,
+            CounterEntropy(300),
+        )
+        .unwrap();
+        let payload = vec![0x55; uste_crypto::MAX_PLAINTEXT_BYTES];
+        let committed = store
+            .append_group(
+                &mut fs,
+                CommitInput {
+                    encoded_group: &payload,
+                    logical_event_digest: [9; 32],
+                },
+            )
+            .unwrap();
+        for bytes in [MAX_ENCODED_GROUP, MAX_CERTIFIED_GROUP - 1] {
+            assert_eq!(
+                store.visit_committed_range(
+                    &mut fs,
+                    committed.revision,
+                    committed.revision,
+                    1,
+                    bytes,
+                    |_, _| panic!("short byte budget must fail before callback")
+                ),
+                Err(StorageError::ResourceLimit)
+            );
+        }
+        let mut visited = 0;
+        store
+            .visit_committed_range(
+                &mut fs,
+                committed.revision,
+                committed.revision,
+                1,
+                MAX_CERTIFIED_GROUP,
+                |_, group| {
+                    assert_eq!(group.encoded_group, payload);
+                    visited += 1;
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(visited, 1);
     }
 
     #[test]

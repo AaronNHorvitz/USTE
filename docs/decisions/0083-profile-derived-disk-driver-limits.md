@@ -12,7 +12,8 @@ ordinary writes and metadata/graph merges. The batch's identities and operations
 retry identities and canonical fixture bytes are unchanged.
 
 For G planned revisions, admit G transaction outcomes, no blob owners, and G+1 metadata entries.
-Bound each journal-prefix pass by G times the format's maximum encoded group (16,781,377 bytes);
+Bound each journal-prefix pass by G times the format's maximum encoded group plus certificate
+(16,781,377 + 4,161 = 16,785,538 bytes; corrected during Decision 0084 review);
 the two-outcome metadata overlay retains an independent two-group encoded suffix allowance.
 The one-pending-graph-revision contract is unchanged. Fixed-width coordinator runs use explicit
 count-derived page/byte limits. No full-memory fallback is introduced.

@@ -262,6 +262,33 @@ fn disk_cli_supervised_sampling_preserves_oracle_cache_pairs_and_deadline_claim(
     assert!(cache[0]["index_cache_misses"].as_u64().unwrap() > 0);
     assert_eq!(cache[1]["index_cache_misses"], 0);
     assert_eq!(cache[0]["successful_visits"], cache[1]["successful_visits"]);
+    assert_eq!(report["adapter_io_accounting"], "filesystem-adapter-calls");
+    let io = sample["adapter_io"].as_array().unwrap();
+    assert_eq!(io.len(), 2);
+    for (work, cache) in io.iter().zip(cache) {
+        assert_eq!(work["cache"], cache["cache"]);
+        assert_eq!(
+            work["work"]["measurement_scope"],
+            "filesystem-adapter-calls"
+        );
+        assert_eq!(work["work"]["physical_device_io"], false);
+        assert_eq!(work["work"]["complete_authenticated_index_io"], false);
+        assert_eq!(work["work"]["operations"]["write_at"]["calls"], 0);
+    }
+    assert!(io[0]["work"]["read_returned_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(io[1]["work"]["read_returned_bytes"], 0);
+    assert!(
+        report["setup_adapter_io"]["read_returned_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        report["warmup_adapter_io"]["read_returned_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     let latencies = sample["latency_groups"].as_array().unwrap();
     assert_eq!(latencies.len(), 32);
     let all_count: u64 = latencies

@@ -13,19 +13,23 @@ use uste_txn::{
 
 type Disk = DiskCommitCoordinator<
     GraphDiskLiveState,
-    LinuxFileSystem,
+    DiskFileSystem,
     RecoveryEnvelope,
     OsEntropy,
     OsEntropy,
 >;
+type DiskFileSystem = io::ObservedFileSystem<LinuxFileSystem>;
+type DiskRaw =
+    CommitCoordinator<GraphState, DiskFileSystem, RecoveryEnvelope, OsEntropy, OsEntropy>;
 
+mod io;
 mod query;
 mod sampling;
 pub use query::query_correctness;
 pub use sampling::sample_worker;
 
 struct DiskSession {
-    filesystem: LinuxFileSystem,
+    filesystem: DiskFileSystem,
     coordinator: Disk,
     policy: PolicyKernel,
     principal: AuthenticatedPrincipal,
@@ -96,7 +100,7 @@ fn prepare_session_with_observer(
     }
     let limits = DiskProfileLimits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?;
     let started = Instant::now();
-    let mut fs = open_filesystem(root)?;
+    let mut fs = io::ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password_file)?);
     let name =
         EntryName::new("bm01-linux-disk-engine").map_err(|_| error("USTE_BM01_DATABASE_NAME"))?;
@@ -261,7 +265,7 @@ fn prepare_session_with_observer(
             "\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},",
             "\"frontier\":{},\"recovered_revision\":{},\"elapsed_milliseconds\":{},",
             "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{},",
-            "\"cold_admission\":{},\"final_state_counts\":{}}}"
+            "\"cold_admission\":{},\"final_state_counts\":{},\"setup_adapter_io\":{}}}"
         ),
         phase,
         profile.entities(),
@@ -272,7 +276,8 @@ fn prepare_session_with_observer(
         report.repaired_certificate_tail_bytes,
         report.ignored_uncommitted_journal_bytes,
         admission_json,
-        serde_json::json!(final_counts)
+        serde_json::json!(final_counts),
+        fs.snapshot()?.json()?
     );
     Ok((
         DiskSession {
@@ -288,8 +293,8 @@ fn prepare_session_with_observer(
 }
 
 fn bootstrap(
-    mut raw: LinuxRaw,
-    fs: &mut LinuxFileSystem,
+    mut raw: DiskRaw,
+    fs: &mut DiskFileSystem,
     observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
 ) -> Result<(), LinuxRunnerError> {
     install_policy(&mut raw, fs)?;
@@ -308,7 +313,10 @@ fn bootstrap(
     Ok(())
 }
 
-fn install_policy(raw: &mut LinuxRaw, fs: &mut LinuxFileSystem) -> Result<(), LinuxRunnerError> {
+fn install_policy<F: uste_storage::OwnershipFileSystem>(
+    raw: &mut CommitCoordinator<GraphState, F, RecoveryEnvelope, OsEntropy, OsEntropy>,
+    fs: &mut F,
+) -> Result<(), LinuxRunnerError> {
     // Recovery must be an exact retry, never a fresh policy append to an unrelated prefix.
     if let Some((revision, _)) = raw
         .checkpoint_anchor()
@@ -357,7 +365,7 @@ fn install_policy(raw: &mut LinuxRaw, fs: &mut LinuxFileSystem) -> Result<(), Li
 
 fn require_binding(
     disk: &Disk,
-    fs: &mut LinuxFileSystem,
+    fs: &mut DiskFileSystem,
     policy: &PolicyKernel,
     principal: &AuthenticatedPrincipal,
     profile: Bm01Profile,

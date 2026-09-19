@@ -35,6 +35,7 @@ pub fn query_correctness(
     let mut result_bytes = 0_u64;
     let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-query-v1");
     let materializer = Materializer::new(profile);
+    let setup_io = session.filesystem.snapshot()?;
     let query_started = Instant::now();
     for expected in summary.expectations() {
         reader
@@ -127,7 +128,8 @@ pub fn query_correctness(
             "\"p50_nanoseconds\":{},\"p95_nanoseconds\":{},\"p99_nanoseconds\":{},",
             "\"current_rss_kib\":{},\"process_peak_rss_kib\":{},\"oracle_summary_digest\":\"{}\",",
             "\"output_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_accounted_bytes\":{},",
-            "\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{}}}"
+            "\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{},",
+            "\"setup_adapter_io\":{},\"query_adapter_io\":{}}}"
         ),
         profile.entities(),
         profile.relationships(),
@@ -151,6 +153,8 @@ pub fn query_correctness(
         cache.accounted_bytes,
         cache.hits,
         cache.misses,
-        cache.evictions
+        cache.evictions,
+        setup_io.json()?,
+        session.filesystem.snapshot()?.delta(setup_io)?.json()?
     ))
 }

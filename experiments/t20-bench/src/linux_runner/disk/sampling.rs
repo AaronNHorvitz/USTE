@@ -14,7 +14,7 @@ use uste_txn::AuthorizedDiskCacheReport;
 type Reader<'a> = AuthorizedDiskReader<
     'a,
     GraphDiskLiveState,
-    LinuxFileSystem,
+    DiskFileSystem,
     RecoveryEnvelope,
     OsEntropy,
     OsEntropy,
@@ -61,6 +61,7 @@ fn sample(
         64 * 1024 * 1024,
     )
     .map_err(|_| error("USTE_BM01_AUTHORIZED_OPEN"))?;
+    let setup_io = session.filesystem.snapshot()?;
     let mut engine = Engine {
         reader,
         filesystem: &mut session.filesystem,
@@ -77,6 +78,7 @@ fn sample(
             OutcomeKind::ResultLimit => 2,
         }] += 1;
     }
+    let warmup_io = engine.filesystem.snapshot()?.delta(setup_io)?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
@@ -90,6 +92,8 @@ fn sample(
         "cache_pairing": "empty-then-retained-identical-query", "kernel_filesystem_device_cache": "uncontrolled",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
         "storage_metadata_memory_resident": true, "authenticated_io_accounting": "not-measured",
+        "adapter_io_accounting": "filesystem-adapter-calls",
+        "setup_adapter_io": setup_io.json()?, "warmup_adapter_io": warmup_io.json()?,
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
         "budget_evaluation": "not-performed", "entities": profile.entities(),
@@ -103,7 +107,7 @@ fn sample(
 
 struct Engine<'a> {
     reader: Reader<'a>,
-    filesystem: &'a mut LinuxFileSystem,
+    filesystem: &'a mut DiskFileSystem,
     principal: &'a AuthenticatedPrincipal,
     materializer: Materializer,
 }
@@ -149,6 +153,7 @@ impl Engine<'_> {
         let mut groups = BTreeMap::new();
         let mut executions = 0;
         let mut work = [CacheWork::default(); 2];
+        let mut io_work = [io::IoSnapshot::default(); 2];
         let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
         aggregate.update(&(ordinal as u64).to_be_bytes());
         loop {
@@ -159,8 +164,11 @@ impl Engine<'_> {
                         return Err(error("USTE_BM01_SAMPLE_OBSERVATIONS"));
                     }
                     let before = self.report()?;
+                    let before_io = self.filesystem.snapshot()?;
                     let (outcome, elapsed) = self.execute(expected, observer)?;
                     work[cache.index()].add(outcome, before, self.report()?)?;
+                    io_work[cache.index()]
+                        .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
                     executions += 1;
                     aggregate.update(&[
                         cache.code(),
@@ -203,6 +211,10 @@ impl Engine<'_> {
                 "elapsed_milliseconds": elapsed.as_millis(), "rounds": rounds, "timed_executions": executions,
                 "current_rss_kib": rss, "process_peak_rss_kib": peak, "output_digest": hex(aggregate.finalize().as_bytes()),
                 "cache_work": [work[0].json(CacheState::Empty)?, work[1].json(CacheState::Retained)?],
+                "adapter_io": [
+                    {"cache": CacheState::Empty.name(), "work": io_work[0].json()?},
+                    {"cache": CacheState::Retained.name(), "work": io_work[1].json()?},
+                ],
                 "latency_groups": latencies,
             }),
         )

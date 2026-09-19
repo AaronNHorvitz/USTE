@@ -87,6 +87,11 @@ history, outgoing, incoming, provenance, reverse, policy history, current policy
 setup measurements exclude coordinator journal passes, suffix preparation, publication and query
 work; they are not complete authenticated-I/O counters. Construction
 and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
+Native reports also include fixed-size filesystem-adapter observation: call/failure counts and
+requested/returned read/write bytes. Setup, query, warm-up and paired sample populations are
+separate. These exclude credential/oracle-file I/O, internal syscalls and handle drops, and are
+neither physical-device traffic nor complete authenticated-index statistics. Observation never
+changes storage results; overflow invalidates measurements. No path or payload is retained.
 The native tests require the experiment's `target` directory to reside on Btrfs:
 `CARGO_BUILD_JOBS=1 cargo test --release --locked --offline native_disk -- --test-threads=1`.
 
