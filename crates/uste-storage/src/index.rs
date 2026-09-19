@@ -49,8 +49,12 @@ const ROOT_BYTES: usize = 2_048;
 const ROOT_HEADER_BYTES: usize = 192;
 const RUN_DESCRIPTOR_BYTES: usize = 72;
 const ROOT_FILE_BYTES: u64 = 16 + SMALL_ENVELOPE_BYTES as u64;
-const CACHE_ENTRY_OVERHEAD: usize = 96;
+// Logical admission allowances for both ordered maps, including sparse root nodes. These
+// are not allocator/RSS measurements; qualification must still measure the process group.
+const CACHE_FIXED_OVERHEAD: usize = 8 * 1024;
+const CACHE_ENTRY_OVERHEAD: usize = 1024;
 const CACHE_ENTRY_BYTES: usize = INDEX_PAGE_BYTES + CACHE_ENTRY_OVERHEAD;
+pub const MIN_INDEX_CACHE_BYTES: usize = CACHE_FIXED_OVERHEAD + CACHE_ENTRY_BYTES;
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct IndexEntry {
@@ -656,7 +660,9 @@ struct CachedPage {
     last_used: u64,
 }
 
-/// Fixed-byte-budget decrypted page cache. Eviction zeroizes page buffers on normal drop.
+/// Fixed logical-byte-budget decrypted page cache with logarithmic-time LRU maintenance.
+/// Eviction zeroizes page buffers on normal drop. Accounting includes explicit map allowances,
+/// not allocator or process RSS measurements; the configured process limit remains independent.
 pub struct PageCache {
     budget: usize,
     accounted_bytes: usize,
@@ -665,6 +671,7 @@ pub struct PageCache {
     misses: u64,
     evictions: u64,
     pages: BTreeMap<CacheKey, CachedPage>,
+    recency: BTreeMap<u64, CacheKey>,
     read_telemetry: IndexReadTelemetry,
     read_telemetry_overflowed: bool,
 }
@@ -685,7 +692,7 @@ impl core::fmt::Debug for PageCache {
 
 impl PageCache {
     pub fn new(budget: usize) -> Result<Self, StorageError> {
-        if !(CACHE_ENTRY_BYTES..=MAX_INDEX_CACHE_BYTES).contains(&budget) {
+        if !(MIN_INDEX_CACHE_BYTES..=MAX_INDEX_CACHE_BYTES).contains(&budget) {
             return Err(StorageError::ResourceLimit);
         }
         Ok(Self {
@@ -696,6 +703,7 @@ impl PageCache {
             misses: 0,
             evictions: 0,
             pages: BTreeMap::new(),
+            recency: BTreeMap::new(),
             read_telemetry: IndexReadTelemetry::default(),
             read_telemetry_overflowed: false,
         })
@@ -747,21 +755,29 @@ impl PageCache {
     }
 
     pub fn clear(&mut self) {
-        self.pages.clear();
+        self.pages = BTreeMap::new();
+        self.recency = BTreeMap::new();
         self.accounted_bytes = 0;
     }
 
-    fn touch(&mut self, key: CacheKey) -> Option<&[u8]> {
+    fn advance_clock(&mut self) {
         self.clock = self.clock.checked_add(1).unwrap_or_else(|| {
             let removed = u64::try_from(self.pages.len()).unwrap_or(u64::MAX);
             self.evictions = self.evictions.saturating_add(removed);
-            self.pages.clear();
-            self.accounted_bytes = 0;
+            self.clear();
             1
         });
+    }
+
+    fn touch(&mut self, key: CacheKey) -> Option<&[u8]> {
+        self.advance_clock();
         match self.pages.get_mut(&key) {
             Some(page) => {
                 self.hits = self.hits.saturating_add(1);
+                let removed = self.recency.remove(&page.last_used);
+                debug_assert!(removed == Some(key));
+                let replaced = self.recency.insert(self.clock, key);
+                debug_assert!(replaced.is_none());
                 page.last_used = self.clock;
                 Some(page.bytes.as_ref())
             }
@@ -773,49 +789,32 @@ impl PageCache {
     }
 
     fn insert(&mut self, key: CacheKey, bytes: Vec<u8>) -> Result<(), StorageError> {
-        if bytes.len() != INDEX_PAGE_BYTES {
+        let bytes = Zeroizing::new(bytes.into_boxed_slice());
+        if bytes.len() != INDEX_PAGE_BYTES || self.pages.contains_key(&key) {
             return Err(StorageError::IntegrityFailure);
         }
-        while self
-            .accounted_bytes
-            .checked_add(CACHE_ENTRY_BYTES)
-            .ok_or(StorageError::ResourceLimit)?
-            > self.budget
-        {
-            let oldest = self
-                .pages
-                .iter()
-                .min_by_key(|(_, page)| page.last_used)
-                .map(|(key, _)| *key)
-                .ok_or(StorageError::ResourceLimit)?;
-            self.pages.remove(&oldest);
-            self.accounted_bytes = self
-                .accounted_bytes
-                .checked_sub(CACHE_ENTRY_BYTES)
+        self.advance_clock();
+        let capacity = (self.budget - CACHE_FIXED_OVERHEAD) / CACHE_ENTRY_BYTES;
+        if self.pages.len() == capacity {
+            let (_, oldest) = self
+                .recency
+                .pop_first()
+                .ok_or(StorageError::IntegrityFailure)?;
+            self.pages
+                .remove(&oldest)
                 .ok_or(StorageError::IntegrityFailure)?;
             self.evictions = self.evictions.saturating_add(1);
         }
-        self.clock = self
-            .clock
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-        if self
-            .pages
-            .insert(
-                key,
-                CachedPage {
-                    bytes: Zeroizing::new(bytes.into_boxed_slice()),
-                    last_used: self.clock,
-                },
-            )
-            .is_some()
-        {
-            return Err(StorageError::IntegrityFailure);
-        }
-        self.accounted_bytes = self
-            .accounted_bytes
-            .checked_add(CACHE_ENTRY_BYTES)
-            .ok_or(StorageError::ResourceLimit)?;
+        self.pages.insert(
+            key,
+            CachedPage {
+                bytes,
+                last_used: self.clock,
+            },
+        );
+        self.recency.insert(self.clock, key);
+        self.accounted_bytes = CACHE_FIXED_OVERHEAD + self.pages.len() * CACHE_ENTRY_BYTES;
+        debug_assert!(self.accounted_bytes <= self.budget);
         Ok(())
     }
 }
@@ -3742,6 +3741,208 @@ const fn index_crypto_error(error: CryptoError) -> StorageError {
 mod tests {
     use super::*;
 
+    fn cache_key(page: u64) -> CacheKey {
+        CacheKey {
+            database: DatabaseId::from_bytes([0x11; 16]),
+            namespace: NamespaceId::from_bytes([0x22; 16]),
+            epoch: KeyEpoch::new(1).unwrap(),
+            writer: WriterIncarnationId::from_bytes([0x33; 16]),
+            revision: CommitRevision::FIRST,
+            index_profile: [0x44; 32],
+            generation: 1,
+            object_id: [0x55; 16],
+            page,
+        }
+    }
+
+    fn assert_cache_invariants(cache: &PageCache) {
+        assert_eq!(cache.pages.len(), cache.recency.len());
+        for (key, page) in &cache.pages {
+            assert!(cache.recency.get(&page.last_used) == Some(key));
+            assert_eq!(page.bytes.len(), INDEX_PAGE_BYTES);
+        }
+        let expected_bytes = if cache.pages.is_empty() {
+            0
+        } else {
+            CACHE_FIXED_OVERHEAD + cache.pages.len() * CACHE_ENTRY_BYTES
+        };
+        assert_eq!(cache.accounted_bytes, expected_bytes);
+        assert!(cache.accounted_bytes <= cache.budget);
+    }
+
+    #[test]
+    fn ordered_cache_eviction_matches_independent_lru_traces() {
+        for capacity in [1, 2, 17, 128] {
+            let mut cache =
+                PageCache::new(CACHE_FIXED_OVERHEAD + capacity * CACHE_ENTRY_BYTES).unwrap();
+            let mut reference = Vec::new();
+            let (mut hits, mut misses, mut evictions) = (0, 0, 0);
+            let mut state = 19_u64;
+            for step in 0..5000 {
+                if step % 257 == 0 {
+                    cache.clear();
+                    reference.clear();
+                }
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let key = cache_key((state >> 32) % 193);
+                let position = reference.iter().position(|candidate| *candidate == key);
+                let actual = cache.touch(key);
+                assert_eq!(actual.is_some(), position.is_some());
+                if let Some(position) = position {
+                    assert_eq!(actual.unwrap()[0], key.page as u8);
+                    reference.remove(position);
+                    hits += 1;
+                } else {
+                    misses += 1;
+                    if reference.len() == capacity {
+                        reference.remove(0);
+                        evictions += 1;
+                    }
+                    cache
+                        .insert(key, vec![key.page as u8; INDEX_PAGE_BYTES])
+                        .unwrap();
+                }
+                reference.push(key);
+                assert!(
+                    cache
+                        .recency
+                        .values()
+                        .copied()
+                        .eq(reference.iter().copied())
+                );
+                assert_cache_invariants(&cache);
+                assert_eq!(
+                    (cache.hits, cache.misses, cache.evictions),
+                    (hits, misses, evictions)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cache_admission_clock_overflow_and_duplicate_insert_preserve_invariants() {
+        assert_eq!(MIN_INDEX_CACHE_BYTES, 25_600);
+        assert!(PageCache::new(MIN_INDEX_CACHE_BYTES - 1).is_err());
+        assert!(PageCache::new(MAX_INDEX_CACHE_BYTES + 1).is_err());
+        assert!(PageCache::new(MAX_INDEX_CACHE_BYTES).is_ok());
+        let mut cache = PageCache::new(MIN_INDEX_CACHE_BYTES).unwrap();
+        let key = cache_key(1);
+        cache.insert(key, vec![7; INDEX_PAGE_BYTES]).unwrap();
+        let before_clock = cache.clock;
+        assert_eq!(
+            cache.insert(key, vec![9; INDEX_PAGE_BYTES]),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert_eq!(
+            cache.insert(cache_key(2), vec![9; INDEX_PAGE_BYTES - 1]),
+            Err(StorageError::IntegrityFailure)
+        );
+        assert_eq!(cache.clock, before_clock);
+        assert_eq!(cache.touch(key).unwrap()[0], 7);
+        assert_eq!(cache.accounted_bytes, MIN_INDEX_CACHE_BYTES);
+        cache.clock = u64::MAX;
+        assert!(cache.touch(key).is_none());
+        assert_eq!(cache.clock, 1);
+        assert_eq!(cache.evictions, 1);
+        assert_cache_invariants(&cache);
+        cache.insert(key, vec![7; INDEX_PAGE_BYTES]).unwrap();
+        cache.clock = u64::MAX;
+        cache
+            .insert(cache_key(2), vec![9; INDEX_PAGE_BYTES])
+            .unwrap();
+        assert_eq!(cache.clock, 1);
+        assert_eq!(cache.evictions, 2);
+        assert_eq!(cache.touch(cache_key(2)).unwrap()[0], 9);
+        assert_cache_invariants(&cache);
+        cache.clear();
+        assert_cache_invariants(&cache);
+    }
+
+    #[test]
+    fn ordered_cache_keeps_every_context_field_distinct() {
+        let original = cache_key(0);
+        let keys = [
+            original,
+            CacheKey {
+                database: DatabaseId::from_bytes([1; 16]),
+                ..original
+            },
+            CacheKey {
+                namespace: NamespaceId::from_bytes([2; 16]),
+                ..original
+            },
+            CacheKey {
+                epoch: KeyEpoch::new(2).unwrap(),
+                ..original
+            },
+            CacheKey {
+                writer: WriterIncarnationId::from_bytes([3; 16]),
+                ..original
+            },
+            CacheKey {
+                revision: CommitRevision::new(2).unwrap(),
+                ..original
+            },
+            CacheKey {
+                index_profile: [4; 32],
+                ..original
+            },
+            CacheKey {
+                generation: 2,
+                ..original
+            },
+            CacheKey {
+                object_id: [5; 16],
+                ..original
+            },
+            cache_key(1),
+        ];
+        let mut cache =
+            PageCache::new(CACHE_FIXED_OVERHEAD + keys.len() * CACHE_ENTRY_BYTES).unwrap();
+        for (i, key) in keys.iter().enumerate() {
+            cache.insert(*key, vec![i as u8; INDEX_PAGE_BYTES]).unwrap();
+        }
+        for (i, key) in keys.iter().enumerate().rev() {
+            assert_eq!(cache.touch(*key).unwrap()[0], i as u8);
+        }
+        assert_cache_invariants(&cache);
+        assert_eq!(cache.evictions, 0);
+    }
+
+    #[test]
+    fn cache_layout_allowances_and_default_capacity_are_explicit() {
+        // These checks cover owned inline types, not opaque std collection allocations.
+        // The separate root/node allowances must still be checked against measured RSS.
+        let inline_pair = size_of::<(CacheKey, CachedPage)>() + size_of::<(u64, CacheKey)>();
+        assert!(inline_pair <= CACHE_ENTRY_OVERHEAD);
+        assert!(size_of::<PageCache>() <= CACHE_FIXED_OVERHEAD);
+        let mut cache = PageCache::default();
+        let capacity = (DEFAULT_INDEX_CACHE_BYTES - CACHE_FIXED_OVERHEAD) / CACHE_ENTRY_BYTES;
+        assert_eq!(capacity, 3854);
+        for page in 0..capacity {
+            cache
+                .insert(cache_key(page as u64), vec![0x5a; INDEX_PAGE_BYTES])
+                .unwrap();
+        }
+        assert!(
+            cache
+                .pages
+                .values()
+                .all(|page| page.bytes.iter().all(|byte| *byte == 0x5a))
+        );
+        assert_cache_invariants(&cache);
+        assert_eq!(cache.pages.len(), capacity);
+        assert_eq!(cache.evictions, 0);
+        cache
+            .insert(cache_key(capacity as u64), vec![1; INDEX_PAGE_BYTES])
+            .unwrap();
+        assert_eq!(cache.evictions, 1);
+        assert!(!cache.pages.contains_key(&cache_key(0)));
+        assert_cache_invariants(&cache);
+        cache.clear();
+        assert_cache_invariants(&cache);
+    }
+
     #[test]
     fn cached_read_telemetry_preserves_errors_clear_and_overflow_semantics() {
         let mut cache = PageCache::default();
@@ -3808,7 +4009,7 @@ mod tests {
 
     #[test]
     fn page_cache_debug_redacts_keys_and_plaintext() {
-        let mut cache = PageCache::new(CACHE_ENTRY_BYTES).unwrap();
+        let mut cache = PageCache::new(MIN_INDEX_CACHE_BYTES).unwrap();
         let key = CacheKey {
             database: DatabaseId::from_bytes([0x11; 16]),
             namespace: NamespaceId::from_bytes([0x22; 16]),

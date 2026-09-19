@@ -41,7 +41,7 @@ journal frontier as either the ready base or exactly one revalidated pending suf
 reconstructing `GraphState`. Decision 0059 at `8885da4` removes the hidden absolute-maximum root
 pre-scrub from graph recovery: fixed manifest discovery now precedes one caller-bounded semantic
 scan. Decisions 0060–0073 add the opt-in disk coordinator, bounded overlays and maintained
-first-reference roots; Decisions 0074–0085 connect native development construction, recovery,
+first-reference roots; Decisions 0074–0086 connect native development construction, recovery,
 supervised queries, profile-derived work limits and partial adapter/index I/O observation. T-20 remains open
 pending remaining scalability/accounting work, larger-than-memory qualification and qualifying
 BM-01/BM-06 results. Review was
@@ -53,6 +53,34 @@ every budget and orders T-20 first; T-19 and R1 acceptance remain open. T-62 rem
 unverified external distribution prerequisite.
 
 ## Completed this increment
+
+- [Decision 0086](docs/decisions/0086-ordered-cache-eviction.md) replaces linear oldest-page
+  selection with a bounded ordered recency map. It preserves exact LRU/reference behavior,
+  complete cache identity and zeroizing ownership; malformed/duplicate insertions precede
+  mutation and clock overflow clears both maps. New logical metadata allowances charge 8 KiB
+  fixed plus 1 KiB per 16 KiB page, fixing the old 96-byte inline-field undercount. Minimum
+  budget is now 25,600 bytes; unchanged 64 MiB default admits 3,854 pages. These are not measured
+  allocator/RSS bounds. Initial six index tests passed in 1.81s, including 20,000 independent
+  vector-LRU trace operations; workspace strict clippy passed. A subsequent full-default-capacity
+  test exposed redundant `size_of` qualifications at compilation; these were corrected without
+  suppressions. On pushed `622a66c` plus this increment, `CARGO_BUILD_JOBS=1 cargo test --workspace
+  --all-targets --all-features --locked --offline -- --test-threads=1` passed, including M1 process
+  recovery, nine disk-graph tests (31.10s), nine coordinator-checkpoint tests (81.41s) and 65
+  storage unit tests (173.83s). Release experiment tests passed 48 unit tests (2 existing ignores)
+  in 27.98s and three real CLI tests in 12.77s using `cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`. Both workspace and
+  experiment strict all-target clippy passed. All ran sequentially under MemoryHigh=3G,
+  MemoryMax=4G, MemorySwapMax=512M, one job/thread.
+  Host preflight: 35 GiB available RAM, 3.9 GiB free swap and approximately 1,000 GiB free Btrfs
+  space; sampled scope peak 1,556,017,152 bytes, zero swap. The final default-capacity test uses
+  nonzero bytes verified across every page. After scoped `cargo test -p uste-storage --lib
+  --locked --offline --no-run`, `/usr/bin/time -v target/debug/deps/uste_storage-3a9cf4c9b7716745
+  --exact index::tests::cache_layout_allowances_and_default_capacity_are_explicit --test-threads=1`
+  passed in 0.48s with 67,836 KiB whole-process maximum RSS, no swaps, 3,854 retained pages and
+  67,098,624 accounted cache bytes before eviction. This is one debug-process observation, not
+  allocator isolation, a universal bound or qualification. Strict storage docs and docs/task
+  checks pass (159 links, 68 tasks). Next exercise native disk cache pressure with explicit
+  development-scale resource admission before qualifying campaigns. T-20/T-19 remain open.
 
 - [Decision 0085](docs/decisions/0085-cached-index-operation-telemetry.md) retains fixed-size
   cached exact/predecessor/prefix primitive work on successes and failures. Checked cumulative

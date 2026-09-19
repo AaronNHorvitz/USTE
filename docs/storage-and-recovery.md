@@ -147,6 +147,14 @@ database, namespace, epoch, writer, revision, profile, generation, run and page;
 keys and plaintext, and scrub bypasses cached bytes. Exact layout, scan and object limits are pinned
 in Decision 0025 and `acceptance/r1/index-v1.tsv`.
 
+Decision 0086 replaces linear eviction selection with an ordered recency index. A nonempty cache
+charges an 8 KiB fixed allowance plus 16 KiB plaintext and 1 KiB metadata per entry; these are
+logical admission allowances, not measured allocator/RSS bounds. The minimum constructor budget is
+25,600 bytes and the unchanged 64 MiB default admits 3,854 pages. Both cache maps remain bounded
+to resident entry count. Current maintenance authority is required for the cached primitive work
+reports added by Decision 0085; these include work before errors but exclude uncached cursors,
+scrubs, publication and pre-primitive checks.
+
 These roots are rebuildable certificate-anchored caches, not committed baselines. Privileged raw
 access remains separate; current-graph consumer reads reuse the mandatory policy lease plus
 top-level, candidate and embedded-reference checks through a reducer-owned indexed-read trait.
