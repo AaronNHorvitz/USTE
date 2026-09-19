@@ -58,6 +58,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `687be92` plus this increment: [Decision 0139](docs/decisions/0139-certificate-bound-packed-tree-capabilities.md)
+  adds opaque live-owner canonical packed-tree admission, lookup, sticky-error cursors and private
+  certificate-targeted copy-on-write staging. Historical base capabilities survive same-owner
+  appends, not reopen/foreign/poisoned owners; staging requires a current-frontier proof. Missing
+  families, scope/profile/family/newer-base mismatches and locked keys fail closed, even for empty
+  trees or completed cursors. This is not domain validation or consumer authorization.
+  Six tests cover chained private stages, terminal publication/reopen, bounded admission, late
+  corruption, owner and key rejection, 81 admission faults and 42 staging faults. An initial
+  corruption test incorrectly expected a page not yet visited to fail the next cursor step;
+  correction checks failure on the first actual damaged-page read and sticky failure thereafter.
+  Final scope `run-p560432-i21515953.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 518 tests/47 executables.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/6.60s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.12s. Test log:
+  `/tmp/uste-d139-workspace-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap; no final peak
+  measurement retained. No native matrix rerun (latest native baseline `42f9abb`), qualification,
+  M1/lockfile change or task completion claimed. Next implement scoped coordinator/recovery
+  maintenance, then versioned domain integration, complete accounting and qualifying campaigns.
+
 - Implemented on pushed `e64d5b8` plus this increment: [Decision 0138](docs/decisions/0138-append-only-certified-packed-roots.md)
   adds opt-in immutable revision/attempt root slots, exact current-certificate publication and
   bounded proof-owned discovery without resident certificate history. Up to 64 fixed slots are

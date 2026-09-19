@@ -1,4 +1,5 @@
 use super::*;
+mod trees;
 use crate::{
     ordered_commitment::{self, CommitmentContext},
     packed_index_pack::PackWriteLimits,

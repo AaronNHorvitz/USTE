@@ -39,6 +39,9 @@ pub struct CertifiedPackedRoot {
     proof: CertificateAnchorProof,
 }
 impl CertifiedPackedRoot {
+    pub(super) fn certificate_proof(&self) -> &CertificateAnchorProof {
+        &self.proof
+    }
     pub fn manifest(&self) -> &PackedRootManifest {
         &self.manifest
     }

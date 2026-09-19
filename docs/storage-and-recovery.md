@@ -212,6 +212,11 @@ publication performs no fallback tree scan. Discovery uses a bounded current-own
 and at most 64 fixed slots; partial/invalid cache files are omitted but operational failures propagate.
 The returned handle proves certificate binding, not canonical/domain admission or authorization;
 attempt exhaustion is an explicit resource refusal and reclamation remains T-35 work.
+Decision 0139 adds opaque canonical per-family capabilities: complete bounded cold validation
+precedes admission, journal-owned lookup/cursors recheck certificate ownership and key availability,
+and proven-target private batches preserve canonicality without rescanning unchanged subtrees.
+Staged capabilities do not publish roots or validate reducer semantics; current/historical policy
+and domain admission remain facade responsibilities.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
