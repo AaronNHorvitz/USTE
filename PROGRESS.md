@@ -54,6 +54,39 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0092](docs/decisions/0092-private-streamed-graph-suffix-recovery.md) connects
+  coordinator-owned authenticated suffix validation to private staged graph recovery and terminal
+  publication. Exact request/result, retry/collision and first-owner checks remain mandatory;
+  metadata publication rejects generation-zero intermediate graph roots. Shared range bytes and
+  caller cache are retained; graph work has explicit total-count and per-revision limits.
+  Initial graph integration compile exposed an attempted clone of the intentionally non-Clone
+  admitted base and an unnecessary test qualification; corrected the API to consume ready
+  `GraphDiskLiveState` directly. Workspace strict lint passed before the final test additions.
+  Two initial end-to-end tests passed in 1.41s (three revisions, lagging metadata, ready reopen,
+  retry/authorization checks, exact/minus-one count/byte bounds). The first fault harness assumed
+  an external `MemoryFileSystem` clone (available only to its own crate tests); fixed by recreating
+  deterministic fixtures. Its first sweep then exposed a harness assumption: `CrashAfter` does not
+  crash after an optional `NotFound`. The corrected sweep passed in 229.73s: 211 operation
+  boundaries / 633 attempts, with 6 explicitly logged no-crash optional-error cases and exact
+  terminal-result checks; all actual injected failures refuse a coordinator and preserve old-or-final
+  roots. No fault behavior or production check was relaxed. Subsequent additions boundedly resync
+  an already-current root, test every resync flush failure, reject wrong preparation before domain
+  advancement, and prove metadata rebase/exact retry/collision/new-write behavior. These 5 focused
+  tests passed (6.04s), plus 3 transaction-cursor/scope tests (0.34s) and workspace strict lint.
+  Final source tested on `b03d8e8` plus this increment: `CARGO_BUILD_JOBS=1 cargo test
+  --workspace --all-targets --all-features --locked --offline -- --test-threads=1` passed,
+  including all 15 disk-graph tests/full sweep (265.18s), 73 storage tests (180.63s), 9 checkpoint/
+  first-owner tests (83.25s), 17 coordinator tests (5.97s) and M1 process tests (31.51s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 50 unit tests (40.39s; 2 existing exact-profile
+  oracle ignores) and 3 CLI process/sampling tests (10.20s). Native all-target strict clippy and
+  `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn -p uste-graph --no-deps
+  --locked --offline` passed. Gates ran sequentially under 3G/4G/512M, one job/thread;
+  preflight 30 GiB available RAM/3.9 GiB free swap; sampled peak 1,207,533,568 bytes, zero swap.
+  Format, diff whitespace, docs (165 links) and task graph (68 tasks) checks passed. M1 crate
+  sources and lock digest remain unchanged. Next connect the native recovery driver; resident
+  storage metadata and qualifying BM-01/BM-06 remain open, so T-20 is not complete.
+
 - [Decision 0091](docs/decisions/0091-unpublished-certified-recovery-roots.md) adds bounded
   certified-revision scratch merges and explicitly unpublished read roots for multi-step recovery.
   Durable root slots still require the exact current frontier; intermediate stages are never
@@ -1548,8 +1581,9 @@ development run matches every oracle query but records zero query evictions. Dec
 resumable authenticated transaction ranges. Decisions 0089–0090 remove repeated page-parser
 allocation/validation and add actual native one-page eviction regression; the pinned larger
 development comparison preserves all results and work counts with reduced CPU time. Decision
-0091 supplies unpublished certified-revision storage roots. Next integrate these stages with
-multi-revision graph/coordinator recovery, then address remaining resident storage metadata.
+0091 supplies unpublished certified-revision storage roots. Decision 0092 connects them to
+verified private multi-revision graph/coordinator recovery. Next integrate the native resume
+driver and its process-loss coverage, then address remaining resident storage metadata.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

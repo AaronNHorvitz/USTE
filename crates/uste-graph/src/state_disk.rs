@@ -7,8 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod authorized_read;
 mod authorized_write;
+mod streaming_recovery;
 pub use authorized_read::{GraphDiskExpansionLimits, GraphDiskReadLimits};
 pub use authorized_write::GraphDiskWritePreparationLimits;
+pub use streaming_recovery::{
+    GraphDiskSuffixRecoveryLimits, GraphDiskSuffixRecoveryReport, recover_graph_disk_suffix,
+};
 
 use sha2::{Digest, Sha256};
 use uste_crypto::EntropySource;
@@ -2236,7 +2240,10 @@ impl uste_txn::DiskCoordinatorState for GraphDiskLiveState {
         anchor: (CommitRevision, [u8; 32]),
     ) -> Result<IndexRootInput, ApplyError> {
         let root = &self.base.root.root;
-        if self.pending.is_some() || anchor != (root.revision(), *root.certificate_digest()) {
+        if self.pending.is_some()
+            || root.generation() == 0
+            || anchor != (root.revision(), *root.certificate_digest())
+        {
             return Err(ApplyError::Conflict);
         }
         Ok(IndexRootInput {
@@ -2250,7 +2257,10 @@ impl uste_txn::DiskCoordinatorState for GraphDiskLiveState {
     }
 
     fn validate_metadata_base(&self, root: &RecoveredIndexRoot) -> Result<(), ApplyError> {
-        if self.pending.is_some() || self.base.anchor() != root.anchor() {
+        if self.pending.is_some()
+            || self.base.generation() == 0
+            || self.base.anchor() != root.anchor()
+        {
             return Err(ApplyError::Conflict);
         }
         Ok(())

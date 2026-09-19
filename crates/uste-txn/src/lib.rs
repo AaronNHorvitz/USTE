@@ -37,13 +37,13 @@ pub use disk_metadata::{
 };
 pub use index_recovery::{
     AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredPreparedSuffix,
-    TransactionRecoveryCursor,
+    RecoveryIndexMaintenance, TransactionRecoveryCursor,
 };
 
 mod disk_coordinator;
 pub use disk_coordinator::{
     CommittedBlobUsage, DiskBlobAccountingLimits, DiskCommitCheck, DiskCommitCoordinator,
-    DiskCoordinatorRecoveryLimits, DiskCoordinatorState,
+    DiskCoordinatorRecoveryLimits, DiskCoordinatorState, DiskRecoveryDomain,
 };
 
 use std::collections::BTreeMap;
@@ -250,7 +250,7 @@ pub trait ExternallyPreparedTransactionState: TransactionState {
     ) -> Result<(), ApplyError>;
 }
 
-/// Ready-state anchor required to recover at most one externally prepared journal suffix.
+/// Ready-state anchor required for externally prepared authenticated journal suffix recovery.
 pub trait JournalAnchoredTransactionState: ExternallyPreparedTransactionState {
     fn journal_base_anchor(&self) -> Result<(NamespaceRef, CommitRevision, [u8; 32]), ApplyError>;
 }

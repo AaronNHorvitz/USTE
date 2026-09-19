@@ -17,12 +17,16 @@ use super::{
     TransactionOutcome, TransactionState, decode_group, map_open_error, sha256,
 };
 
+mod maintenance;
+pub use maintenance::RecoveryIndexMaintenance;
+
 /// Opaque owned copy of one authenticated journal transaction, including the frontier.
 ///
 /// Only one bounded canonical request and inventory are retained. Construction is possible only
 /// while the storage journal is fully authenticated.
 #[derive(PartialEq, Eq)]
 pub struct RecoveredFrontierTransaction {
+    pub(crate) scope: NamespaceRef,
     pub(crate) revision: CommitRevision,
     pub(crate) certificate_digest: [u8; 32],
     pub(crate) logical_event_digest: [u8; 32],
@@ -140,9 +144,9 @@ impl<P> core::fmt::Debug for RecoveredPreparedSuffix<P> {
 }
 
 /// Authenticates the complete storage journal and keeps its exclusive owner/key context alive while
-/// optional derived roots are inspected. It does not decode transaction groups or create commit
-/// authority. Drop it before `CommitCoordinator::open_seeded`, which reopens and independently
-/// validates the transaction prefix and exact seed anchor.
+/// optional derived roots are inspected or rebuilt privately. It creates no append authority;
+/// consuming it into a coordinator requires the selected transaction/domain/metadata validation.
+/// The legacy `CommitCoordinator::open_seeded` instead requires dropping this owner before reopen.
 pub struct AuthenticatedIndexRecovery<F, W, E, I>
 where
     F: OwnershipFileSystem,
@@ -636,6 +640,7 @@ fn capture_group(
         .map(|inventory| BlobInventory::new(scope, inventory.references().iter().copied()))
         .transpose()?;
     Ok(RecoveredFrontierTransaction {
+        scope,
         revision: group.revision,
         certificate_digest: group.certificate_digest,
         logical_event_digest: group.logical_event_digest,

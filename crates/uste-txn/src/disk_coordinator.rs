@@ -4,7 +4,9 @@ use super::*;
 
 mod commit_check;
 mod index_reads;
+mod streaming;
 pub use commit_check::DiskCommitCheck;
+pub use streaming::DiskRecoveryDomain;
 
 /// Trusted domain proof that the supplied live state is exactly the metadata base's state.
 /// Implementations must check scope, revision, reducer profile and logical state digest (or an
@@ -165,7 +167,10 @@ where
             retention,
             limits,
             cache,
-            |state, transaction| {
+            |_, _, state, transaction, _| {
+                let Some(transaction) = transaction else {
+                    return Ok(());
+                };
                 let prepared = state
                     .prepare(
                         &transaction.canonical_request,
@@ -245,7 +250,10 @@ where
             retention,
             limits,
             cache,
-            |state, transaction| {
+            |_, _, state, transaction, _| {
+                let Some(transaction) = transaction else {
+                    return Ok(());
+                };
                 if transaction.revision <= revision {
                     if transaction.revision == revision {
                         if transaction.certificate_digest != certificate {
@@ -285,14 +293,20 @@ where
 
     #[allow(clippy::too_many_arguments)]
     fn recover_with_domain_replay(
-        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        mut recovery: AuthenticatedIndexRecovery<F, W, E, I>,
         filesystem: &mut F,
         base: CoordinatorDiskBase,
         mut state: S,
         retention: RetentionDays,
         limits: DiskCoordinatorRecoveryLimits,
         cache: &mut PageCache,
-        mut replay: impl FnMut(&mut S, &RecoveredFrontierTransaction) -> Result<(), StorageError>,
+        mut replay: impl FnMut(
+            &mut AuthenticatedIndexRecovery<F, W, E, I>,
+            &mut F,
+            &mut S,
+            Option<&RecoveredFrontierTransaction>,
+            &mut PageCache,
+        ) -> Result<(), StorageError>,
     ) -> Result<Self, TransactionError> {
         let frontier = recovery
             .journal
@@ -317,13 +331,16 @@ where
                 .revision()
                 .checked_next()
                 .map_err(|_| TransactionError::RevisionExhausted)?;
-            recovery.visit_transactions(
-                filesystem,
+            let mut cursor = recovery.open_transaction_cursor(
                 first,
                 frontier,
                 suffix_count,
                 limits.maximum_encoded_bytes,
-                |filesystem, transaction| {
+            )?;
+            while let Some(transaction) =
+                recovery.next_recovered_transaction(filesystem, &mut cursor)?
+            {
+                (|| {
                     let key = RetryKey {
                         principal: transaction.principal,
                         key: transaction.idempotency_key,
@@ -381,15 +398,23 @@ where
                             }
                         }
                     }
-                    replay(&mut state, &transaction)?;
+                    replay(
+                        &mut recovery,
+                        filesystem,
+                        &mut state,
+                        Some(&transaction),
+                        cache,
+                    )?;
                     outcomes.insert(key, transaction.outcome);
                     transactions.insert(
                         transaction.outcome.transaction_id,
                         (transaction.principal, transaction.outcome),
                     );
                     Ok(())
-                },
-            )?;
+                })()
+                .map_err(map_open_error)?;
+            }
+            recovery.finish_transaction_cursor(cursor)?;
         }
         let mut rebase_required = false;
         for profile in [
@@ -402,6 +427,8 @@ where
                 .iter()
                 .any(|root| root.revision() > base.metadata.revision());
         }
+        // No coordinator escapes before the domain's terminal publication/validation succeeds.
+        replay(&mut recovery, filesystem, &mut state, None, cache).map_err(map_open_error)?;
         let inner = CommitCoordinator {
             scope: recovery.scope(),
             retention,

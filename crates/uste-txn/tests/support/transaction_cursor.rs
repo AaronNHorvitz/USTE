@@ -266,7 +266,7 @@ fn transaction_cursor_scope_and_frontier_binding_precede_io() {
             .unwrap()
     };
     let (mut other_fs, other_name, _, _) = fixture();
-    let foreign = open(
+    let mut foreign = open(
         &mut other_fs,
         &other_name,
         NamespaceRef::new(scope().database(), NamespaceId::from_bytes([9; 16])),
@@ -278,6 +278,13 @@ fn transaction_cursor_scope_and_frontier_binding_precede_io() {
             .next_recovered_transaction(&mut other_fs, &mut wrong_scope)
             .is_err()
     );
+    assert_eq!(other_fs.operation_count(Operation::ReadAt), 0);
+    let mut original_cursor = cursor();
+    let transaction = recovery
+        .next_recovered_transaction(&mut fs, &mut original_cursor)
+        .unwrap()
+        .unwrap();
+    assert!(foreign.stage_indexes(&transaction).is_err());
     assert_eq!(other_fs.operation_count(Operation::ReadAt), 0);
     drop(foreign);
     let newer = open(&mut other_fs, &other_name, scope());
