@@ -14,6 +14,7 @@ not measured memory/disk usage or proof of larger-than-memory recovery.
 ```text
 cargo run --release --locked --offline -- bm06-manifest
 cargo run --release --locked --offline -- bm06-manifest --records 2
+cargo run --release --locked --offline -- bm06-disk-check --records 2
 cargo test --release --locked --offline bm06 -- --test-threads=1
 ```
 
@@ -26,6 +27,14 @@ policy excluded, each subsequent request prefixed with little-endian revision an
 Small reducer tests inspect all historical versions and compare sequential reduction to decoded
 checkpoint plus suffix. Native disk materialization, authorized durable recovery, cache-corruption
 controls and 30 reserved-host trials remain implementation work. No BM-06 result is claimed.
+
+Decision 0115 adds `bm06-disk-check`, explicitly capped at two records (200 real historical
+versions). It uses authorized encrypted disk-state writes, deliberately refuses only the last
+certified transaction's derived publication, cold-recovers that suffix from the selected root,
+checks exact retry, reopens again and verifies every historical payload through authorized reads.
+Its filesystem and credentials remain development models; JSON discloses that boundary and zero
+qualifying trials. Exact-scale admission math is tested without running that database. All larger
+profiles are rejected before filesystem/key allocation. This is not a native recovery campaign.
 
 ## BM-01 materialization
 

@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `6cc94e7` plus this increment: [Decision 0115](docs/decisions/0115-bm06-disk-state-equivalence.md)
+  connects the BM-06 workload to authorized encrypted disk-state writes and recovery. The
+  `bm06-disk-check --records 2` development command is capped before filesystem/key allocation
+  and uses the durable memory model, not a native benchmark. It maintains roots through revision
+  100, certifies 101 while deliberately refusing only derived publication, then cold-recovers the
+  suffix, rebases metadata, checks exact retry, reopens and verifies all 200 historical versions
+  and 819,200 payload bytes through authorized history reads. No full graph/coordinator or
+  certificate/blob-history map is reconstructed after the policy-only bootstrap.
+  BM-06-specific work limits admit 100 historical versions and at most 512 preparation records;
+  exact-size limit construction is tested without running that database. The first focused run
+  failed at historical lookup ordinal 117 under the inherited 64-page-visit BM-01 allowance;
+  contextual diagnosis confirmed it, then a profile-derived 664-visit allowance passed. BM-01
+  limits remain unchanged. The publication-refusal check accepts only the exact certified storage
+  ResourceLimit, not arbitrary errors. Final focused tests passed two tests (0.50s), strict lint
+  (1.10s), before adding exact retry and CLI coverage to the full final gate.
+  `run-p408250-i21364298.scope` exited 0 under MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M:
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passes 58 active unit tests (44.96s), three existing
+  process tests (11.89s), two BM-06 CLI tests (0.51s), with two unchanged exact-oracle ignores.
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings` passes (0.92s). Sampled scope peak 333,303,808 bytes,
+  zero swap, not final whole-run peak. Native formatting/whitespace, docs (188 links) and task
+  graph (68 tasks) pass. Production workspace/M1 sources and both lockfiles are unchanged from
+  their preceding verified trees. Preflight: 36 GiB available RAM, 3.9 GiB free swap.
+  Next: native BM-06 materialization/recovery and process-loss controls, then remaining scaling
+  prerequisites. This is one development suffix revision, not the exact-size 196 or one of the
+  required 30 reserved-host trials. T-20/T-19 and all benchmark thresholds remain open/unchanged.
+
 - Verified on pushed `a7ee52b` plus this increment: [Decision 0114](docs/decisions/0114-bm06-versioned-event-materialization.md)
   adds an executable BM-06 materialization contract and bounded actual graph operation generator.
   Exact fixture: 100,000 records, 100 retained 4096-byte versions each, ten million events,

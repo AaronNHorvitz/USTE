@@ -16,7 +16,7 @@ fn run() -> Result<(), String> {
         print_usage();
         return Ok(());
     }
-    if command == "bm06-manifest" {
+    if command == "bm06-manifest" || command == "bm06-disk-check" {
         let records = match arguments.next() {
             None => 100_000,
             Some(flag) if flag == "--records" => arguments
@@ -26,15 +26,26 @@ fn run() -> Result<(), String> {
                 .map_err(|_| "--records must be UTF-8")?
                 .parse::<u64>()
                 .map_err(|_| "--records must be an unsigned integer")?,
-            _ => return Err("bm06-manifest accepts only --records N".into()),
+            _ => return Err("BM-06 commands accept only --records N".into()),
         };
         if arguments.next().is_some() {
-            return Err("unexpected bm06-manifest argument".into());
+            return Err("unexpected BM-06 argument".into());
         }
-        print!(
-            "{}",
-            uste_t20_bench::recovery_materialization::Bm06Profile::new(records)?.manifest()
-        );
+        let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(records)?;
+        if command == "bm06-manifest" {
+            print!("{}", profile.manifest());
+        } else {
+            let report = uste_t20_bench::engine::recovery::verify_disk_recovery(profile)?;
+            println!(
+                "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-disk-development-equivalence\",\"filesystem_profile\":\"durable-memory-model\",\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,\"storage_metadata_memory_resident\":{},\"records\":{},\"verified_versions\":{},\"verified_payload_bytes\":{},\"base_revision\":{},\"recovered_revision\":{},\"qualifying_recovery_trials\":0}}",
+                report.storage_metadata_memory_resident,
+                report.records,
+                report.verified_versions,
+                report.verified_payload_bytes,
+                report.base_revision,
+                report.recovered_revision
+            );
+        }
         return Ok(());
     }
     let linux_command = matches!(
@@ -267,6 +278,7 @@ fn print_usage() {
     println!(
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
+         uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench <linux-create|linux-resume|linux-open> \
          --root DIR --password-file FILE [--entities COUNT]\n\
          uste-t20-bench <linux-disk-create|linux-disk-resume|linux-disk-open> \

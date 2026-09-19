@@ -20,6 +20,8 @@ pub(crate) struct DiskProfileLimits {
     pub preparation: GraphDiskPreparationLimits,
     pub merge_read: IndexRunReadLimits,
     pub merge: IndexRunMergeLimits,
+    pub history_group_bytes: u64,
+    pub historical_page_visits: u64,
 }
 
 impl DiskProfileLimits {
@@ -29,9 +31,67 @@ impl DiskProfileLimits {
         let mul = |a: u64, b: u64| a.checked_mul(b).ok_or("disk profile limit overflow");
         let add = |a: u64, b: u64| a.checked_add(b).ok_or("disk profile limit overflow");
         let counts = fixture_state_counts(profile);
+        let batch = MAX_TRANSACTION_OPERATIONS as u64;
+        let relationship_batch = profile.relationships().min(batch);
+        let proofs = add(
+            add(
+                relationship_batch,
+                mul(relationship_batch, 2)?.min(profile.entities()),
+            )?,
+            1,
+        )?
+        .max(add(profile.entities(), 1)?.min(batch));
+        let preparation = GraphDiskPreparationLimits::new(
+            proofs,
+            1_000_000,
+            0,
+            0,
+            add(mul(proofs, 1024)?, 1024 * 1024)?,
+        )
+        .map_err(debug)?;
+        Self::from_shape(
+            counts,
+            materialization_revision_count(profile),
+            2,
+            64 * 1024,
+            mul(profile.relationships(), 64)?,
+            preparation,
+        )
+    }
+
+    pub fn recovery(profile: crate::recovery_materialization::Bm06Profile) -> Result<Self, String> {
+        use crate::recovery_materialization::{BATCH_RECORDS, VERSIONS};
+        let records = profile.records();
+        let preparation = GraphDiskPreparationLimits::new(
+            records.min(BATCH_RECORDS),
+            1_000_000,
+            0,
+            0,
+            records.min(BATCH_RECORDS) * ENTRY_BYTES + 1024 * 1024,
+        )
+        .map_err(debug)?;
+        Self::from_shape(
+            [records, profile.events(), 0, 0, 0, 0, 1, 1],
+            profile.frontier(),
+            VERSIONS,
+            VERSIONS * ENTRY_BYTES,
+            1,
+            preparation,
+        )
+    }
+
+    fn from_shape(
+        counts: [u64; 8],
+        groups: u64,
+        history_versions: u64,
+        history_group_bytes: u64,
+        semantic_references: u64,
+        preparation: GraphDiskPreparationLimits,
+    ) -> Result<Self, String> {
+        let mul = |a: u64, b: u64| a.checked_mul(b).ok_or("disk profile limit overflow");
+        let add = |a: u64, b: u64| a.checked_add(b).ok_or("disk profile limit overflow");
         let entries = counts.into_iter().try_fold(1_u64, add)?;
         let largest_family = *counts.iter().max().ok_or("missing fixture families")?;
-        let groups = materialization_revision_count(profile);
         let proof_bytes = |count: u64| mul(mul(count, add(count, 1)?)? / 2, 4_161);
         let prefix_bytes = add(mul(groups, MAX_CERTIFIED_GROUP)?, proof_bytes(groups)?)?;
         // This closed graph fixture prohibits blob inventories. The storage catalog therefore
@@ -87,40 +147,27 @@ impl DiskProfileLimits {
         // Includes history/current closure and owner-local secondary checks. Keep substantial
         // declared headroom; measurements, not these bounds, determine campaign performance.
         let lookups = mul(counts[0], 32)?;
+        // BM-01 retains its frozen allowance. The BM-06 predecessor can traverse a 100-version
+        // prefix: allow three passes over at most two pages per <=16 KiB version, plus search.
+        let historical_page_visits = if history_versions <= 2 {
+            64
+        } else {
+            add(mul(history_versions, 6)?, 64)?
+        };
         let graph = GraphDiskBaseAdmissionLimits::new(
             scan,
-            2,
-            64 * 1024,
-            mul(profile.relationships(), 64)?,
+            history_versions,
+            history_group_bytes,
+            semantic_references,
             lookups,
-            mul(lookups, 64)?,
+            mul(lookups, historical_page_visits)?,
             mul(lookups, ENTRY_BYTES)?,
-            IndexPredecessorLimits::new(64, ENTRY_BYTES as usize).map_err(debug)?,
-        )
-        .map_err(debug)?;
-        let batch = MAX_TRANSACTION_OPERATIONS as u64;
-        let relationship_batch = profile.relationships().min(batch);
-        let proofs = add(
-            add(
-                relationship_batch,
-                mul(relationship_batch, 2)?.min(profile.entities()),
-            )?,
-            1,
-        )?
-        .max(add(profile.entities(), 1)?.min(batch));
-        // The fixed null-property fixture needs no ReadView history or deletion reverse bucket.
-        // Its stored record proofs plus ID accounting fit within 1 KiB each; allow 1 MiB policy
-        // headroom. General domain requests must not be routed through these fixture limits.
-        let preparation = GraphDiskPreparationLimits::new(
-            proofs,
-            1_000_000,
-            0,
-            0,
-            add(mul(proofs, 1024)?, 1024 * 1024)?,
+            IndexPredecessorLimits::new(historical_page_visits, ENTRY_BYTES as usize)
+                .map_err(debug)?,
         )
         .map_err(debug)?;
         let merge_read = IndexRunReadLimits::new(
-            add(mul(largest_family, 2)?, 16)?,
+            add(mul(largest_family, 2)?, 16)?.min(uste_storage::MAX_INDEX_PAGES_PER_RUN),
             largest_family,
             mul(largest_family, ENTRY_BYTES)?,
         )
@@ -147,6 +194,8 @@ impl DiskProfileLimits {
             preparation,
             merge_read,
             merge,
+            history_group_bytes,
+            historical_page_visits,
         })
     }
 }

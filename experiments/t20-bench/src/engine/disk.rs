@@ -379,8 +379,11 @@ where
             maximum_revisions: if repair { profile_limits.groups - 1 } else { 0 },
             preparation: profile_limits.preparation,
             deltas: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
-            merge: GraphStateRootMergeLimits::uniform(profile_limits.merge, 64 * 1024)
-                .map_err(debug)?,
+            merge: GraphStateRootMergeLimits::uniform(
+                profile_limits.merge,
+                profile_limits.history_group_bytes,
+            )
+            .map_err(debug)?,
         },
         &mut cache,
     )
@@ -516,7 +519,7 @@ where
             proof: limits.preparation,
             delta: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
         },
-        GraphStateRootMergeLimits::uniform(merge, 64 * 1024).map_err(debug)?,
+        GraphStateRootMergeLimits::uniform(merge, limits.history_group_bytes).map_err(debug)?,
         limits::CACHE_BYTES,
     )
     .map_err(debug)?;

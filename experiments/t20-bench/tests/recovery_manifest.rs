@@ -42,3 +42,33 @@ fn bm06_cli_manifest_is_fixture_only_and_refuses_mixed_or_unbounded_arguments() 
         assert!(output.stdout.is_empty());
     }
 }
+
+#[test]
+fn bm06_disk_cli_preserves_model_boundary_and_rejects_exact_scale() {
+    for records in ["3", "100000"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_uste-t20-bench"))
+            .args(["bm06-disk-check", "--records", records])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_uste-t20-bench"))
+        .args(["bm06-disk-check", "--records", "2"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["engine_benchmark"], false);
+    assert_eq!(report["filesystem_profile"], "durable-memory-model");
+    assert_eq!(report["verified_versions"], 200);
+    assert_eq!(report["verified_payload_bytes"], 819200);
+    assert_eq!(report["base_revision"], 100);
+    assert_eq!(report["recovered_revision"], 101);
+    assert_eq!(report["qualifying_recovery_trials"], 0);
+    assert_eq!(report["storage_metadata_memory_resident"], false);
+}

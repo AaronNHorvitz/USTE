@@ -2,6 +2,7 @@
 
 pub(crate) mod disk;
 pub use disk::{DiskDevelopmentVerification, verify_disk_development_profile};
+pub mod recovery;
 
 use std::collections::BTreeSet;
 
