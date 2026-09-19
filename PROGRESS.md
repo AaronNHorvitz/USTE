@@ -1026,8 +1026,21 @@ publication vectors; dependency/fixture checks; isolated T-20 driver (31 passed,
 exact-profile oracle tests ignored) and its strict lint. M1 SIGKILL/corruption tests remain green.
 Last sampled scope peak: 2,516,131,840 bytes, zero swap; this is not a final peak or benchmark
 qualification. Host still had 17 GiB available RAM and 1.5 GiB free swap. T-20 remains open.
-Next connect shared read-only commit admission before external disk preparation, then implement
-authorized disk commits and staged-upload reconciliation without duplicating retry/owner rules.
+Decision 0069 now connects shared read-only commit admission before external disk preparation.
+Tested on `678d64f` plus this increment: the extracted admission prefix compares unchanged after
+whitespace/result-wrapper normalization; normal commit and new `check_commit` use the same rules.
+The new fault-backed test proves no preparation/publication/reservation, exact retry/collision/
+expiry/cancellation/owner limits, uncertain-state rejection and certified restart. Its initial
+harness error attempted to rearm an unconsumed fault; corrected the test to require that fault
+to fire on the subsequent actual commit, then recover before continuing.
+Commands under the established 3G/4G/512M scope, one Cargo job/test thread:
+`cargo test -p uste-replay --test coordinator_checkpoint --locked --offline -- --test-threads=1`
+(6 passed); `cargo test -p uste-txn -p uste-graph -p uste-memory --all-targets --locked --offline
+-- --test-threads=1` passed; `cargo clippy -p uste-txn -p uste-replay -p uste-graph --all-targets
+--locked --offline -- -D warnings` passed. Preflight host headroom improved to 29 GiB available RAM
+and 2.7 GiB free swap, but the implementation boundary still does not justify qualifying campaigns.
+Next implement authorized disk commits and staged-upload reconciliation without duplicating
+retry/owner rules; preserve explicit distinction between a certified commit and derived-root repair.
 
 T-63–T-68 and M1 are complete at implementation `b9689f3`, qualified by Decision 0058 and the
 exact-version consumer handoff. The resumed audit confirmed that commit's lockfile digest and

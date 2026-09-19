@@ -7,6 +7,7 @@
 
 mod authorized;
 mod authorized_disk;
+mod commit_admission;
 mod disk_metadata;
 mod index_recovery;
 
@@ -37,7 +38,7 @@ pub use index_recovery::{
 
 mod disk_coordinator;
 pub use disk_coordinator::{
-    CommittedBlobUsage, DiskBlobAccountingLimits, DiskCommitCoordinator,
+    CommittedBlobUsage, DiskBlobAccountingLimits, DiskCommitCheck, DiskCommitCoordinator,
     DiskCoordinatorRecoveryLimits, DiskCoordinatorState,
 };
 
@@ -1932,159 +1933,25 @@ where
         request: TransactionRequest<'_>,
         clock: &mut impl Clock,
         cancellation: &impl Cancellation,
-        mut disk: Option<disk_coordinator::DiskCommitMetadata<'_>>,
+        disk: Option<disk_coordinator::DiskCommitMetadata<'_>>,
         prepare: P,
     ) -> Result<TransactionOutcome, TransactionError>
     where
         P: FnOnce(&S, CommitRevision) -> Result<S::Prepared, ApplyError>,
     {
-        if self.uncertain {
-            return Err(TransactionError::OutcomeUnknown);
-        }
-        if request.canonical_request.is_empty()
-            || request.canonical_request.len() > MAX_REQUEST_BYTES
-            || request.blob_inventory.is_some_and(BlobInventory::is_empty)
-        {
-            return Err(TransactionError::InvalidRequest);
-        }
-        if request
-            .blob_inventory
-            .is_some_and(|inventory| inventory.scope() != self.scope)
-        {
-            return Err(TransactionError::InvalidRequest);
-        }
-        let blob_inventory_digest = request
-            .blob_inventory
-            .map_or(EMPTY_BLOB_INVENTORY_DIGEST, BlobInventory::digest);
-        let request_digest =
-            transaction_request_digest(request.canonical_request, blob_inventory_digest);
-        let accepted_at = clock
-            .observe()
-            .map_err(|_| TransactionError::RetryableUnavailable)?
-            .wall_utc;
-        let retry_key = RetryKey {
-            principal: request.principal,
-            key: request.idempotency_key,
+        let using_disk = disk.is_some();
+        let admitted = self.admit_commit(filesystem, request, clock, cancellation, disk)?;
+        let commit_admission::FreshCommitAdmission {
+            accepted_at,
+            expires_at,
+            revision,
+            request_digest,
+            retry_key,
+            new_owners,
+        } = match admitted {
+            commit_admission::CommitAdmission::Retry(outcome) => return Ok(outcome),
+            commit_admission::CommitAdmission::Fresh(admission) => admission,
         };
-        let mut previous = self.outcomes.get(&retry_key).copied();
-        if previous.is_none()
-            && let Some(disk) = disk.as_mut()
-        {
-            previous = disk.base.retry_from_journal(
-                &self.journal,
-                filesystem,
-                request.principal,
-                request.idempotency_key,
-                disk.lookup,
-                disk.cache,
-            )?;
-        }
-        if let Some(previous) = previous {
-            if accepted_at >= previous.expires_at {
-                return Err(TransactionError::IdempotencyExpired);
-            }
-            return if previous.request_digest == request_digest
-                && previous.transaction_id == request.transaction_id
-            {
-                Ok(previous)
-            } else {
-                Err(TransactionError::Conflict)
-            };
-        }
-        if self.transactions.contains_key(&request.transaction_id) {
-            return Err(TransactionError::Conflict);
-        }
-        if let Some(disk) = disk.as_mut() {
-            if disk
-                .base
-                .transaction_from_journal(
-                    &self.journal,
-                    filesystem,
-                    request.transaction_id,
-                    disk.lookup,
-                    disk.cache,
-                )?
-                .is_some()
-            {
-                return Err(TransactionError::Conflict);
-            }
-            if self.outcomes.len() >= disk.overlay.maximum_outcomes
-                || disk
-                    .base
-                    .metadata
-                    .revision()
-                    .get()
-                    .checked_add(self.outcomes.len() as u64)
-                    .is_none_or(|count| count >= MAX_OUTCOMES_PER_NAMESPACE as u64)
-            {
-                return Err(TransactionError::ResourceLimit);
-            }
-        }
-        if self.outcomes.len() >= MAX_OUTCOMES_PER_NAMESPACE {
-            return Err(TransactionError::ResourceLimit);
-        }
-        if cancellation.is_cancelled() {
-            return Err(TransactionError::Cancelled);
-        }
-        // Resolve first ownership and admit overlay growth before preparation or any journal
-        // write. After certification the publication path performs no disk metadata reads.
-        let mut new_owners = Vec::new();
-        if disk.is_some()
-            && let Some(inventory) = request.blob_inventory
-        {
-            for reference in inventory.references() {
-                let mut owner = self
-                    .committed_blob_owners
-                    .get(&(reference.scope(), reference.id()))
-                    .copied();
-                if owner.is_none()
-                    && let Some(disk) = disk.as_mut()
-                {
-                    owner = disk.base.owner_from_journal(
-                        &self.journal,
-                        filesystem,
-                        reference.id(),
-                        disk.lookup,
-                        disk.cache,
-                    )?;
-                }
-                if let Some((committed, _)) = owner {
-                    if committed != *reference {
-                        return Err(TransactionError::IntegrityFailure);
-                    }
-                } else {
-                    if let Some(disk) = disk.as_ref()
-                        && self
-                            .committed_blob_owners
-                            .len()
-                            .checked_add(new_owners.len())
-                            .is_none_or(|count| count >= disk.overlay.maximum_blob_owners)
-                    {
-                        return Err(TransactionError::ResourceLimit);
-                    }
-                    new_owners
-                        .try_reserve(1)
-                        .map_err(|_| TransactionError::ResourceLimit)?;
-                    new_owners.push(*reference);
-                }
-            }
-        }
-        if let Some(disk) = disk.as_ref()
-            && self
-                .committed_blob_owners
-                .len()
-                .checked_add(new_owners.len())
-                .is_none_or(|count| count > disk.overlay.maximum_blob_owners)
-        {
-            return Err(TransactionError::ResourceLimit);
-        }
-        let revision = match self.journal.frontier() {
-            Some(revision) => revision
-                .checked_next()
-                .map_err(|_| TransactionError::RevisionExhausted)?,
-            None => CommitRevision::FIRST,
-        };
-        let expires_at = expiration(accepted_at, self.retention)?;
         let prepared = prepare(&self.state, revision).map_err(map_apply_error)?;
         let result_digest = S::result_digest(&prepared);
         if cancellation.is_cancelled() {
@@ -2127,9 +1994,7 @@ where
                 (reference, request.principal),
             );
         }
-        if disk.is_none()
-            && let Some(inventory) = request.blob_inventory
-        {
+        if !using_disk && let Some(inventory) = request.blob_inventory {
             for reference in inventory.references() {
                 self.committed_blob_owners
                     .entry((reference.scope(), reference.id()))

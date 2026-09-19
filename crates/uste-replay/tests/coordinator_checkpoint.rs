@@ -1,6 +1,9 @@
 use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
+
+#[path = "support/disk_commit_check.rs"]
+mod disk_commit_check;
 use uste_replay::{ReplayError, capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
     BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName, IndexEntry, IndexRootInput,

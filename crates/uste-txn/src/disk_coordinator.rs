@@ -2,7 +2,9 @@
 
 use super::*;
 
+mod commit_check;
 mod index_reads;
+pub use commit_check::DiskCommitCheck;
 
 /// Trusted domain proof that the supplied live state is exactly the metadata base's state.
 /// Implementations must check scope, revision, reducer profile and logical state digest (or an
