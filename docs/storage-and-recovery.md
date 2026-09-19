@@ -309,6 +309,11 @@ coordinator or authenticated maintenance target supplies a read-only scoped borr
 maintenance reads delegate to the same owner/key/revision checks. Exhausted cursors still recheck
 authority, and failures remain sticky. This is neither caller authorization nor concurrent snapshot
 support; native query integration and packed page caching remain separate.
+Decision 0160 adds restricted authorized current and at-revision packed record reads, with current
+policy enforcement before I/O and all-or-nothing embedded-reference visibility. Historical seek
+returns the latest version at or before the requested certified revision; future views, pending
+repair and uncertainty are refused. Explicit lookup/cursor limits bound work, and observed
+cancellation prevents partial success. Graph expansion is not enabled by this point-read increment.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

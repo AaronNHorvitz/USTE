@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_authorized_reads.rs"]
+mod read;
 use uste_graph::{PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits};
 use uste_policy::{
     Action, AuthenticatedPrincipal, NamespaceGrant, PermissionSet, PolicyKernel, PrincipalDigest,

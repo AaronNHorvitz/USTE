@@ -1,9 +1,11 @@
 //! Restricted packed-metadata facade. Raw coordinator capabilities never escape.
+mod read;
 mod write;
 use crate::{
     AuthorizedDiskPolicyState, AuthorizedError, CommittedBlobUsage, PackedBlobAccountingLimits,
     PackedCommitCoordinator, PackedCoordinatorState, TransactionError, TransactionOutcome,
 };
+pub use read::{AuthorizedPackedReadState, AuthorizedPackedReader};
 use uste_crypto::EntropySource;
 use uste_policy::{Action, AuthenticatedPrincipal, PolicyKernel, Target};
 use uste_storage::{

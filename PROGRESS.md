@@ -2,7 +2,43 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — read-only packed access (Decision 0159)
+## Latest verified increment — authorized packed point/history reads (Decision 0160)
+
+Implemented on pushed `4d7c956` plus this increment: a restricted domain-read facade validates the
+exact current durable policy and typed target permissions before I/O. Current packed lookup and
+reverse historical seek return bounded records with existing all-or-nothing embedded-reference
+visibility. History uses current authorization; future views, pending repair and uncertainty fail
+closed. Observed cancellation is sticky. Expansion is explicitly unsupported in this increment.
+
+Six tests cover full replay reference equality after cold reopen, temporal boundaries, hidden
+references, foreign/absent identities, denied targets/history/scope, stale policy, pre-I/O refusal,
+cancellation, exact/narrower bounds, late current/history ciphertext corruption, pending repair,
+uncertain commit recovery and all 63 observed point/history read fault cases with cold restart.
+Initial fixture compilation found redundant qualifications and a two-argument use of the
+three-argument record-reference constructor; corrected without changing requirements. Focused
+session 54757 / `run-p704435-i21706429.scope` passed six tests (2.17 s), Clippy 0.41 s.
+
+Full gate session 29745 / `run-p704893-i21706474.scope` exited 0: 625 tests across 47 executables,
+zero failed/ignored (graph disk 67/121.27 s; transaction integration 95/100.80 s), Clippy 0.07 s,
+graph/transaction docs 2.67 s. Preflight 31 GiB available RAM / 5.7 GiB free swap; sampled scope
+peak 1,513,119,744 bytes / zero swap. Format, diff, docs and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d160-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+```
+
+Next integrate bounded packed adjacency/evidence expansion, then caching and native qualification
+readiness. Decision 0161 and unregistered `authorized_read/expansion/semantics.rs`, packed
+`live/authorized_read/expansion.rs` and `packed_authorized_expansion.rs` are excluded drafts.
+T-20/T-19 remain open; no larger-than-memory/production qualification is claimed. Native standalone
+remains last tested at `42f9abb`; pinned M1 interfaces and evidence are unchanged. This section
+supersedes earlier next-step text below.
+
+## Prior verified increment — read-only packed access (Decision 0159)
 
 Implemented on pushed `664f6c4` plus this increment: immutable scoped packed index readers from
 the current coordinator or authenticated maintenance target. Maintenance delegates exact lookup,

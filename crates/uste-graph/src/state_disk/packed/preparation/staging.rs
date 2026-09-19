@@ -3,7 +3,7 @@ use super::*;
 mod live;
 pub use live::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState,
-    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
+    PackedGraphReadLimits, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
     PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits,
     publish_packed_graph_live_base, recover_packed_graph_suffix,
 };
