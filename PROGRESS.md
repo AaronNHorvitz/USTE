@@ -58,6 +58,19 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `9fda196` plus this increment: [Decision 0108](docs/decisions/0108-native-cache-pressure-development-admission.md)
+  raises only native development admission to 20,000 entities / 200,000 relationships. The
+  1,000-entity memory-adapter cap, 64 MiB cache, fixed batch/request limits and refusal of
+  qualifying 100,000-entity execution remain. Extended old/new-ceiling batch and pre-I/O refusal
+  checks pass with the full native release regression: `CARGO_BUILD_JOBS=1 cargo test --release
+  --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`
+  reports 51 active unit tests (43.65s), two unchanged exact-profile oracle ignores, and three
+  CLI/process tests (12.15s). `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` passes (0.81s).
+  Format/whitespace, docs (181 links) and task graph (68 tasks) pass. No new-scale execution or
+  cache-pressure result is claimed yet. Host preflight: 36 GiB available RAM, 3.9 GiB free swap
+  and 996 GiB free Btrfs space. One native test workload ran under 3G/4G/512M, one job/thread.
+
 - Tested on pushed `ca0f5df` plus this increment: [Decision 0107](docs/decisions/0107-empty-history-catalog-construction.md)
   uses the maintained zero-binding count only to skip redundant empty-history construction;
   whole-prefix independent admission still precedes publication. Initial focused verification
@@ -1918,11 +1931,10 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0107 and the native fragment-counter disclosure are locally verified;
-commit/push this increment. Continue T-20 with bounded native cache-pressure development admission:
-the 10,000-entity observation used 57,228,288 accounted cache bytes and had no evictions, so it
-cannot establish pressure behavior. Preserve all qualifying-size gates while verifying a larger
-nonqualifying fixture. Scalable accounting and qualifying campaign prerequisites remain. Decisions
+Current action: Decision 0108 passes native regression. Commit/push, then use that exact binary
+for a resource-bounded 20,000-entity development fixture
+and independent-oracle query observation. Preserve partial fixtures and investigate any refusal
+without weakening limits. Scalable accounting and qualifying campaign prerequisites remain. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

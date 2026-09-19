@@ -8,7 +8,7 @@ fn native_profile_admission_is_separate_and_precedes_filesystem_or_process_acces
     );
     assert_eq!(
         materialization_revision_count(Bm01Profile::new(MAX_NATIVE_DEVELOPMENT_ENTITIES).unwrap()),
-        23
+        44
     );
     let absent = Path::new("deliberately-absent-native-profile-boundary");
     for count in [MAX_NATIVE_DEVELOPMENT_ENTITIES + 1, 100_000] {

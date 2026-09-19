@@ -31,7 +31,7 @@ pub use query::query_correctness;
 pub use sampling::sample_worker;
 use storage_work::{storage_recovery_json, storage_resident};
 
-pub(super) const MAX_NATIVE_DEVELOPMENT_ENTITIES: u64 = 10_000;
+pub(super) const MAX_NATIVE_DEVELOPMENT_ENTITIES: u64 = 20_000;
 
 pub(super) fn validate_native_profile(profile: Bm01Profile) -> Result<(), LinuxRunnerError> {
     if profile.entities() > MAX_NATIVE_DEVELOPMENT_ENTITIES {

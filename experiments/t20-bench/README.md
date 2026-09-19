@@ -72,7 +72,8 @@ semantic evidence, not performance or bounded total-RSS evidence.
 The existing Linux commands are not silently switched by this development command.
 
 `linux-disk-create/resume/open` use a distinct native Btrfs database name and portable recovery
-credentials, with a separate 10,000-entity native development ceiling (Decision 0087). Both
+credentials, with a separate 20,000-entity native development ceiling (Decision 0108, extending
+Decision 0087 after the 10,000-entity observation had no cache evictions). Both
 memory-adapter engine checks remain capped at 1,000. Native over-limit profiles are rejected
 before filesystem/child-process access, and reports include `development_entity_limit`.
 They use profile-derived
