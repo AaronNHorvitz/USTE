@@ -1147,10 +1147,40 @@ where
         last: CommitRevision,
         maximum_groups: u64,
         maximum_encoded_bytes: u64,
-        visitor: V,
+        mut visitor: V,
     ) -> Result<JournalRangeReadReport, StorageError>
     where
         V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        self.visit_committed_range_with_proofs_report(
+            filesystem,
+            first,
+            last,
+            maximum_groups,
+            maximum_encoded_bytes,
+            |filesystem, group, _| visitor(filesystem, group),
+        )
+    }
+
+    /// Forward range read retaining the proof already charged to the shared byte allowance.
+    /// Disk-certificate mode supplies owner/frontier-bound evidence for each authenticated group;
+    /// resident-anchor mode supplies none. Reusing evidence does not authorize a transaction or
+    /// publish intermediate state. Callback results remain provisional until complete success.
+    pub fn visit_committed_range_with_proofs_report<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        visitor: V,
+    ) -> Result<JournalRangeReadReport, StorageError>
+    where
+        V: FnMut(
+            &mut F,
+            RecoveredGroup<'_>,
+            Option<&CertificateAnchorProof>,
+        ) -> Result<(), StorageError>,
     {
         self.visit_committed_range_ordered(
             filesystem,
@@ -1176,7 +1206,7 @@ where
         last: CommitRevision,
         maximum_groups: u64,
         maximum_encoded_bytes: u64,
-        visitor: V,
+        mut visitor: V,
     ) -> Result<JournalRangeReadReport, StorageError>
     where
         V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
@@ -1188,7 +1218,7 @@ where
             maximum_groups,
             maximum_encoded_bytes,
             true,
-            visitor,
+            |filesystem, group, _| visitor(filesystem, group),
         )
     }
 
@@ -1204,7 +1234,11 @@ where
         mut visitor: V,
     ) -> Result<JournalRangeReadReport, StorageError>
     where
-        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+        V: FnMut(
+            &mut F,
+            RecoveredGroup<'_>,
+            Option<&CertificateAnchorProof>,
+        ) -> Result<(), StorageError>,
     {
         if self.poisoned || first > last || self.frontier.is_none_or(|end| last > end) {
             return Err(StorageError::IntegrityFailure);
@@ -1259,6 +1293,7 @@ where
                 SMALL_ENVELOPE_BYTES,
             )?;
             let certificate_digest = sha256(&encoded);
+            let mut retained_proof = None;
             if let Some(expected) = reverse_expected {
                 if certificate_digest != expected {
                     return Err(StorageError::IntegrityFailure);
@@ -1276,6 +1311,7 @@ where
                 remaining = remaining
                     .checked_sub(proof.report().encoded_bytes)
                     .ok_or(StorageError::ResourceLimit)?;
+                retained_proof = Some(proof);
             } else if self.certificate_anchors.get(&revision) != Some(&certificate_digest) {
                 return Err(StorageError::IntegrityFailure);
             }
@@ -1373,6 +1409,7 @@ where
                     blob_inventory: inventory.as_ref(),
                     logical_event_digest: certificate.logical_event_digest,
                 },
+                retained_proof.as_ref(),
             )?;
         }
         Ok(JournalRangeReadReport {

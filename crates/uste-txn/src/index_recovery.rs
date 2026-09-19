@@ -43,7 +43,6 @@ impl<S> RecoveredGenesis<S> {
 ///
 /// Only one bounded canonical request and inventory are retained. Construction is possible only
 /// while the storage journal is fully authenticated.
-#[derive(PartialEq, Eq)]
 pub struct RecoveredFrontierTransaction {
     pub(crate) scope: NamespaceRef,
     pub(crate) revision: CommitRevision,
@@ -55,7 +54,25 @@ pub struct RecoveredFrontierTransaction {
     pub(crate) outcome: TransactionOutcome,
     pub(crate) canonical_request: Vec<u8>,
     pub(crate) blob_inventory: Option<BlobInventory>,
+    // Transient evidence, not transaction content. Never serialized or accepted across owners.
+    certificate_proof: Option<uste_storage::journal::CertificateAnchorProof>,
 }
+
+impl PartialEq for RecoveredFrontierTransaction {
+    fn eq(&self, other: &Self) -> bool {
+        self.scope == other.scope
+            && self.revision == other.revision
+            && self.certificate_digest == other.certificate_digest
+            && self.logical_event_digest == other.logical_event_digest
+            && self.blob_inventory_digest == other.blob_inventory_digest
+            && self.principal == other.principal
+            && self.idempotency_key == other.idempotency_key
+            && self.outcome == other.outcome
+            && self.canonical_request == other.canonical_request
+            && self.blob_inventory == other.blob_inventory
+    }
+}
+impl Eq for RecoveredFrontierTransaction {}
 
 impl core::fmt::Debug for RecoveredFrontierTransaction {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -570,14 +587,16 @@ where
             let mut transaction = None;
             let report = self
                 .journal
-                .visit_committed_range_report(
+                .visit_committed_range_with_proofs_report(
                     filesystem,
                     revision,
                     revision,
                     1,
                     cursor.remaining_encoded_bytes,
-                    |_, group| {
-                        transaction = Some(capture_group(self.scope, group)?);
+                    |_, group, proof| {
+                        let mut captured = capture_group(self.scope, group)?;
+                        captured.certificate_proof = proof.cloned();
+                        transaction = Some(captured);
                         Ok(())
                     },
                 )
@@ -839,5 +858,6 @@ fn capture_group(
         outcome: decoded.outcome,
         canonical_request,
         blob_inventory,
+        certificate_proof: None,
     })
 }

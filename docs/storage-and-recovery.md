@@ -154,6 +154,10 @@ without admitted witnesses refuse. Quota-preserving streaming and rewrite/accoun
 Decision 0125 selects private metadata streaming for ordinary native/model paired graph/metadata
 recovery as well as explicit origin rebuild. Mismatched bases retain bounded suffix overlays;
 diagnostics distinguish recovery overlay capacity from the retained capacity for future writes.
+Decision 0126 retains each forward cursor transaction's already-accounted owner-bound certificate
+proof for private staging. Invalid bound evidence cannot fall back; unbound transactions retain
+their existing proof path. Fresh recovery still reauthenticates, and triangular forward proof
+work and immutable-family rewrites remain limitations.
 Decision 0124 adds explicit quota-preserving streaming and private genesis quota candidates, with
 exact first-owner charges and mandatory independent initial quota admission. Private optional roots
 also require rebase when primary roots are already published. Rewrite/proof amplification and

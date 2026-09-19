@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `de67ff3` plus this increment: [Decision 0126](docs/decisions/0126-recovery-transaction-proof-reuse.md)
+  retains the forward cursor's already-accounted certificate proof with its bounded transaction.
+  Private staging reuses it without additional certificate reads. Both staging APIs reject a
+  bound transaction from another/reopened owner before I/O and never fall back on invalid proof.
+  Unbound fallback, content equality, shared budgets, fresh corruption refusal and sticky cursor
+  failure remain tested. New tests cover all storage subranges in both modes and every observed
+  disk cursor read error; full graph/primary/first-reference/quota publication fault suites pass.
+  Focused scope `run-p478775-i21472903.scope` passed three new tests and strict workspace lint.
+  Final scope `run-p480221-i21429109.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 436 tests/46 executables, no failures/ignores
+  (graph disk 24/26.40s, replay 50/108.80s, transaction coordinator 34/0.33s, M1 process 2/2.69s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/44.85s, BM-01 process 3/11.89s,
+  BM-06 CLI 2/0.50s, BM-06 process 8/73.42s; two prior exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` and `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` pass;
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn -p uste-storage --no-deps
+  --locked --offline` passes (1.92s). Preflight 35 GiB available RAM/3.9 GiB free swap; sampled
+  peak 1,649,557,504 bytes/zero swap, not final whole-run peak. Formatting/whitespace, docs
+  (200 links), task graph (68 tasks) pass. No M1 source/lock or qualification target changes.
+  Next: bounded certificate authentication windows to reduce repeated forward suffix scans,
+  then immutable-family construction scaling and complete accounting. Two unregistered window
+  implementation/test drafts are deliberately excluded from this tested commit for that next
+  package; they are not compiled or claimed verified. T-20/T-19 remain open.
+
 - Implemented on pushed `746ca3d` plus this increment: [Decision 0125](docs/decisions/0125-native-paired-metadata-streaming.md)
   connects ordinary paired-base native/model recovery to private per-revision metadata staging.
   Both ready-open suffix ceilings are zero. Mismatched graph/metadata bases retain the existing
@@ -2507,8 +2535,9 @@ Current action: T-20 remains the priority. Decisions 0108–0120, including the 
 `3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
 suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
 references on that path; Decision 0124 maintains quota projections (pushed `746ca3d`). Decision
-0125 applies streamed metadata to native paired-base recovery. Next reduce duplicate certificate
-proof work in recovery staging, then address immutable-family rewrite scaling and
+0125 applies streamed metadata to native paired-base recovery (pushed `de67ff3`). Decision 0126
+removes duplicate staging proofs. Next add bounded certificate authentication windows for the
+forward cursor, then address immutable-family rewrite scaling and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

@@ -26,7 +26,8 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    /// Explicit-I/O variant supporting a journal opened without resident certificate history.
+    /// Reuse a cursor's exact live-owner certificate evidence when present; otherwise use the
+    /// explicit-I/O proof path. A bound transaction never falls back after proof rejection.
     pub fn stage_indexes_with_io(
         &mut self,
         filesystem: &mut F,
@@ -35,15 +36,21 @@ where
         if transaction.scope != self.scope {
             return Err(TransactionError::IntegrityFailure);
         }
-        let stage = self
-            .journal
-            .open_index_recovery_stage_with_io(
+        let stage = if let Some(proof) = transaction.certificate_proof.as_ref() {
+            if proof.anchor() != (transaction.revision, transaction.certificate_digest) {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            self.journal
+                .open_proven_index_recovery_stage(self.scope, proof)
+        } else {
+            self.journal.open_index_recovery_stage_with_io(
                 filesystem,
                 self.scope,
                 transaction.revision,
                 transaction.certificate_digest,
             )
-            .map_err(map_open_error)?;
+        }
+        .map_err(map_open_error)?;
         Ok(RecoveryIndexMaintenance {
             journal: &mut self.journal,
             stage: Some(stage),
@@ -58,14 +65,20 @@ where
         if transaction.scope != self.scope {
             return Err(TransactionError::IntegrityFailure);
         }
-        let stage = self
-            .journal
-            .open_index_recovery_stage(
+        let stage = if let Some(proof) = transaction.certificate_proof.as_ref() {
+            if proof.anchor() != (transaction.revision, transaction.certificate_digest) {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            self.journal
+                .open_proven_index_recovery_stage(self.scope, proof)
+        } else {
+            self.journal.open_index_recovery_stage(
                 self.scope,
                 transaction.revision,
                 transaction.certificate_digest,
             )
-            .map_err(map_open_error)?;
+        }
+        .map_err(map_open_error)?;
         Ok(RecoveryIndexMaintenance {
             journal: &mut self.journal,
             stage: Some(stage),

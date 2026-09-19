@@ -59,6 +59,175 @@ fn open(fs: &mut Fs, name: &EntryName, scope: NamespaceRef) -> Recovery {
     .0
 }
 
+fn open_disk(fs: &mut Fs, name: &EntryName) -> (Recovery, uste_txn::RecoveredFrontierTransaction) {
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+        fs,
+        name,
+        scope(),
+        CounterEntropy(912),
+        CounterEntropy(913),
+        &mut TestKeyAdapter,
+        uste_storage::journal::CertificateAnchorReadLimits::new(3, 3 * 4161).unwrap(),
+    )
+    .unwrap();
+    (recovery, frontier.unwrap())
+}
+
+#[test]
+fn cursor_retained_proofs_remove_stage_reads_without_authorizing_another_owner() {
+    let (mut fs, name, outcomes, _) = fixture();
+    let (mut recovery, unbound_frontier) = open_disk(&mut fs, &name);
+    let mut cursor = recovery
+        .open_transaction_cursor(
+            CommitRevision::FIRST,
+            outcomes[2].revision,
+            3,
+            RANGE_BYTES + 6 * 4161,
+        )
+        .unwrap();
+    let mut retained = Vec::new();
+    while let Some(transaction) = recovery
+        .next_recovered_transaction(&mut fs, &mut cursor)
+        .unwrap()
+    {
+        fs.arm(FaultPlan::default()).unwrap();
+        for _ in 0..3 {
+            let stage = recovery
+                .stage_indexes_with_io(&mut fs, &transaction)
+                .unwrap();
+            assert_eq!(
+                stage.anchor().unwrap(),
+                (transaction.revision(), *transaction.certificate_digest())
+            );
+        }
+        recovery.stage_indexes(&transaction).unwrap();
+        assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+        assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+        retained.push(transaction);
+    }
+    let report = recovery.finish_transaction_cursor(cursor).unwrap();
+    assert_eq!(report.encoded_bytes, RANGE_BYTES + 6 * 4161);
+    assert_eq!(retained[2], unbound_frontier); // transient proof is not transaction content
+    fs.arm(FaultPlan::default()).unwrap();
+    recovery
+        .stage_indexes_with_io(&mut fs, &unbound_frontier)
+        .unwrap();
+    assert_eq!(fs.operation_count(Operation::ReadAt), 1); // explicit fallback still reauthenticates
+
+    let (mut foreign_fs, foreign_name, _, _) = fixture();
+    for disk in [false, true] {
+        let mut foreign = if disk {
+            open_disk(&mut foreign_fs, &foreign_name).0
+        } else {
+            open(&mut foreign_fs, &foreign_name, scope())
+        };
+        foreign_fs.arm(FaultPlan::default()).unwrap();
+        for transaction in &retained {
+            assert!(
+                foreign
+                    .stage_indexes_with_io(&mut foreign_fs, transaction)
+                    .is_err()
+            );
+            assert!(foreign.stage_indexes(transaction).is_err());
+        }
+        assert_eq!(foreign_fs.operation_count(Operation::ReadAt), 0);
+        assert_eq!(foreign_fs.operation_count(Operation::CreateNew), 0);
+    }
+    // Existing receipts bind admitted content, not continuous rereads. Fresh cursors still fail.
+    let directory = fs.open_directory(&fs.root(), &name).unwrap();
+    let certificates = fs
+        .open_existing(&directory, &EntryName::new("CERTIFICATES").unwrap())
+        .unwrap();
+    let offset = 3 * 4161 + 127;
+    let mut byte = [0];
+    fs.read_at(&certificates, offset, &mut byte).unwrap();
+    fs.write_at(&certificates, offset, &[byte[0] ^ 1]).unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    recovery
+        .stage_indexes_with_io(&mut fs, &retained[0])
+        .unwrap();
+    assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+    let mut fresh = recovery
+        .open_transaction_cursor(CommitRevision::FIRST, outcomes[2].revision, 3, 100_000)
+        .unwrap();
+    assert!(
+        recovery
+            .next_recovered_transaction(&mut fs, &mut fresh)
+            .is_err()
+    );
+    assert!(recovery.finish_transaction_cursor(fresh).is_err());
+    fs.write_at(&certificates, offset, &byte).unwrap();
+    drop(recovery);
+    let (mut reopened, _) = open_disk(&mut fs, &name);
+    fs.arm(FaultPlan::default()).unwrap();
+    assert!(
+        reopened
+            .stage_indexes_with_io(&mut fs, &retained[0])
+            .is_err()
+    );
+    assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+}
+
+#[test]
+fn disk_cursor_retained_proofs_preserve_every_read_failure_and_sticky_refusal() {
+    let (mut fs, name, outcomes, _) = fixture();
+    let (recovery, _) = open_disk(&mut fs, &name);
+    let bytes = RANGE_BYTES + 6 * 4161;
+    fs.arm(FaultPlan::default()).unwrap();
+    recovery
+        .visit_transactions(
+            &mut fs,
+            CommitRevision::FIRST,
+            outcomes[2].revision,
+            3,
+            bytes,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+    let reads = fs.operation_count(Operation::ReadAt);
+    assert!(reads > 6);
+    for occurrence in 1..=reads {
+        fs.arm(
+            FaultPlan::new([FaultPoint {
+                operation: Operation::ReadAt,
+                occurrence,
+                action: FaultAction::Error(AdapterErrorKind::Io),
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        let mut cursor = recovery
+            .open_transaction_cursor(CommitRevision::FIRST, outcomes[2].revision, 3, bytes)
+            .unwrap();
+        loop {
+            match recovery.next_recovered_transaction(&mut fs, &mut cursor) {
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("selected read fault must reject the range"),
+                Err(_) => break,
+            }
+        }
+        assert_eq!(fs.pending_faults(), 0);
+        fs.arm(FaultPlan::default()).unwrap();
+        assert!(
+            recovery
+                .next_recovered_transaction(&mut fs, &mut cursor)
+                .is_err()
+        );
+        assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+        assert!(recovery.finish_transaction_cursor(cursor).is_err());
+    }
+    recovery
+        .visit_transactions(
+            &mut fs,
+            CommitRevision::FIRST,
+            outcomes[2].revision,
+            3,
+            bytes,
+            |_, _| Ok(()),
+        )
+        .unwrap();
+}
+
 #[test]
 fn inventory_free_genesis_preserves_terminal_authority_and_reauthenticates_reads() {
     let (mut fs, name, outcomes, _) = fixture();
