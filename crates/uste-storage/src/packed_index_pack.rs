@@ -16,6 +16,21 @@ pub struct PackWriteLimits {
     pub maximum_payload_bytes: u64,
 }
 
+impl PackWriteLimits {
+    pub(crate) fn validate(self) -> Result<(), StorageError> {
+        if self.maximum_pages == 0
+            || self.maximum_pages > MAX_PAGES
+            || self.maximum_records == 0
+            || self.maximum_records > MAX_PAGES * MAX_SLOTS as u64
+            || self.maximum_payload_bytes == 0
+            || self.maximum_payload_bytes > MAX_PAGES * MAX_RECORD_PAYLOAD as u64
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct PackedRecordAddress {
     context: PackedPageContext,
@@ -87,15 +102,7 @@ impl<F: FileSystem> ImmutablePackWriter<F> {
         if context.object != [0; 16] || context.page != 0 || context.family == 0 {
             return Err(StorageError::InvalidState);
         }
-        if limits.maximum_pages == 0
-            || limits.maximum_pages > MAX_PAGES
-            || limits.maximum_records == 0
-            || limits.maximum_records > MAX_PAGES * MAX_SLOTS as u64
-            || limits.maximum_payload_bytes == 0
-            || limits.maximum_payload_bytes > MAX_PAGES * MAX_RECORD_PAYLOAD as u64
-        {
-            return Err(StorageError::ResourceLimit);
-        }
+        limits.validate()?;
         entropy
             .fill(&mut context.object)
             .map_err(|_| StorageError::Crypto(uste_crypto::CryptoError::RetryableUnavailable))?;

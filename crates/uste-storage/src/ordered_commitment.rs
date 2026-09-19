@@ -235,7 +235,7 @@ pub(crate) fn bit(key: &[u8], position: u32) -> bool {
         .is_some_and(|value| offset == 0 || value & (1 << (8 - offset)) != 0)
 }
 
-fn first_difference(a: &[u8], b: &[u8]) -> Option<u32> {
+pub(crate) fn first_difference(a: &[u8], b: &[u8]) -> Option<u32> {
     for (index, (left, right)) in a.iter().zip(b).enumerate() {
         if left != right {
             return Some(index as u32 * 9 + 1 + (left ^ right).leading_zeros());

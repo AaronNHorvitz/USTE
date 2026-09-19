@@ -186,6 +186,10 @@ terminal key-route proof, canonical chunk lengths and complete value hash before
 Its caller still requires independent canonical-root admission and authorization. Linked reads
 check bounded integral pack geometry without a resident pack catalog; descriptor reads retain
 their exact-length requirement. This is not yet a graph/coordinator profile or root-publication path.
+Decision 0133 adds private copy-on-write batches over those trees: sorted exact deltas, bounded
+arena/path/read reservations, before-value proof checks before output creation, unchanged-subtree
+reuse and iterative final-only serialization. The returned staged root is not a journal commit or
+independently admitted manifest; integration and recovery still have to establish that authority.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

@@ -58,6 +58,33 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `702ab33` plus this increment: [Decision 0133](docs/decisions/0133-bounded-packed-tree-batches.md)
+  adds bounded private copy-on-write batches with exact sorted preconditions, unchanged-subtree
+  reuse, conservative 64 MiB metadata reservation and iterative final-reachable-node serialization.
+  Nine new tests cover 32 generated reference batches, 512 deltas, 16 MiB values, exact 64 MiB
+  input admission, late conflicts/corruption, output exhaustion and 87 observed error/crash cases.
+  Updating one leaf of a 128-key tree writes eight nodes; deleting the entire tree writes none.
+  The mixed fault fixture pins seven reads and four output pages. Focused scope
+  `run-p525118-i21525488.scope` passed nine tests/3.69s. An earlier expanded run caught an incorrect
+  predicted fault-case count (84 versus observed 87); all injected checks passed, and the assertion
+  now pins 87. Unnecessary test qualifications were corrected without weakening lint checks.
+  The earlier full gate's terminal result was unavailable after context recovery, so it was not
+  used as evidence. Retained-log gate `run-p529669-i21522072.scope` exited 0 under 3G/4G/512M,
+  one job/test thread: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  --workspace --all-targets --all-features --locked --offline -- --test-threads=1`;
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings`; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage
+  --no-deps --locked --offline`. Tests passed 486/46 executables, no failures/ignores; replay
+  50/115.75s; Clippy/0.04s and docs/0.03s. Log `/tmp/uste-d133-workspace-verification.log` is
+  supplemental local evidence, not required for reproduction. Preflight 33 GiB RAM/4.0 GiB swap;
+  sampled scope peak 291,110,912 bytes/zero swap is not the final peak. Formatting, diff,
+  documentation and task checks passed. No native matrix rerun (latest native baseline `42f9abb`),
+  benchmark qualification, root authority, M1/lockfile change or task completion is claimed.
+  Unregistered `packed_tree_validation.rs` and Decision 0134 are next-package work, excluded from
+  this tested commit. Next: complete bounded structural/content validation, then independent
+  manifests, range queries, recovery/domain integration, complete accounting and qualification.
+
 - Implemented on pushed `d12fe7f` plus this increment: [Decision 0132](docs/decisions/0132-bounded-packed-tree-lookup.md)
   adds bounded authenticated packed-tree lookup with exact parent summaries, terminal key-route
   proof and complete value-hash verification before returning a zeroizing result. The separate

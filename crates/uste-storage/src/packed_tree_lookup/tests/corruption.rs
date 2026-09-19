@@ -15,7 +15,7 @@ fn physical(location: PackedLocator) -> PackedPageContext {
         .resolve(c.scope, c.profile, c.family, c.revision)
         .unwrap()
 }
-fn rewrite(
+pub(super) fn rewrite(
     f: &mut Fixture,
     location: PackedLocator,
     alter: impl FnOnce(PackedRecord<'_>, PackedPageContext) -> Vec<u8>,

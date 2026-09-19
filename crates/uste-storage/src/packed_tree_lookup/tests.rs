@@ -14,6 +14,7 @@ use uste_crypto::{
 };
 use uste_types::{DatabaseId, NamespaceId};
 
+mod batch;
 mod corruption;
 
 struct Entropy(u64);
