@@ -4,6 +4,8 @@ use uste_crypto::{
 
 #[path = "support/disk_commit_check.rs"]
 mod disk_commit_check;
+#[path = "support/first_reference.rs"]
+mod first_reference;
 use uste_replay::{ReplayError, capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
     BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName, IndexEntry, IndexRootInput,
@@ -1167,6 +1169,40 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
     );
     let mut recovered = recovered;
     let good_metadata = publish_coordinator_metadata_root(&mut recovered, &mut filesystem).unwrap();
+    let first_limits = uste_txn::CoordinatorFirstReferenceLimits {
+        maximum_owners: 1,
+        maximum_groups: 2,
+        maximum_encoded_bytes: 1_000_000,
+    };
+    for limited in [
+        uste_txn::CoordinatorFirstReferenceLimits {
+            maximum_owners: 0,
+            ..first_limits
+        },
+        uste_txn::CoordinatorFirstReferenceLimits {
+            maximum_groups: 1,
+            ..first_limits
+        },
+        uste_txn::CoordinatorFirstReferenceLimits {
+            maximum_encoded_bytes: 1,
+            ..first_limits
+        },
+    ] {
+        assert!(
+            uste_txn::publish_coordinator_first_reference_index(
+                &mut recovered,
+                &mut filesystem,
+                limited
+            )
+            .is_err()
+        );
+    }
+    let good_first = uste_txn::publish_coordinator_first_reference_index(
+        &mut recovered,
+        &mut filesystem,
+        first_limits,
+    )
+    .unwrap();
     uste_txn::publish_coordinator_transaction_index(&mut recovered, &mut filesystem).unwrap();
     let indexes = uste_txn::load_coordinator_transaction_indexes(
         &recovered,
@@ -1261,6 +1297,32 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         .find(|root| root.generation() == good_metadata.generation)
         .unwrap();
     let mut owner_entries = Vec::new();
+    let wrong_first = recovered
+        .publish_index_run(
+            &mut filesystem,
+            metadata_root.revision(),
+            uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+            1,
+            [IndexEntry {
+                key: reference.id().as_bytes().to_vec(),
+                value: 2_u64.to_be_bytes().to_vec(),
+            }],
+        )
+        .unwrap();
+    recovered
+        .publish_index_root(
+            &mut filesystem,
+            IndexRootInput {
+                scope,
+                revision: metadata_root.revision(),
+                certificate_digest: *metadata_root.certificate_digest(),
+                reducer_profile: *metadata_root.reducer_profile(),
+                logical_state_digest: *metadata_root.logical_state_digest(),
+                index_profile: uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+            },
+            &[wrong_first],
+        )
+        .unwrap();
     recovered
         .visit_index_run(
             &mut filesystem,
@@ -1409,6 +1471,78 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         Err(TransactionError::IntegrityFailure)
     ));
     let mut admitted_base = None;
+    for maximum_total_journal_groups in [1, 2] {
+        for first_generation in [good_first.generation, good_first.generation + 1] {
+            let candidates = uste_txn::load_coordinator_metadata_candidates_for_recovery::<
+                CounterState,
+                _,
+                _,
+                _,
+                _,
+            >(&recovery, &mut filesystem)
+            .unwrap();
+            for candidate in candidates {
+                let good = candidate.generation() == good_metadata.generation;
+                let transaction_root = recovery
+                    .load_index_root_manifests(
+                        &mut filesystem,
+                        uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .find(|root| root.generation() == good_generation)
+                    .unwrap();
+                let transaction_index = uste_txn::admit_coordinator_transaction_index_for_recovery(
+                    &recovery,
+                    &mut filesystem,
+                    transaction_root,
+                    admission_limits,
+                    &mut transaction_cache,
+                )
+                .unwrap();
+                let first_root = recovery
+                    .load_index_root_manifests(
+                        &mut filesystem,
+                        uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+                    )
+                    .unwrap()
+                    .into_iter()
+                    .find(|root| root.generation() == first_generation)
+                    .unwrap();
+                let result = uste_txn::admit_coordinator_disk_base_with_first_references(
+                    &recovery,
+                    &mut filesystem,
+                    candidate,
+                    transaction_index,
+                    first_root,
+                    uste_storage::IndexRunReadLimits::new(16, 10, 4096).unwrap(),
+                    uste_txn::CoordinatorDiskAdmissionLimits {
+                        maximum_total_journal_groups,
+                        ..base_limits
+                    },
+                    &mut transaction_cache,
+                );
+                assert_eq!(
+                    result.is_ok(),
+                    good && first_generation == good_first.generation
+                        && maximum_total_journal_groups == 2
+                );
+                if let Ok(base) = result {
+                    assert_eq!(
+                        base.owner_at_base(
+                            &recovery,
+                            &mut filesystem,
+                            reference.id(),
+                            lookup_limits,
+                            &mut transaction_cache
+                        )
+                        .unwrap(),
+                        Some((reference, principal))
+                    );
+                }
+            }
+        }
+    }
     for maximum_total_journal_groups in [3, 4] {
         let candidates = uste_txn::load_coordinator_metadata_candidates_for_recovery::<
             CounterState,

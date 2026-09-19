@@ -51,6 +51,22 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0072 adds optional authenticated first-reference evidence and single-journal-pass
+  first-owner admission without reconstructing an owner comparator map. Existing compatibility
+  admission remains unchanged. The legacy bridge publisher explicitly bounds its temporary map
+  and replay; it is not a disk-backed incremental builder. Tests reject false earlier/later
+  revisions, absent IDs, malformed values, wrong owners and short budgets, and fail closed at
+  every observed cold-admission read fault. Warm metadata rebase does not yet maintain this proof.
+  Capped validation (one build job/thread; MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M):
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-replay -p uste-txn -p uste-graph --all-targets --locked
+  --offline -- --test-threads=1`, `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets
+  --all-features --locked --offline -- -D warnings`, and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D
+  warnings" cargo doc --workspace --all-features --no-deps --locked --offline` all exited 0.
+  Replay checkpoint suite now has 7 tests; txn unit suite has 5. Docs/task checks pass (145 links,
+  68 tasks). Preflight: 36 GiB available RAM, 3.9 GiB free swap. No qualifying benchmark run.
+  Next: maintain first-reference evidence across bounded disk overlays/rebase, then address
+  resident storage certificate/blob metadata. T-20 and the remaining roadmap remain open.
+
 - Decision 0071 adds `AuthorizedDiskUploads`: bounded staging-only reservations, fail-closed
   complete-outbox reconciliation, private disk owner lookup and exact streaming committed charges.
   Unknown recovered staging is explicitly marked incomplete. Graph inventory rejection remains;
@@ -1097,11 +1113,11 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next extend disk-aware authorization beyond metadata, bounded graph reads and inventory-free
-graph writes (blob inventory admission and upload quota/reconciliation),
-and replace per-owner
-prefix scans with scalable authenticated first-reference
-evidence before qualification.
+next maintain Decision 0072's single-pass first-reference evidence across disk metadata rebase
+and remove remaining resident storage metadata. Decision 0071 supplies bounded authorized upload
+quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
+open. The existing graph domain intentionally prohibits inventories. The new first-reference
+publisher remains a bounded legacy bridge, not larger-than-memory construction.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. Extend bounded
 suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host

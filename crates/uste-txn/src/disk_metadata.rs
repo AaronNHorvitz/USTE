@@ -6,9 +6,15 @@
 use std::collections::BTreeMap;
 
 mod admission;
+mod first_reference;
 mod rebase;
 pub use admission::{
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, admit_coordinator_disk_base,
+    admit_coordinator_disk_base_with_first_references,
+};
+pub use first_reference::{
+    COORDINATOR_FIRST_REFERENCE_PROFILE_V1, CoordinatorFirstReferenceLimits,
+    publish_coordinator_first_reference_index,
 };
 pub use rebase::CoordinatorMetadataRebaseLimits;
 pub(crate) use rebase::publish_overlay_base;

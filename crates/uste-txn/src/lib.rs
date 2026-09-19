@@ -22,13 +22,15 @@ pub use authorized_disk::{
     AuthorizedDiskReader, AuthorizedDiskWriteError, AuthorizedDiskWriteState, AuthorizedDiskWriter,
 };
 pub use disk_metadata::{
-    COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
-    CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, CoordinatorMetadataCandidate,
-    CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport, CoordinatorMetadataRebaseLimits,
+    COORDINATOR_FIRST_REFERENCE_PROFILE_V1, COORDINATOR_METADATA_PROFILE_V1,
+    COORDINATOR_TRANSACTION_PROFILE_V1, CoordinatorDiskAdmissionLimits, CoordinatorDiskBase,
+    CoordinatorFirstReferenceLimits, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
+    CoordinatorMetadataLoadReport, CoordinatorMetadataRebaseLimits,
     CoordinatorTransactionAdmissionLimits, CoordinatorTransactionIndex,
-    admit_coordinator_disk_base, admit_coordinator_transaction_index_for_recovery,
-    load_coordinator_metadata_candidates, load_coordinator_metadata_candidates_for_recovery,
-    load_coordinator_transaction_indexes, publish_coordinator_metadata_root,
+    admit_coordinator_disk_base, admit_coordinator_disk_base_with_first_references,
+    admit_coordinator_transaction_index_for_recovery, load_coordinator_metadata_candidates,
+    load_coordinator_metadata_candidates_for_recovery, load_coordinator_transaction_indexes,
+    publish_coordinator_first_reference_index, publish_coordinator_metadata_root,
     publish_coordinator_transaction_index, reconstruct_coordinator_metadata_seed,
     reconstruct_coordinator_metadata_seed_for_recovery,
 };

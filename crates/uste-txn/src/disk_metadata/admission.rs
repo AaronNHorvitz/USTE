@@ -1,10 +1,12 @@
-//! Bounded-memory, deliberately read-amplified admission of the existing metadata profile.
+//! Bounded-memory admission, with optional single-pass first-reference evidence.
 
 use super::*;
 use uste_storage::{IndexGetLimits, PageCache};
 
-/// Explicit recovery budgets. Owner validation rereads the prefix once per owner; the total
-/// group ceiling includes those passes and the final retry/reference correspondence pass.
+/// Explicit recovery budgets. Compatibility admission rereads the prefix once per owner;
+/// first-reference admission needs only the final retry/reference correspondence pass.
+/// The total group ceiling covers all passes within this admission, not separate transaction
+/// index admission. Every pass also obeys its encoded-byte ceiling.
 #[derive(Clone, Copy, Debug)]
 pub struct CoordinatorDiskAdmissionLimits {
     pub metadata: CoordinatorMetadataLoadLimits,
@@ -281,6 +283,62 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    admit_base(
+        recovery,
+        filesystem,
+        candidate,
+        transactions,
+        limits,
+        cache,
+        None,
+    )
+}
+
+/// Single-journal-pass owner admission using an independently authenticated first-reference run.
+/// The optional cache remains derived evidence: every claim is checked against the journal.
+#[allow(clippy::too_many_arguments)]
+pub fn admit_coordinator_disk_base_with_first_references<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    candidate: CoordinatorMetadataCandidate,
+    transactions: CoordinatorTransactionIndex,
+    first_references: RecoveredIndexRoot,
+    first_reference_limits: IndexRunReadLimits,
+    limits: CoordinatorDiskAdmissionLimits,
+    cache: &mut PageCache,
+) -> Result<CoordinatorDiskBase, TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_base(
+        recovery,
+        filesystem,
+        candidate,
+        transactions,
+        limits,
+        cache,
+        Some((first_references, first_reference_limits)),
+    )
+}
+
+fn admit_base<F, W, E, I>(
+    recovery: &AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    candidate: CoordinatorMetadataCandidate,
+    transactions: CoordinatorTransactionIndex,
+    limits: CoordinatorDiskAdmissionLimits,
+    cache: &mut PageCache,
+    first_references: Option<(RecoveredIndexRoot, IndexRunReadLimits)>,
+) -> Result<CoordinatorDiskBase, TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     if candidate.root.scope() != recovery.scope()
         || candidate.root.index_profile() != &COORDINATOR_METADATA_PROFILE_V1
         || candidate.anchor() != transactions.anchor()
@@ -309,13 +367,31 @@ where
     if metadata.outcomes != candidate.revision().get() {
         return Err(TransactionError::IntegrityFailure);
     }
-    let total_groups = metadata
-        .owners
+    let total_groups = first_references
+        .as_ref()
+        .map_or(metadata.owners, |_| 0)
         .checked_add(1)
         .and_then(|passes| passes.checked_mul(candidate.revision().get()))
         .ok_or(TransactionError::ResourceLimit)?;
     if total_groups > limits.maximum_total_journal_groups {
         return Err(TransactionError::ResourceLimit);
+    }
+    if let Some((root, run_limits)) = &first_references {
+        if root.anchor() != candidate.anchor()
+            || root.index_profile() != &COORDINATOR_FIRST_REFERENCE_PROFILE_V1
+            || root.runs().len() != 1
+            || root
+                .runs()
+                .next()
+                .is_none_or(|run| run.family() != 1 || run.entry_count() != metadata.owners)
+            || metadata.owners == 0
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        recovery.visit_index_run(filesystem, root, 1, *run_limits, &mut |key, value| {
+            first_reference::decode_first_reference(key, value, candidate.revision())?;
+            Ok(())
+        })?;
     }
     visit_family(
         recovery,
@@ -347,6 +423,23 @@ where
         while let Some(entry) = recovery.next_index_run_entry(filesystem, &mut cursor)? {
             let (reference, principal) = decode_owner(recovery.scope(), &entry.key, &entry.value)
                 .map_err(TransactionError::Storage)?;
+            if let Some((root, _)) = &first_references {
+                let (value, _) = recovery.index_get_bounded(
+                    filesystem,
+                    root,
+                    1,
+                    &entry.key,
+                    limits.lookup,
+                    cache,
+                )?;
+                first_reference::decode_first_reference(
+                    &entry.key,
+                    &value.ok_or(TransactionError::IntegrityFailure)?,
+                    candidate.revision(),
+                )
+                .map_err(TransactionError::Storage)?;
+                continue;
+            }
             let mut found = false;
             recovery.visit_transactions(
                 filesystem,
@@ -379,6 +472,7 @@ where
         }
         budget.add(&report)?;
     }
+    let mut first_matches = 0_u64;
     recovery.visit_transactions(
         filesystem,
         CommitRevision::FIRST,
@@ -417,16 +511,41 @@ where
                         )
                         .map_err(storage_error)?;
                     let actual = actual.ok_or(StorageError::IntegrityFailure)?;
-                    let (stored, _) =
+                    let (stored, principal) =
                         decode_owner(recovery.scope(), &reference.id().as_bytes(), &actual)?;
                     if stored != *reference {
                         return Err(StorageError::IntegrityFailure);
+                    }
+                    if let Some((root, _)) = &first_references {
+                        let key = reference.id().as_bytes();
+                        let (value, _) = recovery
+                            .index_get_bounded(filesystem, root, 1, &key, limits.lookup, cache)
+                            .map_err(storage_error)?;
+                        let first = first_reference::decode_first_reference(
+                            &key,
+                            &value.ok_or(StorageError::IntegrityFailure)?,
+                            candidate.revision(),
+                        )?;
+                        if first > transaction.revision {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        if first == transaction.revision {
+                            if principal != transaction.principal {
+                                return Err(StorageError::IntegrityFailure);
+                            }
+                            first_matches = first_matches
+                                .checked_add(1)
+                                .ok_or(StorageError::ResourceLimit)?;
+                        }
                     }
                 }
             }
             Ok(())
         },
     )?;
+    if first_references.is_some() && first_matches != metadata.owners {
+        return Err(TransactionError::IntegrityFailure);
+    }
     Ok(CoordinatorDiskBase {
         metadata: candidate.root,
         transactions,
