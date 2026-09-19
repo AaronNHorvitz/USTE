@@ -2,7 +2,40 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — authorized packed reads (Decision 0150)
+## Latest verified increment — bounded reverse packed traversal (Decision 0151)
+
+Implemented on pushed `cb63dbd` plus this increment: descending `(lower, upper]` cursor and
+owner/scope-bound wrappers reuse authenticated path/value verification and cumulative limits.
+Compressed-prefix seek skips later subtrees rather than scanning them. Forward `[lower, upper)`
+behavior is unchanged. Four new tests and expanded existing cases cover all byte/prefix bounds,
+96 seeded sparse variable-length keys, empty/singleton and 16 MiB values, exact/minus-one budgets,
+all observed read faults with restart, late content corruption and foreign/future/locked handles.
+The 256-key shared-prefix test selects the first key in nine page reads and one candidate.
+
+Focused session 11876 / scope `run-p648135-i21620886.scope` passed the initial three tests in
+1.39 s and Clippy in 7.24 s. Session 65639 / `run-p649008-i21648652.scope` passed 71 storage and
+56 transaction packed tests (8.49/98.95 s); subsequent Clippy caught unusual byte grouping in the
+new sparse test's seed. Corrected without changing the seed or test requirements.
+
+Final full gate session 80518 / scope `run-p650987-i21613870.scope` exited 0: 579 tests across
+47 executables (transaction integration 93/99.26 s), Clippy 1.30 s and docs 2.63 s. Preflight:
+31 GiB available RAM / 5.6 GiB free swap; sampled scope peak 2,194,870,272 bytes / zero swap.
+Format, diff, documentation and task graph checks passed. Exact gate command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d151-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn --no-deps --locked --offline'
+```
+
+Next implement the separately versioned packed graph bridge and v1 compatibility export, then
+domain preparation/admission/live integration. Decision 0152 and unregistered graph `packed.rs`
+and `packed_bridge.rs` drafts are excluded from this verified increment. T-20/T-19, complete I/O
+accounting and qualifying campaigns remain open; native standalone and M1 baselines are unchanged.
+
+## Prior verified increment — authorized packed reads (Decision 0150)
 
 Implemented on pushed `ff3a6cd` plus this increment: exact packed retry/transaction reads and
 paired committed-byte accounting now have a restricted, current-durable-policy-bound facade.

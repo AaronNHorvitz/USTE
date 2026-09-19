@@ -31,7 +31,7 @@ pub struct TreeCursorLimits {
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TreeCursorReport {
-    /// Every reached leaf, including the initial seek probe and exclusive upper-bound witness.
+    /// Every reached leaf, including the initial seek probe and exclusive boundary witness.
     pub candidates: u64,
     pub returned_entries: u64,
     pub returned_bytes: u64,
@@ -84,6 +84,7 @@ pub struct PackedTreeCursor {
     started: bool,
     done: bool,
     failed: bool,
+    reverse: bool,
 }
 fn copy_key(key: &[u8]) -> Result<Zeroizing<Vec<u8>>, StorageError> {
     let mut out = Zeroizing::new(Vec::new());
@@ -108,6 +109,28 @@ impl PackedTreeCursor {
         lower: &[u8],
         upper: Option<&[u8]>,
         limits: TreeCursorLimits,
+    ) -> Result<Self, StorageError> {
+        Self::with_direction(context, expected, root, lower, upper, limits, false)
+    }
+    /// Descending traversal over `(lower, upper]`; absent upper means the greatest key.
+    pub fn new_reverse(
+        context: TreeReadContext,
+        expected: OrderedCommitment,
+        root: Option<PackedLocator>,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+    ) -> Result<Self, StorageError> {
+        Self::with_direction(context, expected, root, lower, upper, limits, true)
+    }
+    fn with_direction(
+        context: TreeReadContext,
+        expected: OrderedCommitment,
+        root: Option<PackedLocator>,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
     ) -> Result<Self, StorageError> {
         let logical_context =
             CommitmentContext::new(context.scope, context.profile, context.family)
@@ -165,6 +188,7 @@ impl PackedTreeCursor {
             started: false,
             done: root.is_none() || upper == Some(lower),
             failed: false,
+            reverse,
         })
     }
     pub fn report(&self) -> TreeCursorReport {
@@ -248,7 +272,11 @@ impl PackedTreeCursor {
                     {
                         return Err(StorageError::IntegrityFailure);
                     }
-                    let rightward = seek && logical::bit(&self.lower, bit);
+                    let rightward = if seek {
+                        logical::bit(self.seek_bound().ok_or(StorageError::InvalidState)?, bit)
+                    } else {
+                        self.reverse
+                    };
                     self.path.push(Frame {
                         original: link,
                         left,
@@ -309,20 +337,31 @@ impl PackedTreeCursor {
             }
         }
     }
-    fn successor<F: FileSystem, W, E: EntropySource>(
+    fn advance<F: FileSystem, W, E: EntropySource>(
         &mut self,
         reader: &mut Reader<'_, F, W, E>,
     ) -> Result<Option<Leaf>, StorageError> {
         while let Some(frame) = self.path.last_mut() {
-            if frame.rightward {
+            if frame.rightward != self.reverse {
                 self.path.pop();
             } else {
-                frame.rightward = true;
-                let next = frame.right;
+                frame.rightward = !self.reverse;
+                let next = if self.reverse {
+                    frame.left
+                } else {
+                    frame.right
+                };
                 return self.descend(reader, next, false).map(Some);
             }
         }
         Ok(None)
+    }
+    fn seek_bound(&self) -> Option<&[u8]> {
+        if self.reverse {
+            self.upper.as_ref().map(|key| key.as_slice())
+        } else {
+            (!self.lower.is_empty()).then_some(self.lower.as_slice())
+        }
     }
     fn seek<F: FileSystem, W, E: EntropySource>(
         &mut self,
@@ -333,16 +372,24 @@ impl PackedTreeCursor {
             location: self.root.ok_or(StorageError::IntegrityFailure)?,
             claimed: self.expected,
         };
-        let leaf = self.descend(reader, root, !self.lower.is_empty())?;
-        if self.lower.is_empty() || leaf.key.as_slice() == self.lower.as_slice() {
+        let leaf = self.descend(reader, root, self.seek_bound().is_some())?;
+        let Some(bound) = self.seek_bound() else {
+            return Ok(Some(leaf));
+        };
+        if leaf.key.as_slice() == bound {
             return Ok(Some(leaf));
         }
-        let split = logical::first_difference(&leaf.key, &self.lower)
-            .ok_or(StorageError::IntegrityFailure)?;
+        let split =
+            logical::first_difference(&leaf.key, bound).ok_or(StorageError::IntegrityFailure)?;
         let keep = self.path.partition_point(|frame| frame.bit < split);
-        if leaf.key.as_slice() < self.lower.as_slice() {
+        let skip = if self.reverse {
+            leaf.key.as_slice() > bound
+        } else {
+            leaf.key.as_slice() < bound
+        };
+        if skip {
             self.path.truncate(keep);
-            self.successor(reader)
+            self.advance(reader)
         } else if let Some(frame) = self.path.get(keep) {
             let subtree = frame.original;
             self.path.truncate(keep);
@@ -356,7 +403,7 @@ impl PackedTreeCursor {
         reader: &mut Reader<'_, F, W, E>,
     ) -> Result<Option<PackedCursorEntry>, StorageError> {
         let leaf = if self.started {
-            self.successor(reader)?
+            self.advance(reader)?
         } else {
             self.seek(reader)?
         };
@@ -364,16 +411,23 @@ impl PackedTreeCursor {
             self.done = true;
             return Ok(None);
         };
-        if leaf.key.as_slice() < self.lower.as_slice()
-            || (!self.previous.is_empty() && leaf.key.as_slice() <= self.previous.as_slice())
-        {
+        let key = leaf.key.as_slice();
+        let invalid = if self.reverse {
+            self.upper.as_ref().is_some_and(|end| key > end.as_slice())
+                || (!self.previous.is_empty() && key >= self.previous.as_slice())
+        } else {
+            key < self.lower.as_slice()
+                || (!self.previous.is_empty() && key <= self.previous.as_slice())
+        };
+        if invalid {
             return Err(StorageError::IntegrityFailure);
         }
-        if self
-            .upper
-            .as_ref()
-            .is_some_and(|end| leaf.key.as_slice() >= end.as_slice())
-        {
+        let ended = if self.reverse {
+            key <= self.lower.as_slice()
+        } else {
+            self.upper.as_ref().is_some_and(|end| key >= end.as_slice())
+        };
+        if ended {
             self.done = true;
             return Ok(None);
         }

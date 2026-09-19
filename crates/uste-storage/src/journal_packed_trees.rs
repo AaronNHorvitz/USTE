@@ -162,8 +162,33 @@ where
         upper: Option<&[u8]>,
         limits: TreeCursorLimits,
     ) -> Result<CertifiedPackedTreeCursor, StorageError> {
+        self.open_directional_packed_tree_cursor(tree, lower, upper, limits, false)
+    }
+    /// Owner-bound descending `(lower, upper]` traversal of an admitted canonical tree.
+    pub fn open_reverse_packed_tree_cursor(
+        &self,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+    ) -> Result<CertifiedPackedTreeCursor, StorageError> {
+        self.open_directional_packed_tree_cursor(tree, lower, upper, limits, true)
+    }
+    fn open_directional_packed_tree_cursor(
+        &self,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
+    ) -> Result<CertifiedPackedTreeCursor, StorageError> {
         self.validate_canonical_packed_tree(tree)?;
-        let cursor = PackedTreeCursor::new(
+        let constructor = if reverse {
+            PackedTreeCursor::new_reverse
+        } else {
+            PackedTreeCursor::new
+        };
+        let cursor = constructor(
             tree.context,
             tree.commitment,
             tree.root,

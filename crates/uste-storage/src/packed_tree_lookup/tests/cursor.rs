@@ -2,6 +2,7 @@ use super::*;
 use crate::packed_tree_cursor::*;
 type Entries = Vec<(Vec<u8>, Vec<u8>)>;
 use super::corruption::rewrite;
+mod reverse;
 
 fn cursor_limits() -> TreeCursorLimits {
     TreeCursorLimits {
@@ -166,6 +167,11 @@ fn packed_tree_cursor_compressed_seek_does_not_scan_prior_keyspace() {
             collect(&mut f.fs, &f.vault, &mut c).unwrap(),
             reference(&values, &lower, None)
         );
+        let mut c = reverse::reverse(root, b"", Some(&lower), cursor_limits());
+        assert_eq!(
+            collect(&mut f.fs, &f.vault, &mut c).unwrap(),
+            reverse::expected(&values, b"", Some(&lower))
+        );
     }
     let lower = b"compressed-prefix-\0\xff";
     let mut c = cursor(
@@ -183,6 +189,23 @@ fn packed_tree_cursor_compressed_seek_does_not_scan_prior_keyspace() {
         reference(&values, lower, None)
     );
     assert_eq!(c.report().pages, 10);
+    assert_eq!(c.report().candidates, 1);
+    let upper = b"compressed-prefix-\0\0";
+    let mut c = reverse::reverse(
+        root,
+        b"",
+        Some(upper),
+        TreeCursorLimits {
+            maximum_pages: 9,
+            maximum_candidates: 1,
+            ..cursor_limits()
+        },
+    );
+    assert_eq!(
+        collect(&mut f.fs, &f.vault, &mut c).unwrap(),
+        reverse::expected(&values, b"", Some(upper))
+    );
+    assert_eq!(c.report().pages, 9);
     assert_eq!(c.report().candidates, 1);
 }
 
@@ -429,6 +452,15 @@ fn packed_tree_cursor_late_content_corruption_and_wrong_scope_poison_without_val
     let mut f = fixture(2 * MAX_CHUNK_DATA + 7);
     let mut c = cursor(f.root, b"a", None, cursor_limits());
     let directory = f.fs.root();
+    let mut reversed = reverse::reverse(f.root, b"", None, cursor_limits());
+    assert_eq!(
+        reversed
+            .next(&mut f.fs, &directory, &f.vault)
+            .unwrap()
+            .unwrap()
+            .key(),
+        &[255]
+    );
     assert_eq!(
         c.next(&mut f.fs, &directory, &f.vault)
             .unwrap()
@@ -478,6 +510,15 @@ fn packed_tree_cursor_late_content_corruption_and_wrong_scope_poison_without_val
         .to_vec()
     });
     let directory = f.fs.root();
+    assert_eq!(
+        reversed.next(&mut f.fs, &directory, &f.vault).err(),
+        Some(StorageError::IntegrityFailure)
+    );
+    assert_eq!(reversed.report().returned_entries, 1);
+    assert_eq!(
+        reversed.next(&mut f.fs, &directory, &f.vault).err(),
+        Some(StorageError::NeedsRecovery)
+    );
     assert_eq!(
         c.next(&mut f.fs, &directory, &f.vault).err(),
         Some(StorageError::IntegrityFailure)

@@ -198,6 +198,9 @@ Decision 0135 adds a bounded in-process range cursor over independently admitted
 including compressed-prefix lower-bound seek and ordered successors. It returns one completely
 verified zeroizing entry per step, accounts cumulative work, and permanently refuses continuation
 after errors. It does not grant consumer authorization or define a serialized resume token.
+Decision 0151 adds descending `(lower, upper]` traversal with compressed-prefix upper-bound seek,
+the same cumulative budgets and owner/key checks, and no scan of the later keyspace to locate
+a predecessor. The independently admitted canonical-root prerequisite remains unchanged.
 Decision 0136 frames separate encrypted packed-root manifests with at most sixteen sorted family
 commitments/locators and an explicit state-commitment profile. Exact certificate and reducer claims
 are carried but not admitted by the codec. No frozen v1 state digest is reinterpreted, and no new
@@ -257,7 +260,10 @@ Decision 0149 adds streamed cold recovery from a published admitted historical p
 It checks each authenticated prepared result, advances paired private metadata and a receipt-bound
 private reducer, then publishes only the terminal pair and returns empty coordinator overlays.
 Late failure returns no live state. Reducer residency itself remains the caller's responsibility;
-this does not supply the separately required packed disk-domain or authorized consumer adapters.
+this does not supply the separately required packed disk-domain adapter.
+Decision 0150 adds restricted authorized own-outcome and committed-quota reads bound to exact
+current durable policy. Base plus bounded first-owner overlays provide charges without ledger
+scans. Authorized packed writes, staged reservations and reconciliation remain separate work.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

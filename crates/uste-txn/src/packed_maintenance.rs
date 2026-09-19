@@ -169,6 +169,24 @@ where
             failed: false,
         })
     }
+    /// Descending `(lower, upper]` traversal; all owner/scope checks match the forward cursor.
+    pub fn reverse_cursor(
+        &self,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+    ) -> Result<ScopedPackedCursor, TransactionError> {
+        self.check(tree.context())?;
+        let inner = self
+            .journal
+            .open_reverse_packed_tree_cursor(tree, lower, upper, limits)
+            .map_err(TransactionError::Storage)?;
+        Ok(ScopedPackedCursor {
+            inner,
+            failed: false,
+        })
+    }
     pub fn next(
         &self,
         filesystem: &mut F,

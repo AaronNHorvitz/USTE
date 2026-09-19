@@ -112,6 +112,25 @@ fn entries(f: &mut Fixture, tree: &CanonicalPackedTree) -> Entries {
         values.push((entry.key().to_vec(), entry.value().to_vec()));
     }
     assert_eq!(cursor.report().returned_entries, values.len() as u64);
+    let mut reverse = f
+        .store
+        .open_reverse_packed_tree_cursor(tree, b"", None, cursors())
+        .unwrap();
+    for (key, value) in values.iter().rev() {
+        let entry = f
+            .store
+            .next_packed_tree_entry(&mut f.fs, &mut reverse)
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.key(), key);
+        assert_eq!(entry.value(), value);
+    }
+    assert!(
+        f.store
+            .next_packed_tree_entry(&mut f.fs, &mut reverse)
+            .unwrap()
+            .is_none()
+    );
     values
 }
 
@@ -553,6 +572,39 @@ fn packed_tree_capabilities_locked_vault_refuses_even_empty_and_finished_reads()
         .store
         .open_packed_tree_cursor(&tree, b"", None, cursors())
         .unwrap();
+    let mut reverse = f
+        .store
+        .open_reverse_packed_tree_cursor(&tree, b"", None, cursors())
+        .unwrap();
+    assert!(
+        f.store
+            .next_packed_tree_entry(&mut f.fs, &mut reverse)
+            .unwrap()
+            .is_none()
+    );
+    let foreign = Fixture::new(false);
+    assert!(
+        foreign
+            .store
+            .open_reverse_packed_tree_cursor(&tree, b"", None, cursors())
+            .is_err()
+    );
+    let mut foreign_cursor = f
+        .store
+        .open_reverse_packed_tree_cursor(&tree, b"", None, cursors())
+        .unwrap();
+    assert!(
+        foreign
+            .store
+            .next_packed_tree_entry(&mut f.fs, &mut foreign_cursor)
+            .is_err()
+    );
+    assert_eq!(
+        f.store
+            .next_packed_tree_entry(&mut f.fs, &mut foreign_cursor)
+            .err(),
+        Some(StorageError::NeedsRecovery)
+    );
     assert!(
         f.store
             .next_packed_tree_entry(&mut f.fs, &mut cursor)
@@ -562,6 +614,18 @@ fn packed_tree_capabilities_locked_vault_refuses_even_empty_and_finished_reads()
     f.fs.arm(FaultPlan::default()).unwrap();
     f.store.vault.lock();
     let expected = Some(StorageError::Crypto(CryptoError::Locked));
+    assert_eq!(
+        f.store
+            .open_reverse_packed_tree_cursor(&tree, b"", None, cursors())
+            .err(),
+        expected
+    );
+    assert_eq!(
+        f.store
+            .next_packed_tree_entry(&mut f.fs, &mut reverse)
+            .err(),
+        expected
+    );
     assert_eq!(f.store.validate_packed_tree_binding(&tree).err(), expected);
     assert_eq!(
         f.store
@@ -587,6 +651,12 @@ fn packed_tree_capabilities_locked_vault_refuses_even_empty_and_finished_reads()
     );
     assert_eq!(stage(&mut f, &target, None, &[]).err(), expected);
     f.store.vault.unlock(&mut TestKeyAdapter).unwrap();
+    assert_eq!(
+        f.store
+            .next_packed_tree_entry(&mut f.fs, &mut reverse)
+            .err(),
+        Some(StorageError::NeedsRecovery)
+    );
     assert_eq!(f.store.validate_packed_tree_binding(&tree), Ok(()));
     assert_eq!(
         f.store.next_packed_tree_entry(&mut f.fs, &mut cursor).err(),

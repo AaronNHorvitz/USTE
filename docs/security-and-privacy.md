@@ -69,6 +69,10 @@ disk-base/overlay coordinator. It checks the exact ready durable policy without 
 derives identity from the current kernel, and authorizes before disk/clock work. It exposes only
 own outcomes and committed-byte accounting, not writes, uploads, graph reads or complete quota
 state. Pending graph roots require trusted repair before this restricted facade becomes usable.
+Decision 0150 applies the same boundary to `AuthorizedPackedMetadata`: exact ready durable policy,
+own retry/transaction outcomes, and namespace/requesting-principal committed charges. Outcome and
+quota permissions are independent. No raw owner data, caller-tuned point budgets, telemetry,
+staged reservations, write or maintenance authority escapes the facade.
 
 Decision 0039 treats index cache/I/O diagnostics as privileged, cardinality-sensitive operator
 telemetry. Report and cache-clear operations require a fresh `ManageSchema` decision, an opaque

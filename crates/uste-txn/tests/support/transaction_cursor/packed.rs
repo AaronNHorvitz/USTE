@@ -105,6 +105,13 @@ fn packed_ordinary_maintenance_checks_frontier_budget_and_keeps_retry_semantics(
         assert_eq!(entry.value(), b"value");
         assert!(maintenance.next(&mut fs, &mut cursor).unwrap().is_none());
         assert_eq!(cursor.report().returned_entries, 1);
+        let mut reverse = maintenance
+            .reverse_cursor(staged.tree(), b"", None, cursors())
+            .unwrap();
+        let reversed = maintenance.next(&mut fs, &mut reverse).unwrap().unwrap();
+        assert_eq!(reversed.key(), entry.key());
+        assert_eq!(reversed.value(), entry.value());
+        assert!(maintenance.next(&mut fs, &mut reverse).unwrap().is_none());
     }
     assert_eq!(
         coordinator
@@ -213,7 +220,7 @@ fn packed_recovery_stages_bind_target_and_reject_future_and_foreign_receipts_bef
             )
             .unwrap()
     };
-    let mut future_cursor = {
+    let (mut future_cursor, mut future_reverse) = {
         let maintenance = recovery
             .packed_indexes_with_io(&mut fs, &transactions[1], certificate_limits())
             .unwrap();
@@ -226,9 +233,14 @@ fn packed_recovery_stages_bind_target_and_reject_future_and_foreign_receipts_bef
                 .map(|value| value.as_slice()),
             Some(b"second".as_slice())
         );
-        maintenance
-            .cursor(second.tree(), b"", None, cursors())
-            .unwrap()
+        (
+            maintenance
+                .cursor(second.tree(), b"", None, cursors())
+                .unwrap(),
+            maintenance
+                .reverse_cursor(second.tree(), b"", None, cursors())
+                .unwrap(),
+        )
     };
     fs.arm(FaultPlan::default()).unwrap();
     {
@@ -251,6 +263,12 @@ fn packed_recovery_stages_bind_target_and_reject_future_and_foreign_receipts_bef
                 .is_err()
         );
         assert!(maintenance.next(&mut fs, &mut future_cursor).is_err());
+        assert!(
+            maintenance
+                .reverse_cursor(second.tree(), b"", None, cursors())
+                .is_err()
+        );
+        assert!(maintenance.next(&mut fs, &mut future_reverse).is_err());
     }
     assert_eq!(fs.operation_count(Operation::ReadAt), 0);
     assert_eq!(fs.operation_count(Operation::CreateNew), 0);
@@ -260,6 +278,10 @@ fn packed_recovery_stages_bind_target_and_reject_future_and_foreign_receipts_bef
             .unwrap();
         assert!(matches!(
             maintenance.next(&mut fs, &mut future_cursor),
+            Err(TransactionError::Storage(StorageError::NeedsRecovery))
+        ));
+        assert!(matches!(
+            maintenance.next(&mut fs, &mut future_reverse),
             Err(TransactionError::Storage(StorageError::NeedsRecovery))
         ));
         assert_eq!(
