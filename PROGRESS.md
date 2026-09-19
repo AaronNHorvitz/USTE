@@ -58,6 +58,30 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `42f9abb` plus this increment: [Decision 0128](docs/decisions/0128-canonical-ordered-content-commitments.md)
+  adds canonical ordered content commitments, bounded borrowed membership/absence proofs and exact
+  compare-and-swap insert/replace/delete root transitions. This is a storage-free, opt-in primitive,
+  not a persisted index or a new source of authority. Existing v1 formats, M1 and task status are
+  unchanged. Six tests cover independent reconstruction, four cross-language hash goldens, all
+  576 small insertion/deletion order pairs, 1,024 generated updates, all 65,536 single-byte key
+  pairs, context/proof mutations, exact/minus-one admission and key/value boundaries.
+  Final scope `run-p495078-i21473707.scope` exited 0 with one job/test thread and
+  `MemoryHigh=3G MemoryMax=4G MemorySwapMax=512M`. Commands:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` (449 tests/46 executables, no failures/ignores;
+  graph disk 24/25.62s, replay 50/116.31s, coordinator 37/0.56s, M1 process 2/2.72s),
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (0.92s), and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc
+  -p uste-storage --no-deps --locked --offline` (1.01s). Preflight headroom was 35 GiB RAM/
+  3.9 GiB swap; sampled scope peak was 2,107,744,256 bytes, zero swap (not a final peak).
+  `python3 scripts/check_ordered_commitment_vectors.py` passed four vectors;
+  `python3 scripts/check_docs.py` passed 202 links; `python3 scripts/check_task_graph.py`
+  passed 68 tasks; `git diff --check` passed. The standalone native matrix was not rerun for
+  this unused pure module; its latest verified baseline remains `42f9abb` below. No benchmark
+  ran or scalability qualification is claimed. Next implement a separately versioned bounded
+  copy-on-write carrier and its admission, publication/recovery and domain integration.
+
 - Implemented on pushed `fa3897a` plus this increment: [Decision 0127](docs/decisions/0127-bounded-certificate-proof-windows.md)
   authenticates fixed windows of at most 64 certificate receipts, reuses them for forward group
   reads and selects the windowed cursor in private coordinator recovery. Every selected certificate
@@ -2570,8 +2594,9 @@ suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 ma
 references on that path; Decision 0124 maintains quota projections (pushed `746ca3d`). Decision
 0125 applies streamed metadata to native paired-base recovery (pushed `de67ff3`). Decision 0126
 removes duplicate staging proofs (pushed `fa3897a`). Decision 0127 adds bounded certificate
-windows to private forward recovery. Next address immutable-family rewrite/global digest scaling
-through a separately versioned index design, and
+windows to private forward recovery (pushed `42f9abb`). Decision 0128 adds locally verified
+canonical ordered commitments without changing any persisted v1 profile. Next implement the
+separately versioned copy-on-write carrier, bounded admission and domain integration, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

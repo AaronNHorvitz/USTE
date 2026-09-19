@@ -14,6 +14,7 @@ pub mod journal;
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 pub mod linux;
 pub mod memory;
+pub mod ordered_commitment;
 
 pub use adapter::{
     AdapterError, AdapterErrorKind, Clock, ClockObservation, EntryName, EntryNameError,

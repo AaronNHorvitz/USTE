@@ -169,6 +169,12 @@ complete accounting/qualification remain open; the paired-base paths do not remo
 
 ## Indexing and bounded resources
 
+Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
+indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
+compare-and-swap deltas. It changes no v1 digest or persisted format and is not a live disk index
+or a canonical-state admission shortcut. Versioned encrypted carrier and domain integration remain
+required before it can address the whole-family rewrite bottleneck.
+
 Decision 0025 implements the first `index-v1` slice: immutable sorted runs use exact 16 KiB
 authenticated plaintext pages, roots alternate between two key-derived opaque names and every root
 is bound to the exact existing certificate, reducer/logical digest and index profile. Root recovery
