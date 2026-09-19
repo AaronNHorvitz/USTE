@@ -58,6 +58,48 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `556fb7a` plus this increment: [Decision 0106](docs/decisions/0106-sparse-cached-page-search.md)
+  wires the previously uncompiled sparse page directory and borrows cached layouts. New linear-
+  reference and encrypted dense-page tests pass (3 tests, 27.80s), as do the complete `index::`
+  parser/cache tests (13 tests, 4.77s) and strict storage all-target/all-feature Clippy (2.46s).
+  Commands: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --locked --offline sparse --
+  --test-threads=1 --nocapture`, then the same command with filter `index::`, then
+  `CARGO_BUILD_JOBS=1 cargo clippy -p uste-storage --all-targets --all-features --locked
+  --offline -- -D warnings`, under the resource scope below. A lost terminal result was not
+  counted; rerunning exposed an unnecessary test type qualification, corrected before these
+  passing results. Full core regression passed under the same scope:
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn -p uste-replay -p uste-graph
+  --all-targets --all-features --locked --offline -- --test-threads=1`:
+  116 storage unit tests (704.87s, no fault-matrix skips), 16 graph disk-index tests (535.65s),
+  17 coordinator/replay tests (196.89s), 26 transaction tests (8.04s), 13 authorization tests
+  (0.90s), and all other selected adapter/process/unit tests passed. Native release regression
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 51 active unit tests (42.97s), with two unchanged
+  exact-profile oracle ignores, and three CLI/process tests (12.30s). Strict lint commands
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (7.58s) and `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (2.45s) pass.
+  Sampled gate scope peak: 1,325,060,096 bytes, zero swap (not final whole-run peak).
+  Format/whitespace, evidence JSON, documentation (179 links) and task graph (68 tasks) pass.
+  M1 crate sources and the pinned lockfile remain unchanged. No task is newly complete.
+  An unchanged exact-version native binary measured the pre-change query baseline:
+  commit `556fb7ad11e687023b64c5ce02fde69587ccab0d`, binary SHA-256
+  `4f794dad05551cbf755d04458aa43edbb7651c84711a3432fc78949d829f6658`.
+  Command under 3G/4G/512M: `timeout --signal=TERM --kill-after=5s 900s /usr/bin/time -v
+  experiments/t20-bench/target/release/uste-t20-bench linux-disk-query --root
+  experiments/t20-bench/target/native-pressure.kedpTk --password-file
+  experiments/t20-bench/target/native-pressure.kedpTk/password --oracle-file
+  experiments/t20-bench/target/native-pressure.kedpTk/oracle-summary --entities 10000`.
+  Release build completed before source edits; no second build/heavy workload runs concurrently.
+  Preflight 36 GiB available RAM / 3.9 GiB free swap. [Baseline measurements](docs/evidence/native-disk-sparse-search-development.json)
+  passed all 384 oracle comparisons: 252.50s wall time, 240,579ms query phase, 264,844 KiB peak RSS,
+  zero swaps, exit 0. Query work: 1,080,841,044 fragments, 806,885 page loads, 420,631,561 cache
+  hits, no evictions, unchanged output digest. Sampled scope peak 274,292,736 bytes (not final
+  whole-run peak). Sparse source compilation/reference tests ran separately;
+  no optimized performance result or qualification is claimed.
+  `crates/uste-storage/src/journal/tests/blob_metadata_tests/empty_rebuild.rs` is unwired
+  next-increment test preparation, excluded from this increment's verification and commit scope.
+
 - Tested on pushed `16e9e9d` plus this increment: [Decision 0105](docs/decisions/0105-reverse-metadata-correspondence.md)
   applies authenticated reverse scanning to storage catalog and final coordinator retry/reference
   correspondence. Ordered construction/replay and compatibility first-owner discovery stay forward.
@@ -1793,24 +1835,31 @@ remaining mixed workload have not passed.
   actual merged outputs and the canonical digest with one caller-bounded history bucket rather than
   scanning the complete reducer. Cold semantic admission now returns a bounded `GraphDiskBase`
   without complete graph-map reconstruction. The warm live reducer now advances that base with
-  one bounded pending plan and no complete graph map. Journal-anchored restart recovers either that
-  ready base or one exact pending suffix without `GraphState`. Decision 0059 bounds graph manifest
+  one bounded pending plan and no complete graph map. Decision 0092 extends journal-anchored
+  restart to an explicitly bounded multi-revision suffix with private intermediate stages and
+  terminal-only publication, without `GraphState`. Decision 0059 bounds graph manifest
   discovery before run scanning. The explicit-I/O preparation proof now supports
   all graph operation/precondition variants with bounded current/history/reverse proofs and now
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
   The legacy coordinator still replays complete metadata maps; Decisions 0060–0063 add a separate
   disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
-  metadata rebase. Decision 0064 connects the ready/one-pending graph suffix path; its dedicated
-  full authorization facade remains incomplete. Dedicated suffix read-fault/certificate-corruption
+  metadata rebase. Decision 0064 connects the original ready/one-pending graph suffix path.
+  Dedicated suffix read-fault/certificate-corruption
   and terminal-publication model cases now pass. Decision 0065 adds
   restricted authorized own-outcome and committed-usage reads against a ready durable policy;
   Decisions 0067–0070 add bounded graph reads and inventory-free authorized graph writes with
   explicit certified-versus-repair outcomes. Blob inventories and staging remain unsupported by
-  that writer; this is not a complete consumer interface.
-  Storage's own certificate/blob collections remain memory-resident, first-owner admission is
-  read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
+  that graph writer; Decisions 0102–0103 separately support ordinary disk-coordinator inventory
+  commits and authorized staged-charge transfer. This is not a complete graph consumer interface.
+  Decisions 0095–0101 add opt-in map-free certificate/storage-blob cold recovery and bounded
+  inventory append; legacy APIs retain their resident collections. Committed principal quota
+  accounting still streams all owners, catalog construction still rewrites immutable families,
+  and compatibility first-owner discovery remains read-amplified. Decisions 0104–0105 make
+  order-independent metadata correspondence use linear authenticated reverse certificate scans.
+  Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
   the legacy publication API retains its compatibility scrub.
-  BM-01/BM-06 have not run. Graph policy is
+  Qualifying BM-01/BM-06 campaigns have not run; capped native development observations do not
+  substitute for them. Graph policy is
   durable; the trusted adapter must supply its exact
   current copy at authorized open. The oracle
   intentionally scans records and is not scalable. The fuzz runner requires nightly Rust plus a C++
@@ -1834,9 +1883,11 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0105's additional reverse correspondence passes are locally verified.
-Capture an exact-version native query baseline, then wire and verify bounded sparse page search;
-continue T-20 scalable construction/accounting and qualifying campaign prerequisites. Decisions
+Current action: Decision 0106's sparse page search passes full local regression. Commit/push the
+reviewed increment, then measure its exact-version native query work against the recorded
+`556fb7a` baseline. Continue T-20 with empty-history catalog construction that still independently
+authenticates every prefix group before publication, then scalable accounting and qualifying
+campaign prerequisites. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.

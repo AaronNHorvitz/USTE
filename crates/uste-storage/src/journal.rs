@@ -3222,6 +3222,7 @@ mod tests {
     mod blob_proof_tests;
     mod certificate_proof_tests;
     mod index_stage_tests;
+    mod sparse_index_tests;
 
     use std::fmt::Write as _;
 

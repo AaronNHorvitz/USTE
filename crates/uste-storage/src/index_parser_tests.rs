@@ -182,6 +182,21 @@ fn dense_fragment_page_is_fully_validated_including_its_tail() {
         b"k"
     );
     assert_eq!(reference(&bytes, &root, &run, 0).unwrap(), b"k");
+    let parsed = ParsedPage::new(&bytes, &root, &run, 0).unwrap();
+    for key in [b"a", b"k", b"z"] {
+        let (fragments, _) = parsed.fragments_from(key).unwrap();
+        assert_eq!(
+            fragments
+                .map(Result::unwrap)
+                .find(|fragment| fragment.key >= key)
+                .map(|fragment| fragment.offset),
+            parsed
+                .fragments()
+                .map(Result::unwrap)
+                .find(|fragment| fragment.key >= key)
+                .map(|fragment| fragment.offset),
+        );
+    }
     for declared in [count - 1, count + 1, u32::MAX] {
         bytes[24..28].copy_from_slice(&declared.to_be_bytes());
         assert!(ParsedPage::new(&bytes, &root, &run, 0).is_err());

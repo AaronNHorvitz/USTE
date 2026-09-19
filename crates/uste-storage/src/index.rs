@@ -3,7 +3,11 @@
 //! Index roots are optional caches. The authenticated journal remains the only commit authority;
 //! a missing, stale, unsupported or corrupt root must be rebuilt from retained authority.
 
-use std::collections::BTreeMap;
+use std::{borrow::Borrow, collections::BTreeMap};
+
+#[path = "index_sparse.rs"]
+mod sparse;
+use sparse::SparseDirectory;
 
 use sha2::{Digest, Sha256};
 use uste_crypto::{
@@ -397,6 +401,7 @@ pub struct IndexScanEntry {
 pub struct IndexReadStats {
     pub pages_read: u64,
     pub cache_hits: u64,
+    /// Enumerated fragments plus sparse-directory key probes; excludes full-page validation.
     pub fragments_visited: u64,
     pub result_bytes: u64,
 }
@@ -731,19 +736,17 @@ impl CachedPage {
         root: &RecoveredIndexRoot,
         run: &IndexRunDescriptor,
         page_index: u64,
-    ) -> Result<ParsedPage<'_>, StorageError> {
-        let layout = if let Some(layout) = self.layout {
+    ) -> Result<ParsedPage<'_, &PageLayout>, StorageError> {
+        if self.layout.is_some() {
             // Context (especially family) must still match on every immutable cache hit.
             ParsedPage::validate_context(&self.bytes, root, run, page_index)?;
-            layout
         } else {
             let layout = ParsedPage::new(&self.bytes, root, run, page_index)?.layout;
             self.layout = Some(layout);
-            layout
-        };
+        }
         Ok(ParsedPage {
             bytes: &self.bytes,
-            layout,
+            layout: self.layout.as_ref().ok_or(StorageError::IntegrityFailure)?,
         })
     }
 }
@@ -1231,7 +1234,9 @@ where
                 cache,
                 stats,
             )?;
-            for fragment in parsed.fragments() {
+            let (fragments, probes) = parsed.fragments_from(key)?;
+            stats.fragments_visited = stats.fragments_visited.saturating_add(probes);
+            for fragment in fragments {
                 let fragment = fragment?;
                 stats.fragments_visited = stats.fragments_visited.saturating_add(1);
                 match fragment.key.cmp(key) {
@@ -3385,7 +3390,7 @@ fn load_get_page<'a, F, W, E>(
     page_visits: &mut u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<ParsedPage<'a>, StorageError>
+) -> Result<ParsedPage<'a, &'a PageLayout>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3412,7 +3417,7 @@ fn load_predecessor_page<'a, F, W, E>(
     page_visits: &mut u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<ParsedPage<'a>, StorageError>
+) -> Result<ParsedPage<'a, &'a PageLayout>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3437,7 +3442,7 @@ fn load_page<'a, F, W, E>(
     page_index: u64,
     cache: &'a mut PageCache,
     stats: &mut IndexReadStats,
-) -> Result<ParsedPage<'a>, StorageError>
+) -> Result<ParsedPage<'a, &'a PageLayout>, StorageError>
 where
     F: FileSystem,
     W: DurableKeyEnvelope,
@@ -3513,9 +3518,9 @@ fn validate_read<D>(
     Ok(())
 }
 
-struct ParsedPage<'a> {
+struct ParsedPage<'a, L = PageLayout> {
     bytes: &'a [u8],
-    layout: PageLayout,
+    layout: L,
 }
 
 // Structural facts about one immutable plaintext page; no allocation or borrowed plaintext.
@@ -3525,6 +3530,7 @@ struct PageLayout {
     fragment_count: usize,
     last_key_start: usize,
     last_key_end: usize,
+    sparse: SparseDirectory,
 }
 
 #[cfg(test)]
@@ -3573,6 +3579,8 @@ impl<'a> ParsedPage<'a> {
         }
         let mut previous: Option<Fragment<'a>> = None;
         let mut count = 0;
+        let mut offset = PAGE_HEADER_BYTES;
+        let mut sparse = SparseDirectory::default();
         // Exhaust the iterator: even after the declared count, trailing bytes must fail.
         for fragment in (FragmentIter {
             remaining: &bytes[PAGE_HEADER_BYTES..used],
@@ -3585,6 +3593,10 @@ impl<'a> ParsedPage<'a> {
             }) {
                 return Err(StorageError::IntegrityFailure);
             }
+            sparse.record(count, offset)?;
+            offset = offset
+                .checked_add(FRAGMENT_HEADER_BYTES + fragment.key.len() + fragment.value.len())
+                .ok_or(StorageError::IntegrityFailure)?;
             previous = Some(fragment);
             count += 1;
         }
@@ -3605,19 +3617,44 @@ impl<'a> ParsedPage<'a> {
                 fragment_count,
                 last_key_start,
                 last_key_end,
+                sparse,
             },
         })
     }
+}
 
+impl<'a, L: Borrow<PageLayout>> ParsedPage<'a, L> {
     fn fragments(&self) -> FragmentIter<'a> {
+        let layout = self.layout.borrow();
         FragmentIter {
-            remaining: &self.bytes[PAGE_HEADER_BYTES..self.layout.used],
-            remaining_count: self.layout.fragment_count,
+            remaining: &self.bytes[PAGE_HEADER_BYTES..layout.used],
+            remaining_count: layout.fragment_count,
         }
     }
 
+    fn fragments_from(&self, key: &[u8]) -> Result<(FragmentIter<'a>, u64), StorageError> {
+        let layout = self.layout.borrow();
+        let start = layout
+            .sparse
+            .start(self.bytes, layout.fragment_count, key)?;
+        Ok((
+            FragmentIter {
+                remaining: self
+                    .bytes
+                    .get(start.offset..layout.used)
+                    .ok_or(StorageError::IntegrityFailure)?,
+                remaining_count: layout
+                    .fragment_count
+                    .checked_sub(start.ordinal)
+                    .ok_or(StorageError::IntegrityFailure)?,
+            },
+            start.probes,
+        ))
+    }
+
     fn last_key(&self) -> &'a [u8] {
-        &self.bytes[self.layout.last_key_start..self.layout.last_key_end]
+        let layout = self.layout.borrow();
+        &self.bytes[layout.last_key_start..layout.last_key_end]
     }
 }
 
