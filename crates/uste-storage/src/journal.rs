@@ -46,6 +46,9 @@ pub use certificate_proof::{
     CertificateAnchorProof, CertificateAnchorReadLimits, CertificateAnchorReadReport,
     ProvenIndexRunCursor,
 };
+#[path = "journal_blob_proof.rs"]
+mod blob_proof;
+pub use blob_proof::{BlobReferenceProof, BlobReferenceProofLimits, BlobReferenceProofReport};
 
 const STORAGE_MAJOR: u8 = 1;
 const STORAGE_MINOR: u8 = 0;
@@ -55,6 +58,7 @@ const CERTIFICATE_HEADER_PLAINTEXT_BYTES: usize = 64;
 const SEGMENT_HEADER_PLAINTEXT_BYTES: usize = 80;
 const CERTIFICATE_PLAINTEXT_BYTES: usize = 192;
 const MAX_KEY_ENVELOPE_BYTES: u64 = 64 * 1024;
+const MAX_ENCODED_BLOB_INVENTORY_BYTES: u64 = MAX_PLAINTEXT_BYTES as u64 + 8 * 1024;
 const CERTIFICATE_LOG_LIMIT: u64 = 1024 * 1024 * 1024;
 const STORAGE_PROFILE_LINUX_LOCAL_V1: u8 = 1;
 const CRYPTO_SUITE_V1: u8 = 1;
@@ -2324,6 +2328,38 @@ where
     F: FileSystem,
     E: EntropySource,
 {
+    load_blob_inventory_bounded(
+        filesystem,
+        vault,
+        database_directory,
+        database,
+        epoch,
+        writer,
+        digest,
+        verify_blobs,
+        crate::blob::MAX_BLOBS_PER_INVENTORY,
+        MAX_ENCODED_BLOB_INVENTORY_BYTES,
+    )
+    .map(|(inventory, _)| inventory)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn load_blob_inventory_bounded<F, W, E>(
+    filesystem: &mut F,
+    vault: &KeyVault<W, E>,
+    database_directory: &F::Directory,
+    database: DatabaseId,
+    epoch: KeyEpoch,
+    writer: WriterIncarnationId,
+    digest: [u8; 32],
+    verify_blobs: bool,
+    maximum_references: usize,
+    maximum_encoded_bytes: u64,
+) -> Result<(BlobInventory, u64), StorageError>
+where
+    F: FileSystem,
+    E: EntropySource,
+{
     if digest == EMPTY_BLOB_INVENTORY_DIGEST {
         return Err(StorageError::IntegrityFailure);
     }
@@ -2334,12 +2370,11 @@ where
         )
         .map_err(|_| StorageError::IntegrityFailure)?;
     let len = filesystem.metadata(&file)?.len;
-    let maximum = u64::try_from(MAX_PLAINTEXT_BYTES)
-        .map_err(|_| StorageError::ResourceLimit)?
-        .checked_add(8 * 1024)
-        .ok_or(StorageError::ResourceLimit)?;
-    if len == 0 || len > maximum {
+    if len == 0 || len > MAX_ENCODED_BLOB_INVENTORY_BYTES {
         return Err(StorageError::IntegrityFailure);
+    }
+    if len > maximum_encoded_bytes {
+        return Err(StorageError::ResourceLimit);
     }
     let encoded = read_bounded(filesystem, &file, 0, len)?;
     let envelope = EncryptedEnvelope::decode(&encoded).map_err(committed_crypto_error)?;
@@ -2349,7 +2384,11 @@ where
             &envelope,
         )
         .map_err(committed_crypto_error)?;
-    let inventory = BlobInventory::decode(database, plaintext.as_slice())?;
+    let inventory = if maximum_references == crate::blob::MAX_BLOBS_PER_INVENTORY {
+        BlobInventory::decode(database, plaintext.as_slice())?
+    } else {
+        BlobInventory::decode_bounded(database, plaintext.as_slice(), maximum_references)?
+    };
     if inventory.digest() != digest {
         return Err(StorageError::IntegrityFailure);
     }
@@ -2366,7 +2405,7 @@ where
             )?;
         }
     }
-    Ok(inventory)
+    Ok((inventory, len))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2927,6 +2966,7 @@ fn read_array<const N: usize>(bytes: &[u8], offset: usize) -> Result<[u8; N], St
 
 #[cfg(test)]
 mod tests {
+    mod blob_proof_tests;
     mod certificate_proof_tests;
     mod index_stage_tests;
 

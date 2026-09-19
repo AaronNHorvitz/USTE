@@ -54,6 +54,29 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0096](docs/decisions/0096-committed-blob-reference-proofs.md) adds a bounded
+  committed-blob proof/read path that does not consult resident blob maps. It rechecks an exact
+  certificate and inventory, admits encoded bytes before reads and authenticated reference count
+  before reference-vector allocation, and retains only owner-bound evidence plus one exact
+  reference. It neither grants principal access nor establishes first-owner/quota accounting.
+  Five focused tests passed (1.47s initially; 1.49s after fixing the strict lint's unused legacy
+  decoder finding). They cover four metadata-I/O boundaries/12 injected failures and restart,
+  empty/exact payloads, absent/orphan/mismatched references, corruption, append continuity and
+  owner invalidation. Review added exact refusal I/O counts and same-content foreign-owner tests.
+  On `6bb95e8` plus this increment, `CARGO_BUILD_JOBS=1 cargo test -p uste-storage -p uste-txn
+  -p uste-replay -p uste-memory -p uste-memory-adapter --all-targets --all-features --locked
+  --offline -- --test-threads=1` passed: 88 storage tests (173.26s), 9 coordinator recovery tests
+  (78.32s), 17 transaction tests (5.68s), 13 authorization tests (0.89s), real adapter/restart
+  tests and unchanged M1 process/corruption tests (30.42s). `CARGO_BUILD_JOBS=1 cargo clippy
+  --workspace --all-targets --all-features --locked --offline -- -D warnings` and
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage --no-deps --locked
+  --offline` passed. Format, whitespace, docs (169 links) and task graph (68 tasks) passed.
+  One job/thread, MemoryHigh=3G/MemoryMax=4G/MemorySwapMax=512M; preflight 37 GiB available RAM,
+  3.9 GiB free swap; sampled final-gate peak 746,741,760 bytes, zero group swap. Both journal
+  scans and append admission still retain blob metadata. Next connect proven reads to admitted
+  disk owner/first-reference metadata, then replace recovery/accounting collections without
+  dropping uniqueness, exact first ownership, quota or durability checks. T-20 remains open.
+
 - [Decision 0095](docs/decisions/0095-map-free-certificate-recovery.md) implements opt-in
   certificate-map-free recovery and proof-bound ordinary root APIs. Both scans and appends skip
   anchor insertion; range work charges certificate-proof re-reads. Nine focused storage tests

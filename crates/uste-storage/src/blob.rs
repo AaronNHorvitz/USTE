@@ -185,6 +185,14 @@ impl BlobInventory {
     }
 
     pub(crate) fn decode(database: DatabaseId, bytes: &[u8]) -> Result<Self, StorageError> {
+        Self::decode_bounded(database, bytes, MAX_BLOBS_PER_INVENTORY)
+    }
+
+    pub(crate) fn decode_bounded(
+        database: DatabaseId,
+        bytes: &[u8],
+        maximum_references: usize,
+    ) -> Result<Self, StorageError> {
         if bytes.len() < INVENTORY_HEADER_BYTES
             || &bytes[..4] != b"UBIN"
             || bytes[4] != BLOB_FORMAT_MAJOR
@@ -205,6 +213,9 @@ impl BlobInventory {
             .ok_or(StorageError::ResourceLimit)?;
         if count == 0 || count > MAX_BLOBS_PER_INVENTORY || bytes.len() != expected {
             return Err(StorageError::IntegrityFailure);
+        }
+        if count > maximum_references {
+            return Err(StorageError::ResourceLimit);
         }
         let scope = NamespaceRef::new(
             database,

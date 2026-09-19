@@ -174,7 +174,7 @@ where
         Ok(())
     }
 
-    fn validate_historical_certificate_proof(
+    pub(super) fn validate_historical_certificate_proof(
         &self,
         proof: &CertificateAnchorProof,
     ) -> Result<(), StorageError> {
