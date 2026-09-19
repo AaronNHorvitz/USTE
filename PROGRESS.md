@@ -58,6 +58,33 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `48f7531` plus this increment: [Decision 0144](docs/decisions/0144-packed-first-owner-quota-construction.md)
+  adds a separately profiled three-family packed quota prefix. Exact target retry binding precedes
+  even empty-inventory construction; first-owner witnesses select charges, checked arithmetic
+  preserves zero-byte owners, and bounded copy-on-write updates maintain the head, principal totals
+  and principal/blob ordering. Usage rechecks logical primary pairing and authenticates head and
+  principal reads; missing accounting is not synthesized as zero. No intermediate root publishes.
+  Four integration tests and one arithmetic/framing unit test cover empty and zero-byte ledgers,
+  new/existing principals, repeated references, mismatched/missing/foreign bases, narrow reads,
+  corrupt head/principal pages and 351 staging faults (34 each OpenExisting/Metadata/ReadAt,
+  three each CreateNew/WriteAt/SetLen/SyncAll/SyncDirectory, three error/crash actions). Restart
+  reconstruction matches all quota commitments and exact first-owner charges. Strict Clippy's
+  test-module placement finding was fixed without suppressing the lint.
+  Focused scope `run-p598851-i21599339.scope` passed 1 unit/4 integration tests (7.71s) and
+  workspace Clippy/4.53s. Final scope `run-p599802-i21596367.scope` exited 0 under 3G/4G/512M,
+  one job/test thread: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  --workspace --all-targets --all-features --locked --offline -- --test-threads=1` passed
+  540 tests/47 executables (replay 50/117.46s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace
+  --all-targets --all-features --locked --offline -- -D warnings` passed/0.06s;
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline`
+  passed/1.18s. Log `/tmp/uste-d144-workspace-verification.log`; preflight 31 GiB RAM/4.0 GiB swap,
+  sampled peak 1,691,549,696 bytes/zero swap (not final peak). Formatting, diff/docs/task checks pass.
+  Native remains `42f9abb`; no qualification, M1/lockfile change or task completion. Unregistered
+  quota admission implementation/test and Decision 0145 drafts are excluded next-package work.
+  Next independently admit cold quota projections, then populated rebuild and live/domain
+  integration, complete accounting and qualifying campaigns.
+
 - Implemented on pushed `a37c40c` plus this increment: [Decision 0143](docs/decisions/0143-packed-coordinator-cold-admission.md)
   adds read-only canonical and journal-correspondence admission of the four packed coordinator
   families. Exact retry/transaction cardinalities and per-revision comparisons exclude collisions

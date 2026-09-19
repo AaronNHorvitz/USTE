@@ -1,6 +1,8 @@
 use super::*;
 #[path = "packed_coordinator_admission.rs"]
 mod admission;
+#[path = "packed_quota.rs"]
+mod quota;
 use uste_txn::{
     COORDINATOR_PACKED_PROFILE_V1, PackedCoordinatorLimits, PackedCoordinatorPrefix,
     stage_packed_coordinator_prefix,

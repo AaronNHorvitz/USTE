@@ -8,9 +8,10 @@ use std::collections::BTreeMap;
 mod admission;
 mod packed;
 pub use packed::{
-    COORDINATOR_PACKED_PROFILE_V1, PackedCoordinatorAdmissionLimits,
-    PackedCoordinatorAdmissionReport, PackedCoordinatorLimits, PackedCoordinatorPrefix,
-    PackedCoordinatorReport, admit_packed_coordinator_prefix, stage_packed_coordinator_prefix,
+    COORDINATOR_PACKED_PROFILE_V1, COORDINATOR_PACKED_USAGE_PROFILE_V1,
+    PackedCoordinatorAdmissionLimits, PackedCoordinatorAdmissionReport, PackedCoordinatorLimits,
+    PackedCoordinatorPrefix, PackedCoordinatorReport, PackedQuotaPrefix, PackedQuotaReport,
+    admit_packed_coordinator_prefix, stage_packed_coordinator_prefix, stage_packed_quota_prefix,
 };
 mod first_reference;
 mod genesis;
