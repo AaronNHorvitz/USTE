@@ -115,7 +115,7 @@ where
         recovery: AuthenticatedIndexRecovery<F, W, E, I>,
         filesystem: &mut F,
         base: CoordinatorDiskBase,
-        mut state: S,
+        state: S,
         retention: RetentionDays,
         limits: DiskCoordinatorRecoveryLimits,
         cache: &mut PageCache,
@@ -123,6 +123,146 @@ where
     where
         S: DiskCoordinatorState,
     {
+        state
+            .validate_metadata_base(&base.metadata)
+            .map_err(map_apply_error)?;
+        Self::recover_with_domain_replay(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            cache,
+            |state, transaction| {
+                let prepared = state
+                    .prepare(
+                        &transaction.canonical_request,
+                        transaction.blob_inventory.as_ref(),
+                        transaction.revision,
+                    )
+                    .map_err(|error| match error {
+                        ApplyError::ResourceLimit => StorageError::ResourceLimit,
+                        _ => StorageError::IntegrityFailure,
+                    })?;
+                if S::result_digest(&prepared) != transaction.outcome.result_digest {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                state.publish(prepared);
+                Ok(())
+            },
+        )
+    }
+
+    /// Recover bounded metadata overlays with an independently admitted ready domain base and
+    /// at most one externally prepared pending transaction. The metadata base may precede the
+    /// domain base; no domain prefix is replayed or reconstructed as complete in-memory maps.
+    /// The supplied suffix remains provisional until its complete journal binding is rechecked.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_with_prepared_suffix(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        state: S,
+        mut suffix: Option<RecoveredPreparedSuffix<S::Prepared>>,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        cache: &mut PageCache,
+    ) -> Result<Self, TransactionError>
+    where
+        S: DiskCoordinatorState + JournalAnchoredTransactionState,
+    {
+        let (scope, revision, certificate) =
+            state.journal_base_anchor().map_err(map_apply_error)?;
+        let input = state
+            .metadata_publication_input((revision, certificate))
+            .map_err(map_apply_error)?;
+        if scope != recovery.scope()
+            || input.scope != scope
+            || input.revision != revision
+            || input.certificate_digest != certificate
+            || input.reducer_profile != *base.metadata.reducer_profile()
+            || revision < base.metadata.revision()
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let expected_frontier = if let Some(pending) = suffix.as_ref() {
+            let next = revision
+                .checked_next()
+                .map_err(|_| TransactionError::RevisionExhausted)?;
+            if pending.transaction.revision != next {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            next
+        } else {
+            revision
+        };
+        if recovery.journal.frontier() != Some(expected_frontier) {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let mut domain_base_seen = revision == base.metadata.revision();
+        if domain_base_seen {
+            state
+                .validate_metadata_base(&base.metadata)
+                .map_err(map_apply_error)?;
+        }
+        let coordinator = Self::recover_with_domain_replay(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            cache,
+            |state, transaction| {
+                if transaction.revision <= revision {
+                    if transaction.revision == revision {
+                        if transaction.certificate_digest != certificate {
+                            return Err(StorageError::IntegrityFailure);
+                        }
+                        domain_base_seen = true;
+                    }
+                    return Ok(());
+                }
+                let pending = suffix.take().ok_or(StorageError::IntegrityFailure)?;
+                if !domain_base_seen || pending.transaction != *transaction {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                state
+                    .validate_external_prepared(
+                        &transaction.canonical_request,
+                        transaction.blob_inventory.as_ref(),
+                        transaction.revision,
+                        &pending.prepared,
+                    )
+                    .map_err(|error| match error {
+                        ApplyError::ResourceLimit => StorageError::ResourceLimit,
+                        _ => StorageError::IntegrityFailure,
+                    })?;
+                if S::result_digest(&pending.prepared) != transaction.outcome.result_digest {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                state.publish(pending.prepared);
+                Ok(())
+            },
+        )?;
+        if !domain_base_seen || suffix.is_some() {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok(coordinator)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn recover_with_domain_replay(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        mut state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        cache: &mut PageCache,
+        mut replay: impl FnMut(&mut S, &RecoveredFrontierTransaction) -> Result<(), StorageError>,
+    ) -> Result<Self, TransactionError> {
         let frontier = recovery
             .journal
             .frontier()
@@ -130,9 +270,6 @@ where
         if recovery.scope() != base.metadata.scope() || frontier < base.metadata.revision() {
             return Err(TransactionError::IntegrityFailure);
         }
-        state
-            .validate_metadata_base(&base.metadata)
-            .map_err(map_apply_error)?;
         let suffix_count = frontier.get() - base.metadata.revision().get();
         if suffix_count > limits.overlay.maximum_outcomes as u64
             || frontier.get() > MAX_OUTCOMES_PER_NAMESPACE as u64
@@ -213,20 +350,7 @@ where
                             }
                         }
                     }
-                    let prepared = state
-                        .prepare(
-                            &transaction.canonical_request,
-                            transaction.blob_inventory.as_ref(),
-                            transaction.revision,
-                        )
-                        .map_err(|error| match error {
-                            ApplyError::ResourceLimit => StorageError::ResourceLimit,
-                            _ => StorageError::IntegrityFailure,
-                        })?;
-                    if S::result_digest(&prepared) != transaction.outcome.result_digest {
-                        return Err(StorageError::IntegrityFailure);
-                    }
-                    state.publish(prepared);
+                    replay(&mut state, &transaction)?;
                     outcomes.insert(key, transaction.outcome);
                     transactions.insert(
                         transaction.outcome.transaction_id,

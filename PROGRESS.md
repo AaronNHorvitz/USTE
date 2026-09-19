@@ -51,6 +51,23 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0064](docs/decisions/0064-disk-coordinator-graph-suffix.md) connects the disk metadata
+  coordinator to independently admitted graph state. Metadata may lag the ready graph root;
+  authenticated streaming rebuilds only bounded post-metadata-base overlays. Recovery accepts a
+  ready graph frontier or exactly one revalidated externally prepared pending change, never a
+  complete graph-map fallback. A shared terminal publication helper repairs the disk coordinator's
+  pending graph root before metadata rebase releases overlays.
+- Verified on `5be9afc` plus this increment: `cargo test -p uste-txn -p uste-graph --all-targets
+  --locked --offline -- --test-threads=1` passed all targets; `cargo test -p uste-replay --test
+  coordinator_checkpoint --locked --offline -- --test-threads=1` passed 5 including existing
+  commit/rebase fault matrices. Graph recovery adds seven cases for ready/pending recovery,
+  outcome/byte refusal, absent/misplaced suffixes and failed terminal publication followed by
+  repair/rebase. Strict all-target txn/replay/graph clippy passed. The initial byte-refusal test
+  expected a coordinator-level error; corrected it to require the existing wrapped storage
+  `ResourceLimit`, without changing production behavior. One job/thread and the existing 4 GiB
+  cgroup; preflight 19 GiB available RAM, 1.5 GiB free swap. Dedicated disk-graph faults/corruption
+  and disk-aware authorization remain next work; no benchmark qualification or task closure.
+
 - Caller-bounded fallback validation now precedes metadata rebase and graph terminal-root
   overwrite selection. Per-run page/entry/byte refusal leaves root slots unchanged, and a corrupt
   newest run cannot displace the sole good older fallback. The compatibility API remains available.
@@ -860,7 +877,8 @@ remaining mixed workload have not passed.
   feeds both the authoritative coordinator commit and a separately published terminal-root plan.
   The legacy coordinator still replays complete metadata maps; Decisions 0060–0063 add a separate
   disk-base/overlay coordinator with bounded ordinary-reducer suffix recovery and streaming
-  metadata rebase. Its disk-graph suffix path and authorization facade are not yet complete.
+  metadata rebase. Decision 0064 connects the ready/one-pending graph suffix path; its dedicated
+  fault/corruption coverage and authorization facade remain incomplete.
   Storage's own certificate/blob collections remain memory-resident, first-owner admission is
   read-amplified. Opt-in metadata/graph publication now bounds fallback scrubbing explicitly;
   the legacy publication API retains its compatibility scrub.
@@ -901,8 +919,8 @@ its cold admission now uses authenticated journal/disk correspondence without a 
 comparator map. Decision 0061 pairs retry, transaction and owner indexes into an admitted disk
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
-0062). Ordinary-reducer suffix recovery is implemented; next extend the disk-graph external
-preparation/recovery path, add disk-aware authorization,
+0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
+next extend disk-graph fault/corruption coverage, add disk-aware authorization,
 and replace per-owner
 prefix scans with scalable authenticated first-reference
 evidence before qualification.

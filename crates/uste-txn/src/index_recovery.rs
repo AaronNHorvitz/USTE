@@ -17,6 +17,7 @@ use super::{
 ///
 /// Only one bounded canonical request and inventory are retained. Construction is possible only
 /// while the storage journal is fully authenticated.
+#[derive(PartialEq, Eq)]
 pub struct RecoveredFrontierTransaction {
     pub(crate) revision: CommitRevision,
     pub(crate) certificate_digest: [u8; 32],

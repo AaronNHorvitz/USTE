@@ -2388,8 +2388,59 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    let (published, report, publication) = publish_pending_graph_base(
+        coordinator.reducer_and_index_maintenance()?,
+        filesystem,
+        outcome,
+        limits,
+    )?;
+    coordinator.install_postcommit_publication(publication)?;
+    Ok((published, report))
+}
+
+/// Repair/install a pending graph root while coordinator metadata remains disk-backed.
+pub fn publish_graph_disk_coordinator_base<F, W, E, I>(
+    coordinator: &mut uste_txn::DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    outcome: TransactionOutcome,
+    limits: GraphStateRootMergeLimits,
+) -> Result<(DerivedGraphStateRoot, GraphStateRootMergeReport), GraphDiskError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let (published, report, publication) = publish_pending_graph_base(
+        coordinator.reducer_and_index_maintenance()?,
+        filesystem,
+        outcome,
+        limits,
+    )?;
+    coordinator.install_postcommit_publication(publication)?;
+    Ok((published, report))
+}
+
+fn publish_pending_graph_base<F, W, E, I>(
+    mut maintenance: uste_txn::ReducerIndexMaintenance<'_, GraphDiskLiveState, F, W, E, I>,
+    filesystem: &mut F,
+    outcome: TransactionOutcome,
+    limits: GraphStateRootMergeLimits,
+) -> Result<
+    (
+        DerivedGraphStateRoot,
+        GraphStateRootMergeReport,
+        GraphDiskLivePublication,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let (published, report, counts, policy) = {
-        let mut maintenance = coordinator.reducer_and_index_maintenance()?;
         let (base, pending) = maintenance.reducer.pending_publication(outcome)?;
         let counts = pending.plan.target_counts;
         let policy = pending.target_policy.clone();
@@ -2410,8 +2461,11 @@ where
         counts,
         current_policy: policy,
     };
-    coordinator.install_postcommit_publication(GraphDiskLivePublication { base: installed })?;
-    Ok((published, report))
+    Ok((
+        published,
+        report,
+        GraphDiskLivePublication { base: installed },
+    ))
 }
 
 fn publish_graph_state_root_delta_with<P, F>(

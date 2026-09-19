@@ -2233,6 +2233,7 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     let metadata_publication =
         publish_coordinator_metadata_root(&mut coordinator, &mut filesystem).unwrap();
     assert_eq!(graph_publication.revision, metadata_publication.revision);
+    uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut filesystem).unwrap();
 
     commit(
         &mut coordinator,
@@ -2433,6 +2434,189 @@ fn cold_root_pair_reconstructs_seed_and_replays_graph_suffix() {
     assert_eq!(disk.overlay_counts(), (0, 0));
     assert_eq!(disk.state().unwrap().revision().get(), 2);
     drop(disk);
+
+    // An older metadata pair can accompany either a ready newer graph base or one pending
+    // externally prepared transaction. Recovery retains only post-metadata-base overlays.
+    for case in 0..7 {
+        let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            &mut filesystem,
+            &name,
+            scope(),
+            CounterEntropy(50_000 + case * 2000),
+            CounterEntropy(51_000 + case * 2000),
+            &mut TestKeyAdapter,
+        )
+        .unwrap();
+        let transaction_root = recovery
+            .load_index_root_manifests(
+                &mut filesystem,
+                uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            )
+            .unwrap()
+            .into_iter()
+            .find(|root| root.revision() == CommitRevision::FIRST)
+            .unwrap();
+        let transaction_index = uste_txn::admit_coordinator_transaction_index_for_recovery(
+            &recovery,
+            &mut filesystem,
+            transaction_root,
+            uste_txn::CoordinatorTransactionAdmissionLimits {
+                run: IndexRunReadLimits::new(16, 2, 4096).unwrap(),
+                lookup: lookup_limits,
+                maximum_groups: 1,
+                maximum_encoded_bytes: 1_000_000,
+            },
+            &mut metadata_cache,
+        )
+        .unwrap();
+        let candidate =
+            load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
+                &recovery,
+                &mut filesystem,
+            )
+            .unwrap()
+            .into_iter()
+            .find(|root| root.revision() == CommitRevision::FIRST)
+            .unwrap();
+        let metadata_base = uste_txn::admit_coordinator_disk_base(
+            &recovery,
+            &mut filesystem,
+            candidate,
+            transaction_index,
+            uste_txn::CoordinatorDiskAdmissionLimits {
+                metadata: CoordinatorMetadataLoadLimits::new(2, 0, 3, 16, 4096).unwrap(),
+                lookup: lookup_limits,
+                maximum_total_journal_groups: 1,
+                maximum_encoded_bytes_per_pass: 1_000_000,
+            },
+            &mut metadata_cache,
+        )
+        .unwrap();
+        let candidates =
+            load_graph_state_root_candidates_for_recovery(&recovery, &mut filesystem).unwrap();
+        let old_candidate = candidates
+            .iter()
+            .find(|root| root.revision() == CommitRevision::FIRST)
+            .unwrap();
+        let (old_base, _) = admit_graph_disk_base_candidate_for_recovery(
+            &recovery,
+            &mut filesystem,
+            old_candidate,
+            admission_limits(),
+            &mut admission_cache,
+        )
+        .unwrap();
+        let recovered_outcome = frontier.as_ref().unwrap().outcome();
+        let suffix = if case == 1 || case == 4 {
+            None
+        } else {
+            let frontier = frontier.unwrap();
+            let prepared = load_graph_disk_recovery_preparation_view(
+                &recovery,
+                &mut filesystem,
+                &old_base,
+                &frontier,
+                GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+                &mut admission_cache,
+            )
+            .unwrap()
+            .prepare()
+            .unwrap();
+            Some(
+                frontier.bind_prepared(
+                    prepare_graph_disk_commit(
+                        prepared,
+                        GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+                    )
+                    .unwrap(),
+                ),
+            )
+        };
+        let domain_base = if case == 1 || case == 5 {
+            let current = candidates
+                .iter()
+                .find(|root| root.revision().get() == 2)
+                .unwrap();
+            admit_graph_disk_base_candidate_for_recovery(
+                &recovery,
+                &mut filesystem,
+                current,
+                admission_limits(),
+                &mut admission_cache,
+            )
+            .unwrap()
+            .0
+        } else {
+            old_base
+        };
+        let result = uste_txn::DiskCommitCoordinator::recover_with_prepared_suffix(
+            recovery,
+            &mut filesystem,
+            metadata_base,
+            GraphDiskLiveState::new(domain_base),
+            suffix,
+            RetentionDays::new(30).unwrap(),
+            uste_txn::DiskCoordinatorRecoveryLimits {
+                overlay: uste_txn::CoordinatorRecoveryLimits::new(if case == 2 { 0 } else { 1 }, 0)
+                    .unwrap(),
+                lookup: lookup_limits,
+                maximum_encoded_bytes: if case == 3 { 1 } else { 1_000_000 },
+            },
+            &mut metadata_cache,
+        );
+        match case {
+            0 | 1 | 6 => {
+                let mut disk = result.unwrap();
+                assert_eq!(disk.overlay_counts(), (1, 0));
+                assert_eq!(disk.state().unwrap().revision().get(), 2);
+                assert_eq!(disk.state().unwrap().is_pending(), case != 1);
+                if case == 6 {
+                    let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+                    let merge =
+                        IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+                    assert!(
+                        uste_graph::publish_graph_disk_coordinator_base(
+                            &mut disk,
+                            &mut filesystem,
+                            recovered_outcome,
+                            GraphStateRootMergeLimits::uniform(merge, 1).unwrap(),
+                        )
+                        .is_err()
+                    );
+                    assert!(disk.state().unwrap().is_pending());
+                    let (root, _) = uste_graph::publish_graph_disk_coordinator_base(
+                        &mut disk,
+                        &mut filesystem,
+                        recovered_outcome,
+                        GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(root.revision().get(), 2);
+                    assert!(!disk.state().unwrap().is_pending());
+                    disk.rebase_metadata(
+                        &mut filesystem,
+                        uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read },
+                    )
+                    .unwrap();
+                    assert_eq!(disk.overlay_counts(), (0, 0));
+                }
+            }
+            2 => assert!(matches!(
+                result,
+                Err(uste_txn::TransactionError::ResourceLimit)
+            )),
+            3 => assert!(matches!(
+                result,
+                Err(uste_txn::TransactionError::Storage(
+                    uste_storage::journal::StorageError::ResourceLimit
+                ))
+            )),
+            _ => assert!(matches!(
+                result,
+                Err(uste_txn::TransactionError::IntegrityFailure)
+            )),
+        }
+    }
 
     let (recovered, seeded_report) = CommitCoordinator::open_seeded(
         &mut filesystem,

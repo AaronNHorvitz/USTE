@@ -133,8 +133,12 @@ rebuilds exactly one pending suffix from the authenticated final request, then i
 reopens and rebinds it while replaying coordinator metadata only. Decision 0059 separates bounded
 authenticated manifest discovery from the compatibility full-scrub path: graph recovery applies
 caller-selected run-cursor limits before any run page is read and performs only the semantic scan.
-Next move coordinator maps/origin replay to disk-backed or bounded streaming state before
-qualifying BM-06.
+Decisions 0060–0063 add an admitted disk metadata pair, bounded coordinator overlays, authenticated
+ordinary-reducer suffix replay and streaming metadata rebase. Decision 0064 joins independently
+admitted graph roots to this path, restoring bounded metadata overlays and at most one pending
+graph change without full-map reconstruction. Disk-aware authorization, dedicated graph recovery
+fault/corruption coverage, scalable first-owner admission and storage metadata residency remain
+before larger-than-memory/BM-06 qualification.
 
 Decision 0039 adds the measurement seam needed before connecting the fixture: the authorized
 coordinator exposes cumulative cache/page/fragment/result-byte work and explicit page zeroization
