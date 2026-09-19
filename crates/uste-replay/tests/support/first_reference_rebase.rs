@@ -3,6 +3,9 @@ use uste_storage::fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, O
 use uste_storage::{IndexGetLimits, IndexRunReadLimits, PageCache};
 use uste_txn::{COORDINATOR_FIRST_REFERENCE_PROFILE_V1, CoordinatorFirstReferenceLimits};
 
+#[path = "first_reference_rebase/reverse.rs"]
+mod reverse;
+
 type Fs = FaultFileSystem<MemoryFileSystem>;
 
 fn suffix() -> CoordinatorFirstReferenceLimits {

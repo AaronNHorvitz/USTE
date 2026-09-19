@@ -572,7 +572,7 @@ where
     }
 
     /// Preserve first-reference evidence while rebasing, or bootstrap it from an owner-free base.
-    /// The extra limits bound a single post-base journal pass and its new-owner ID/revision map.
+    /// The extra limits bound one reverse post-base pass and its new-owner revision/match map.
     /// A legacy base with existing owners needs independently admitted evidence first.
     pub fn rebase_metadata_with_first_references(
         &mut self,

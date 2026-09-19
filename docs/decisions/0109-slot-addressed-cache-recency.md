@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 
-Status: implemented and locally verified; native comparison pending. T-20 remains open.
+Status: implemented and locally verified, with a nonqualifying native comparison. T-20 remains open.
 
 Replace Decision 0086's second ordered map for LRU age with safe slot-addressed predecessor/next
 links. Keep one ordered map from the complete existing cache identity to a slot index. A hit does
@@ -37,3 +37,10 @@ profile. Full assertion-enabled workspace regression passes 382 tests, including
 tests and all fault matrices, with no ignores. Native regression passes 51 active unit and three
 process tests; its two existing exact-profile oracle ignores remain. Strict workspace/native
 Clippy and storage rustdoc pass. PROGRESS.md records commands, versions and resource limits.
+
+The [20,000-entity comparison](../evidence/native-disk-20000-development.json) at `d1da3c2` preserves
+all 384 oracle expectations, query adapter counters, primitive work, page loads, cache hits and
+7,577,807 evictions exactly. Query-phase time changes from 401,232ms to 314,866ms. Overall command
+time is 339.56s versus 435.30s, but setup differs because the baseline rebuilt a stale catalog.
+Peak RSS is 265,104 KiB, zero swaps. These are single uncontrolled observations, not statistical
+speedup, warm per-depth latency qualification or larger-than-memory evidence.

@@ -58,6 +58,46 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `d1da3c2` plus this increment: [Decision 0110](docs/decisions/0110-reverse-first-reference-rebase.md)
+  constructs bounded post-base first-reference claims using authenticated reverse streaming.
+  Every occurrence checks reference bytes; the completed scan must match the earliest principal.
+  No root publication precedes complete validation. Three new tests cover all 256 principal
+  histories, exact/one-short byte limits in both certificate modes, and 27 selected read-fault
+  attempts (27 failures, all restart/retry checks pass). Normal unoptimized focused command
+  `CARGO_BUILD_JOBS=1 cargo test -p uste-txn -p uste-replay --locked --offline
+  reverse_first_reference -- --test-threads=1 --nocapture` passed (integration 18.37s).
+  Corrected the new module's explicit relative path before compilation; strict Clippy then
+  caught its unit-test placement before helper definitions, corrected by moving it to EOF.
+  The interrupted gate had no recoverable result and was not counted. A fresh serial gate in
+  scope `run-p376039-i21362324.scope` exited 0 under 3G/4G/512M, with 36 GiB available RAM and
+  3.9 GiB free swap before launch:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed, including all 19 coordinator/replay integration
+  tests (5.35s) and the unchanged M1 process cases. The native release test command below passed
+  51 active unit tests (43.12s), three process tests (11.86s), and two unchanged oracle ignores.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings`, the same native-manifest all-target Clippy, and `CARGO_BUILD_JOBS=1
+  RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline` all pass.
+  Format/whitespace, docs (183 links), task graph (68 tasks) pass; the M1 crate trees and
+  workspace lockfile still exactly match the pinned pilot implementation. No qualification
+  or task completion is newly claimed. Next address remaining disk quota/accounting and
+  construction costs before qualifying campaigns; T-19 remains behind T-20.
+
+- The slot-cache comparison passed on pushed `d1da3c23ee20c6bee428f531054242f44d50cb6a`,
+  binary SHA-256 `dae9f15ad93624941f935c5ae29cdf5a402152196c6e828ff4c644aff7efa84a`.
+  Same 20,000-entity artifact, independent oracle and timed query command as the baseline below;
+  release rebuilt locked/offline with one job before launch. Preflight: 36 GiB available RAM,
+  3.9 GiB free swap; one heavy workload under 3G/4G/512M and 900s timeout. Exit 0:
+  339.56s wall, 314,866ms query phase, 265,104 KiB peak RSS, zero swaps. All 384 expectations
+  pass (313 results and 71 expected result-limit refusals). Programmatic comparison of 18
+  result/work fields against the baseline found no differences, including both digests,
+  cache hits/misses/evictions, adapter I/O and cached-index work. The evidence archive records
+  the exact values. Sampled scope peak 274,907,136 bytes is not a final whole-run peak.
+  The baseline rebuilt a stale catalog; this reopen reused it, so setup costs are not identical.
+  One observation per version with uncontrolled host caches is not statistical speedup evidence,
+  qualifying latency evidence or larger-than-memory proof.
+
 - Tested on pushed `0d5eeeb` plus this increment: [Decision 0109](docs/decisions/0109-slot-addressed-cache-recency.md)
   replaces the age tree with safe bounded slot links and avoids the second key lookup on hits.
   Existing LRU/reference/parser/resource tests remain, with added slot reuse/capacity checks.
@@ -1980,9 +2020,9 @@ remaining mixed workload have not passed.
 ## Next dependency-permitted work
 
 Current action: Decision 0108 is pushed as `0d5eeeb`; native 20,000-entity construction passed.
-The independent-oracle query observation passed with measured cache evictions. Decision 0109
-passes full workspace/native regression; commit/push, then compare its exact-version native
-query outcomes, cache/page work and measured resources on the same fixture.
+The independent-oracle baseline passed with measured cache evictions. Decision 0109 is pushed
+as `d1da3c2`; consume its in-flight exact-version native comparison and check query outcomes,
+cache/page work and measured resources on the same fixture before starting another heavy job.
 Preserve partial fixtures and investigate any refusal
 without weakening limits. Scalable accounting and qualifying campaign prerequisites remain. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
@@ -2103,19 +2143,20 @@ development comparison preserves all results and work counts with reduced CPU ti
 0091 supplies unpublished certified-revision storage roots. Decision 0092 connects them to
 verified private multi-revision graph/coordinator recovery. Decision 0093 integrates native
 resume with explicit fixture-derived limits and separate suffix diagnostics. Native
-process coverage of stale-root gaps is now passing. Next address remaining resident storage
-metadata. Decision 0094 supplies bounded authenticated disk certificate proofs and exact live-owner
+process coverage of stale-root gaps is now passing. Decision 0094 supplies bounded authenticated
+disk certificate proofs and exact live-owner
 binding for proven reads/cursors/staging. Decision 0095 integrated proof-bound handles and map-free
 certificate recovery; Decisions 0096–0097 added committed blob proofs and disk-coordinator reads.
 Decision 0098 adds the verified bounded catalog rebuild/admission; Decision 0099 supplies opt-in
-map-free blob cold recovery. Native adapter integration and disk-aware inventory append remain.
-Decision 0071 supplies bounded authorized upload
-quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
-open. The existing graph domain intentionally prohibits inventories. The new first-reference
+map-free blob cold recovery. Decisions 0100–0103 integrate native recovery, bounded inventory
+append, disk coordinator inventory commits and authorized certified upload charge transfer.
+The existing graph domain intentionally prohibits inventories. The first-reference
 publisher remains a bounded legacy bridge, not larger-than-memory construction.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
 transaction collision and first-owner semantics. The authenticated streaming suffix is now
-implemented; native failure qualification and disk-backed storage metadata remain open.
+implemented; native failure qualification, full immutable-run rewrite amplification and
+principal quota accounting scalability remain open. Decisions 0104–0110 reduce authenticated
+reverse-scan, empty-catalog, point-lookup and cache-recency work without qualifying T-20.
 Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's

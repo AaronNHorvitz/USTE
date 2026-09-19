@@ -187,11 +187,11 @@ where
         && owner_count != 0
     {
         let insertions = first.len();
-        let deltas = first.into_iter().map(|(id, revision)| {
+        let deltas = first.into_iter().map(|(id, claim)| {
             IndexDelta::new(
                 id.as_bytes().to_vec(),
                 None,
-                Some(revision.get().to_be_bytes().to_vec()),
+                Some(claim.revision.get().to_be_bytes().to_vec()),
             )
         });
         let merged = coordinator
@@ -243,13 +243,44 @@ where
     })
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FirstReferenceClaim {
+    revision: CommitRevision,
+    owner_matches: bool,
+}
+
+fn record_first_reference(
+    first: &mut BTreeMap<BlobId, FirstReferenceClaim>,
+    id: BlobId,
+    claim: FirstReferenceClaim,
+) -> Result<(), StorageError> {
+    if first
+        .get(&id)
+        .is_some_and(|previous| previous.revision <= claim.revision)
+    {
+        return Err(StorageError::IntegrityFailure);
+    }
+    first.insert(id, claim);
+    Ok(())
+}
+
+fn validate_first_references(
+    first: &BTreeMap<BlobId, FirstReferenceClaim>,
+    expected: usize,
+) -> Result<(), TransactionError> {
+    if first.len() != expected || first.values().any(|claim| !claim.owner_matches) {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    Ok(())
+}
+
 fn first_reference_overlay<S, F, W, E, I>(
     coordinator: &CommitCoordinator<S, F, W, E, I>,
     filesystem: &mut F,
     base: &CoordinatorDiskBase,
     frontier: CommitRevision,
     limits: CoordinatorFirstReferenceLimits,
-) -> Result<BTreeMap<BlobId, CommitRevision>, TransactionError>
+) -> Result<BTreeMap<BlobId, FirstReferenceClaim>, TransactionError>
 where
     S: TransactionState,
     F: OwnershipFileSystem,
@@ -268,7 +299,7 @@ where
             .map_err(|_| TransactionError::IntegrityFailure)?;
         coordinator
             .journal
-            .visit_committed_range(
+            .visit_committed_range_reverse_report(
                 filesystem,
                 start,
                 frontier,
@@ -299,14 +330,16 @@ where
                             if expected.0 != *reference {
                                 return Err(StorageError::IntegrityFailure);
                             }
-                            if let std::collections::btree_map::Entry::Vacant(entry) =
-                                first.entry(reference.id())
-                            {
-                                if expected.1 != decoded.retry_key.principal {
-                                    return Err(StorageError::IntegrityFailure);
-                                }
-                                entry.insert(group.revision);
-                            }
+                            // Descending occurrences replace later claims. A foreign later
+                            // reference is legal; only the eventual earliest principal matters.
+                            record_first_reference(
+                                &mut first,
+                                reference.id(),
+                                FirstReferenceClaim {
+                                    revision: group.revision,
+                                    owner_matches: expected.1 == decoded.retry_key.principal,
+                                },
+                            )?;
                         }
                     }
                     Ok(())
@@ -314,9 +347,7 @@ where
             )
             .map_err(TransactionError::Storage)?;
     }
-    if first.len() != coordinator.committed_blob_owners.len() {
-        return Err(TransactionError::IntegrityFailure);
-    }
+    validate_first_references(&first, coordinator.committed_blob_owners.len())?;
     Ok(first)
 }
 
@@ -378,4 +409,50 @@ where
         .journal
         .publish_index_root_recovered_bounded(filesystem, input, runs, limits)
         .map_err(TransactionError::Storage)
+}
+
+#[cfg(test)]
+mod reverse_first_reference_tests {
+    use super::*;
+
+    #[test]
+    fn reverse_first_reference_claims_match_independent_earliest_owner_selection() {
+        assert!(size_of::<FirstReferenceClaim>() <= 2 * size_of::<CommitRevision>());
+        // Enumerate all principal-match histories: a late correct principal cannot repair an
+        // incorrect earliest owner, and a late foreign reference cannot displace a correct one.
+        for bits in 0_u16..256 {
+            let id = BlobId::from_bytes([1; 16]);
+            let mut first = BTreeMap::new();
+            for number in (1..=8).rev() {
+                record_first_reference(
+                    &mut first,
+                    id,
+                    FirstReferenceClaim {
+                        revision: CommitRevision::new(number).unwrap(),
+                        owner_matches: bits & (1 << (number - 1)) != 0,
+                    },
+                )
+                .unwrap();
+            }
+            assert_eq!(first[&id].revision, CommitRevision::FIRST);
+            assert_eq!(validate_first_references(&first, 1).is_ok(), bits & 1 != 0);
+            assert!(validate_first_references(&first, 0).is_err());
+            assert!(validate_first_references(&first, 2).is_err());
+            let before = first.clone();
+            for number in [1, 2] {
+                assert!(
+                    record_first_reference(
+                        &mut first,
+                        id,
+                        FirstReferenceClaim {
+                            revision: CommitRevision::new(number).unwrap(),
+                            owner_matches: true,
+                        }
+                    )
+                    .is_err()
+                );
+                assert_eq!(first, before);
+            }
+        }
+    }
 }
