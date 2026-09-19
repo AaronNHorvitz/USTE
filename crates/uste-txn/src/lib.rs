@@ -28,13 +28,14 @@ pub use authorized_disk::{
 };
 pub use disk_metadata::{
     COORDINATOR_BLOB_USAGE_PROFILE_V1, COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
-    COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
-    CoordinatorBlobUsageLimits, CoordinatorBlobUsageRebuildLimits,
-    CoordinatorBlobUsageRebuildReport, CoordinatorDiskAdmissionLimits, CoordinatorDiskBase,
-    CoordinatorFirstReferenceLimits, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
-    CoordinatorMetadataLoadReport, CoordinatorMetadataRebaseLimits,
-    CoordinatorTransactionAdmissionLimits, CoordinatorTransactionIndex,
-    MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS, admit_coordinator_disk_base,
+    COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_PACKED_PROFILE_V1,
+    COORDINATOR_TRANSACTION_PROFILE_V1, CoordinatorBlobUsageLimits,
+    CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,
+    CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, CoordinatorFirstReferenceLimits,
+    CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits, CoordinatorMetadataLoadReport,
+    CoordinatorMetadataRebaseLimits, CoordinatorTransactionAdmissionLimits,
+    CoordinatorTransactionIndex, MAX_BLOB_USAGE_REBUILD_BATCH_OWNERS, PackedCoordinatorLimits,
+    PackedCoordinatorPrefix, PackedCoordinatorReport, admit_coordinator_disk_base,
     admit_coordinator_disk_base_with_first_references,
     admit_coordinator_transaction_index_for_recovery, load_coordinator_metadata_candidates,
     load_coordinator_metadata_candidates_for_recovery, load_coordinator_transaction_indexes,
@@ -42,7 +43,7 @@ pub use disk_metadata::{
     publish_coordinator_transaction_index, reconstruct_coordinator_metadata_seed,
     reconstruct_coordinator_metadata_seed_for_recovery, stage_genesis_blob_usage,
     stage_genesis_first_references, stage_inventory_free_genesis_metadata,
-    stage_primary_genesis_metadata,
+    stage_packed_coordinator_prefix, stage_primary_genesis_metadata,
 };
 pub use index_recovery::{
     AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredGenesis,

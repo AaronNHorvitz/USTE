@@ -224,6 +224,12 @@ domain semantics are not conferred by these privileged maintenance handles.
 Decision 0141 adds namespace-fixed coordinator discovery and terminal publication, plus explicit
 bounded historical-revision recovery discovery. Publication remains outside private staging and
 requires the exact live frontier. Cold discovery still requires canonical and domain admission.
+Decision 0142 constructs an opt-in private packed coordinator prefix from revision one, advancing
+exactly one authenticated transaction at a time. Four explicit families retain retries,
+transaction-ID collision metadata, first owners and earliest-reference witnesses without complete
+maps. Exact absence-before updates reject collisions and existing owners are never replaced.
+Per-transaction inventory admission is explicitly capped at 512 references. This is not yet cold
+cache admission, live-coordinator installation or quota/domain pairing.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

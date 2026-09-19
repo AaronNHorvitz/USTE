@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_coordinator.rs"]
+mod coordinator;
 #[path = "packed_roots.rs"]
 mod roots;
 use uste_storage::{

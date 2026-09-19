@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `b670c9c` plus this increment: [Decision 0142](docs/decisions/0142-packed-coordinator-prefix-construction.md)
+  adds the opt-in four-family packed coordinator prefix: exact retry outcomes, cross-principal
+  transaction-ID collision lookup, first blob owners and first-reference witnesses. Construction
+  advances one authenticated transaction from an opaque predecessor, starting only at revision one;
+  it retains four handles and request-sized deltas, not complete metadata maps. No roots publish.
+  Six tests cover 32 reference transactions, unchanged first owners, authenticated retry/transaction
+  collisions, gaps/foreign-owner/limit rejection, late owner corruption, exact 512-reference
+  admission and pre-I/O rejection of 513, and 123 observed error/crash cases. Every fault preserves
+  prior metadata and restart reconstruction matches all four logical commitments.
+  Initial compile fixed borrowed blob-ID bytes and the raw-journal fixture constructor. The
+  reference fixture initially used unwindowed certificate recovery and exhausted its 2,000,000-byte
+  allowance; selecting the supported 64-certificate window preserved that allowance. A write-count
+  assertion was corrected from three nodes to two: copy-on-write retains the old leaf.
+  Focused scope `run-p575488-i21594510.scope` passed six tests/2.88s and Clippy/0.24s.
+  Final scope `run-p575968-i21555396.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 530 tests/47 executables (replay 50/115.85s,
+  storage 202/26.47s, coordinator 49/3.10s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace
+  --all-targets --all-features --locked --offline -- -D warnings` passed/0.28s;
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline`
+  passed/1.10s. Log `/tmp/uste-d142-workspace-verification.log`; preflight 33 GiB RAM/4.0 GiB swap,
+  sampled peak 1,656,320,000 bytes/zero swap (not final peak). Formatting, diff/docs/task checks passed.
+  Native baseline remains `42f9abb`; no benchmark/M1/lockfile change or task completion. Unregistered
+  packed admission implementation/test and Decision 0143 drafts are excluded next-package work.
+  Next complete bounded journal-correspondence cold admission, quota pairing and live/domain
+  integration, then accounting and qualification. The private prefix is not an installed coordinator.
+
 - Implemented on pushed `3197fe9` plus this increment: [Decision 0141](docs/decisions/0141-scoped-packed-root-publication.md)
   adds namespace-fixed packed-root publication/discovery to ordinary and recovery maintenance.
   Current discovery authenticates the frontier; historical recovery discovery takes an explicit

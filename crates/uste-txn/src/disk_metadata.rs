@@ -6,6 +6,11 @@
 use std::collections::BTreeMap;
 
 mod admission;
+mod packed;
+pub use packed::{
+    COORDINATOR_PACKED_PROFILE_V1, PackedCoordinatorLimits, PackedCoordinatorPrefix,
+    PackedCoordinatorReport, stage_packed_coordinator_prefix,
+};
 mod first_reference;
 mod genesis;
 mod rebase;
