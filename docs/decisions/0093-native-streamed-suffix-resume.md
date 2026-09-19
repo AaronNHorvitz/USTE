@@ -31,3 +31,11 @@ open refusal without terminal publication, resume/rebase, exact repeated resume,
 and all 384 queries against a separately built oracle. Existing missing-base, wrong binding,
 cardinality, native SIGKILL-prefix and cache-pressure tests remain regressions. A native gap
 close/reopen test is not a new SIGKILL-at-intermediate-stage or hardware power-loss qualification.
+
+The owned-child CLI SIGKILL matrix additionally captures the bounded derived manifests after
+the revision-two kill, completes the journal to four, then restores only those saved manifests.
+Newer manifests are preserved in the test's private directory; source/journal/certificate bytes
+are not rewritten. A separate open process must refuse without changing the saved roots; resume
+must report a two-revision graph suffix, reach the unchanged frontier and match all 384 oracle
+queries and the pre-restore output digest. This tests stale derived-root recovery across processes,
+not an injected kill during intermediate staging, physical erasure or authoritative restore.

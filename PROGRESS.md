@@ -54,6 +54,18 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0093's native process regression now also restores saved derived manifests from a
+  killed revision-two child beneath an unchanged completed revision-four journal. Open refuses
+  without root mutation; separate resume/open/query processes recover the two-revision suffix
+  and reproduce all 384 oracle outputs and the pre-restore digest. Newer manifests are preserved
+  inside the isolated synthetic test fixture until its normal cleanup; source/journal files are
+  untouched. On `1147329` plus this test increment, `CARGO_BUILD_JOBS=1 cargo test --release
+  --manifest-path experiments/t20-bench/Cargo.toml --test disk_process_loss --locked --offline
+  -- --test-threads=1` passed all 3 tests (12.21s); native all-target strict clippy passed.
+  Scope 3G/4G/512M, one job/thread; preflight 37 GiB available RAM/3.9 GiB free swap. No
+  intermediate-stage SIGKILL or hardware power-loss qualification is inferred. Next address
+  storage's resident certificate/blob metadata and its explicit authenticated disk lookup contract.
+
 - [Decision 0093](docs/decisions/0093-native-streamed-suffix-resume.md) connects native resume
   to private multi-revision graph recovery with fixture-derived count/shared-byte bounds and
   separate suffix-merge diagnostics. Open/query require current graph/metadata bases before any
@@ -1602,7 +1614,8 @@ development comparison preserves all results and work counts with reduced CPU ti
 0091 supplies unpublished certified-revision storage roots. Decision 0092 connects them to
 verified private multi-revision graph/coordinator recovery. Decision 0093 integrates native
 resume with explicit fixture-derived limits and separate suffix diagnostics. Next extend native
-process coverage of stale-root gaps, then address remaining resident storage metadata.
+process coverage of stale-root gaps is now passing. Next address remaining resident storage
+metadata, starting with bounded authenticated certificate lookup and exact owner/frontier binding.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

@@ -1,6 +1,7 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
 //! Explicit Btrfs process-loss checks. Every killed process is a child owned by this test.
 use std::{
+    collections::BTreeMap,
     fs,
     io::{BufRead, BufReader, Read, Write},
     os::unix::{fs::OpenOptionsExt, process::ExitStatusExt},
@@ -75,6 +76,55 @@ impl Fixture {
             String::from_utf8_lossy(&output.stderr)
         );
         serde_json::from_slice(&output.stdout).unwrap()
+    }
+
+    /// Test-only snapshot of the bounded derived manifests, never journal/source files.
+    fn derived_roots(&self) -> BTreeMap<String, Vec<u8>> {
+        let directory = self.root.join("bm01-linux-disk-engine");
+        let mut roots = BTreeMap::new();
+        for entry in fs::read_dir(directory).unwrap() {
+            let entry = entry.unwrap();
+            let name = entry.file_name().into_string().unwrap();
+            if !name.starts_with("x-") {
+                continue;
+            }
+            assert_eq!(name.len(), 66);
+            assert!(
+                name[2..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            );
+            assert!(entry.file_type().unwrap().is_file());
+            assert_eq!(entry.metadata().unwrap().len(), 4177);
+            assert!(roots.len() < 8, "four profiles, two slots each");
+            roots.insert(name, fs::read(entry.path()).unwrap());
+        }
+        assert!((6..=8).contains(&roots.len()));
+        roots
+    }
+
+    fn restore_derived_roots(&self, roots: &BTreeMap<String, Vec<u8>>) {
+        let directory = self.root.join("bm01-linux-disk-engine");
+        let saved = self.root.join("saved-terminal-derived-roots");
+        fs::create_dir(&saved).unwrap();
+        // Preserve every newer manifest in this test's private directory. All immutable runs,
+        // certificates, keys and journal segments stay untouched and available for recovery.
+        for name in self.derived_roots().keys() {
+            fs::rename(directory.join(name), saved.join(name)).unwrap();
+        }
+        fs::File::open(&saved).unwrap().sync_all().unwrap();
+        for (name, bytes) in roots {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(directory.join(name))
+                .unwrap();
+            file.write_all(bytes).unwrap();
+            file.sync_all().unwrap();
+        }
+        fs::File::open(&directory).unwrap().sync_all().unwrap();
+        assert_eq!(&self.derived_roots(), roots);
     }
 }
 impl Drop for Fixture {
@@ -174,6 +224,8 @@ fn disk_cli_sigkill_prefixes_resume_and_match_separate_oracle() {
         assert_eq!(status.signal(), Some(9));
         child.0.take();
 
+        let old_roots = (revision == 2).then(|| fixture.derived_roots());
+
         let resumed = fixture.run("linux-disk-resume");
         assert_eq!(resumed["recovered_revision"], revision);
         assert_eq!(resumed["frontier"], 4);
@@ -186,9 +238,29 @@ fn disk_cli_sigkill_prefixes_resume_and_match_separate_oracle() {
         assert_eq!(queried["queries"], 384);
         assert_eq!(queried["engine_benchmark"], false);
         assert_eq!(queried["oracle_adjacency_memory_resident"], false);
+        let expected_output_digest = queried["output_digest"].as_str().unwrap().to_owned();
         let retried = fixture.run("linux-disk-resume");
         assert_eq!(retried["recovered_revision"], 4);
         assert_eq!(retried["frontier"], 4);
+        if let Some(old_roots) = old_roots {
+            fixture.restore_derived_roots(&old_roots);
+            let refused = complete(fixture.command("linux-disk-open"));
+            assert!(!refused.status.success());
+            assert_eq!(fixture.derived_roots(), old_roots);
+            let resumed = fixture.run("linux-disk-resume");
+            assert_eq!(resumed["recovered_revision"], 4);
+            assert_eq!(resumed["cold_admission"]["graph_revision"], 2);
+            assert_eq!(resumed["cold_admission"]["metadata_revision"], 2);
+            assert_eq!(resumed["suffix_recovery"]["revisions"], 2);
+            assert_eq!(resumed["frontier"], 4);
+            assert_eq!(
+                fixture.run("linux-disk-open")["suffix_recovery"]["revisions"],
+                0
+            );
+            let queried = fixture.run("linux-disk-query");
+            assert_eq!(queried["successful_queries"], 384);
+            assert_eq!(queried["output_digest"], expected_output_digest);
+        }
     }
 }
 
