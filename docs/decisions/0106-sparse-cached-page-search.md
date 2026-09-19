@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 
-Status: implemented and locally verified. Native before/after observation pending; T-20 remains open.
+Status: implemented and locally verified; T-20 remains open.
 
 Add a fixed sparse fragment directory to Decision 0090's validated immutable page layout. The
 16 KiB plaintext page, 80-byte header and minimum 17-byte fragment permit at most 959 fragments.
@@ -36,4 +36,9 @@ conclusions. No cache budget, benchmark target, qualification cap or M1 interfac
 The complete storage, graph, coordinator/replay, transaction and native-driver regression gates
 pass, including parser mutations, resource refusal, publication/recovery fault matrices and
 native process-loss tests. Strict workspace/native Clippy passes. PROGRESS.md records exact
-commands and results; the pre-change 10,000-entity query observation is archived separately.
+commands and results. [Exact-version native observations](../evidence/native-disk-sparse-search-development.json)
+preserve all 384 oracle outcomes, page loads/cache hits and output digest. Fragment work changes
+from 1,080,841,044 to 789,750,846, including the added sparse probes. Wall time changes from
+252.50s to 246.20s, peak RSS from 264,844 to 265,100 KiB. These single uncontrolled observations
+are not statistical speedup or benchmark qualification evidence. Native reports additionally
+disclose probe inclusion alongside the retained historical `enumerated_fragments` field name.

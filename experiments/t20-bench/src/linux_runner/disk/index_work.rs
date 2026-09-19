@@ -46,6 +46,8 @@ impl IndexWork {
             "complete_authenticated_index_io": false,
             "physical_device_io": false,
             "includes_work_before_primitive_errors": true,
+            // Keep the existing counter name, but disclose the sparse-search probe work.
+            "fragment_work_semantics": "enumerated-fragments-plus-sparse-key-probes; excludes-page-validation",
             "completed_operations": self.0[0], "failed_operations": self.0[1],
             "authenticated_pages_loaded": self.0[2], "cache_page_hits": self.0[3],
             "enumerated_fragments": self.0[4], "primitive_result_bytes": self.0[5],
@@ -73,5 +75,10 @@ mod tests {
         }
         assert_eq!(work.json()["complete_authenticated_index_io"], false);
         assert_eq!(work.json()["physical_device_io"], false);
+        assert_eq!(work.json()["enumerated_fragments"], 5);
+        assert_eq!(
+            work.json()["fragment_work_semantics"],
+            "enumerated-fragments-plus-sparse-key-probes; excludes-page-validation"
+        );
     }
 }

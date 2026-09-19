@@ -38,7 +38,15 @@ where
         let mut counts = BlobMetadataCounts::default();
         let mut staged: Option<crate::StagedIndexRoot> = None;
         let mut report = BlobMetadataRebuildReport::default();
-        for number in 1..=frontier.get() {
+        // The maintained binding count is only a construction hint. An empty candidate still
+        // has to pass the independent, authenticated whole-prefix admission below before any
+        // root is published. A false zero hint therefore fails closed on the first inventory.
+        let first = if self.committed_blob_reference_bindings == 0 {
+            frontier.get()
+        } else {
+            1
+        };
+        for number in first..=frontier.get() {
             let revision = CommitRevision::new(number).map_err(|_| StorageError::InvalidState)?;
             let remaining = limits
                 .admission

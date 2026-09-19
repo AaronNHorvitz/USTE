@@ -117,6 +117,9 @@ Decision 0085 adds cached primitive operation/error, page, hit, fragment and res
 work before errors, with separate warm-up and paired sample deltas. These maintenance-only
 counters exclude uncached cursor/recovery/publication work and are not complete I/O or device
 traffic measurements; `authenticated_io_accounting` is `partial-cached-primitives`.
+The historical `enumerated_fragments` field includes Decision 0106's sparse key probes as well
+as enumerated fragments; `fragment_work_semantics` discloses this explicitly. Full-page parser
+validation is still excluded. This partial counter is neither a comparison count nor CPU time.
 
 The adapter observation retains call/failure counts and requested/returned read/write bytes.
 Setup, query, warm-up and paired sample populations are

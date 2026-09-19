@@ -58,6 +58,41 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `ca0f5df` plus this increment: [Decision 0107](docs/decisions/0107-empty-history-catalog-construction.md)
+  uses the maintained zero-binding count only to skip redundant empty-history construction;
+  whole-prefix independent admission still precedes publication. Initial focused verification
+  passed four tests including 45 selected I/O fault attempts; the group-corruption test exposed
+  a wrong fixture assumption that reopen created a segment. Corrected to the retained segment
+  layout and expanded corruption coverage to all five groups. All five focused tests now pass
+  (2.47s) in the unoptimized profile: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage --locked
+  --offline empty_blob_rebuild -- --test-threads=1 --nocapture`; strict storage Clippy passes
+  (1.58s). The full gate passed under 3G/4G/512M: `CARGO_BUILD_JOBS=1
+  CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage -p uste-txn -p uste-replay
+  -p uste-graph --all-targets --all-features --locked --offline -- --test-threads=1`.
+  Optimization retains debug assertions/overflow checks; every fault case remains. Results:
+  121 storage tests (18.56s), 16 graph disk-index tests (13.61s), 17 coordinator/replay tests
+  (5.01s), 26 transaction tests (0.26s), 13 authorization tests (0.03s), all selected adapter/
+  process/unit tests pass. Native gate `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 51 active unit
+  tests (42.58s) and three CLI/process tests (12.17s), with the two unchanged exact-profile
+  oracle ignores. Strict workspace all-target/all-feature Clippy (3.91s), native all-target
+  Clippy (1.26s), and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage
+  --no-deps --locked --offline` (0.93s) pass. All used locked/offline dependencies and one job;
+  Clippy used `-- -D warnings`. Sampled scope peak 2,401,251,328 bytes / zero swap, not final
+  whole-run peak. Format, whitespace, evidence JSON, docs (180 links) and task graph (68 tasks)
+  pass. M1 sources/lockfile are unchanged; no task or qualifying gate is newly complete.
+  The unchanged `ca0f5df260cba66ac4c286a8d7565419de2f5b57` native binary,
+  SHA-256 `e7f896575bc1c4d8f7d22849829a083925456a77f67b4b9a95bb246ae7494eb1`, ran the same
+  10,000-entity/384-query observation command recorded below. It was rebuilt before these edits;
+  no second build/heavy workload ran concurrently. Preflight: 36 GiB available RAM, 3.9 GiB free swap;
+  scope 3G/4G/512M. All 384 queries matched, exit 0, 246.20s wall time, 234,349ms query phase,
+  265,100 KiB peak RSS, zero swaps. Fragment work: 789,750,846 versus 1,080,841,044 before;
+  page loads, cache hits, adapter bytes and output digest are unchanged. The
+  [archive](docs/evidence/native-disk-sparse-search-development.json) records both versions and
+  measurement limitations; no qualifying speedup is claimed. Native report metadata now makes
+  sparse-probe inclusion in the historical fragment field explicit, with a regression assertion.
+
 - Tested on pushed `556fb7a` plus this increment: [Decision 0106](docs/decisions/0106-sparse-cached-page-search.md)
   wires the previously uncompiled sparse page directory and borrows cached layouts. New linear-
   reference and encrypted dense-page tests pass (3 tests, 27.80s), as do the complete `index::`
@@ -1883,11 +1918,11 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0106's sparse page search passes full local regression. Commit/push the
-reviewed increment, then measure its exact-version native query work against the recorded
-`556fb7a` baseline. Continue T-20 with empty-history catalog construction that still independently
-authenticates every prefix group before publication, then scalable accounting and qualifying
-campaign prerequisites. Decisions
+Current action: Decision 0107 and the native fragment-counter disclosure are locally verified;
+commit/push this increment. Continue T-20 with bounded native cache-pressure development admission:
+the 10,000-entity observation used 57,228,288 accounted cache bytes and had no evictions, so it
+cannot establish pressure behavior. Preserve all qualifying-size gates while verifying a larger
+nonqualifying fixture. Scalable accounting and qualifying campaign prerequisites remain. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a
 request to repeat completed work.
