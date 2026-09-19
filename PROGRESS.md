@@ -58,6 +58,54 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Tested on pushed `0d5eeeb` plus this increment: [Decision 0109](docs/decisions/0109-slot-addressed-cache-recency.md)
+  replaces the age tree with safe bounded slot links and avoids the second key lookup on hits.
+  Existing LRU/reference/parser/resource tests remain, with added slot reuse/capacity checks.
+  Focused checks passed after the baseline exited: `CARGO_BUILD_JOBS=1 cargo test -p uste-storage
+  --locked --offline index:: -- --test-threads=1` (15 tests, 5.70s), then the same command with
+  filter `sparse_point_reads` (1 test, 27.86s); strict storage all-target/all-feature Clippy
+  (2.03s). All ran in the unoptimized profile under 3G/4G/512M. No build overlapped the unchanged
+  baseline query process; cache limits/accounting constants are unchanged. Full workspace gate:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 382 tests with no ignores: 123 storage unit
+  tests (18.56s), 16 graph disk-index tests (12.65s), 17 coordinator/replay tests (4.95s),
+  memory-adapter process tests (2.70s), 26 transaction tests (0.27s), and all other selected
+  crypto/policy/ingest/memory/spatial/time/type/reference/adapter tests. Native release command
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 51 active unit tests (43.18s) and three process
+  tests (11.75s), retaining two exact-profile oracle ignores. Strict workspace all-target/
+  all-feature Clippy (4.66s), native all-target Clippy (1.78s), and strict storage rustdoc
+  (0.94s) pass with one job, locked/offline dependencies, `-- -D warnings` for Clippy and
+  `RUSTDOCFLAGS="-D warnings"` for `cargo doc -p uste-storage --no-deps`.
+  All gates ran serially under 3G/4G/512M; sampled scope peak 2,812,538,880 bytes, zero swap
+  (not final whole-run peak). Format/whitespace, JSON evidence, docs (182 links) and task graph
+  (68 tasks) pass. M1 sources/lockfile remain unchanged; no task or qualification is newly complete.
+
+- Native 20,000-entity construction on pushed `0d5eeebbd0d6f04d2975e171d3c4e27d99d043c0`
+  passed at revision 44: 143.86s wall time, 266,292 KiB peak RSS, zero swaps, exit 0; actual final
+  counts `[220001,420001,200000,200000,200000,600000,1,1]`, no complete graph/coordinator history
+  maps. Binary SHA-256 `34f066f834f8d96227fe2cda0f92651e453b4e73647bff72e10ee9e66dbf6be0`;
+  pinned lock SHA-256 unchanged. Command: `timeout --signal=TERM --kill-after=5s 900s
+  /usr/bin/time -v experiments/t20-bench/target/release/uste-t20-bench linux-disk-create --root
+  experiments/t20-bench/target/native-pressure20000.ya99oO --password-file
+  experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000`, after
+  `CARGO_BUILD_JOBS=1 cargo build --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline`, all under 3G/4G/512M. Synthetic password copied owner-only from the prior
+  development fixture, not printed or committed. Adapter read/write bytes: 31,717,128,873 /
+  11,167,788,572, not physical device traffic. The retained artifact is separate from the
+  prior 10,000 fixture. `oracle-summary --entities 20000` now generates its separate summary;
+  then the same timed command with `linux-disk-query` and `--oracle-file
+  experiments/t20-bench/target/native-pressure20000.ya99oO/oracle-summary` runs serially in one
+  new 3G/4G/512M scope. Query passed all 384 expectations (313 results, 71 expected result-limit
+  refusals): 435.30s wall time, 401,232ms query phase, 265,384 KiB peak RSS, zero swaps, exit 0.
+  The [archive](docs/evidence/native-disk-20000-development.json) records 7,577,807 evictions,
+  8,531,739 page loads, 346,098,730 cache hits and 67,098,624 accounted bytes under the 64 MiB
+  budget. Actual D0107 native rebuild discovers one terminal group and independently admits
+  all 44 prefix groups; this first query's setup therefore differs from later catalog reuse.
+  Sampled scope peak 273,215,488 bytes, not final whole-run peak. Preflight available RAM
+  remained 36 GiB with 3.9 GiB free swap. This is not qualification or larger-than-memory proof.
+
 - Tested on pushed `9fda196` plus this increment: [Decision 0108](docs/decisions/0108-native-cache-pressure-development-admission.md)
   raises only native development admission to 20,000 entities / 200,000 relationships. The
   1,000-entity memory-adapter cap, 64 MiB cache, fixed batch/request limits and refusal of
@@ -1931,9 +1979,11 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: Decision 0108 passes native regression. Commit/push, then use that exact binary
-for a resource-bounded 20,000-entity development fixture
-and independent-oracle query observation. Preserve partial fixtures and investigate any refusal
+Current action: Decision 0108 is pushed as `0d5eeeb`; native 20,000-entity construction passed.
+The independent-oracle query observation passed with measured cache evictions. Decision 0109
+passes full workspace/native regression; commit/push, then compare its exact-version native
+query outcomes, cache/page work and measured resources on the same fixture.
+Preserve partial fixtures and investigate any refusal
 without weakening limits. Scalable accounting and qualifying campaign prerequisites remain. Decisions
 0095–0097 already provide map-free certificate history and disk-coordinator proven blob reads;
 do not restart them. The entries below preserve chronological implementation evidence, not a

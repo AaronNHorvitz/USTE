@@ -8,6 +8,9 @@ use std::{borrow::Borrow, collections::BTreeMap};
 #[path = "index_sparse.rs"]
 mod sparse;
 use sparse::SparseDirectory;
+#[path = "index_cache.rs"]
+mod cache;
+use cache::CachePages;
 
 use sha2::{Digest, Sha256};
 use uste_crypto::{
@@ -53,7 +56,7 @@ const ROOT_BYTES: usize = 2_048;
 const ROOT_HEADER_BYTES: usize = 192;
 const RUN_DESCRIPTOR_BYTES: usize = 72;
 const ROOT_FILE_BYTES: u64 = 16 + SMALL_ENVELOPE_BYTES as u64;
-// Logical admission allowances for both ordered maps, including sparse root nodes. These
+// Logical admission allowances for the ordered map, reserved slots and sparse root nodes. These
 // are not allocator/RSS measurements; qualification must still measure the process group.
 const CACHE_FIXED_OVERHEAD: usize = 8 * 1024;
 const CACHE_ENTRY_OVERHEAD: usize = 1024;
@@ -751,7 +754,7 @@ impl CachedPage {
     }
 }
 
-/// Fixed logical-byte-budget decrypted page cache with logarithmic-time LRU maintenance.
+/// Fixed logical-byte-budget decrypted page cache with ordered lookup and constant-time LRU links.
 /// Eviction zeroizes page buffers on normal drop. Accounting includes explicit map allowances,
 /// not allocator or process RSS measurements; the configured process limit remains independent.
 pub struct PageCache {
@@ -761,8 +764,7 @@ pub struct PageCache {
     hits: u64,
     misses: u64,
     evictions: u64,
-    pages: BTreeMap<CacheKey, CachedPage>,
-    recency: BTreeMap<u64, CacheKey>,
+    pages: CachePages,
     read_telemetry: IndexReadTelemetry,
     read_telemetry_overflowed: bool,
 }
@@ -793,8 +795,7 @@ impl PageCache {
             hits: 0,
             misses: 0,
             evictions: 0,
-            pages: BTreeMap::new(),
-            recency: BTreeMap::new(),
+            pages: CachePages::default(),
             read_telemetry: IndexReadTelemetry::default(),
             read_telemetry_overflowed: false,
         })
@@ -846,8 +847,7 @@ impl PageCache {
     }
 
     pub fn clear(&mut self) {
-        self.pages = BTreeMap::new();
-        self.recency = BTreeMap::new();
+        self.pages = CachePages::default();
         self.accounted_bytes = 0;
     }
 
@@ -860,17 +860,13 @@ impl PageCache {
         });
     }
 
-    fn touch(&mut self, key: CacheKey) -> Option<&[u8]> {
+    fn touch_index(&mut self, key: CacheKey) -> Option<usize> {
         self.advance_clock();
-        match self.pages.get_mut(&key) {
-            Some(page) => {
+        match self.pages.touch(&key) {
+            Some(index) => {
                 self.hits = self.hits.saturating_add(1);
-                let removed = self.recency.remove(&page.last_used);
-                debug_assert!(removed == Some(key));
-                let replaced = self.recency.insert(self.clock, key);
-                debug_assert!(replaced.is_none());
-                page.last_used = self.clock;
-                Some(page.bytes.as_ref())
+                self.pages.page_mut(index)?.last_used = self.clock;
+                Some(index)
             }
             None => {
                 self.misses = self.misses.saturating_add(1);
@@ -879,35 +875,32 @@ impl PageCache {
         }
     }
 
-    fn insert(&mut self, key: CacheKey, bytes: Vec<u8>) -> Result<(), StorageError> {
+    #[cfg(test)]
+    fn touch(&mut self, key: CacheKey) -> Option<&[u8]> {
+        let index = self.touch_index(key)?;
+        Some(self.pages.page_mut(index)?.bytes.as_ref())
+    }
+
+    fn insert(&mut self, key: CacheKey, bytes: Vec<u8>) -> Result<usize, StorageError> {
         let bytes = Zeroizing::new(bytes.into_boxed_slice());
         if bytes.len() != INDEX_PAGE_BYTES || self.pages.contains_key(&key) {
             return Err(StorageError::IntegrityFailure);
         }
         self.advance_clock();
         let capacity = (self.budget - CACHE_FIXED_OVERHEAD) / CACHE_ENTRY_BYTES;
-        if self.pages.len() == capacity {
-            let (_, oldest) = self
-                .recency
-                .pop_first()
-                .ok_or(StorageError::IntegrityFailure)?;
-            self.pages
-                .remove(&oldest)
-                .ok_or(StorageError::IntegrityFailure)?;
-            self.evictions = self.evictions.saturating_add(1);
-        }
-        self.pages.insert(
+        let (index, evicted) = self.pages.insert(
             key,
             CachedPage {
                 bytes,
                 last_used: self.clock,
                 layout: None,
             },
-        );
-        self.recency.insert(self.clock, key);
+            capacity,
+        )?;
+        self.evictions = self.evictions.saturating_add(u64::from(evicted));
         self.accounted_bytes = CACHE_FIXED_OVERHEAD + self.pages.len() * CACHE_ENTRY_BYTES;
         debug_assert!(self.accounted_bytes <= self.budget);
-        Ok(())
+        Ok(index)
     }
 }
 
@@ -3462,7 +3455,10 @@ where
         object_id: run.object_id,
         page: page_index,
     };
-    if cache.touch(key).is_none() {
+    let slot = if let Some(slot) = cache.touch_index(key) {
+        stats.cache_hits = stats.cache_hits.saturating_add(1);
+        slot
+    } else {
         let file = filesystem.open_existing(context.directory, &run_name(run.object_id)?)?;
         let offset = page_index
             .checked_mul(ENCODED_PAGE_BYTES)
@@ -3492,14 +3488,13 @@ where
         page.try_reserve_exact(INDEX_PAGE_BYTES)
             .map_err(|_| StorageError::ResourceLimit)?;
         page.extend_from_slice(plaintext.as_slice());
-        cache.insert(key, page)?;
+        let slot = cache.insert(key, page)?;
         stats.pages_read = stats.pages_read.saturating_add(1);
-    } else {
-        stats.cache_hits = stats.cache_hits.saturating_add(1);
-    }
+        slot
+    };
     cache
         .pages
-        .get_mut(&key)
+        .page_mut(slot)
         .ok_or(StorageError::IntegrityFailure)?
         .parsed(root, run, page_index)
 }
@@ -3916,9 +3911,8 @@ mod tests {
     }
 
     fn assert_cache_invariants(cache: &PageCache) {
-        assert_eq!(cache.pages.len(), cache.recency.len());
-        for (key, page) in &cache.pages {
-            assert!(cache.recency.get(&page.last_used) == Some(key));
+        cache.pages.assert_invariants();
+        for page in cache.pages.values() {
             assert_eq!(page.bytes.len(), INDEX_PAGE_BYTES);
         }
         let expected_bytes = if cache.pages.is_empty() {
@@ -3963,13 +3957,7 @@ mod tests {
                         .unwrap();
                 }
                 reference.push(key);
-                assert!(
-                    cache
-                        .recency
-                        .values()
-                        .copied()
-                        .eq(reference.iter().copied())
-                );
+                assert!(cache.pages.ordered_keys().eq(reference.iter().copied()));
                 assert_cache_invariants(&cache);
                 assert_eq!(
                     (cache.hits, cache.misses, cache.evictions),
@@ -4016,6 +4004,69 @@ mod tests {
         assert_cache_invariants(&cache);
         cache.clear();
         assert_cache_invariants(&cache);
+    }
+
+    #[test]
+    fn cache_slot_hits_and_evictions_reuse_reserved_storage_without_growing_history() {
+        for capacity in [1, 2, 3, 32, 257] {
+            let mut cache =
+                PageCache::new(CACHE_FIXED_OVERHEAD + capacity * CACHE_ENTRY_BYTES).unwrap();
+            for page in 0..capacity {
+                cache
+                    .insert(cache_key(page as u64), vec![0; INDEX_PAGE_BYTES])
+                    .unwrap();
+            }
+            let reserved = cache.pages.reserved_slots();
+            for _ in 0..5 {
+                for page in (0..capacity).rev() {
+                    let key = cache_key(page as u64);
+                    let slot = cache.pages.resident_slot(&key).unwrap();
+                    assert!(cache.touch(key).is_some());
+                    assert_eq!(cache.pages.resident_slot(&key), Some(slot));
+                    assert_eq!(cache.pages.reserved_slots(), reserved);
+                    assert_cache_invariants(&cache);
+                }
+            }
+            for page in capacity..capacity * 3 {
+                cache
+                    .insert(cache_key(page as u64), vec![1; INDEX_PAGE_BYTES])
+                    .unwrap();
+                assert_eq!(cache.pages.len(), capacity);
+                assert_eq!(cache.pages.reserved_slots(), reserved);
+                assert_cache_invariants(&cache);
+            }
+            assert_eq!(cache.evictions(), (capacity * 2) as u64);
+            cache.clear();
+            assert_eq!(cache.pages.reserved_slots(), 0);
+            assert_cache_invariants(&cache);
+        }
+    }
+
+    #[test]
+    fn cache_reserved_metadata_fits_the_maximum_admitted_slot_count() {
+        // Isolate slot/tree metadata without allocating the maximum cache's plaintext pages.
+        let capacity = (MAX_INDEX_CACHE_BYTES - CACHE_FIXED_OVERHEAD) / CACHE_ENTRY_BYTES;
+        let mut pages = CachePages::default();
+        let mut previous_reserved = 0;
+        for index in 0..capacity {
+            let (_, evicted) = pages
+                .insert(
+                    cache_key(index as u64),
+                    CachedPage {
+                        bytes: Zeroizing::new(Vec::new().into_boxed_slice()),
+                        last_used: index as u64 + 1,
+                        layout: None,
+                    },
+                    capacity,
+                )
+                .unwrap();
+            assert!(!evicted);
+            if previous_reserved != pages.reserved_slots() || index + 1 == capacity {
+                pages.assert_invariants();
+                previous_reserved = pages.reserved_slots();
+            }
+        }
+        assert_eq!(pages.len(), capacity);
     }
 
     #[test]
@@ -4073,7 +4124,7 @@ mod tests {
     fn cache_layout_allowances_and_default_capacity_are_explicit() {
         // These checks cover owned inline types, not opaque std collection allocations.
         // The separate root/node allowances must still be checked against measured RSS.
-        let inline_pair = size_of::<(CacheKey, CachedPage)>() + size_of::<(u64, CacheKey)>();
+        let inline_pair = CachePages::inline_allowance();
         assert!(inline_pair <= CACHE_ENTRY_OVERHEAD);
         assert!(size_of::<PageCache>() <= CACHE_FIXED_OVERHEAD);
         let mut cache = PageCache::default();

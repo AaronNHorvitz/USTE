@@ -2,7 +2,7 @@
 
 Date: 2026-09-19
 
-Status: implemented and locally verified; new-scale measurement pending. T-20 remains open.
+Status: implemented and locally verified, with nonqualifying cache-pressure evidence. T-20 remains open.
 
 Extend only the native development ceiling from 10,000 to 20,000 entities (200,000 relationships).
 The exact-version 10,000-entity observations used 57,228,288 accounted cache bytes and had zero
@@ -31,5 +31,10 @@ rewrite amplification and principal quota accounting remain separate implementat
 
 Native release regression passes all 51 active unit tests and three CLI/process tests, with the
 two unchanged exact-profile oracle ignores. Strict native all-target Clippy and format/docs/task
-checks pass. PROGRESS.md records commands and resource limits. No new-scale observation is yet
-claimed by this admission increment.
+checks pass. PROGRESS.md records commands and resource limits.
+
+The [exact-version 20,000-entity observation](../evidence/native-disk-20000-development.json) on
+`0d5eeeb` builds revision 44 and matches all 384 query expectations (313 results, 71 expected
+result-limit refusals). It records 7,577,807 cache evictions with 67,098,624 accounted bytes under
+the unchanged 64 MiB budget. Query command wall time is 435.30s, peak RSS 265,384 KiB, zero swaps.
+This establishes that this native development run exercised eviction, not benchmark qualification.
