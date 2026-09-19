@@ -176,7 +176,7 @@ impl Fixture {
             uste_txn::publish_coordinator_transaction_index(&mut raw, &mut fs).unwrap();
         }
         let result = visit_disk_batches(Bm01Profile::new(20).unwrap(), |sequence, operations| {
-            assert!(sequence == 2 || (prefix == 6 && sequence == 3));
+            assert!(sequence == 2 || (prefix == 6 && sequence == 3) || prefix == 13);
             let encoded = encode_transaction(&GraphTransaction::new(scope(), operations)).unwrap();
             raw.commit(
                 &mut fs,
@@ -191,13 +191,13 @@ impl Fixture {
                 &NeverCancel,
             )
             .unwrap();
-            if prefix == 6 && sequence == 2 {
+            if (prefix == 6 && sequence == 2) || prefix == 13 {
                 Ok(())
             } else {
                 Err("stop fixture at its selected certificate".into())
             }
         });
-        assert!(result.is_err());
+        assert_eq!(result.is_ok(), prefix == 13);
         if prefix == 3 || prefix == 4 {
             let snapshot = raw.read_view().unwrap().state().clone();
             uste_graph::publish_graph_state_root(&mut raw, &mut fs, &snapshot).unwrap();
@@ -302,12 +302,6 @@ fn native_disk_create_and_missing_large_prefix_roots_fail_closed() {
         missing.run("resume").unwrap_err().code(),
         "USTE_BM01_DISK_ADMISSION"
     );
-    let oversized_suffix = Fixture::new();
-    oversized_suffix.seed(6);
-    assert_eq!(
-        oversized_suffix.run("resume").unwrap_err().code(),
-        "USTE_BM01_DISK_ADMISSION"
-    );
     assert_eq!(
         run(
             Path::new("unused"),
@@ -319,6 +313,45 @@ fn native_disk_create_and_missing_large_prefix_roots_fail_closed() {
         .code(),
         "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
     );
+}
+
+#[test]
+fn native_disk_multi_revision_suffix_repairs_only_on_resume_and_matches_oracle() {
+    for (prefix, revisions) in [(6, 2), (13, 3)] {
+        let fixture = Fixture::new();
+        fixture.seed(prefix);
+        // Open must not publish a terminal graph root. The subsequent resume report must
+        // still observe base one and perform every missing graph revision itself.
+        assert!(fixture.run("open").is_err());
+        let resumed: serde_json::Value =
+            serde_json::from_str(&fixture.run("resume").unwrap()).unwrap();
+        assert_eq!(resumed["cold_admission"]["graph_revision"], 1);
+        assert_eq!(resumed["cold_admission"]["metadata_revision"], 1);
+        assert_eq!(resumed["suffix_recovery"]["revisions"], revisions);
+        assert_eq!(resumed["suffix_recovery"]["maximum_revisions"], 3);
+        assert_eq!(
+            resumed["suffix_recovery"]["maximum_encoded_journal_bytes"],
+            3 * 16_785_538_u64
+        );
+        assert_eq!(resumed["frontier"], 4);
+        assert_eq!(resumed["full_memory_graph_state"], false);
+        let opened: serde_json::Value =
+            serde_json::from_str(&fixture.run("open").unwrap()).unwrap();
+        assert_eq!(opened["suffix_recovery"]["revisions"], 0);
+        assert_eq!(opened["cold_admission"]["metadata_revision"], 4);
+        let profile = Bm01Profile::new(20).unwrap();
+        let oracle = fixture.root.join("oracle-summary");
+        fs::write(&oracle, OracleSummary::build(profile).unwrap().to_tsv()).unwrap();
+        let queried: serde_json::Value = serde_json::from_str(
+            &query_correctness(&fixture.root, &fixture.password, &oracle, profile).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(queried["successful_queries"], 384);
+        let retry: serde_json::Value =
+            serde_json::from_str(&fixture.run("resume").unwrap()).unwrap();
+        assert_eq!(retry["suffix_recovery"]["revisions"], 0);
+        assert_eq!(retry["frontier"], 4);
+    }
 }
 
 #[test]

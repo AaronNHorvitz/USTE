@@ -4,7 +4,7 @@ use crate::engine::disk::{
     DiskBatch, DiskProfileLimits, admit_development_disk, commit_batch, fixture_state_counts,
     visit_disk_batches,
 };
-use uste_graph::{GraphDiskLiveState, GraphDiskReadLimits, GraphStateRootMergeLimits};
+use uste_graph::{GraphDiskLiveState, GraphDiskReadLimits};
 use uste_storage::{IndexGetLimits, IndexPredecessorLimits};
 use uste_txn::{
     AuthenticatedIndexRecovery, AuthorizedDiskReader, CoordinatorMetadataRebaseLimits,
@@ -169,8 +169,9 @@ fn prepare_session_with_observer(
     };
     let frontier = frontier.ok_or_else(|| error("USTE_BM01_FRONTIER_MISSING"))?;
     let outcome = frontier.outcome();
-    let (mut disk, admission) = admit_development_disk(&mut fs, recovery, frontier, limits)
-        .map_err(|_| error("USTE_BM01_DISK_ADMISSION"))?;
+    let (mut disk, admission) =
+        admit_development_disk(&mut fs, recovery, frontier, limits, phase != "open")
+            .map_err(|_| error("USTE_BM01_DISK_ADMISSION"))?;
     if phase == "open"
         && (disk
             .state()
@@ -183,20 +184,6 @@ fn prepare_session_with_observer(
     }
     if phase != "open" {
         let (read, merge) = (limits.merge_read, limits.merge);
-        if disk
-            .state()
-            .map_err(|_| error("USTE_BM01_DISK_STATE"))?
-            .is_pending()
-        {
-            uste_graph::publish_graph_disk_coordinator_base(
-                &mut disk,
-                &mut fs,
-                outcome,
-                GraphStateRootMergeLimits::uniform(merge, 64 * 1024)
-                    .map_err(|_| error("USTE_BM01_LIMITS"))?,
-            )
-            .map_err(|_| error("USTE_BM01_DISK_ROOT_REPAIR"))?;
-        }
         disk.rebase_metadata(
             &mut fs,
             CoordinatorMetadataRebaseLimits { merge, reuse: read },
@@ -265,6 +252,18 @@ fn prepare_session_with_observer(
         "lookup_result_bytes": admission.graph.lookup_result_bytes,
         "peak_history_group_logical_bytes": admission.graph.peak_history_group_logical_bytes,
     });
+    let suffix_json = serde_json::json!({
+        "measurement_scope": "private-graph-suffix-merges-only",
+        "complete_authenticated_io": false,
+        "revisions": admission.suffix.revisions,
+        "staged_runs": admission.suffix.staged_runs,
+        "base_entries": admission.suffix.base_entries,
+        "output_entries": admission.suffix.output_entries,
+        "output_logical_bytes": admission.suffix.output_logical_bytes,
+        "pages_read": admission.suffix.pages_read,
+        "maximum_revisions": if phase == "open" { 0 } else { limits.groups - 1 },
+        "maximum_encoded_journal_bytes": limits.suffix_bytes,
+    });
     let report = format!(
         concat!(
             "{{\"schema\":\"bm01-linux-disk-development-v1\",",
@@ -274,7 +273,7 @@ fn prepare_session_with_observer(
             "\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},",
             "\"frontier\":{},\"recovered_revision\":{},\"elapsed_milliseconds\":{},",
             "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{},",
-            "\"cold_admission\":{},\"final_state_counts\":{},\"setup_adapter_io\":{},\"development_entity_limit\":{}}}"
+            "\"cold_admission\":{},\"suffix_recovery\":{},\"final_state_counts\":{},\"setup_adapter_io\":{},\"development_entity_limit\":{}}}"
         ),
         phase,
         profile.entities(),
@@ -285,6 +284,7 @@ fn prepare_session_with_observer(
         report.repaired_certificate_tail_bytes,
         report.ignored_uncommitted_journal_bytes,
         admission_json,
+        suffix_json,
         serde_json::json!(final_counts),
         fs.snapshot()?.json()?,
         MAX_NATIVE_DEVELOPMENT_ENTITIES

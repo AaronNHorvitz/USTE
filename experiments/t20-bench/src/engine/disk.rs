@@ -29,6 +29,7 @@ pub(crate) struct DiskAdmissionMeasurement {
     pub metadata_revision: u64,
     pub state_counts: [u64; 8],
     pub graph: uste_graph::GraphDiskBaseAdmissionReport,
+    pub suffix: uste_graph::GraphDiskSuffixRecoveryReport,
 }
 
 type AdmittedDisk<F, W, E, I> = (
@@ -254,6 +255,7 @@ fn open_disk(
         recovery,
         frontier.ok_or("missing disk frontier")?,
         limits,
+        false,
     )
     .map(|(disk, _)| disk)
 }
@@ -265,6 +267,7 @@ pub(crate) fn admit_development_disk<F, W, E, I>(
     recovery: AuthenticatedIndexRecovery<F, W, E, I>,
     frontier: uste_txn::RecoveredFrontierTransaction,
     profile_limits: DiskProfileLimits,
+    repair: bool,
 ) -> Result<AdmittedDisk<F, W, E, I>, String>
 where
     F: OwnershipFileSystem,
@@ -280,8 +283,10 @@ where
         .filter(|root| root.revision() <= frontier.revision())
         .max_by_key(|root| root.revision())
         .ok_or("missing graph base")?;
-    if frontier.revision().get() - graph_candidate.revision().get() > 1 {
-        return Err("disk graph suffix exceeds one revision".into());
+    if frontier.revision().get() > profile_limits.groups
+        || (!repair && graph_candidate.revision() != frontier.revision())
+    {
+        return Err("disk graph suffix requires admitted repair".into());
     }
     let transaction_roots = recovery
         .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
@@ -300,6 +305,9 @@ where
         })
         .max_by_key(|root| root.revision())
         .ok_or("missing paired metadata base")?;
+    if !repair && candidate.revision() != frontier.revision() {
+        return Err("disk metadata suffix requires admitted repair".into());
+    }
     let transaction_root = transaction_roots
         .into_iter()
         .find(|root| root.revision() == candidate.revision())
@@ -340,51 +348,41 @@ where
         &mut cache,
     )
     .map_err(debug)?;
-    let measurement = DiskAdmissionMeasurement {
+    let mut measurement = DiskAdmissionMeasurement {
         graph_revision: base.revision().get(),
         metadata_revision,
         state_counts: base.state_counts(),
         graph: graph_report,
+        suffix: uste_graph::GraphDiskSuffixRecoveryReport::default(),
     };
-    let suffix = if base.revision() == frontier.revision() {
-        None
-    } else {
-        let prepared = uste_graph::load_graph_disk_recovery_preparation_view(
-            &recovery,
-            fs,
-            &base,
-            &frontier,
-            profile_limits.preparation,
-            &mut cache,
-        )
-        .map_err(debug)?
-        .prepare()
-        .map_err(debug)?;
-        Some(
-            frontier.bind_prepared(
-                uste_graph::prepare_graph_disk_commit(
-                    prepared,
-                    GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
-                )
-                .map_err(debug)?,
-            ),
-        )
-    };
-    DiskCommitCoordinator::recover_with_prepared_suffix(
+    uste_graph::recover_graph_disk_suffix(
         recovery,
         fs,
         metadata,
         GraphDiskLiveState::new(base),
-        suffix,
         RetentionDays::new(30).map_err(debug)?,
         uste_txn::DiskCoordinatorRecoveryLimits {
-            overlay: uste_txn::CoordinatorRecoveryLimits::new(2, 0).map_err(debug)?,
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(
+                usize::try_from(profile_limits.groups).map_err(debug)?,
+                0,
+            )
+            .map_err(debug)?,
             lookup,
             maximum_encoded_bytes: profile_limits.suffix_bytes,
         },
+        uste_graph::GraphDiskSuffixRecoveryLimits {
+            maximum_revisions: if repair { profile_limits.groups - 1 } else { 0 },
+            preparation: profile_limits.preparation,
+            deltas: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
+            merge: GraphStateRootMergeLimits::uniform(profile_limits.merge, 64 * 1024)
+                .map_err(debug)?,
+        },
         &mut cache,
     )
-    .map(|disk| (disk, measurement))
+    .map(|(disk, suffix)| {
+        measurement.suffix = suffix;
+        (disk, measurement)
+    })
     .map_err(debug)
 }
 

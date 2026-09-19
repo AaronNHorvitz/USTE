@@ -105,7 +105,7 @@ impl DiskProfileLimits {
         Ok(Self {
             groups,
             prefix_bytes: mul(groups, MAX_CERTIFIED_GROUP)?,
-            suffix_bytes: mul(2, MAX_CERTIFIED_GROUP)?,
+            suffix_bytes: mul(groups - 1, MAX_CERTIFIED_GROUP)?,
             transaction_run,
             metadata,
             graph,
@@ -127,7 +127,7 @@ mod tests {
         let limits = DiskProfileLimits::new(Bm01Profile::qualifying()).unwrap();
         assert_eq!(limits.groups, 212);
         assert_eq!(limits.prefix_bytes, 212 * 16_785_538);
-        assert_eq!(limits.suffix_bytes, 2 * 16_785_538);
+        assert_eq!(limits.suffix_bytes, 211 * 16_785_538);
         assert_eq!(limits.transaction_run.maximum_entries(), 212);
         assert_eq!(limits.merge_read.maximum_entries(), 3_000_000);
         assert_eq!(

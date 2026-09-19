@@ -54,6 +54,24 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0093](docs/decisions/0093-native-streamed-suffix-resume.md) connects native resume
+  to private multi-revision graph recovery with fixture-derived count/shared-byte bounds and
+  separate suffix-merge diagnostics. Open/query require current graph/metadata bases before any
+  repair, while ready-root resynchronization preserves slots. Native and memory development caps
+  are unchanged. Two/three-revision native gaps now recover and match all 384 separate-oracle
+  queries; the formerly unsupported valid two-revision fixture is now a positive regression,
+  while missing-base refusal and core count/byte-overage tests remain intact. The first focused
+  release run passed 5 native tests (37.37s) and strict native lint. An unused import exposed by
+  removing the old pending-root repair block was removed. Final source on `d38e5ca` plus this
+  increment passed `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`: 51 unit tests
+  (44.42s; 2 unchanged exact-profile oracle ignores), 3 CLI SIGKILL/sampling tests (10.23s).
+  Native all-target strict clippy, format, whitespace, docs (166 links) and task graph checks
+  passed. Scope 3G/4G/512M, one job/thread, preflight 36 GiB available/3.9 GiB free swap;
+  sampled peak 334,061,568 bytes, zero swap. Next extend native process coverage of stale-root
+  gaps, then remove remaining resident storage metadata. No new intermediate-stage process-kill
+  or qualifying benchmark result is claimed yet; T-20 remains open.
+
 - [Decision 0092](docs/decisions/0092-private-streamed-graph-suffix-recovery.md) connects
   coordinator-owned authenticated suffix validation to private staged graph recovery and terminal
   publication. Exact request/result, retry/collision and first-owner checks remain mandatory;
@@ -1582,15 +1600,17 @@ resumable authenticated transaction ranges. Decisions 0089–0090 remove repeate
 allocation/validation and add actual native one-page eviction regression; the pinned larger
 development comparison preserves all results and work counts with reduced CPU time. Decision
 0091 supplies unpublished certified-revision storage roots. Decision 0092 connects them to
-verified private multi-revision graph/coordinator recovery. Next integrate the native resume
-driver and its process-loss coverage, then address remaining resident storage metadata.
+verified private multi-revision graph/coordinator recovery. Decision 0093 integrates native
+resume with explicit fixture-derived limits and separate suffix diagnostics. Next extend native
+process coverage of stale-root gaps, then address remaining resident storage metadata.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference
 publisher remains a bounded legacy bridge, not larger-than-memory construction.
 Explicit-I/O outcome APIs and journal-prefix validation must preserve exact retry,
-transaction collision and first-owner semantics. Extend bounded
-suffix recovery beyond one revision only with an authenticated streaming design. Run the exact five-sample BM-01 campaign under the accepted host
+transaction collision and first-owner semantics. The authenticated streaming suffix is now
+implemented; native failure qualification and disk-backed storage metadata remain open.
+Run the exact five-sample BM-01 campaign under the accepted host
 24 GiB reservation once the implementation boundary is honest, and define/run BM-06's
 10-million-event protocol. Then return to T-19's
 remaining VT gaps and BM-02/BM-04 work; no failed or absent benchmark is accepted as passing.

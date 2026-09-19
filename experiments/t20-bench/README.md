@@ -79,8 +79,11 @@ admission/preparation/merge work limits shared with the memory-adapter verifier.
 The limits validate through the exact-size 212-revision plan, including 30,001 preparation proofs,
 but constructor validity does not qualify execution or remove the native development ceiling.
 Create streams the fixture through
-authorized disk writes; resume admits paired metadata roots and a ready graph base or one pending
-transaction, repairs derived roots, then retries the unchanged deterministic plan. Only an empty
+authorized disk writes; resume admits paired metadata roots and a graph base, streams its bounded
+authenticated suffix privately, publishes only the terminal graph root, then repairs metadata and
+retries the unchanged deterministic plan. The suffix count is bounded by the fixture's planned
+revisions minus its policy bootstrap; one shared certificate/group byte allowance covers metadata
+replay, with explicit per-revision proof/merge limits. Only an empty
 or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
 Open requires completed, repaired roots and validates the fixture Evidence binding and exact
 current/history/adjacency/provenance/reverse/policy cardinalities. Reports retain the initial
@@ -88,7 +91,10 @@ current/history/adjacency/provenance/reverse/policy cardinalities. Reports retai
 counts separately from `final_state_counts` after repair/materialization. Count order is current,
 history, outgoing, incoming, provenance, reverse, policy history, current policy. These privileged
 setup measurements exclude coordinator journal passes, suffix preparation, publication and query
-work; they are not complete authenticated-I/O counters. Construction
+work; they are not complete authenticated-I/O counters. The separate `suffix_recovery` object
+reports private graph merge work/counts and declared recovery ceilings; it likewise excludes
+proof reads, coordinator passes and terminal publication I/O. An already-current root is
+reauthenticated and resynchronized without rotating slots, even on open. Construction
 and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
 Native reports distinguish filesystem-adapter observation from authenticated cached-index work.
 Decision 0085 adds cached primitive operation/error, page, hit, fragment and result-byte totals, including
