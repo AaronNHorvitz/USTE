@@ -2,6 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — paired packed live rebase (Decision 0148)
+
+Implemented on pushed `bdf0640` plus this increment: explicit live rebase reuses the authenticated
+certificate-window cursor and packed staging through internal borrowed-journal helpers. The cursor
+algorithm was mechanically compared with `bdf0640` and is unchanged apart from whitespace. No
+exclusive journal ownership moves or reopens. Each suffix outcome/transaction is checked against
+the bounded live overlays; exact first-owner correspondence and quota pairing precede terminal
+publication. Only both durable roots install and clear overlays. Failed attempts retain all exact
+retries and block fresh writes until successful rebase. Work counters are partial successful
+primitive work, not complete adapter/physical I/O.
+
+Five focused tests passed in session 71453 / scope `run-p629349-i21601091.scope` (18.69 s), then
+workspace Clippy (0.39 s): repeated two-outcome/one-owner overlays, first-owner charges, cold
+admission and retries, exact suffix byte/group limits, corruption in suffix/primary/quota and
+four ready-domain/profile refusals. All 738 observed read/write/crash rebase cases retained the
+old installed pair and recovered identical terminal commitments. An initial fault expectation
+incorrectly required ResourceLimit after a simulated adapter crash: metadata reads occur before
+the fresh-write ceiling. The corrected test requires the storage refusal for crashes, ResourceLimit
+for noncrash faults, and no new writes in either case. A patch delimiter error was fixed before
+the final focused pass; no engine requirement or fault boundary was removed.
+
+Full gate passed in session 88673 / scope `run-p629898-i21619995.scope`, exit 0: 560 tests across
+47 executables (replay 50/111.46 s; transaction integration 78/68.12 s), Clippy 0.08 s and docs
+1.15 s. `cargo fmt --all -- --check`, diff checks and `python3 scripts/check_docs.py` passed
+(223 documents, 152 definitions). Preflight showed 32 GiB available RAM / 5.6 GiB free swap;
+sampled scope peak 1,631,547,392 bytes / zero swap. Exact full-gate command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d148-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline'
+```
+
+Next implement Decision 0149 streamed packed recovery;
+that draft, unregistered `packed_coordinator/recovery.rs` and `packed_recovery.rs` tests are
+excluded next-package work.
+T-20/T-19 remain open; no native/M1 interface switch or qualifying campaign ran.
+
 ## Latest verified increment — packed live coordinator (Decision 0147)
 
 Implemented on pushed `95b6b03` plus this increment: a separate raw packed coordinator consumes

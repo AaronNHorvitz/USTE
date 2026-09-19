@@ -249,6 +249,10 @@ primary/quota prefixes, exact published family receipts, live owner bindings and
 domain-state check including the explicit state-commitment profile. Its bounded overlays use the
 existing shared commit-admission/publication engine with packed historical reads. This is not a
 consumer authorization facade, automatic rebase, domain adapter or benchmark qualification.
+Decision 0148 adds explicit quota-preserving live rebase: a bounded authenticated suffix advances
+private paired prefixes, followed by terminal primary/quota publication. Only both durable roots
+permit installation and overlay clearing. A failed attempt keeps old bases/outcomes and blocks
+fresh writes; exact retries remain available. Work reports remain partial primitive accounting.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

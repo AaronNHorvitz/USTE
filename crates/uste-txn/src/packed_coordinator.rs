@@ -1,6 +1,10 @@
 //! Opt-in trusted live writes over admitted packed metadata; consumer authorization is separate.
 use super::*;
+mod rebase;
 use crate::disk_coordinator::{DiskCommitMetadata, DiskMetadataBase};
+pub use rebase::{
+    PackedCoordinatorPublicationState, PackedMetadataRebaseLimits, PackedMetadataRebaseReport,
+};
 use uste_storage::{
     journal::{CertifiedPackedRoot, DiskBlobAppendLimits},
     packed_root_manifest::PackedRootClaims,
@@ -38,6 +42,8 @@ where
     primary: PackedCoordinatorPrefix,
     quota: PackedQuotaPrefix,
     overlay: CoordinatorRecoveryLimits,
+    profiles: ([u8; 32], [u8; 32]),
+    rebase_required: bool,
 }
 
 impl<S, F, W, E, I> PackedCommitCoordinator<S, F, W, E, I>
@@ -120,6 +126,8 @@ where
             primary,
             quota,
             overlay,
+            profiles: (claims.reducer_profile, claims.state_commitment_profile),
+            rebase_required: false,
         })
     }
 
@@ -139,6 +147,19 @@ where
     /// Historical installed accounting anchor, not current usage after new commits.
     pub fn base_anchor(&self) -> (CommitRevision, [u8; 32]) {
         self.quota.anchor()
+    }
+    pub fn rebase_required(&self) -> bool {
+        self.rebase_required
+    }
+    fn admitted_overlay_limits(&self) -> CoordinatorRecoveryLimits {
+        if self.rebase_required {
+            CoordinatorRecoveryLimits {
+                maximum_outcomes: 0,
+                ..self.overlay
+            }
+        } else {
+            self.overlay
+        }
     }
 
     /// Trusted staging only; does not grant authorization or reserve consumer quota.
@@ -195,7 +216,7 @@ where
             cancellation,
             Some(DiskCommitMetadata {
                 base: DiskMetadataBase::Packed(&self.primary, limits.lookup),
-                overlay: self.overlay,
+                overlay: self.admitted_overlay_limits(),
                 storage: limits.storage,
                 cache,
             }),
@@ -218,6 +239,7 @@ where
         limits: PackedCommitLimits,
         cache: &mut PageCache,
     ) -> Result<TransactionOutcome, TransactionError> {
+        let overlay = self.admitted_overlay_limits();
         self.inner.commit_with_preparation(
             fs,
             request,
@@ -225,7 +247,7 @@ where
             cancellation,
             Some(DiskCommitMetadata {
                 base: DiskMetadataBase::Packed(&self.primary, limits.lookup),
-                overlay: self.overlay,
+                overlay,
                 storage: limits.storage,
                 cache,
             }),
@@ -249,6 +271,7 @@ where
     where
         S: ExternallyPreparedTransactionState,
     {
+        let overlay = self.admitted_overlay_limits();
         self.inner.commit_with_preparation(
             fs,
             request,
@@ -256,7 +279,7 @@ where
             cancellation,
             Some(DiskCommitMetadata {
                 base: DiskMetadataBase::Packed(&self.primary, limits.lookup),
-                overlay: self.overlay,
+                overlay,
                 storage: limits.storage,
                 cache,
             }),

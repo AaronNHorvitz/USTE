@@ -5,6 +5,42 @@ use uste_storage::{
     StagedIndexRoot,
 };
 
+impl RecoveredFrontierTransaction {
+    pub(crate) fn packed_maintenance<'a, F, W, E, I>(
+        &self,
+        scope: NamespaceRef,
+        journal: &'a mut JournalStore<F, W, E, I>,
+        filesystem: &mut F,
+        limits: uste_storage::journal::CertificateAnchorReadLimits,
+    ) -> Result<crate::PackedIndexMaintenance<'a, F, W, E, I>, TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        if self.scope != scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let target = if let Some(proof) = &self.certificate_proof {
+            if proof.anchor() != (self.revision, self.certificate_digest) {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            proof.clone()
+        } else {
+            journal
+                .authenticate_certificate_anchor(
+                    filesystem,
+                    self.revision,
+                    self.certificate_digest,
+                    limits,
+                )
+                .map_err(map_open_error)?
+        };
+        crate::PackedIndexMaintenance::new(scope, journal, target)
+    }
+}
+
 /// Exclusive, scope-bound scratch index maintenance for one authenticated transaction.
 /// This cannot append a transaction or publish an intermediate root slot.
 pub struct RecoveryIndexMaintenance<'a, F, W, E, I>
@@ -34,25 +70,7 @@ where
         transaction: &RecoveredFrontierTransaction,
         limits: uste_storage::journal::CertificateAnchorReadLimits,
     ) -> Result<crate::PackedIndexMaintenance<'_, F, W, E, I>, TransactionError> {
-        if transaction.scope != self.scope {
-            return Err(TransactionError::IntegrityFailure);
-        }
-        let target = if let Some(proof) = &transaction.certificate_proof {
-            if proof.anchor() != (transaction.revision, transaction.certificate_digest) {
-                return Err(TransactionError::IntegrityFailure);
-            }
-            proof.clone()
-        } else {
-            self.journal
-                .authenticate_certificate_anchor(
-                    filesystem,
-                    transaction.revision,
-                    transaction.certificate_digest,
-                    limits,
-                )
-                .map_err(map_open_error)?
-        };
-        crate::PackedIndexMaintenance::new(self.scope, &mut self.journal, target)
+        transaction.packed_maintenance(self.scope, &mut self.journal, filesystem, limits)
     }
 
     /// Reuse a cursor's exact live-owner certificate evidence when present; otherwise use the

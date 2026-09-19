@@ -12,7 +12,10 @@ mod disk_metadata;
 mod index_recovery;
 mod packed_coordinator;
 mod packed_maintenance;
-pub use packed_coordinator::{PackedCommitCoordinator, PackedCommitLimits, PackedCoordinatorState};
+pub use packed_coordinator::{
+    PackedCommitCoordinator, PackedCommitLimits, PackedCoordinatorPublicationState,
+    PackedCoordinatorState, PackedMetadataRebaseLimits, PackedMetadataRebaseReport,
+};
 mod packed_root_maintenance;
 pub use packed_maintenance::{PackedIndexMaintenance, ScopedPackedCursor};
 

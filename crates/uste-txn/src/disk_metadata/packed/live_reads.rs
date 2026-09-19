@@ -78,13 +78,31 @@ impl PackedCoordinatorPrefix {
         E: EntropySource,
         I: EntropySource,
     {
+        self.owner_from_journal_report(journal, fs, id, limits)
+            .map(|v| v.0)
+    }
+
+    pub(crate) fn owner_from_journal_report<F, W, E, I>(
+        &self,
+        journal: &JournalStore<F, W, E, I>,
+        fs: &mut F,
+        id: BlobId,
+        limits: TreeLookupLimits,
+    ) -> Result<(Option<(BlobReference, PrincipalDigest)>, TreeLookupReport), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
         let result = journal
             .packed_tree_get(fs, &self.trees[2], &id.as_bytes(), limits)
             .map_err(TransactionError::Storage)?;
-        result
+        let owner = result
             .value
             .map(|v| decode_owner(self.scope, &id.as_bytes(), v.as_slice()))
             .transpose()
-            .map_err(TransactionError::Storage)
+            .map_err(TransactionError::Storage)?;
+        Ok((owner, result.report))
     }
 }

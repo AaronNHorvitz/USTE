@@ -16,6 +16,9 @@ pub use packed::{
     admit_packed_quota_prefix, rebuild_packed_quota_prefix, stage_packed_coordinator_prefix,
     stage_packed_quota_prefix,
 };
+pub(crate) use packed::{
+    stage_packed_coordinator_prefix_on_journal, stage_packed_quota_prefix_on_journal,
+};
 mod first_reference;
 mod genesis;
 mod rebase;

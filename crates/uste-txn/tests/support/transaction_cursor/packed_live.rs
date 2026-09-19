@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_live_rebase.rs"]
+mod rebase;
 use uste_storage::PageCache;
 use uste_txn::{
     DiskCommitCheck, PackedCommitCoordinator, PackedCommitLimits, PackedCoordinatorState,

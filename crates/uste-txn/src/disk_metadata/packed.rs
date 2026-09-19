@@ -8,6 +8,7 @@ pub use admission::{
     PackedCoordinatorAdmissionLimits, PackedCoordinatorAdmissionReport,
     admit_packed_coordinator_prefix,
 };
+pub(crate) use quota::stage_packed_quota_prefix_on_journal;
 pub use quota::{
     COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport,
     PackedQuotaPrefix, PackedQuotaRebuildLimits, PackedQuotaRebuildReport, PackedQuotaReport,
@@ -191,11 +192,34 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    if transaction.scope != recovery.scope()
+    stage_packed_coordinator_prefix_on_journal(
+        recovery.scope(),
+        &mut recovery.journal,
+        fs,
+        base,
+        transaction,
+        limits,
+    )
+}
+
+pub(crate) fn stage_packed_coordinator_prefix_on_journal<F, W, E, I>(
+    scope: NamespaceRef,
+    journal: &mut uste_storage::journal::JournalStore<F, W, E, I>,
+    fs: &mut F,
+    base: Option<&PackedCoordinatorPrefix>,
+    transaction: &RecoveredFrontierTransaction,
+    limits: PackedCoordinatorLimits,
+) -> Result<(PackedCoordinatorPrefix, PackedCoordinatorReport), TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if transaction.scope != scope
         || base.is_none() && transaction.revision != CommitRevision::FIRST
         || base.is_some_and(|b| {
-            b.scope != recovery.scope()
-                || b.anchor.0.checked_next().ok() != Some(transaction.revision)
+            b.scope != scope || b.anchor.0.checked_next().ok() != Some(transaction.revision)
         })
     {
         return Err(TransactionError::IntegrityFailure);
@@ -212,7 +236,8 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
-    let mut maintenance = recovery.packed_indexes_with_io(fs, transaction, limits.certificates)?;
+    let mut maintenance =
+        transaction.packed_maintenance(scope, journal, fs, limits.certificates)?;
     let mut report = PackedCoordinatorReport::default();
     let mut deltas: [Vec<IndexDelta>; 4] = core::array::from_fn(|_| Vec::new());
     for (index, delta) in deltas.iter_mut().enumerate() {

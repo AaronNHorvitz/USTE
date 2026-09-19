@@ -150,7 +150,33 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    if primary.scope != recovery.scope()
+    stage_packed_quota_prefix_on_journal(
+        recovery.scope(),
+        &mut recovery.journal,
+        fs,
+        before,
+        primary,
+        transaction,
+        limits,
+    )
+}
+
+pub(crate) fn stage_packed_quota_prefix_on_journal<F, W, E, I>(
+    scope: NamespaceRef,
+    journal: &mut JournalStore<F, W, E, I>,
+    fs: &mut F,
+    before: Option<&PackedQuotaPrefix>,
+    primary: &PackedCoordinatorPrefix,
+    transaction: &RecoveredFrontierTransaction,
+    limits: PackedCoordinatorLimits,
+) -> Result<(PackedQuotaPrefix, PackedQuotaReport), TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if primary.scope != scope
         || transaction.scope != primary.scope
         || primary.anchor != (transaction.revision, transaction.certificate_digest)
         || before.is_none() && transaction.revision != CommitRevision::FIRST
@@ -171,7 +197,8 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
-    let mut maintenance = recovery.packed_indexes_with_io(fs, transaction, limits.certificates)?;
+    let mut maintenance =
+        transaction.packed_maintenance(scope, journal, fs, limits.certificates)?;
     let mut report = PackedQuotaReport::default();
     // Bind the supplied primary capability even when the inventory is empty.
     let (outcome, work) = primary.retry(
