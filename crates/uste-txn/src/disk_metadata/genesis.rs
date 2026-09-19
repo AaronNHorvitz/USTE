@@ -3,6 +3,75 @@ use super::*;
 use crate::RecoveredGenesis;
 use uste_storage::{IndexDelta, IndexRunMergeLimits};
 
+/// Stage optional earliest-reference evidence for a reconstructed first transaction.
+/// Empty inventories require no witness root. The result is private and must be independently
+/// admitted with the matching primary candidates, never used as consumer authority.
+pub fn stage_genesis_first_references<S, F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    genesis: &RecoveredGenesis<S>,
+    maximum_blob_owners: u64,
+    limits: IndexRunMergeLimits,
+) -> Result<Option<RecoveredIndexRoot>, TransactionError>
+where
+    S: CheckpointState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let transaction = genesis.transaction();
+    let state = genesis.state();
+    if transaction.scope != recovery.scope()
+        || transaction.revision != CommitRevision::FIRST
+        || state.current_checkpoint_scope() != recovery.scope()
+        || state.current_checkpoint_revision() != Some(CommitRevision::FIRST)
+    {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    let references = transaction
+        .blob_inventory
+        .as_ref()
+        .map_or(&[][..], |inventory| inventory.references());
+    if references.len() as u64 > maximum_blob_owners
+        || maximum_blob_owners > MAX_COMMITTED_BLOBS_PER_JOURNAL as u64
+    {
+        return Err(TransactionError::ResourceLimit);
+    }
+    if references.is_empty() {
+        return Ok(None);
+    }
+    let input = IndexRootInput {
+        scope: recovery.scope(),
+        revision: CommitRevision::FIRST,
+        certificate_digest: *transaction.certificate_digest(),
+        reducer_profile: S::REDUCER_PROFILE,
+        logical_state_digest: state
+            .current_logical_state_digest()
+            .map_err(checkpoint_error)?,
+        index_profile: COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+    };
+    let mut stage = recovery.stage_indexes_with_io(filesystem, transaction)?;
+    let merged = stage.merge_index_run_visit(
+        filesystem,
+        CommitRevision::FIRST,
+        COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+        1,
+        None,
+        limits,
+        references.iter().map(|reference| {
+            IndexDelta::new(
+                reference.id().as_bytes().to_vec(),
+                None,
+                Some(1_u64.to_be_bytes().to_vec()),
+            )
+        }),
+        &mut |_, _| Ok(()),
+    )?;
+    let run = rebase::exact_merged_run(merged, references.len() as u64, references.len())?;
+    Ok(Some(stage.finish(input, &[run])?.read_root().clone()))
+}
+
 /// Stage retry and transaction-ID roots for a reconstructed inventory-free first revision.
 /// Nothing is published to discoverable root slots. Both candidates must undergo the normal
 /// independent journal admission before use, and only terminal recovery may publish roots.

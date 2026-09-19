@@ -148,6 +148,9 @@ owner family at every step. Attached first-reference/quota projections explicitl
 path; ordinary general recovery remains available. Decision 0122 adds bounded inventory-bearing
 genesis reconstruction and private primary owner candidates, completing this primary-only origin
 path with independent admission. Optional projection maintenance and scaling remain open.
+Decision 0123 adds explicit first-reference-preserving streaming recovery and private genesis
+witness staging. Earliest claims are retained with only current-inventory deltas; populated bases
+without admitted witnesses refuse. Quota-preserving streaming and rewrite/accounting scale remain open.
 
 ## Indexing and bounded resources
 

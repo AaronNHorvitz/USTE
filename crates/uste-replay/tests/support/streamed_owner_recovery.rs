@@ -1,4 +1,6 @@
 use super::*;
+#[path = "streamed_owner_recovery/first_references.rs"]
+mod first_references;
 use uste_storage::fault::{FaultAction, FaultFileSystem, FaultPlan, FaultPoint, Operation};
 use uste_storage::journal::StorageError;
 use uste_storage::{BlobReference, FileSystem, IndexGetLimits, IndexRunReadLimits, PageCache};
@@ -156,6 +158,14 @@ fn fixture_options(
     roots: bool,
     last: u8,
 ) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
+    fixture_projection(initial_owner, roots, last, false)
+}
+fn fixture_projection(
+    initial_owner: bool,
+    roots: bool,
+    last: u8,
+    first: bool,
+) -> (Fs, EntryName, Anchored, [BlobReference; 2]) {
     let name = EntryName::new("streamed-primary-owners").unwrap();
     let mut fs = Fs::new(MemoryFileSystem::default(), FaultPlan::default());
     let vault = KeyVault::create(
@@ -215,6 +225,18 @@ fn fixture_options(
             if roots {
                 publish_coordinator_metadata_root(&mut coordinator, &mut fs).unwrap();
                 uste_txn::publish_coordinator_transaction_index(&mut coordinator, &mut fs).unwrap();
+                if first && initial_owner {
+                    uste_txn::publish_coordinator_first_reference_index(
+                        &mut coordinator,
+                        &mut fs,
+                        uste_txn::CoordinatorFirstReferenceLimits {
+                            maximum_owners: 1,
+                            maximum_groups: 1,
+                            maximum_encoded_bytes: 1_000_000,
+                        },
+                    )
+                    .unwrap();
+                }
             }
             base = Some(Anchored {
                 state: coordinator.read_view().unwrap().state().clone(),
@@ -281,6 +303,24 @@ fn admit_roots(
     first: bool,
 ) -> CoordinatorDiskBase {
     let revision = candidate.revision();
+    let first = first.then(|| {
+        recovery
+            .load_index_root_manifests(fs, uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1)
+            .unwrap()
+            .into_iter()
+            .find(|r| r.revision() == revision)
+            .unwrap()
+    });
+    admit_roots_with_first(fs, recovery, root, candidate, first)
+}
+fn admit_roots_with_first(
+    fs: &mut Fs,
+    recovery: &Recovery,
+    root: uste_storage::RecoveredIndexRoot,
+    candidate: uste_txn::CoordinatorMetadataCandidate,
+    first: Option<uste_storage::RecoveredIndexRoot>,
+) -> CoordinatorDiskBase {
+    let revision = candidate.revision();
     let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
         recovery,
         fs,
@@ -304,16 +344,10 @@ fn admit_roots(
         )
         .unwrap(),
         lookup: lookup(),
-        maximum_total_journal_groups: revision.get() * 3,
+        maximum_total_journal_groups: revision.get() * if first.is_some() { 1 } else { 3 },
         maximum_encoded_bytes_per_pass: 1_000_000,
     };
-    if first {
-        let root = recovery
-            .load_index_root_manifests(fs, uste_txn::COORDINATOR_FIRST_REFERENCE_PROFILE_V1)
-            .unwrap()
-            .into_iter()
-            .find(|r| r.revision() == revision)
-            .unwrap();
+    if let Some(root) = first {
         uste_txn::admit_coordinator_disk_base_with_first_references(
             recovery,
             fs,

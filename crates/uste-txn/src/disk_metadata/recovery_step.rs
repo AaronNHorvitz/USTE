@@ -12,6 +12,7 @@ pub(crate) fn stage_primary_metadata_step<F, W, E, I>(
     input: IndexRootInput,
     limits: IndexRunMergeLimits,
     owners: &BTreeMap<BlobId, (BlobReference, PrincipalDigest)>,
+    preserve_first_references: bool,
 ) -> Result<(CoordinatorDiskBase, InventoryFreeMetadataRecoveryReport), TransactionError>
 where
     F: OwnershipFileSystem,
@@ -19,7 +20,8 @@ where
     E: EntropySource,
     I: EntropySource,
 {
-    if base.first_references.is_some()
+    if (!preserve_first_references && base.first_references.is_some())
+        || (preserve_first_references && base.owner_count() != 0 && base.first_references.is_none())
         || base.usage.is_some()
         || transaction.scope != recovery.scope()
         || input.scope != recovery.scope()
@@ -126,11 +128,46 @@ where
         .read_root()
         .clone();
     report.revisions = 1;
+    let first_references = if preserve_first_references && owner_count != 0 {
+        let mut stage = recovery.stage_indexes_with_io(filesystem, transaction)?;
+        let merged = stage.merge_index_run_visit(
+            filesystem,
+            input.revision,
+            COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+            1,
+            base.first_references.as_ref(),
+            limits,
+            owners.keys().map(|id| {
+                IndexDelta::new(
+                    id.as_bytes().to_vec(),
+                    None,
+                    Some(input.revision.get().to_be_bytes().to_vec()),
+                )
+            }),
+            &mut |_, _| Ok(()),
+        )?;
+        report.add_run(&merged.report)?;
+        let run = rebase::exact_merged_run(merged, owner_count, owners.len())?;
+        Some(
+            stage
+                .finish(
+                    IndexRootInput {
+                        index_profile: COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+                        ..input
+                    },
+                    &[run],
+                )?
+                .read_root()
+                .clone(),
+        )
+    } else {
+        None
+    };
     Ok((
         CoordinatorDiskBase {
             metadata,
             transactions: CoordinatorTransactionIndex { root: transactions },
-            first_references: None,
+            first_references,
             usage: None,
         },
         report,

@@ -9,8 +9,8 @@ pub struct InventoryFreeMetadataRecoveryLimits {
     pub merge: IndexRunMergeLimits,
 }
 
-/// Paired-base primary metadata recovery bounds. Optional first-reference/quota projections
-/// are not maintained by this path and must not be attached to the admitted base.
+/// Paired-base metadata recovery bounds. The chosen entry point determines which optional
+/// projections are maintained; omitted attached projections must never be silently dropped.
 #[derive(Clone, Copy, Debug)]
 pub struct PrimaryMetadataRecoveryLimits {
     pub maximum_revisions: u64,
@@ -21,6 +21,13 @@ pub struct PrimaryMetadataRecoveryLimits {
 
 /// Diagnostics for private primary metadata staging, with the same partial-I/O semantics.
 pub type PrimaryMetadataRecoveryReport = InventoryFreeMetadataRecoveryReport;
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum MetadataMode {
+    InventoryFree,
+    Primary,
+    FirstReferences,
+}
 
 /// Trusted private-merge diagnostics, not consumer cardinalities or complete physical I/O.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -96,7 +103,7 @@ where
                 maximum_inventory_references: 0,
                 merge: metadata_limits.merge,
             },
-            false,
+            MetadataMode::InventoryFree,
             cache,
             domain,
         )
@@ -126,7 +133,37 @@ where
             retention,
             limits,
             metadata_limits,
-            true,
+            MetadataMode::Primary,
+            cache,
+            domain,
+        )
+    }
+
+    /// Preserve first-reference evidence while privately staging each suffix revision.
+    /// An owner-free base can bootstrap evidence; a populated base must already have independently
+    /// admitted first references. Quota projections still refuse. Fresh writes require the usual
+    /// first-reference-preserving terminal metadata rebase.
+    #[allow(clippy::too_many_arguments)]
+    pub fn recover_with_first_reference_streaming_domain<D: DiskRecoveryDomain<S, F, W, E, I>>(
+        recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+        filesystem: &mut F,
+        base: CoordinatorDiskBase,
+        state: S,
+        retention: RetentionDays,
+        limits: DiskCoordinatorRecoveryLimits,
+        metadata_limits: PrimaryMetadataRecoveryLimits,
+        cache: &mut PageCache,
+        domain: &mut D,
+    ) -> Result<(Self, PrimaryMetadataRecoveryReport), TransactionError> {
+        Self::recover_primary_metadata(
+            recovery,
+            filesystem,
+            base,
+            state,
+            retention,
+            limits,
+            metadata_limits,
+            MetadataMode::FirstReferences,
             cache,
             domain,
         )
@@ -141,7 +178,7 @@ where
         retention: RetentionDays,
         limits: DiskCoordinatorRecoveryLimits,
         metadata_limits: PrimaryMetadataRecoveryLimits,
-        inventories: bool,
+        mode: MetadataMode,
         cache: &mut PageCache,
         domain: &mut D,
     ) -> Result<(Self, PrimaryMetadataRecoveryReport), TransactionError> {
@@ -165,8 +202,10 @@ where
         {
             return Err(TransactionError::IntegrityFailure);
         }
-        if (!inventories && base.owner_count() != 0)
-            || base.has_first_reference_evidence()
+        let first_references = mode == MetadataMode::FirstReferences;
+        if (mode == MetadataMode::InventoryFree && base.owner_count() != 0)
+            || (!first_references && base.has_first_reference_evidence())
+            || (first_references && base.owner_count() != 0 && !base.has_first_reference_evidence())
             || base.has_blob_usage_index()
         {
             return Err(TransactionError::InvalidRequest);
@@ -198,7 +237,7 @@ where
             while let Some(transaction) =
                 recovery.next_recovered_transaction(filesystem, &mut cursor)?
             {
-                if !inventories && transaction.blob_inventory.is_some() {
+                if mode == MetadataMode::InventoryFree && transaction.blob_inventory.is_some() {
                     return Err(TransactionError::InvalidRequest);
                 }
                 let mut owners = BTreeMap::new();
@@ -293,6 +332,7 @@ where
                     input,
                     metadata_limits.merge,
                     &owners,
+                    first_references,
                 )?;
                 report.add(&step)?;
                 base = next;

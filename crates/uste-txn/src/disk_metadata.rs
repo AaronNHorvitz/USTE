@@ -19,7 +19,10 @@ pub use first_reference::{
     COORDINATOR_FIRST_REFERENCE_PROFILE_V1, CoordinatorFirstReferenceLimits,
     publish_coordinator_first_reference_index,
 };
-pub use genesis::{stage_inventory_free_genesis_metadata, stage_primary_genesis_metadata};
+pub use genesis::{
+    stage_genesis_first_references, stage_inventory_free_genesis_metadata,
+    stage_primary_genesis_metadata,
+};
 pub use rebase::CoordinatorMetadataRebaseLimits;
 pub(crate) use rebase::publish_overlay_base;
 pub(crate) use recovery_step::stage_primary_metadata_step;

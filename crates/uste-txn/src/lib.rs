@@ -37,8 +37,8 @@ pub use disk_metadata::{
     load_coordinator_metadata_candidates_for_recovery, load_coordinator_transaction_indexes,
     publish_coordinator_first_reference_index, publish_coordinator_metadata_root,
     publish_coordinator_transaction_index, reconstruct_coordinator_metadata_seed,
-    reconstruct_coordinator_metadata_seed_for_recovery, stage_inventory_free_genesis_metadata,
-    stage_primary_genesis_metadata,
+    reconstruct_coordinator_metadata_seed_for_recovery, stage_genesis_first_references,
+    stage_inventory_free_genesis_metadata, stage_primary_genesis_metadata,
 };
 pub use index_recovery::{
     AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredGenesis,

@@ -58,6 +58,36 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `c8dff73` plus this increment: [Decision 0123](docs/decisions/0123-streamed-first-reference-recovery.md)
+  preserves admitted first-reference evidence during private per-revision metadata staging and
+  supplies bounded private genesis witnesses. Empty-owner bases may bootstrap; populated bases
+  without admitted witnesses refuse before I/O. Quota projections still explicitly refuse.
+  Five tests cross ordinary/origin and empty/populated bases with zero/three suffix steps, pin
+  exact earliest revisions and 15 runs/33 entries/3,657 logical bytes, rebase with zero suffix
+  allowances and independently cold-admit with one correspondence pass. Fault schedules cover
+  27 genesis failures, 678 suffix cases (675 failures/three optional no-crash boundaries) and
+  552 terminal-publication cases (540 failures/twelve optional no-crash boundaries).
+  Focused scopes `run-p461588-i21448389.scope` (4 tests/17.13s),
+  `run-p462479-i21389843.scope` (publication matrix/15.55s) and strict workspace lint
+  `run-p462072-i21464476.scope` (6.17s) exited 0. Final scope
+  `run-p462925-i21428100.scope` exited 0 under MemoryHigh=3G, MemoryMax=4G,
+  MemorySwapMax=512M, one Cargo job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 425 tests/46 executables, no failures/ignores
+  (graph disk 24/28.33s, replay 42/56.68s, storage 123/18.49s, M1 process 2/2.69s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 58 active units/45.21s, BM-01 process 3/11.88s,
+  BM-06 CLI 2/0.50s and BM-06 process 8/73.85s; two prior exact-oracle ignores unchanged.
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` (0.28s), `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path
+  experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings` (2.29s)
+  and `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked
+  --offline` (0.98s) pass. Preflight 35 GiB available RAM/3.9 GiB free swap; sampled peak
+  1,540,292,608 bytes/zero swap, not final whole-run peak. Formatting/whitespace, docs (197 links)
+  and task graph (68 tasks) pass. M1 sources/locks unchanged; no qualification campaign.
+  Next: quota-preserving streaming, then immutable-run scaling/accounting and qualification.
+
 - Implemented on pushed `95fafcc` plus this increment: [Decision 0122](docs/decisions/0122-inventory-bearing-genesis-reconstruction.md)
   reconstructs one bounded inventory-bearing first transaction and streams unpublished primary
   retry/transaction/owner candidates. Independent journal admission remains mandatory; closed
@@ -2424,8 +2454,8 @@ remaining mixed workload have not passed.
 Current action: T-20 remains the priority. Decisions 0108–0120, including the retained native
 20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
 `3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
-suffix staging and bounded inventory-bearing genesis bootstrap. Next maintain optional
-owner projections on the streaming path, then address immutable-family rewrite scaling and
+suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
+references on that path. Next maintain quota projections, then address immutable-family rewrite scaling and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.
