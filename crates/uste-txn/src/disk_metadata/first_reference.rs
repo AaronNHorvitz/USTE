@@ -7,7 +7,8 @@ pub const COORDINATOR_FIRST_REFERENCE_PROFILE_V1: [u8; 32] = [
     0xdc, 0x97, 0x59, 0xea, 0x2a, 0x11, 0xec, 0xa0, 0xbf, 0xd3, 0xfb, 0x79, 0x15, 0x15, 0xf2, 0x1d,
 ];
 
-/// Bounds for the legacy bridge's temporary owner map and single journal pass.
+/// Bounds for a temporary first-reference map and single journal pass. The legacy publisher
+/// scans the full prefix; disk rebase scans only the post-base suffix and retains new owners.
 #[derive(Clone, Copy, Debug)]
 pub struct CoordinatorFirstReferenceLimits {
     pub maximum_owners: usize,

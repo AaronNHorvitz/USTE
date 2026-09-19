@@ -51,12 +51,32 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0073 retains admitted first-reference roots and advances them with one authenticated,
+  owner/group/byte-bounded suffix pass plus a native insertion-only merge. Three-root publication
+  retains the old base/overlays until terminal success; exact retry and cold repair survive every
+  observed create/write/length/file-sync/directory-sync/removal fault (error, crash-before/after).
+  Tests also cover owner-free bootstrap, an owner-free suffix, unchanged first ownership and
+  short suffix budgets. Initial removal testing used an absent fallback slot, where the fault
+  adapter correctly does not crash after `NotFound`; strengthened the fixture to populate both
+  slots rather than weakening the assertion. Targeted two-test matrix passed in 67.24 seconds,
+  followed by strict txn/replay all-target clippy. Full repository gate passed:
+  `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc
+  'CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_NET_OFFLINE=true bash scripts/check.sh'` exited 0.
+  Workspace all-feature tests/lint/docs, M1 process tests, docs/task/dependency/vector checks and
+  the experiment's 31 tests passed (two pre-existing exact-profile oracle tests remain ignored).
+  Replay checkpoint suite: 9 passed. Last sampled cgroup peak was 1,500,987,392 bytes and zero
+  swap, not a final peak measurement. Docs/task checks: 146 links, 68 tasks. The unreferenced
+  next-increment benchmark adapter draft is excluded from this tested/committed increment.
+  Next: connect the disk coordinator/live graph/authorized read-write path to the benchmark
+  driver, which still uses full `GraphState`; preserve fixture/oracle/budget profiles and keep
+  development evidence nonqualifying. Storage-resident metadata and BM-06 remain open.
+
 - Decision 0072 adds optional authenticated first-reference evidence and single-journal-pass
   first-owner admission without reconstructing an owner comparator map. Existing compatibility
   admission remains unchanged. The legacy bridge publisher explicitly bounds its temporary map
   and replay; it is not a disk-backed incremental builder. Tests reject false earlier/later
   revisions, absent IDs, malformed values, wrong owners and short budgets, and fail closed at
-  every observed cold-admission read fault. Warm metadata rebase does not yet maintain this proof.
+  every observed cold-admission read fault. Warm maintenance followed in Decision 0073 above.
   Capped validation (one build job/thread; MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M):
   `CARGO_BUILD_JOBS=1 cargo test -p uste-replay -p uste-txn -p uste-graph --all-targets --locked
   --offline -- --test-threads=1`, `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets
@@ -1113,8 +1133,9 @@ comparator map. Decision 0061 pairs retry, transaction and owner indexes into an
 metadata base with exact first-owner proofs and explicit read amplification. That base is now
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
-next maintain Decision 0072's single-pass first-reference evidence across disk metadata rebase
-and remove remaining resident storage metadata. Decision 0071 supplies bounded authorized upload
+Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
+Next connect the benchmark driver to the implemented disk path and remove remaining resident
+storage metadata. Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference
 publisher remains a bounded legacy bridge, not larger-than-memory construction.

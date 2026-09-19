@@ -395,6 +395,7 @@ where
         for profile in [
             COORDINATOR_METADATA_PROFILE_V1,
             COORDINATOR_TRANSACTION_PROFILE_V1,
+            COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
         ] {
             rebase_required |= recovery
                 .load_index_root_manifests(filesystem, profile)?
@@ -487,6 +488,7 @@ where
 
     /// Stream the admitted base plus bounded overlays into current-revision metadata roots.
     /// The old base and all overlays remain installed until both root publications succeed.
+    /// Bases retaining first-reference evidence require the explicit suffix-bounded variant.
     pub fn rebase_metadata(
         &mut self,
         filesystem: &mut F,
@@ -496,12 +498,52 @@ where
         S: DiskCoordinatorState,
     {
         self.inner.checkpoint_anchor()?;
+        if self.base.first_references.is_some() {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.rebase_metadata_internal(filesystem, limits, None)
+    }
+
+    /// Preserve first-reference evidence while rebasing, or bootstrap it from an owner-free base.
+    /// The extra limits bound a single post-base journal pass and its new-owner ID/revision map.
+    /// A legacy base with existing owners needs independently admitted evidence first.
+    pub fn rebase_metadata_with_first_references(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorMetadataRebaseLimits,
+        suffix: CoordinatorFirstReferenceLimits,
+    ) -> Result<(), TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
+        if self.base.first_references.is_none() && self.base.owner_count() != 0 {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.rebase_metadata_internal(filesystem, limits, Some(suffix))
+    }
+
+    fn rebase_metadata_internal(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorMetadataRebaseLimits,
+        first_references: Option<CoordinatorFirstReferenceLimits>,
+    ) -> Result<(), TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
         if self.inner.outcomes.is_empty() && !self.rebase_required {
             return Ok(());
         }
         self.rebase_required = true;
-        let next =
-            disk_metadata::publish_overlay_base(&mut self.inner, filesystem, &self.base, limits)?;
+        let next = disk_metadata::publish_overlay_base(
+            &mut self.inner,
+            filesystem,
+            &self.base,
+            limits,
+            first_references,
+        )?;
         self.base = next;
         self.inner.outcomes.clear();
         self.inner.transactions.clear();

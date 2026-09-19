@@ -22,6 +22,7 @@ pub struct CoordinatorDiskAdmissionLimits {
 pub struct CoordinatorDiskBase {
     pub(crate) metadata: RecoveredIndexRoot,
     pub(crate) transactions: CoordinatorTransactionIndex,
+    pub(crate) first_references: Option<RecoveredIndexRoot>,
 }
 
 impl CoordinatorDiskBase {
@@ -99,6 +100,11 @@ impl CoordinatorDiskBase {
 
     pub fn transaction_index(&self) -> &CoordinatorTransactionIndex {
         &self.transactions
+    }
+
+    /// Whether this base retains admitted single-pass first-owner evidence for bounded rebase.
+    pub fn has_first_reference_evidence(&self) -> bool {
+        self.first_references.is_some()
     }
 
     /// Trusted recovery-only raw retry lookup at this immutable base, including expired entries.
@@ -549,6 +555,7 @@ where
     Ok(CoordinatorDiskBase {
         metadata: candidate.root,
         transactions,
+        first_references: first_references.map(|(root, _)| root),
     })
 }
 

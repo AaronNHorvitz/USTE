@@ -6,6 +6,8 @@ use uste_crypto::{
 mod disk_commit_check;
 #[path = "support/first_reference.rs"]
 mod first_reference;
+#[path = "support/first_reference_rebase.rs"]
+mod first_reference_rebase;
 use uste_replay::{ReplayError, capture_coordinator_checkpoint, decode_coordinator_checkpoint};
 use uste_storage::{
     BlobInventory, CheckpointInput, Clock, ClockObservation, EntryName, IndexEntry, IndexRootInput,

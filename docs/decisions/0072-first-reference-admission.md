@@ -2,7 +2,8 @@
 
 Date: 2026-09-18
 
-Status: T-20 partial implementation; incremental maintenance and qualification remain open.
+Status: T-20 partial implementation. [Decision 0073](0073-first-reference-rebase.md) subsequently
+adds incremental maintenance; qualification remains open.
 
 Add the optional native encrypted index profile `coordinator-first-reference-v1`, identified by
 SHA-256 of `USTE coordinator-first-reference-v1`:
@@ -35,7 +36,7 @@ own pass/budgets. Existing callers can use the compatibility admission path; it 
 streams one authenticated prefix while retaining a caller-bounded temporary ID/revision map,
 compares it with the legacy first-owner map, then publishes the sorted native encrypted run/root.
 It is not a larger-than-memory builder. Root publication uses existing certificate binding and
-durability rules. Disk overlays/rebase do not yet maintain this optional evidence: after rebase,
+durability rules. At introduction, disk overlays/rebase did not maintain this optional evidence: after rebase,
 an old proof cannot admit a newer root. That next implementation remains required, along with
 removal of storage's resident certificate/blob metadata and qualifying BM-01/BM-06 campaigns.
 

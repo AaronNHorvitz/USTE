@@ -1,10 +1,11 @@
-//! Streaming overlay publication with retry-safe reuse of a partially published root pair.
+//! Streaming overlay publication with retry-safe reuse of a partially published root set.
 
 use super::*;
 use uste_storage::{IndexDelta, IndexRunDescriptor, IndexRunMergeLimits};
 
 /// Per-family merge and root verification limits (reuse and fallback-slot selection). Three data families
-/// and one fixed metadata entry are processed; these bounds are not aggregate across families.
+/// and one fixed metadata entry are processed, plus an optional first-reference family.
+/// These bounds are not aggregate across families.
 #[derive(Clone, Copy, Debug)]
 pub struct CoordinatorMetadataRebaseLimits {
     pub merge: IndexRunMergeLimits,
@@ -16,6 +17,7 @@ pub(crate) fn publish_overlay_base<S, F, W, E, I>(
     filesystem: &mut F,
     base: &CoordinatorDiskBase,
     limits: CoordinatorMetadataRebaseLimits,
+    first_reference_limits: Option<CoordinatorFirstReferenceLimits>,
 ) -> Result<CoordinatorDiskBase, TransactionError>
 where
     S: crate::DiskCoordinatorState,
@@ -31,9 +33,17 @@ where
         .state
         .metadata_publication_input(anchor)
         .map_err(crate::map_apply_error)?;
+    if (base.first_references.is_some() && first_reference_limits.is_none())
+        || (first_reference_limits.is_some()
+            && base.first_references.is_none()
+            && base.owner_count() != 0)
+    {
+        return Err(TransactionError::InvalidRequest);
+    }
     for profile in [
         COORDINATOR_METADATA_PROFILE_V1,
         COORDINATOR_TRANSACTION_PROFILE_V1,
+        COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
     ] {
         if coordinator
             .load_index_root_manifests(filesystem, profile)?
@@ -75,6 +85,9 @@ where
     if owner_count > MAX_COMMITTED_BLOBS_PER_JOURNAL as u64 {
         return Err(TransactionError::ResourceLimit);
     }
+    let first_references = first_reference_limits
+        .map(|suffix| first_reference_overlay(coordinator, filesystem, base, anchor.0, suffix))
+        .transpose()?;
     let retry_deltas = coordinator.outcomes.iter().map(|(key, outcome)| {
         let entry = encode_outcome(key.principal, key.key, *outcome)?;
         IndexDelta::new(entry.key, None, Some(entry.value))
@@ -170,6 +183,34 @@ where
             coordinator.committed_blob_owners.len(),
         )?);
     }
+    let first_run = if let Some(first) = first_references
+        && owner_count != 0
+    {
+        let insertions = first.len();
+        let deltas = first.into_iter().map(|(id, revision)| {
+            IndexDelta::new(
+                id.as_bytes().to_vec(),
+                None,
+                Some(revision.get().to_be_bytes().to_vec()),
+            )
+        });
+        let merged = coordinator
+            .journal
+            .merge_index_run(
+                filesystem,
+                coordinator.scope,
+                anchor.0,
+                COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+                1,
+                base.first_references.as_ref(),
+                limits.merge,
+                deltas,
+            )
+            .map_err(TransactionError::Storage)?;
+        Some(exact_merged_run(merged, owner_count, insertions)?)
+    } else {
+        None
+    };
     let metadata = publish_or_reuse(coordinator, filesystem, input, &runs, limits.reuse)?;
     let transactions = publish_or_reuse(
         coordinator,
@@ -181,10 +222,102 @@ where
         &[transaction],
         limits.reuse,
     )?;
+    let first_references = first_run
+        .map(|run| {
+            publish_or_reuse(
+                coordinator,
+                filesystem,
+                IndexRootInput {
+                    index_profile: COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+                    ..input
+                },
+                &[run],
+                limits.reuse,
+            )
+        })
+        .transpose()?;
     Ok(CoordinatorDiskBase {
         metadata,
         transactions: CoordinatorTransactionIndex { root: transactions },
+        first_references,
     })
+}
+
+fn first_reference_overlay<S, F, W, E, I>(
+    coordinator: &CommitCoordinator<S, F, W, E, I>,
+    filesystem: &mut F,
+    base: &CoordinatorDiskBase,
+    frontier: CommitRevision,
+    limits: CoordinatorFirstReferenceLimits,
+) -> Result<BTreeMap<BlobId, CommitRevision>, TransactionError>
+where
+    S: TransactionState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    if coordinator.committed_blob_owners.len() > limits.maximum_owners
+        || limits.maximum_owners > MAX_COMMITTED_BLOBS_PER_JOURNAL
+    {
+        return Err(TransactionError::ResourceLimit);
+    }
+    let mut first = BTreeMap::new();
+    if base.metadata.revision() < frontier {
+        let start = CommitRevision::new(base.metadata.revision().get() + 1)
+            .map_err(|_| TransactionError::IntegrityFailure)?;
+        coordinator
+            .journal
+            .visit_committed_range(
+                filesystem,
+                start,
+                frontier,
+                limits.maximum_groups,
+                limits.maximum_encoded_bytes,
+                |_, group| {
+                    if crate::sha256(group.encoded_group) != group.logical_event_digest {
+                        return Err(StorageError::IntegrityFailure);
+                    }
+                    let decoded = crate::decode_group(
+                        coordinator.scope,
+                        group.encoded_group,
+                        group.revision,
+                        group.blob_inventory_digest,
+                        group.blob_inventory,
+                    )
+                    .map_err(|_| StorageError::IntegrityFailure)?;
+                    if let Some(inventory) = decoded.blob_inventory {
+                        for reference in inventory.references() {
+                            // Existing-base references were already checked at admission/commit.
+                            // Only disjoint, bounded new-owner overlays need new first-revision evidence.
+                            let Some(expected) = coordinator
+                                .committed_blob_owners
+                                .get(&(reference.scope(), reference.id()))
+                            else {
+                                continue;
+                            };
+                            if expected.0 != *reference {
+                                return Err(StorageError::IntegrityFailure);
+                            }
+                            if let std::collections::btree_map::Entry::Vacant(entry) =
+                                first.entry(reference.id())
+                            {
+                                if expected.1 != decoded.retry_key.principal {
+                                    return Err(StorageError::IntegrityFailure);
+                                }
+                                entry.insert(group.revision);
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(TransactionError::Storage)?;
+    }
+    if first.len() != coordinator.committed_blob_owners.len() {
+        return Err(TransactionError::IntegrityFailure);
+    }
+    Ok(first)
 }
 
 fn exact_merged_run(
