@@ -51,6 +51,26 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0071 adds `AuthorizedDiskUploads`: bounded staging-only reservations, fail-closed
+  complete-outbox reconciliation, private disk owner lookup and exact streaming committed charges.
+  Unknown recovered staging is explicitly marked incomplete. Graph inventory rejection remains;
+  finalized uncommitted blobs cannot be aborted or silently freed. No task checkbox changed.
+  Owner identity lookup is tested against the original first owner and after metadata rebase.
+  Upload tests cover exact 1 MiB quota/one-byte refusal, eight live handles, 32 unresolved
+  reservations, durable resume/abort, finalization retention, duplicate outbox rejection, and an
+  injected reconciliation read failure with authorization before I/O. The initial fixture wrongly
+  expected abort after finalization; corrected the fixture, not immutable-blob semantics.
+  Validation: under `systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G
+  -p MemorySwapMax=512M`, `CARGO_BUILD_JOBS=1 cargo test -p uste-graph -p uste-txn -p uste-replay
+  --all-targets --locked --offline -- --test-threads=1` and `CARGO_BUILD_JOBS=1 cargo clippy
+  --workspace --all-targets --all-features --locked --offline -- -D warnings` passed. After adding
+  the reconciliation fault assertion, reran the graph disk expansion fixture and graph all-target
+  clippy under the same cap: passed. `cargo fmt --all`, docs and task checks passed (144 links,
+  68 tasks). Preflight: 37 GiB available RAM, 3.9 GiB free swap; no qualifying benchmark run.
+  Next: scalable authenticated first-owner admission and remaining storage metadata bottlenecks;
+  inventory commit must retain domain contracts (graph explicitly prohibits inventories), and
+  needs a domain-compatible authorized staging-to-certified-charge transfer capability.
+
 - Added 81 graph terminal-publication model faults: every create (5), write (6), length change
   (5), file sync (5) and directory sync (6), each with error/crash-before/crash-after. Every fault
   fires. Failed publication preserves pending state, overlays and exact journal anchor;

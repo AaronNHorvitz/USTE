@@ -1659,6 +1659,16 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
         .unwrap(),
         Some(principal)
     );
+    assert_eq!(
+        disk.committed_blob_metadata(
+            &mut filesystem,
+            reference.id(),
+            lookup_limits,
+            &mut transaction_cache
+        )
+        .unwrap(),
+        Some((reference, principal))
+    );
     drop(disk);
     filesystem.restart().unwrap();
     let (recovered, _) = CommitCoordinator::open(
@@ -1876,6 +1886,17 @@ fn encrypted_metadata_root_seeds_exact_prefix_and_replays_suffix() {
             recovered
                 .rebase_metadata(&mut filesystem, metadata_rebase_limits())
                 .unwrap();
+            assert_eq!(
+                recovered
+                    .committed_blob_metadata(
+                        &mut filesystem,
+                        new_reference.id(),
+                        lookup_limits,
+                        &mut transaction_cache
+                    )
+                    .unwrap(),
+                Some((new_reference, PrincipalDigest::from_bytes([4; 32])))
+            );
             assert_eq!(recovered.overlay_counts(), (0, 0));
             assert_eq!(
                 recovered

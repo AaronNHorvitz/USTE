@@ -709,23 +709,35 @@ where
         if reference.scope() != self.inner.scope {
             return Err(TransactionError::InvalidRequest);
         }
-        let owner = match self
-            .inner
-            .committed_blob_owners
-            .get(&(reference.scope(), reference.id()))
-        {
-            Some(value) => Some(*value),
-            None => self.base.owner_from_journal(
-                &self.inner.journal,
-                filesystem,
-                reference.id(),
-                lookup,
-                cache,
-            )?,
-        };
+        let owner = self.committed_blob_metadata(filesystem, reference.id(), lookup, cache)?;
         Ok(owner
             .filter(|(stored, _)| *stored == reference)
             .map(|(_, principal)| principal))
+    }
+
+    /// Privileged namespace-fixed identity lookup for complete upload-outbox reconciliation.
+    /// This exposes first-owner metadata, not permission to read or commit the blob.
+    pub fn committed_blob_metadata(
+        &self,
+        filesystem: &mut F,
+        id: BlobId,
+        lookup: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<Option<(BlobReference, PrincipalDigest)>, TransactionError> {
+        if self.inner.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        match self
+            .inner
+            .committed_blob_owners
+            .get(&(self.inner.scope, id))
+        {
+            Some(value) => Ok(Some(*value)),
+            None => {
+                self.base
+                    .owner_from_journal(&self.inner.journal, filesystem, id, lookup, cache)
+            }
+        }
     }
 
     pub fn reducer_and_index_maintenance(

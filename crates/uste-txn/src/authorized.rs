@@ -1,5 +1,8 @@
 //! Mandatory policy facade over the trusted raw transaction coordinator.
 
+mod disk_uploads;
+pub use disk_uploads::{AuthorizedDiskUploads, DiskUploadUsage};
+
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex, MutexGuard},

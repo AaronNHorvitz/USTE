@@ -8,6 +8,8 @@ use uste_storage::fault::{
 };
 use uste_txn::{AuthorizedDiskReader, AuthorizedReadState};
 
+#[path = "disk_uploads.rs"]
+mod disk_uploads;
 #[path = "disk_writes.rs"]
 mod disk_writes;
 
@@ -60,6 +62,15 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
         }
         if who == 1 {
             actions.push(Action::ManagePolicy);
+            actions.extend([
+                Action::StartUpload,
+                Action::ResumeUpload,
+                Action::WriteUpload,
+                Action::FinishUpload,
+                Action::AbortUpload,
+                Action::ManageSchema,
+                Action::InspectQuota,
+            ]);
         }
         let mut grant = NamespaceGrant::new(PermissionSet::from_actions(actions), quotas);
         if who == 2 {
@@ -459,6 +470,7 @@ fn authorized_disk_expansion_matches_reference_and_shares_all_work_budgets() {
     drop(fresh);
     drop(exact);
     drop(reader);
+    disk_uploads::verify(&mut disk, &mut filesystem, &kernel, &admin, &bob);
     disk_writes::verify(
         &mut disk,
         &mut filesystem,
