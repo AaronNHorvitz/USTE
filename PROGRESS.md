@@ -51,6 +51,32 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Decision 0076 adds native `linux-disk-create/resume/open` development commands, distinct from
+  the legacy database/commands. Shared fixture generation and authorized disk writes preserve
+  the oracle and deterministic batch plan. Recovery selects paired metadata roots, admits a
+  ready graph base or one pending suffix, repairs derived roots and rebases before fresh writes.
+  Missing roots above bootstrap and suffixes longer than one revision fail closed. Bootstrap
+  alone has the one-outcome/zero-owner/1-MiB full-replay allowance; open publishes no roots.
+  Native tests cover empty/policy bootstrap, pending graph roots, lagging/partially published
+  metadata, exact resumed retries, wrong profile binding, duplicate create and missing roots.
+  Initial debug matrix exposed a real shared-helper identity mismatch (`BM01DEV` versus native
+  `BM01LIN`), failing prefix-2 resume after 230.59s. Fixed the helper to accept typed explicit
+  identities; retained the native fixture and retry assertions. No acceptance target was changed.
+  Final scoped command (MemoryHigh=3G/MemoryMax=4G/MemorySwapMax=512M, one job/thread):
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 34 tests, with two pre-existing exact-profile
+  oracle tests ignored, in 20.93s; this includes all native cases and the frozen disk oracle.
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings` passed. After ensuring fixture parents exist with an external
+  Cargo target directory, the release `native_disk` filter passed both tests again in 18.34s,
+  followed by strict clippy. Docs/task checks pass (149 links, 68 tasks).
+  Host preflight: 35 GiB available RAM, 3.9 GiB free swap, Btrfs repository; the initial debug
+  scope's sampled peak was 488,796,160 bytes with no swap. This is not a final RSS measurement or
+  benchmark reservation. Commands remain development-capped; storage metadata remains resident.
+  Next add native disk query/oracle verification and preemptive sampling/process-loss coverage,
+  then qualifying-profile admission and removal of the remaining storage memory boundary.
+  T-20 and BM-01/BM-06 remain open; M1's pinned implementation and handoff are unchanged.
+
 - Decision 0075 adds an ownership-preserving, explicitly count/owner/byte-bounded bootstrap
   replay handoff. The disk development check now restarts before bootstrap root publication and
   admits only one policy outcome, zero blob owners and 1 MiB encoded bytes before building roots.
@@ -1176,8 +1202,9 @@ metadata base with exact first-owner proofs and explicit read amplification. Tha
 installed by the opt-in disk coordinator with bounded mutation overlays (Decision
 0062). Ordinary-reducer suffix recovery and disk-graph ready/one-pending recovery are implemented;
 Decision 0073 now maintains single-pass first-reference evidence across bounded disk metadata rebase.
-Next connect the benchmark driver to the implemented disk path and remove remaining resident
-storage metadata. Decision 0071 supplies bounded authorized upload
+Decisions 0074–0076 connect the independent development oracle and native construction/recovery
+commands to the implemented disk path. Next connect native disk queries and supervised sampling,
+qualifying-profile admission, and remove remaining resident storage metadata. Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference
 publisher remains a bounded legacy bridge, not larger-than-memory construction.

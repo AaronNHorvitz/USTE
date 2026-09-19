@@ -4,6 +4,7 @@
 //! emits content-free reports and keeps filesystem paths and recovery metadata out of errors.
 
 mod credential;
+pub mod disk;
 mod sampling;
 mod supervision;
 

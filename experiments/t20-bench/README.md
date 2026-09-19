@@ -31,6 +31,12 @@ cargo run --release --locked --offline -- oracle-summary --entities 20 > ORACLE
 cargo run --release --locked --offline -- oracle-bundle --entities 20 > ORACLE_BUNDLE
 cargo run --release --locked --offline -- engine-check --entities 20
 cargo run --release --locked --offline -- disk-engine-check --entities 20
+cargo run --release --locked --offline -- linux-disk-create --root ROOT \
+  --password-file PASSWORD --entities 20
+cargo run --release --locked --offline -- linux-disk-resume --root ROOT \
+  --password-file PASSWORD --entities 20
+cargo run --release --locked --offline -- linux-disk-open --root ROOT \
+  --password-file PASSWORD --entities 20
 cargo run --release --locked --offline -- linux-query --root ROOT \
   --password-file PASSWORD --oracle-file ORACLE --entities 20
 cargo run --release --locked --offline -- linux-sample --root ROOT \
@@ -57,6 +63,16 @@ reports maintenance-authorized cache counters. It still uses the memory fault-mo
 development keys, holds the independent oracle in process and retains storage-level certificate/
 blob metadata in memory. It is semantic evidence, not performance or bounded total-RSS evidence.
 The existing Linux commands are not silently switched by this development command.
+
+`linux-disk-create/resume/open` use a distinct native Btrfs database name and portable recovery
+credentials, retaining the 1,000-entity development ceiling. Create streams the fixture through
+authorized disk writes; resume admits paired metadata roots and a ready graph base or one pending
+transaction, repairs derived roots, then retries the unchanged deterministic plan. Only an empty
+or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
+Open requires completed, repaired roots and validates the fixture Evidence binding. These commands
+do not yet run the disk query sampler or qualify BM-01/BM-06; storage metadata remains resident.
+The native tests require the experiment's `target` directory to reside on Btrfs:
+`CARGO_BUILD_JOBS=1 cargo test --release --locked --offline native_disk -- --test-threads=1`.
 
 `oracle-summary` is intended to run separately from `linux-query`, so the independent oracle's
 adjacency arrays do not enter the query process. The bounded 256 KiB summary pins profile/query

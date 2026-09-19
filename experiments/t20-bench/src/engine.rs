@@ -1,6 +1,6 @@
 //! Production-engine equivalence check for bounded, explicitly nonqualifying development sizes.
 
-mod disk;
+pub(crate) mod disk;
 pub use disk::{DiskDevelopmentVerification, verify_disk_development_profile};
 
 use std::collections::BTreeSet;

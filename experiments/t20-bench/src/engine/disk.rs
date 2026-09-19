@@ -115,79 +115,21 @@ pub fn verify_disk_development_profile(
         .authenticate(&mut AuthAdapter, &())
         .map_err(debug)?;
     let materializer = Materializer::new(profile);
-    let mut sequence = 2;
-    commit_batches(
-        &mut disk,
-        &mut fs,
-        &mut policy_kernel,
-        &principal,
-        &mut sequence,
-        core::iter::once(Ok(Operation::Create {
-            expected: Expected::Absent,
-            record: NewRecord::Evidence(NewEvidence {
-                id: evidence_ref(scope()),
-                digest: engine_mapping_digest(profile),
-                locator: text("bm01-uste-graph-v1")?,
-            }),
-        }))
-        .chain((0..profile.entities()).map(|ordinal| {
-            Ok(Operation::Create {
-                expected: Expected::Absent,
-                record: NewRecord::Entity(NewEntity {
-                    id: entity_ref(scope(), materializer, ordinal),
-                    entity_type: text("bm01-entity-v1")?,
-                    schema_version: 1,
-                    properties: Value::Null,
-                }),
-            })
-        })),
-    )?;
-    commit_batches(
-        &mut disk,
-        &mut fs,
-        &mut policy_kernel,
-        &principal,
-        &mut sequence,
-        (0..profile.relationships()).map(|ordinal| {
-            let edge = materializer.edge(ordinal);
-            Ok(Operation::Create {
-                expected: Expected::Absent,
-                record: NewRecord::Relationship(NewRelationship {
-                    id: relationship_ref(scope(), materializer, ordinal),
-                    from: entity_ref(scope(), materializer, edge.source),
-                    to: entity_ref(scope(), materializer, edge.destination),
-                    relationship_type: text(match edge.topology {
-                        crate::Topology::Uniform => "bm01-uniform-v1",
-                        crate::Topology::DistributedHub => "bm01-hub-v1",
-                        crate::Topology::RingCycle => "bm01-ring-v1",
-                    })?,
-                    properties: Value::Null,
-                    evidence: vec![evidence_ref(scope())],
-                    valid_time: ValidTime::Unknown,
-                }),
-            })
-        }),
-    )?;
-    commit_batches(
-        &mut disk,
-        &mut fs,
-        &mut policy_kernel,
-        &principal,
-        &mut sequence,
-        (0..profile.relationships()).map(|ordinal| {
-            Ok(Operation::ActOnRelationship {
-                target: relationship_ref(scope(), materializer, ordinal),
-                expected: Expected::Version(RecordVersion::FIRST),
-                action: AssertionAction::Accept,
-                correction: None,
-                correction_expected: None,
-            })
-        }),
-    )?;
-    let expected_revision = materialization_revision_count(profile);
-    if sequence - 1 != expected_revision {
-        return Err("disk materialization plan mismatch".into());
-    }
+    let expected_revision = visit_development_batches(profile, |sequence, operations| {
+        commit_batch(
+            &mut disk,
+            &mut fs,
+            &mut policy_kernel,
+            &principal,
+            DiskBatchIdentity {
+                sequence,
+                idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
+                transaction_id: identity(sequence, TransactionId::from_bytes),
+            },
+            operations,
+            &mut clock(sequence),
+        )
+    })?;
     drop(disk);
     fs.restart().map_err(debug)?;
     let disk = open_disk(&mut fs, &name)?;
@@ -250,7 +192,7 @@ pub fn verify_disk_development_profile(
 fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String> {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
     let entropy = ENTROPY.fetch_add(1_000_000, std::sync::atomic::Ordering::Relaxed);
-    let (recovery, report) = AuthenticatedIndexRecovery::open(
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
         fs,
         name,
         scope(),
@@ -259,15 +201,54 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
         &mut TestKeyAdapter,
     )
     .map_err(debug)?;
-    let frontier = report.frontier.ok_or("missing disk frontier")?;
+    admit_development_disk(fs, recovery, frontier.ok_or("missing disk frontier")?)
+}
+
+/// Shared adapter-independent development recovery. No full graph/coordinator fallback is allowed.
+/// The explicit development budgets are not qualification-profile admission.
+pub(crate) fn admit_development_disk<F, W, E, I>(
+    fs: &mut F,
+    recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+    frontier: uste_txn::RecoveredFrontierTransaction,
+) -> Result<DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>, String>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let mut cache = PageCache::new(64 * 1024).map_err(debug)?;
     let lookup = IndexGetLimits::new(64, 136).map_err(debug)?;
-    let transaction_root = recovery
-        .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+    let graph_candidate = uste_graph::load_graph_state_root_candidates_for_recovery(&recovery, fs)
         .map_err(debug)?
         .into_iter()
-        .find(|root| root.revision() == frontier)
-        .ok_or("missing current transaction root")?;
+        .filter(|root| root.revision() <= frontier.revision())
+        .max_by_key(|root| root.revision())
+        .ok_or("missing graph base")?;
+    if frontier.revision().get() - graph_candidate.revision().get() > 1 {
+        return Err("disk graph suffix exceeds one revision".into());
+    }
+    let transaction_roots = recovery
+        .load_index_root_manifests(fs, uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1)
+        .map_err(debug)?;
+    let candidate =
+        uste_txn::load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
+            &recovery, fs,
+        )
+        .map_err(debug)?
+        .into_iter()
+        .filter(|root| {
+            root.revision() <= graph_candidate.revision()
+                && transaction_roots
+                    .iter()
+                    .any(|tx| tx.revision() == root.revision())
+        })
+        .max_by_key(|root| root.revision())
+        .ok_or("missing paired metadata base")?;
+    let transaction_root = transaction_roots
+        .into_iter()
+        .find(|root| root.revision() == candidate.revision())
+        .ok_or("missing paired transaction root")?;
     let transactions = uste_txn::admit_coordinator_transaction_index_for_recovery(
         &recovery,
         fs,
@@ -281,14 +262,6 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
         &mut cache,
     )
     .map_err(debug)?;
-    let candidate =
-        uste_txn::load_coordinator_metadata_candidates_for_recovery::<GraphState, _, _, _, _>(
-            &recovery, fs,
-        )
-        .map_err(debug)?
-        .into_iter()
-        .find(|root| root.revision() == frontier)
-        .ok_or("missing current metadata root")?;
     let metadata = uste_txn::admit_coordinator_disk_base(
         &recovery,
         fs,
@@ -310,11 +283,6 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
         &mut cache,
     )
     .map_err(debug)?;
-    let candidate = uste_graph::load_graph_state_root_candidates_for_recovery(&recovery, fs)
-        .map_err(debug)?
-        .into_iter()
-        .find(|root| root.revision() == frontier)
-        .ok_or("missing current graph root")?;
     let limits = GraphDiskBaseAdmissionLimits::new(
         GraphStateLoadLimits::new(
             100_000,
@@ -335,67 +303,174 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
     )
     .map_err(debug)?;
     let (base, _) = uste_graph::admit_graph_disk_base_candidate_for_recovery(
-        &recovery, fs, &candidate, limits, &mut cache,
+        &recovery,
+        fs,
+        &graph_candidate,
+        limits,
+        &mut cache,
     )
     .map_err(debug)?;
-    DiskCommitCoordinator::from_admitted_base(
+    let suffix = if base.revision() == frontier.revision() {
+        None
+    } else {
+        let prepared = uste_graph::load_graph_disk_recovery_preparation_view(
+            &recovery,
+            fs,
+            &base,
+            &frontier,
+            GraphDiskPreparationLimits::new(20_000, 1_000_000, 100_000, 100_000, 32 * 1024 * 1024)
+                .map_err(debug)?,
+            &mut cache,
+        )
+        .map_err(debug)?
+        .prepare()
+        .map_err(debug)?;
+        Some(
+            frontier.bind_prepared(
+                uste_graph::prepare_graph_disk_commit(
+                    prepared,
+                    GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
+                )
+                .map_err(debug)?,
+            ),
+        )
+    };
+    DiskCommitCoordinator::recover_with_prepared_suffix(
         recovery,
+        fs,
         metadata,
         GraphDiskLiveState::new(base),
+        suffix,
         RetentionDays::new(30).map_err(debug)?,
-        uste_txn::CoordinatorRecoveryLimits::new(2, 0).map_err(debug)?,
+        uste_txn::DiskCoordinatorRecoveryLimits {
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(2, 0).map_err(debug)?,
+            lookup,
+            maximum_encoded_bytes: 128 * 1024 * 1024,
+        },
+        &mut cache,
     )
     .map_err(debug)
 }
 
-fn commit_batches(
-    disk: &mut Disk,
-    fs: &mut MemoryFileSystem,
-    kernel: &mut PolicyKernel,
-    principal: &AuthenticatedPrincipal,
+/// Stream the unchanged fixture plan in bounded batches to either disk adapter.
+pub(crate) fn visit_development_batches(
+    profile: Bm01Profile,
+    mut visitor: impl FnMut(u64, Vec<Operation>) -> Result<(), String>,
+) -> Result<u64, String> {
+    if profile.entities() > MAX_DEVELOPMENT_ENTITIES {
+        return Err("development disk profile exceeded".into());
+    }
+    let materializer = Materializer::new(profile);
+    let mut sequence = 2;
+    emit_batches(
+        &mut sequence,
+        &mut visitor,
+        core::iter::once(Ok(Operation::Create {
+            expected: Expected::Absent,
+            record: NewRecord::Evidence(NewEvidence {
+                id: evidence_ref(scope()),
+                digest: engine_mapping_digest(profile),
+                locator: text("bm01-uste-graph-v1")?,
+            }),
+        }))
+        .chain((0..profile.entities()).map(|ordinal| {
+            Ok(Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Entity(NewEntity {
+                    id: entity_ref(scope(), materializer, ordinal),
+                    entity_type: text("bm01-entity-v1")?,
+                    schema_version: 1,
+                    properties: Value::Null,
+                }),
+            })
+        })),
+    )?;
+    emit_batches(
+        &mut sequence,
+        &mut visitor,
+        (0..profile.relationships()).map(|ordinal| {
+            let edge = materializer.edge(ordinal);
+            Ok(Operation::Create {
+                expected: Expected::Absent,
+                record: NewRecord::Relationship(NewRelationship {
+                    id: relationship_ref(scope(), materializer, ordinal),
+                    from: entity_ref(scope(), materializer, edge.source),
+                    to: entity_ref(scope(), materializer, edge.destination),
+                    relationship_type: text(match edge.topology {
+                        crate::Topology::Uniform => "bm01-uniform-v1",
+                        crate::Topology::DistributedHub => "bm01-hub-v1",
+                        crate::Topology::RingCycle => "bm01-ring-v1",
+                    })?,
+                    properties: Value::Null,
+                    evidence: vec![evidence_ref(scope())],
+                    valid_time: ValidTime::Unknown,
+                }),
+            })
+        }),
+    )?;
+    emit_batches(
+        &mut sequence,
+        &mut visitor,
+        (0..profile.relationships()).map(|ordinal| {
+            Ok(Operation::ActOnRelationship {
+                target: relationship_ref(scope(), materializer, ordinal),
+                expected: Expected::Version(RecordVersion::FIRST),
+                action: AssertionAction::Accept,
+                correction: None,
+                correction_expected: None,
+            })
+        }),
+    )?;
+    let frontier = sequence - 1;
+    if frontier != materialization_revision_count(profile) {
+        return Err("disk materialization plan mismatch".into());
+    }
+    Ok(frontier)
+}
+
+fn emit_batches(
     sequence: &mut u64,
+    visitor: &mut impl FnMut(u64, Vec<Operation>) -> Result<(), String>,
     operations: impl IntoIterator<Item = Result<Operation, String>>,
 ) -> Result<(), String> {
     let mut batch = Vec::with_capacity(MAX_TRANSACTION_OPERATIONS);
     for operation in operations {
         batch.push(operation?);
         if batch.len() == MAX_TRANSACTION_OPERATIONS {
-            commit_batch(
-                disk,
-                fs,
-                kernel,
-                principal,
-                *sequence,
-                core::mem::take(&mut batch),
-            )?;
+            visitor(*sequence, core::mem::take(&mut batch))?;
             *sequence += 1;
         }
     }
     if !batch.is_empty() {
-        commit_batch(disk, fs, kernel, principal, *sequence, batch)?;
+        visitor(*sequence, batch)?;
         *sequence += 1;
     }
     Ok(())
 }
 
-fn commit_batch(
-    disk: &mut Disk,
-    fs: &mut MemoryFileSystem,
+pub(crate) struct DiskBatchIdentity {
+    pub sequence: u64,
+    pub idempotency_key: IdempotencyKey,
+    pub transaction_id: TransactionId,
+}
+
+pub(crate) fn commit_batch<F, W, E, I>(
+    disk: &mut DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    fs: &mut F,
     kernel: &mut PolicyKernel,
     principal: &AuthenticatedPrincipal,
-    sequence: u64,
+    identity: DiskBatchIdentity,
     operations: Vec<Operation>,
-) -> Result<(), String> {
+    clock: &mut impl uste_storage::Clock,
+) -> Result<(), String>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let encoded = encode_transaction(&GraphTransaction::new(scope(), operations)).map_err(debug)?;
-    let read = IndexRunReadLimits::new(100_000, 1_000_000, 256 * 1024 * 1024).map_err(debug)?;
-    let merge = IndexRunMergeLimits::new(
-        read,
-        1_000_000,
-        64 * 1024 * 1024,
-        1_000_000,
-        256 * 1024 * 1024,
-    )
-    .map_err(debug)?;
+    let (read, merge) = development_merge_limits()?;
     let mut writer = AuthorizedDiskWriter::new(
         disk,
         kernel,
@@ -418,21 +493,35 @@ fn commit_batch(
             fs,
             principal,
             AuthorizedTransactionRequest {
-                idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
-                transaction_id: identity(sequence, TransactionId::from_bytes),
+                idempotency_key: identity.idempotency_key,
+                transaction_id: identity.transaction_id,
                 canonical_request: &encoded,
                 blob_inventory: None,
             },
-            &mut clock(sequence),
+            clock,
             &NeverCancel,
         )
         .map_err(debug)?;
-    if outcome.revision.get() != sequence {
+    if outcome.revision.get() != identity.sequence {
         return Err("disk commit revision mismatch".into());
     }
     drop(writer);
     disk.rebase_metadata(fs, CoordinatorMetadataRebaseLimits { merge, reuse: read })
         .map_err(debug)
+}
+
+pub(crate) fn development_merge_limits() -> Result<(IndexRunReadLimits, IndexRunMergeLimits), String>
+{
+    let read = IndexRunReadLimits::new(100_000, 1_000_000, 256 * 1024 * 1024).map_err(debug)?;
+    let merge = IndexRunMergeLimits::new(
+        read,
+        1_000_000,
+        64 * 1024 * 1024,
+        1_000_000,
+        256 * 1024 * 1024,
+    )
+    .map_err(debug)?;
+    Ok((read, merge))
 }
 
 #[cfg(test)]
