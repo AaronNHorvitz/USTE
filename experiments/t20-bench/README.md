@@ -70,8 +70,10 @@ for the terminal fixture, including complete loss of optional graph/coordinator 
 reconstructs only the authenticated first transaction, independently admits its staged indexes,
 streams 100 later graph revisions, publishes/rebases terminal roots, checks exact retry and verifies
 all 200 history versions. Ordinary open/recover retain their complete graph-base-loss refusal.
-Reports disclose 100 admitted in-memory suffix outcomes against a 101-outcome ceiling: this is
-bounded development recovery, not incremental large-history metadata staging or qualification.
+Decision 0120 now stages retry/transaction metadata to private disk roots after each revision,
+with zero outcome-overlay capacity and zero admitted suffix outcomes. Reports expose the 300
+metadata merges and their logical output work; this inventory-free path still rewrites immutable
+families and does not qualify larger-than-memory recovery or general blob-owner origin staging.
 Tests preserve committed journal/certificate bytes under complete missing/corrupt cache loss.
 
 ## BM-01 materialization

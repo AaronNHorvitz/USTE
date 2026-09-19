@@ -188,7 +188,7 @@ where
     }
 }
 
-fn recovery_apply_error(error: ApplyError) -> StorageError {
+pub(super) fn recovery_apply_error(error: ApplyError) -> StorageError {
     match error {
         ApplyError::ResourceLimit => StorageError::ResourceLimit,
         _ => StorageError::IntegrityFailure,

@@ -138,6 +138,54 @@ struct GraphRecoveryDomain {
     report: GraphDiskSuffixRecoveryReport,
 }
 
+/// Inventory-free paired-base variant that stages coordinator metadata on disk at every step.
+/// It retains no cumulative suffix metadata maps. Returned private metadata must be rebased
+/// before new writes; the graph root is published only at the verified terminal frontier.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn recover_graph_disk_suffix_with_streamed_metadata<F, W, E, I>(
+    recovery: AuthenticatedIndexRecovery<F, W, E, I>,
+    filesystem: &mut F,
+    metadata: CoordinatorDiskBase,
+    state: GraphDiskLiveState,
+    retention: RetentionDays,
+    coordinator_limits: DiskCoordinatorRecoveryLimits,
+    limits: GraphDiskSuffixRecoveryLimits,
+    metadata_limits: uste_txn::InventoryFreeMetadataRecoveryLimits,
+    cache: &mut PageCache,
+) -> Result<
+    (
+        DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+        GraphDiskSuffixRecoveryReport,
+        uste_txn::InventoryFreeMetadataRecoveryReport,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let mut domain = GraphRecoveryDomain {
+        limits,
+        admitted: 0,
+        report: GraphDiskSuffixRecoveryReport::default(),
+    };
+    let (coordinator, metadata_report) =
+        DiskCommitCoordinator::recover_with_inventory_free_streaming_domain(
+            recovery,
+            filesystem,
+            metadata,
+            state,
+            retention,
+            coordinator_limits,
+            metadata_limits,
+            cache,
+            &mut domain,
+        )?;
+    Ok((coordinator, domain.report, metadata_report))
+}
+
 impl<F, W, E, I> DiskRecoveryDomain<GraphDiskLiveState, F, W, E, I> for GraphRecoveryDomain
 where
     F: OwnershipFileSystem,

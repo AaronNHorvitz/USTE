@@ -138,6 +138,10 @@ coordinator candidates, independently admit them, and stream the admitted suffix
 roots become discoverable; private metadata requires durable rebase even with an empty suffix.
 It does not support an erased authoritative prefix, lift suffix-overlay limits, automatically
 enable native cache-loss fallback or qualify larger-than-memory recovery.
+Decisions 0119–0120 connect explicit native inventory-free origin rebuild to per-revision private
+coordinator staging with zero cumulative outcome overlays. This requires paired domain/metadata
+bases and refuses inventories/optional owner projections; existing general recovery remains
+unchanged. Whole-family rewrite costs and qualifying recovery campaigns remain open.
 
 ## Indexing and bounded resources
 

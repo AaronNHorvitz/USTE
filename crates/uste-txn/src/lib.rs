@@ -48,6 +48,7 @@ mod disk_coordinator;
 pub use disk_coordinator::{
     CommittedBlobUsage, DiskBlobAccountingLimits, DiskBlobReadLimits, DiskCommitCheck,
     DiskCommitCoordinator, DiskCoordinatorRecoveryLimits, DiskCoordinatorState, DiskRecoveryDomain,
+    InventoryFreeMetadataRecoveryLimits, InventoryFreeMetadataRecoveryReport,
 };
 
 use std::collections::BTreeMap;

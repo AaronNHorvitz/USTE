@@ -6,9 +6,13 @@ mod blob_reads;
 mod blob_writes;
 mod commit_check;
 mod index_reads;
+mod inventory_free_recovery;
 mod streaming;
 pub use blob_reads::DiskBlobReadLimits;
 pub use commit_check::DiskCommitCheck;
+pub use inventory_free_recovery::{
+    InventoryFreeMetadataRecoveryLimits, InventoryFreeMetadataRecoveryReport,
+};
 pub use streaming::DiskRecoveryDomain;
 
 impl<S, F, W, E, I> DiskCommitCoordinator<S, F, W, E, I>

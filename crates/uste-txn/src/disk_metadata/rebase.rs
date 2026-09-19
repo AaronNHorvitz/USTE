@@ -381,7 +381,7 @@ where
     Ok(first)
 }
 
-fn exact_merged_run(
+pub(super) fn exact_merged_run(
     merged: uste_storage::MergedIndexRun,
     entries: u64,
     insertions: usize,

@@ -363,6 +363,464 @@ fn recover_stream(
     )
 }
 
+fn recover_streamed_metadata(
+    filesystem: &mut FaultFs,
+    mut input: RecoveryInput,
+    maximum_revisions: u64,
+    bytes: u64,
+) -> Result<
+    (
+        Disk,
+        uste_graph::GraphDiskSuffixRecoveryReport,
+        uste_txn::InventoryFreeMetadataRecoveryReport,
+    ),
+    GraphDiskError,
+> {
+    let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+    let merge = IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+    uste_graph::recover_graph_disk_suffix_with_streamed_metadata(
+        input.recovery,
+        filesystem,
+        input.metadata,
+        input.state,
+        RetentionDays::new(30).unwrap(),
+        uste_txn::DiskCoordinatorRecoveryLimits {
+            overlay: uste_txn::CoordinatorRecoveryLimits::new(0, 0).unwrap(),
+            lookup: uste_storage::IndexGetLimits::new(16, 136).unwrap(),
+            maximum_encoded_bytes: bytes,
+        },
+        uste_graph::GraphDiskSuffixRecoveryLimits {
+            maximum_revisions,
+            preparation: GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+            deltas: GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap(),
+            merge: GraphStateRootMergeLimits::uniform(merge, 2 * 1024 * 1024).unwrap(),
+        },
+        uste_txn::InventoryFreeMetadataRecoveryLimits {
+            maximum_revisions,
+            merge,
+        },
+        &mut input.cache,
+    )
+}
+
+#[test]
+fn streamed_primary_metadata_refuses_certified_inventory_before_domain_advancement() {
+    use sha2::{Digest, Sha256};
+    use uste_storage::journal::{CommitInput, CreationOptions, JournalStore};
+    let (mut source, source_name, _) = fixture_roots(1, 1, false, false);
+    let mut groups = Vec::new();
+    let (store, _) = JournalStore::open(
+        &mut source,
+        &source_name,
+        scope().database(),
+        CounterEntropy(950_000),
+        CounterEntropy(960_000),
+        &mut TestKeyAdapter,
+        |group| {
+            groups.push(group.encoded_group.to_vec());
+            Ok(())
+        },
+    )
+    .unwrap();
+    drop(store);
+    let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+    let name = EntryName::new("inventory-free-refusal").unwrap();
+    let mut store = JournalStore::create(
+        &mut fs,
+        CreationOptions {
+            database: scope().database(),
+            final_name: name.clone(),
+        },
+        create_vault(scope().database(), 970_000),
+        CounterEntropy(980_000),
+    )
+    .unwrap();
+    store
+        .append_group(
+            &mut fs,
+            CommitInput {
+                encoded_group: &groups[0],
+                logical_event_digest: Sha256::digest(&groups[0]).into(),
+            },
+        )
+        .unwrap();
+    let mut upload = store.start_blob_upload(scope()).unwrap();
+    let reference = store.finish_blob_upload(&mut fs, &mut upload).unwrap();
+    let inventory = uste_storage::BlobInventory::new(scope(), [reference]).unwrap();
+    let mut hasher = Sha256::new();
+    hasher.update(b"USTE transaction request+blob inventory v1");
+    hasher.update(((groups[1].len() - 192) as u64).to_be_bytes());
+    hasher.update(&groups[1][192..]);
+    hasher.update(inventory.digest());
+    groups[1][120..152].copy_from_slice(&hasher.finalize());
+    store
+        .append_group_with_inventory(
+            &mut fs,
+            CommitInput {
+                encoded_group: &groups[1],
+                logical_event_digest: Sha256::digest(&groups[1]).into(),
+            },
+            &inventory,
+        )
+        .unwrap();
+    drop(store);
+    fs.restart().unwrap();
+    let input = prepare_source(&mut fs, &name, true, true, true);
+    fs.arm(FaultPlan::default()).unwrap();
+    assert!(matches!(
+        recover_streamed_metadata(&mut fs, input, 1, 1_000_000),
+        Err(GraphDiskError::Transaction(
+            uste_txn::TransactionError::InvalidRequest
+        ))
+    ));
+    assert_eq!(fs.operation_count(FaultOperation::CreateNew), 0);
+    let mut observed = false;
+    let (_store, _) = JournalStore::open(
+        &mut fs,
+        &name,
+        scope().database(),
+        CounterEntropy(990_000),
+        CounterEntropy(991_000),
+        &mut TestKeyAdapter,
+        |group| {
+            if group.revision.get() == 2 {
+                assert_eq!(group.blob_inventory, Some(&inventory));
+                observed = true;
+            }
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(observed);
+}
+
+#[test]
+fn streamed_primary_metadata_rejects_authenticated_retry_and_transaction_collisions() {
+    use sha2::{Digest, Sha256};
+    use uste_storage::journal::{CommitInput, CreationOptions, JournalStore};
+    let (mut source, source_name, _) = fixture_roots(3, 1, false, false);
+    let mut groups = Vec::new();
+    let (store, _) = JournalStore::open(
+        &mut source,
+        &source_name,
+        scope().database(),
+        CounterEntropy(910_000),
+        CounterEntropy(920_000),
+        &mut TestKeyAdapter,
+        |group| {
+            groups.push(group.encoded_group.to_vec());
+            Ok(())
+        },
+    )
+    .unwrap();
+    drop(store);
+    assert_eq!(groups.len(), 4);
+    // Frozen txn-group-v1 offsets: retry key 56..72, transaction ID 72..88.
+    // Reauthenticate the changed groups through the real storage writer, not ciphertext flips.
+    for range in [56..72, 72..88] {
+        for earlier in [0, 1] {
+            let mut forged = groups.clone();
+            let duplicate = forged[earlier][range.clone()].to_vec();
+            forged[2][range.clone()].copy_from_slice(&duplicate);
+            let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
+            let name = EntryName::new("authenticated-metadata-collision").unwrap();
+            let mut store = JournalStore::create(
+                &mut fs,
+                CreationOptions {
+                    database: scope().database(),
+                    final_name: name.clone(),
+                },
+                create_vault(scope().database(), 930_000),
+                CounterEntropy(940_000),
+            )
+            .unwrap();
+            for group in &forged {
+                store
+                    .append_group(
+                        &mut fs,
+                        CommitInput {
+                            encoded_group: group,
+                            logical_event_digest: Sha256::digest(group).into(),
+                        },
+                    )
+                    .unwrap();
+            }
+            drop(store);
+            fs.restart().unwrap();
+            let input = prepare_source(&mut fs, &name, true, true, true);
+            assert!(matches!(
+                recover_streamed_metadata(&mut fs, input, 3, 1_000_000),
+                Err(GraphDiskError::Transaction(
+                    uste_txn::TransactionError::IntegrityFailure
+                ))
+            ));
+            let input = prepare_source(&mut fs, &name, true, true, true);
+            for profile in [
+                GRAPH_STATE_PROFILE_V1,
+                uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+                uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            ] {
+                assert!(
+                    input
+                        .recovery
+                        .load_index_root_manifests(&mut fs, profile)
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+            assert!(
+                input
+                    .recovery
+                    .into_bounded_coordinator(
+                        &mut fs,
+                        GraphState::new(scope()),
+                        RetentionDays::new(30).unwrap(),
+                        uste_txn::CoordinatorRecoveryLimits::new(4, 0).unwrap(),
+                        1_000_000
+                    )
+                    .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn streamed_primary_metadata_budgets_and_late_corruption_never_publish_a_partial_root() {
+    let bytes = 3 * 8322 + 6 * 4161;
+    for (maximum, allowance) in [(2, bytes), (3, bytes - 1)] {
+        let (mut fs, name, _) = fixture_with_suffix(3, 1);
+        let input = prepare_source(&mut fs, &name, true, true, false);
+        fs.arm(FaultPlan::default()).unwrap();
+        assert!(recover_streamed_metadata(&mut fs, input, maximum, allowance).is_err());
+        if maximum == 2 {
+            assert_eq!(fs.operation_count(FaultOperation::ReadAt), 0);
+            assert_eq!(fs.operation_count(FaultOperation::CreateNew), 0);
+        } else {
+            assert!(fs.operation_count(FaultOperation::CreateNew) > 0);
+        }
+        fs.restart().unwrap();
+        let input = prepare_source(&mut fs, &name, true, true, false);
+        assert_eq!(input.state.revision().get(), 1);
+        assert_eq!(
+            recover_streamed_metadata(&mut fs, input, 3, bytes)
+                .unwrap()
+                .0
+                .overlay_counts(),
+            (0, 0)
+        );
+    }
+    let (mut fs, name, _) = fixture_with_suffix(3, 1);
+    let input = prepare_source(&mut fs, &name, true, true, false);
+    let directory = fs.open_directory(&fs.root(), &name).unwrap();
+    let file = fs
+        .open_existing(&directory, &EntryName::new("CERTIFICATES").unwrap())
+        .unwrap();
+    let offset = 4 * 4161 + 100;
+    let mut byte = [0];
+    assert_eq!(fs.read_at(&file, offset, &mut byte).unwrap(), 1);
+    byte[0] ^= 1;
+    assert_eq!(fs.write_at(&file, offset, &byte).unwrap(), 1);
+    assert!(recover_streamed_metadata(&mut fs, input, 3, bytes).is_err());
+    byte[0] ^= 1;
+    assert_eq!(fs.write_at(&file, offset, &byte).unwrap(), 1);
+    fs.restart().unwrap();
+    let input = prepare_source(&mut fs, &name, true, true, false);
+    assert_eq!(input.state.revision().get(), 1);
+    assert_eq!(
+        recover_streamed_metadata(&mut fs, input, 3, bytes)
+            .unwrap()
+            .0
+            .overlay_counts(),
+        (0, 0)
+    );
+}
+
+#[test]
+fn streamed_primary_metadata_faults_preserve_old_or_terminal_graph_and_unpublished_metadata() {
+    let (mut baseline, name, _) = fixture_with_suffix(3, 1);
+    let input = prepare_source(&mut baseline, &name, true, true, false);
+    baseline.arm(FaultPlan::default()).unwrap();
+    drop(recover_streamed_metadata(&mut baseline, input, 3, 1_000_000).unwrap());
+    let mut attempts = 0;
+    let mut optional_no_crash = 0;
+    for operation in [
+        FaultOperation::OpenExisting,
+        FaultOperation::Metadata,
+        FaultOperation::ReadAt,
+        FaultOperation::CreateNew,
+        FaultOperation::WriteAt,
+        FaultOperation::SetLen,
+        FaultOperation::SyncAll,
+        FaultOperation::SyncDirectory,
+        FaultOperation::RenameNoReplace,
+        FaultOperation::RemoveFile,
+        FaultOperation::SyncData,
+    ] {
+        for occurrence in 1..=baseline.operation_count(operation) {
+            for action in [
+                FaultAction::Error(uste_storage::AdapterErrorKind::Io),
+                FaultAction::CrashBefore,
+                FaultAction::CrashAfter,
+            ] {
+                let (mut fs, name, _) = fixture_with_suffix(3, 1);
+                let input = prepare_source(&mut fs, &name, true, true, false);
+                fs.arm(
+                    FaultPlan::new([FaultPoint {
+                        operation,
+                        occurrence,
+                        action,
+                    }])
+                    .unwrap(),
+                )
+                .unwrap();
+                let result = recover_streamed_metadata(&mut fs, input, 3, 1_000_000);
+                if action == FaultAction::CrashAfter && !fs.is_crashed() {
+                    assert!(matches!(
+                        operation,
+                        FaultOperation::OpenExisting | FaultOperation::RemoveFile
+                    ));
+                    assert_eq!(result.unwrap().0.overlay_counts(), (0, 0));
+                    optional_no_crash += 1;
+                } else {
+                    assert!(result.is_err(), "{operation:?}/{occurrence}/{action:?}");
+                }
+                assert_eq!(fs.pending_faults(), 0);
+                fs.restart().unwrap();
+                let input = prepare_source(&mut fs, &name, true, true, false);
+                assert!([1, 4].contains(&input.state.revision().get()));
+                for profile in [
+                    uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+                    uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+                ] {
+                    assert!(
+                        input
+                            .recovery
+                            .load_index_root_manifests(&mut fs, profile)
+                            .unwrap()
+                            .iter()
+                            .all(|root| root.revision().get() == 1)
+                    );
+                }
+                drop(input);
+                // A fresh paired private origin can resume even when graph publication completed.
+                let input = prepare_source(&mut fs, &name, true, true, true);
+                let (disk, _, metadata) =
+                    recover_streamed_metadata(&mut fs, input, 3, 1_000_000).unwrap();
+                assert_eq!(disk.overlay_counts(), (0, 0));
+                assert_eq!(metadata.revisions, 3);
+                attempts += 1;
+            }
+        }
+    }
+    eprintln!("streamed metadata fault attempts={attempts} optional_no_crash={optional_no_crash}");
+    assert!(attempts > 0);
+}
+
+#[test]
+fn streamed_primary_metadata_recovers_with_zero_outcome_overlay_capacity() {
+    for suffix in [0, 1, 3] {
+        for origin in [false, true] {
+            let (mut fs, name, digest) = fixture_roots(suffix, 1, false, !origin);
+            let input = prepare_source(&mut fs, &name, true, true, origin);
+            let (mut disk, graph_report, metadata_report) =
+                recover_streamed_metadata(&mut fs, input, u64::from(suffix), 1_000_000).unwrap();
+            assert_eq!(graph_report.revisions, u64::from(suffix));
+            assert_eq!(metadata_report.revisions, u64::from(suffix));
+            assert_eq!(metadata_report.staged_runs, u64::from(suffix) * 3);
+            let steps = u64::from(suffix);
+            let revision_sum = (steps + 1) * (steps + 2) / 2 - 1;
+            assert_eq!(metadata_report.output_entries, steps + 2 * revision_sum);
+            // Frozen primary metadata: 19+48 byte head, 48+104 retry, 16+136 transaction.
+            assert_eq!(
+                metadata_report.output_logical_bytes,
+                steps * 67 + revision_sum * 304
+            );
+            assert_eq!(disk.overlay_counts(), (0, 0));
+            assert!(!disk.certificate_anchor_residency().0);
+            for revision in 1..=suffix + 1 {
+                let principal = uste_policy::PrincipalDigest::from_bytes([0x90; 32]);
+                let mut cache = PageCache::new(64 * 1024).unwrap();
+                let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
+                let outcome = disk
+                    .outcome(
+                        &mut fs,
+                        principal,
+                        IdempotencyKey::from_bytes([revision; 16]),
+                        UtcInstant::new(5, 0).unwrap(),
+                        lookup,
+                        &mut cache,
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(outcome.revision.get(), u64::from(revision));
+                assert_eq!(
+                    disk.outcome(
+                        &mut fs,
+                        principal,
+                        IdempotencyKey::from_bytes([revision; 16]),
+                        outcome.expires_at,
+                        lookup,
+                        &mut cache
+                    ),
+                    Err(uste_txn::TransactionError::IdempotencyExpired)
+                );
+                assert_eq!(
+                    disk.transaction_outcome(
+                        &mut fs,
+                        uste_policy::PrincipalDigest::from_bytes([0x91; 32]),
+                        TransactionId::from_bytes([revision + 32; 16]),
+                        UtcInstant::new(5, 0).unwrap(),
+                        lookup,
+                        &mut cache
+                    )
+                    .unwrap(),
+                    None
+                );
+                assert_eq!(
+                    disk.transaction_outcome(
+                        &mut fs,
+                        principal,
+                        TransactionId::from_bytes([revision + 32; 16]),
+                        UtcInstant::new(5, 0).unwrap(),
+                        lookup,
+                        &mut cache
+                    )
+                    .unwrap(),
+                    Some(outcome)
+                );
+            }
+            assert_metadata_denial_precedes_disk_io(&disk, &mut fs);
+            let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+            let merge = IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+            disk.rebase_metadata(
+                &mut fs,
+                uste_txn::CoordinatorMetadataRebaseLimits { merge, reuse: read },
+            )
+            .unwrap();
+            assert!(!disk.rebase_required());
+            for profile in [
+                GRAPH_STATE_PROFILE_V1,
+                uste_txn::COORDINATOR_METADATA_PROFILE_V1,
+                uste_txn::COORDINATOR_TRANSACTION_PROFILE_V1,
+            ] {
+                let roots = disk.load_index_root_manifests(&mut fs, profile).unwrap();
+                let terminal = roots
+                    .iter()
+                    .find(|root| root.revision().get() == u64::from(suffix) + 1)
+                    .unwrap();
+                assert_eq!(terminal.logical_state_digest(), &digest);
+            }
+        }
+    }
+    // An ahead domain base cannot be mislabeled as a paired-base streaming reconstruction.
+    let (mut fs, name, _) = fixture_with_suffix(3, 2);
+    let input = prepare_source(&mut fs, &name, true, true, false);
+    fs.arm(FaultPlan::default()).unwrap();
+    assert!(recover_streamed_metadata(&mut fs, input, 3, 1_000_000).is_err());
+    assert_eq!(fs.operation_count(FaultOperation::ReadAt), 0);
+    assert_eq!(fs.operation_count(FaultOperation::CreateNew), 0);
+}
+
 #[test]
 fn origin_graph_genesis_staging_faults_leave_no_discoverable_roots() {
     fn open_origin(fs: &mut FaultFs, name: &EntryName) -> Recovery {
@@ -951,59 +1409,82 @@ impl
 
 #[test]
 fn streamed_graph_suffix_core_rejects_wrong_preparation_before_domain_advance() {
-    let (mut other_fs, other_name, _) = fixture_variation(1, 1, true);
-    let mut other = prepare_mode(&mut other_fs, &other_name, true);
-    let revision = CommitRevision::new(2).unwrap();
-    let mut cursor = other
-        .recovery
-        .open_transaction_cursor(revision, revision, 1, 8322)
-        .unwrap();
-    let transaction = other
-        .recovery
-        .next_recovered_transaction(&mut other_fs, &mut cursor)
-        .unwrap()
-        .unwrap();
-    let proof = load_graph_disk_recovery_preparation_view(
-        &other.recovery,
-        &mut other_fs,
-        other.state.current_base().unwrap(),
-        &transaction,
-        GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
-        &mut other.cache,
-    )
-    .unwrap()
-    .prepare()
-    .unwrap();
-    let prepared =
-        prepare_graph_disk_commit(proof, GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap())
+    for streamed_metadata in [false, true] {
+        let (mut other_fs, other_name, _) = fixture_variation(1, 1, true);
+        let mut other = prepare_mode(&mut other_fs, &other_name, true);
+        let revision = CommitRevision::new(2).unwrap();
+        let mut cursor = other
+            .recovery
+            .open_transaction_cursor(revision, revision, 1, 8322)
             .unwrap();
-    let mut domain = WrongPreparedDomain {
-        prepared: Some(prepared),
-        calls: [0; 3],
-    };
-    let (mut fs, name, _) = fixture();
-    let mut input = prepare_mode(&mut fs, &name, true);
-    fs.arm(FaultPlan::default()).unwrap();
-    let result = Disk::recover_with_streaming_domain(
-        input.recovery,
-        &mut fs,
-        input.metadata,
-        input.state,
-        RetentionDays::new(30).unwrap(),
-        uste_txn::DiskCoordinatorRecoveryLimits {
+        let transaction = other
+            .recovery
+            .next_recovered_transaction(&mut other_fs, &mut cursor)
+            .unwrap()
+            .unwrap();
+        let proof = load_graph_disk_recovery_preparation_view(
+            &other.recovery,
+            &mut other_fs,
+            other.state.current_base().unwrap(),
+            &transaction,
+            GraphDiskPreparationLimits::new(8, 8, 8, 8, 1024 * 1024).unwrap(),
+            &mut other.cache,
+        )
+        .unwrap()
+        .prepare()
+        .unwrap();
+        let prepared =
+            prepare_graph_disk_commit(proof, GraphStateDeltaLimits::new(100, 1024 * 1024).unwrap())
+                .unwrap();
+        let mut domain = WrongPreparedDomain {
+            prepared: Some(prepared),
+            calls: [0; 3],
+        };
+        let (mut fs, name, _) = fixture();
+        let mut input = prepare_mode(&mut fs, &name, true);
+        fs.arm(FaultPlan::default()).unwrap();
+        let read = IndexRunReadLimits::new(100, 100, 1024 * 1024).unwrap();
+        let merge = IndexRunMergeLimits::new(read, 100, 1024 * 1024, 100, 1024 * 1024).unwrap();
+        let limits = uste_txn::DiskCoordinatorRecoveryLimits {
             overlay: uste_txn::CoordinatorRecoveryLimits::new(1, 0).unwrap(),
             lookup: uste_storage::IndexGetLimits::new(16, 136).unwrap(),
             maximum_encoded_bytes: 8322,
-        },
-        &mut input.cache,
-        &mut domain,
-    );
-    assert!(matches!(
-        result,
-        Err(uste_txn::TransactionError::IntegrityFailure)
-    ));
-    assert_eq!(domain.calls, [1, 0, 0]);
-    assert_eq!(fs.operation_count(FaultOperation::CreateNew), 0);
+        };
+        let result = if streamed_metadata {
+            Disk::recover_with_inventory_free_streaming_domain(
+                input.recovery,
+                &mut fs,
+                input.metadata,
+                input.state,
+                RetentionDays::new(30).unwrap(),
+                limits,
+                uste_txn::InventoryFreeMetadataRecoveryLimits {
+                    maximum_revisions: 1,
+                    merge,
+                },
+                &mut input.cache,
+                &mut domain,
+            )
+            .map(|(disk, _)| disk)
+        } else {
+            Disk::recover_with_streaming_domain(
+                input.recovery,
+                &mut fs,
+                input.metadata,
+                input.state,
+                RetentionDays::new(30).unwrap(),
+                limits,
+                &mut input.cache,
+                &mut domain,
+            )
+        };
+        assert!(matches!(
+            result,
+            Err(uste_txn::TransactionError::IntegrityFailure)
+        ));
+        assert_eq!(domain.calls, [1, 0, 0]);
+        assert_eq!(fs.operation_count(FaultOperation::CreateNew), 0);
+    }
 }
 
 #[test]

@@ -9,6 +9,7 @@ mod admission;
 mod first_reference;
 mod genesis;
 mod rebase;
+mod recovery_step;
 mod usage;
 pub use admission::{
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, admit_coordinator_disk_base,
@@ -21,6 +22,7 @@ pub use first_reference::{
 pub use genesis::stage_inventory_free_genesis_metadata;
 pub use rebase::CoordinatorMetadataRebaseLimits;
 pub(crate) use rebase::publish_overlay_base;
+pub(crate) use recovery_step::stage_inventory_free_metadata_step;
 pub use usage::{
     COORDINATOR_BLOB_USAGE_PROFILE_V1, CoordinatorBlobUsageLimits,
     CoordinatorBlobUsageRebuildLimits, CoordinatorBlobUsageRebuildReport,

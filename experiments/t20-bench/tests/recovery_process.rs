@@ -338,6 +338,9 @@ fn bm06_native_tail_and_open_preserve_explicit_phase_frontiers() {
     assert_eq!(tail["verified_history_versions"], 99);
     assert!(!complete(fixture.command("open")).status.success()); // pending derived publication
     assert_eq!(fixture.run("recover")["verified_history_versions"], 100);
+    let rebuilt = fixture.run("rebuild");
+    assert_eq!(rebuilt["verified_history_versions"], 100);
+    assert_eq!(rebuilt["admitted_metadata_overlay_outcomes"], 0);
     assert!(!complete(fixture.command("tail")).status.success());
     assert_eq!(fixture.run("open")["verified_payload_bytes"], 409600);
 }
@@ -430,8 +433,19 @@ fn bm06_native_explicit_origin_rebuild_preserves_authority_after_all_cache_loss(
         assert_eq!(rebuilt["initial_graph_revision"], 1);
         assert_eq!(rebuilt["initial_metadata_revision"], 1);
         assert_eq!(rebuilt["private_graph_suffix_revisions"], 100);
-        assert_eq!(rebuilt["maximum_metadata_overlay_outcomes"], 101);
-        assert_eq!(rebuilt["admitted_metadata_overlay_outcomes"], 100);
+        assert_eq!(rebuilt["maximum_metadata_overlay_outcomes"], 0);
+        assert_eq!(rebuilt["admitted_metadata_overlay_outcomes"], 0);
+        assert_eq!(
+            rebuilt["metadata_recovery_model"],
+            "private-per-revision-disk-staging"
+        );
+        assert_eq!(rebuilt["private_metadata_suffix"]["revisions"], 100);
+        assert_eq!(rebuilt["private_metadata_suffix"]["staged_runs"], 300);
+        assert_eq!(rebuilt["private_metadata_suffix"]["output_entries"], 10400);
+        assert_eq!(
+            rebuilt["private_metadata_suffix"]["output_logical_bytes"],
+            1572300
+        );
         assert_eq!(rebuilt["frontier"], 101);
         assert_eq!(rebuilt["verified_history_versions"], 200);
         assert_eq!(

@@ -58,6 +58,36 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `9378599` plus this increment: [Decision 0120](docs/decisions/0120-streamed-inventory-free-recovery-metadata.md)
+  adds opt-in private per-revision retry/transaction-ID staging for paired, inventory-free
+  domain/metadata bases. Native BM-06 origin rebuild now uses zero outcome/transaction/owner
+  overlays: its 100 suffix revisions produce 300 merges, 10,400 output entries and 1,572,300
+  logical output bytes. These are partial merge diagnostics, not complete authenticated I/O.
+  Inventories, existing owners and optional owner projections explicitly refuse; the general
+  recovery path is unchanged. Exact retry/expiry, authorization, authenticated ID collisions,
+  preparation binding, byte/count limits and late corruption have focused coverage. The fault
+  matrix schedules 936 cases: 930 failures plus six optional not-found operations without a
+  successful crash-after boundary. Restart retains only old or terminal graph publication and
+  unpublished metadata remains undiscoverable. A test-module placement lint failure was fixed
+  before the final gate, without suppressing the lint.
+  Final scope `run-p442048-i21360533.scope` exited 0 with one Cargo job/test thread and
+  MemoryHigh=3G, MemoryMax=4G, MemorySwapMax=512M; preflight 35 GiB available RAM/3.9 GiB free swap.
+  Exact commands: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  --workspace --all-targets --all-features --locked --offline -- --test-threads=1`;
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1`; `CARGO_BUILD_JOBS=1 cargo clippy --workspace
+  --all-targets --all-features --locked --offline -- -D warnings`;
+  `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets
+  --locked --offline -- -D warnings`; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc
+  -p uste-txn -p uste-graph --no-deps --locked --offline`.
+  Workspace regression passed, including 24 graph-disk tests (27.34s) and 27 replay tests
+  (10.35s). Native BM-01 process 3/11.73s, BM-06 CLI 2/0.50s and BM-06 process 8/73.82s pass;
+  the two prior exact-oracle ignores are unchanged. Strict lint (4.11s/1.34s) and API docs
+  (2.07s) pass. M1 sources/lockfiles are unchanged. No qualifying campaign ran.
+  Next: extend bounded disk metadata recovery beyond inventory-free origin staging and address
+  immutable-family rewrite scaling/accounting before qualifying campaigns. T-20/T-19 remain open.
+
 - Implemented on pushed `bdb4ac9` plus this increment: [Decision 0119](docs/decisions/0119-native-bm06-origin-rebuild.md)
   connects private genesis reconstruction to explicit native `bm06-linux-rebuild`, retaining the
   two-record cap and ordinary open/recover refusal on total graph-base loss. Native tests rebuild

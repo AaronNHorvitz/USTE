@@ -30,6 +30,7 @@ pub(crate) struct DiskAdmissionMeasurement {
     pub state_counts: [u64; 8],
     pub graph: uste_graph::GraphDiskBaseAdmissionReport,
     pub suffix: uste_graph::GraphDiskSuffixRecoveryReport,
+    pub metadata_suffix: Option<uste_txn::InventoryFreeMetadataRecoveryReport>,
 }
 
 type AdmittedDisk<F, W, E, I> = (
@@ -414,32 +415,57 @@ where
         state_counts: base.state_counts(),
         graph: graph_report,
         suffix: uste_graph::GraphDiskSuffixRecoveryReport::default(),
+        metadata_suffix: None,
     };
+    let coordinator_limits = uste_txn::DiskCoordinatorRecoveryLimits {
+        overlay: uste_txn::CoordinatorRecoveryLimits::new(
+            usize::try_from(if origin { 0 } else { profile_limits.groups }).map_err(debug)?,
+            0,
+        )
+        .map_err(debug)?,
+        lookup,
+        maximum_encoded_bytes: profile_limits.suffix_bytes,
+    };
+    let suffix_limits = uste_graph::GraphDiskSuffixRecoveryLimits {
+        maximum_revisions: if repair { profile_limits.groups - 1 } else { 0 },
+        preparation: profile_limits.preparation,
+        deltas: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
+        merge: GraphStateRootMergeLimits::uniform(
+            profile_limits.merge,
+            profile_limits.history_group_bytes,
+        )
+        .map_err(debug)?,
+    };
+    if origin {
+        return uste_graph::recover_graph_disk_suffix_with_streamed_metadata(
+            recovery,
+            fs,
+            metadata,
+            GraphDiskLiveState::new(base),
+            RetentionDays::new(30).map_err(debug)?,
+            coordinator_limits,
+            suffix_limits,
+            uste_txn::InventoryFreeMetadataRecoveryLimits {
+                maximum_revisions: profile_limits.groups - 1,
+                merge: profile_limits.merge,
+            },
+            &mut cache,
+        )
+        .map(|(disk, suffix, metadata_suffix)| {
+            measurement.suffix = suffix;
+            measurement.metadata_suffix = Some(metadata_suffix);
+            (disk, measurement)
+        })
+        .map_err(debug);
+    }
     uste_graph::recover_graph_disk_suffix(
         recovery,
         fs,
         metadata,
         GraphDiskLiveState::new(base),
         RetentionDays::new(30).map_err(debug)?,
-        uste_txn::DiskCoordinatorRecoveryLimits {
-            overlay: uste_txn::CoordinatorRecoveryLimits::new(
-                usize::try_from(profile_limits.groups).map_err(debug)?,
-                0,
-            )
-            .map_err(debug)?,
-            lookup,
-            maximum_encoded_bytes: profile_limits.suffix_bytes,
-        },
-        uste_graph::GraphDiskSuffixRecoveryLimits {
-            maximum_revisions: if repair { profile_limits.groups - 1 } else { 0 },
-            preparation: profile_limits.preparation,
-            deltas: GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?,
-            merge: GraphStateRootMergeLimits::uniform(
-                profile_limits.merge,
-                profile_limits.history_group_bytes,
-            )
-            .map_err(debug)?,
-        },
+        coordinator_limits,
+        suffix_limits,
         &mut cache,
     )
     .map(|(disk, suffix)| {
