@@ -1,4 +1,5 @@
 //! Restricted packed-metadata facade. Raw coordinator capabilities never escape.
+mod write;
 use crate::{
     AuthorizedDiskPolicyState, AuthorizedError, CommittedBlobUsage, PackedBlobAccountingLimits,
     PackedCommitCoordinator, PackedCoordinatorState, TransactionError, TransactionOutcome,
@@ -9,6 +10,7 @@ use uste_storage::{
     Clock, OwnershipFileSystem, journal::DurableKeyEnvelope, packed_tree_lookup::TreeLookupLimits,
 };
 use uste_types::{IdempotencyKey, TransactionId};
+pub use write::{AuthorizedPackedWriteState, AuthorizedPackedWriter};
 
 pub struct AuthorizedPackedMetadata<'a, S, F, W, E, I>
 where

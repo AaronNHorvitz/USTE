@@ -8,7 +8,9 @@
 mod authorized;
 mod authorized_disk;
 mod authorized_packed;
-pub use authorized_packed::AuthorizedPackedMetadata;
+pub use authorized_packed::{
+    AuthorizedPackedMetadata, AuthorizedPackedWriteState, AuthorizedPackedWriter,
+};
 mod commit_admission;
 mod disk_metadata;
 mod index_recovery;

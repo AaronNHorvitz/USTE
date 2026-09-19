@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_authorized_writes.rs"]
+mod authorized_write;
 use uste_graph::{
     PackedGraphAdmissionLimits, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
     admit_packed_graph_base, recover_packed_graph_suffix,

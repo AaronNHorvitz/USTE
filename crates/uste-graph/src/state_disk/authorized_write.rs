@@ -72,7 +72,7 @@ where
 
 // Graph validation errors can contain hidden dependency counts or record identities. Match the
 // existing authorized reducer's content-free error boundary, never export raw proof errors.
-fn content_free_error(error: GraphDiskError) -> TransactionError {
+pub(super) fn content_free_error(error: GraphDiskError) -> TransactionError {
     match error {
         GraphDiskError::Storage(error) => TransactionError::Storage(error),
         GraphDiskError::Transaction(error) => error,

@@ -298,6 +298,13 @@ transaction; partial publication returns no live coordinator and old roots remai
 Count admission composes with per-revision proof/staging bounds. Authorized packed writes, origin
 rebuild and native qualification remain separate work.
 
+Decision 0158 adds restricted inventory-free packed writes with authenticated identity, typed
+target authorization and request quotas before clock/storage access. Exact retries bypass proof
+preparation; fresh writes use bounded packed graph preparation and publication. Certified pending
+policy changes synchronize before root repair, including failed repair, so revocation is immediate.
+Committed repair errors preserve their durable outcome; uncertainty remains quarantined. This does
+not expose raw maintenance or provide packed queries, upload reservations or native qualification.
+
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free
 compare-and-swap deltas. It changes no v1 digest or persisted format and is not a live disk index

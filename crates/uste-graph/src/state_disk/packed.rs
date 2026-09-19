@@ -9,8 +9,9 @@ pub use preparation::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState, PackedGraphDelta,
     PackedGraphPreparationLimits, PackedGraphReadReport, PackedGraphStageLimits,
     PackedGraphStageReport, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
-    PackedPreparedGraph, prepare_packed_graph_delta, prepare_packed_graph_transaction,
-    publish_packed_graph_live_base, recover_packed_graph_suffix, stage_packed_graph_delta,
+    PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits, PackedPreparedGraph,
+    prepare_packed_graph_delta, prepare_packed_graph_transaction, publish_packed_graph_live_base,
+    recover_packed_graph_suffix, stage_packed_graph_delta,
 };
 use uste_storage::{
     journal::{CanonicalPackedTree, CertificateAnchorReadLimits},

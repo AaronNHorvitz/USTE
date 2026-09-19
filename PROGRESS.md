@@ -2,7 +2,47 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — paired packed graph suffix recovery (Decision 0157)
+## Latest verified increment — authorized packed writes (Decision 0158)
+
+Implemented on pushed `497ce72` plus this increment: restricted inventory-free packed writes,
+typed target authorization and quotas before clock/storage, shared exact retry/collision checks,
+bounded graph preparation, content-free dependency errors and certified policy synchronization
+before repair. Pending revocation survives publication failure; older retries cannot repair another
+pending revision. Outcome uncertainty stays quarantined. No consumer maintenance capability escapes.
+
+Five tests cover denied/foreign/revoked identities, scope/quota/inventory refusal before I/O,
+reference outcomes, retry/expiry/cancellation/collision, hidden dependencies, policy replacement,
+repair failure, read failure, uncertain commit and cold retry. An initial test used a nonexistent
+error variant, then attempted to replace an unconsumed injected fault; both fixture defects were
+fixed without weakening production behavior. Final focused session 59800 /
+`run-p691702-i21550505.scope` passed all five tests (0.14 s), plus Clippy (6.57 s).
+
+Full workspace log `/tmp/uste-d158-workspace-verification.log` records 617 passing tests across
+47 executables, zero failures/ignored (graph disk 61/112.35 s; transaction integration 93/100.22 s).
+Scope `run-p692433-i21651362.scope` finished; its terminal tool response was lost across context
+compaction, so no unseen process exit status is claimed. Clippy and docs were explicitly rerun
+after it finished in `run-p696385-i21674857.scope`, exit 0 (0.04 s each). Preflight: 31 GiB available
+RAM / 5.7 GiB free swap; sampled test scope peak 1,508,417,536 bytes / zero swap. Commands:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d158-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+cargo fmt --all -- --check
+git diff --check
+python3 scripts/check_docs.py
+python3 scripts/check_task_graph.py
+```
+
+Next implement read-only packed access and authorized graph queries, then native integration and
+qualification readiness. Decision 0159 and unregistered `packed_maintenance/reader.rs` are excluded
+drafts. T-20/T-19 remain open; no larger-than-memory campaign or production qualification is claimed.
+Native standalone remains last tested at `42f9abb`; pinned M1 interfaces/evidence are unchanged.
+This section supersedes earlier next-step text below.
+
+## Prior verified increment — paired packed graph suffix recovery (Decision 0157)
 
 Implemented on pushed `df8f54c` plus this increment: common owner/receipt admission validates a
 historical graph/primary/quota triple, then an authenticated windowed cursor drives bounded graph
