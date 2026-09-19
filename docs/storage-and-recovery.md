@@ -253,6 +253,11 @@ Decision 0148 adds explicit quota-preserving live rebase: a bounded authenticate
 private paired prefixes, followed by terminal primary/quota publication. Only both durable roots
 permit installation and overlay clearing. A failed attempt keeps old bases/outcomes and blocks
 fresh writes; exact retries remain available. Work reports remain partial primitive accounting.
+Decision 0149 adds streamed cold recovery from a published admitted historical packed pair.
+It checks each authenticated prepared result, advances paired private metadata and a receipt-bound
+private reducer, then publishes only the terminal pair and returns empty coordinator overlays.
+Late failure returns no live state. Reducer residency itself remains the caller's responsibility;
+this does not supply the separately required packed disk-domain or authorized consumer adapters.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

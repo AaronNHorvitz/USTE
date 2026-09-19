@@ -1,5 +1,9 @@
 //! Opt-in trusted live writes over admitted packed metadata; consumer authorization is separate.
 use super::*;
+mod admission;
+use admission::validate_packed_base;
+mod recovery;
+pub use recovery::PackedCoordinatorRecoveryState;
 mod rebase;
 use crate::disk_coordinator::{DiskCommitMetadata, DiskMetadataBase};
 pub use rebase::{
@@ -68,49 +72,17 @@ where
         overlay: CoordinatorRecoveryLimits,
     ) -> Result<Self, TransactionError> {
         let scope = recovery.scope();
-        if primary.scope() != scope
-            || recovery.journal.checkpoint_anchor() != Some(primary.anchor())
-        {
+        if recovery.journal.checkpoint_anchor() != Some(primary.anchor()) {
             return Err(TransactionError::IntegrityFailure);
         }
-        quota.validate_live_pair(&recovery.journal, &primary)?;
-        for (root, profile, families) in [
-            (
-                primary_root,
-                COORDINATOR_PACKED_PROFILE_V1,
-                primary.families().to_vec(),
-            ),
-            (
-                quota_root,
-                COORDINATOR_PACKED_USAGE_PROFILE_V1,
-                quota.families().to_vec(),
-            ),
-        ] {
-            recovery
-                .journal
-                .validate_packed_root_certificate(root)
-                .map_err(TransactionError::Storage)?;
-            let manifest = root.manifest();
-            let claims = manifest.claims();
-            if manifest.context().scope != scope
-                || manifest.context().profile != profile
-                || (claims.revision, claims.certificate_digest) != primary.anchor()
-                || manifest.families() != families
-            {
-                return Err(TransactionError::IntegrityFailure);
-            }
-        }
-        let claims = primary_root.manifest().claims();
-        let accounting = quota_root.manifest().claims();
-        if claims.reducer_profile != accounting.reducer_profile
-            || claims.state_commitment_profile != accounting.state_commitment_profile
-            || claims.state_digest != accounting.state_digest
-        {
-            return Err(TransactionError::IntegrityFailure);
-        }
-        state
-            .validate_packed_metadata(scope, claims)
-            .map_err(map_apply_error)?;
+        let claims = validate_packed_base(
+            &recovery,
+            &primary,
+            &quota,
+            primary_root,
+            quota_root,
+            &state,
+        )?;
         Ok(Self {
             inner: CommitCoordinator {
                 scope,

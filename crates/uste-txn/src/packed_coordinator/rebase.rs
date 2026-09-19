@@ -31,7 +31,7 @@ pub struct PackedMetadataRebaseReport {
     pub written_nodes: u64,
 }
 #[derive(Default)]
-struct Work {
+pub(super) struct Work {
     lookup_pages: u64,
     lookup_bytes: u64,
     read_pages: u64,
@@ -46,6 +46,42 @@ fn add(value: &mut u64, amount: u64) -> Result<(), TransactionError> {
     Ok(())
 }
 impl Work {
+    pub(super) fn prefixes(
+        &mut self,
+        p: PackedCoordinatorReport,
+        q: PackedQuotaReport,
+    ) -> Result<(), TransactionError> {
+        add(&mut self.lookup_pages, p.owner_lookup_pages)?;
+        add(&mut self.lookup_bytes, p.owner_lookup_bytes)?;
+        add(&mut self.lookup_pages, q.primary_lookup_pages)?;
+        add(&mut self.lookup_bytes, q.primary_lookup_bytes)?;
+        if let Some(lookup) = q.principal_lookup {
+            add(&mut self.lookup_pages, lookup.pages)?;
+            add(&mut self.lookup_bytes, lookup.encoded_bytes)?;
+        }
+        for batch in p.batches.into_iter().chain(q.batches) {
+            self.batch(batch)?;
+        }
+        Ok(())
+    }
+    pub(super) fn finish(
+        self,
+        journal: JournalRangeReadReport,
+        primary_root: CertifiedPackedRoot,
+        quota_root: CertifiedPackedRoot,
+    ) -> PackedMetadataRebaseReport {
+        PackedMetadataRebaseReport {
+            journal,
+            primary_root,
+            quota_root,
+            lookup_pages: self.lookup_pages,
+            lookup_bytes: self.lookup_bytes,
+            batch_read_pages: self.read_pages,
+            batch_read_bytes: self.read_bytes,
+            written_pages: self.pages,
+            written_nodes: self.nodes,
+        }
+    }
     fn batch(&mut self, batch: TreeBatchReport) -> Result<(), TransactionError> {
         add(&mut self.read_pages, batch.read_pages)?;
         add(&mut self.read_bytes, batch.read_bytes)?;
@@ -159,17 +195,7 @@ where
                 &transaction,
                 limits.staging,
             )?;
-            add(&mut work.lookup_pages, p.owner_lookup_pages)?;
-            add(&mut work.lookup_bytes, p.owner_lookup_bytes)?;
-            add(&mut work.lookup_pages, q.primary_lookup_pages)?;
-            add(&mut work.lookup_bytes, q.primary_lookup_bytes)?;
-            if let Some(lookup) = q.principal_lookup {
-                add(&mut work.lookup_pages, lookup.pages)?;
-                add(&mut work.lookup_bytes, lookup.encoded_bytes)?;
-            }
-            for batch in p.batches.into_iter().chain(q.batches) {
-                work.batch(batch)?;
-            }
+            work.prefixes(p, q)?;
             primary = Some(next_primary);
             quota = Some(next_quota);
         }
@@ -234,16 +260,6 @@ where
         self.inner.transactions.clear();
         self.inner.committed_blob_owners.clear();
         self.rebase_required = false;
-        Ok(Some(PackedMetadataRebaseReport {
-            journal,
-            primary_root,
-            quota_root,
-            lookup_pages: work.lookup_pages,
-            lookup_bytes: work.lookup_bytes,
-            batch_read_pages: work.read_pages,
-            batch_read_bytes: work.read_bytes,
-            written_pages: work.pages,
-            written_nodes: work.nodes,
-        }))
+        Ok(Some(work.finish(journal, primary_root, quota_root)))
     }
 }

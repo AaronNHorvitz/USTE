@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_recovery.rs"]
+mod recovery;
 use uste_txn::{PackedCoordinatorPublicationState, PackedMetadataRebaseLimits};
 
 impl PackedCoordinatorPublicationState for ReadyCounter {

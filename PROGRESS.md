@@ -2,6 +2,44 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — streamed packed recovery (Decision 0149)
+
+Implemented on pushed `c2e8852` plus this increment: cold recovery consumes the exclusive owner
+with an admitted published historical primary/quota pair and ready base reducer. One authenticated
+transaction/preparation advances private metadata and receipt-bound state at a time, with no
+suffix outcome/owner maps. Certified result digests, exact range exhaustion, unchanged commitment
+profiles and terminal ready-state validation precede both terminal publications. Only the complete
+pair installs; current bases return without I/O or slot rotation. Caller-supplied domain residency
+is not qualified by this coordinator-only bound.
+
+Focused session 94284 / scope `run-p635510-i21612791.scope` passed eight selected tests (six new
+recovery cases plus two existing maintenance cases) in 25.25 s and Clippy in 0.39 s. Tests include
+1/2/64-certificate windows, zero overlay capacity, exact retry and cold accounting, exact/minus-one
+range budgets, 702 injected I/O/error/crash cases with restart, authenticated retry/transaction
+collisions and false results, five late reducer/hook/anchor/profile failures, and suffix/derived
+ciphertext corruption. Failed recovery publishes no intermediate root or partial live state.
+An initial Clippy needless-borrow error after extracting shared admission was fixed before these
+passes. The shared work aggregation and root validation were reviewed against the prior paths.
+
+Full gate passed in session 27908 / scope `run-p636146-i21647906.scope`, exit 0: 566 tests across
+47 executables (transaction integration 84/97.70 s), Clippy 0.07 s and docs 1.17 s. Format, diff
+and documentation checks passed (224 documents, 152 definitions). Preflight: 32 GiB available RAM /
+5.6 GiB free swap; sampled scope peak 1,886,171,136 bytes / zero swap. Exact full-gate command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d149-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline'
+```
+
+Decision 0150's
+restricted authorized packed-metadata reads are next; that contract draft and the unregistered
+`authorized_packed.rs`, `packed_coordinator/reads.rs`, quota `live_reads.rs` and `packed_live_reads.rs` test drafts are excluded
+from this increment. T-20/T-19, packed disk-domain integration, complete I/O accounting and qualifying
+BM-01/BM-06 remain open. Native standalone remains last tested at `42f9abb`; M1 stays pinned.
+
 ## Latest verified increment — paired packed live rebase (Decision 0148)
 
 Implemented on pushed `bdf0640` plus this increment: explicit live rebase reuses the authenticated
