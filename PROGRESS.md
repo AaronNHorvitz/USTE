@@ -1,6 +1,6 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-18 · Branch: `codex/uste-implementation`
+Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
 Latest completed task is T-68; M1 is complete at exact implementation `b9689f3`. Decision 0055 selects verified recovery commit `7393def` and freezes
 the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Implementation
@@ -54,6 +54,28 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0088](docs/decisions/0088-resumable-authenticated-transaction-ranges.md) adds an
+  opaque transaction-range cursor with one shared group/encoded-byte allowance, pinned scope and
+  authenticated frontier, per-step reauthentication, sticky failure and terminal-only reporting.
+  `visit_transactions` uses the cursor; canonical request/inventory ownership no longer retains
+  encrypted/decrypted group buffers during the caller's index/reducer callback. This is not
+  multi-revision graph-root publication or removal of storage metadata maps. Three new cursor
+  tests passed in 0.34s, including every observed read fault, late corruption, exact/minus-one
+  certificate-plus-group budget, owned inventory and scope/frontier substitution before I/O.
+  Tested on `5a19c37` plus this increment: `CARGO_BUILD_JOBS=1 cargo test --workspace
+  --all-targets --all-features --locked --offline -- --test-threads=1` passed, including 65
+  storage tests (173.85s), 17 coordinator tests (5.86s), replay faults and M1 process recovery.
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 50 unit tests (28.20s, 2 existing exact-profile
+  ignores) and 3 CLI tests (12.83s). Workspace all-target/all-feature and experiment all-target
+  strict clippy passed; `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn
+  --no-deps --locked --offline` passed. Commands ran sequentially with one job/thread under
+  the 3G/4G/512M scope; sampled peak 1,538,392,064 bytes, zero swap. Docs/task checks pass
+  (161 links, 68 tasks). Archived native raw reports match retained outputs exactly; M1 sources
+  and lockfile are unchanged. Latest headroom: 29 GiB available RAM, 3.9 GiB free swap.
+  Next remove repeated page-parser work and verify
+  actual native cache evictions without changing qualifying cache/workload thresholds.
+
 - [Decision 0087](docs/decisions/0087-native-development-cache-pressure-scale.md) gives native
   development commands a separate 10,000-entity ceiling; memory-backed checks stay at 1,000
   and qualifying native profiles are still refused. Admission precedes filesystem/process access.
@@ -63,10 +85,29 @@ unverified external distribution prerequisite.
   experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 50 unit tests
   (2 existing exact-profile ignores) in 28.53s and 3 CLI tests in 12.88s. Experiment strict
   all-target clippy passed. The 3G/4G/512M scope peaked at a sampled 333,647,872 bytes with zero
-  swap; host preflight had 34 GiB available RAM and 3.9 GiB free swap. No actual 10,000-entity
-  construction or cache-pressure result is claimed yet. Next run the native development fixture
-  with separate oracle generation, a bounded construction timeout and retained recovery artifacts
-  in `experiments/t20-bench/target/native-pressure.kedpTk`; qualifying BM-01/BM-06 remain open.
+  swap; host preflight had 34 GiB available RAM and 3.9 GiB free swap.
+  The completed native development observation ran at pushed `5a19c37`, binary SHA-256
+  `20614f7cc71d5b13724ed3cd73679bb5f31fa4ad9e7021d17b48d65320da357a`, with artifacts retained in
+  `experiments/t20-bench/target/native-pressure.kedpTk`. Separate `oracle-summary --entities 10000`
+  completed in 3.13s / 10,836 KiB peak RSS (41,249-byte summary). Scoped `linux-disk-create
+  --root <artifact-dir> --password-file <artifact-dir>/password --entities 10000` under
+  `/usr/bin/time -v` and `timeout --signal=TERM --kill-after=10s 900s` exited 0 in 51.96s,
+  peak RSS 266,520 KiB, no swaps; exact frontier 23 and final counts
+  `[110001,210001,100000,100000,100000,300000,1,1]`. Adapter read/write returned bytes were
+  7,698,911,038 / 2,881,473,171, including setup/rewrite work, not device traffic. The approximately
+  2.7 GiB retained directory includes prior derived runs; T-35 reclamation is not implied.
+  Separately scoped `linux-disk-query` with the same root/password/count and
+  `--oracle-file <artifact-dir>/oracle-summary` exited 0 under the same 900s timeout and
+  3G/4G/512M scope: all 384 queries matched, 701.28s elapsed, 264,896 KiB peak RSS, no swaps.
+  Setup/query durations were 28,553/672,641ms. Diagnostic mixed-depth empty-cache p99 was
+  8,308,109,947ns, not the qualifying warm per-depth metric. Output digest is
+  `1330498a4b131c827113fd3a067e807eec804d83babb62d5d1fa64edebe83367`.
+  The run recorded 420,631,561 cache hits, 806,885 misses, 1,080,841,044 enumerated fragments,
+  16,577,452,325 query adapter read bytes, zero query writes and zero query cache evictions.
+  Thus query equivalence passes at this development size, but query cache-pressure does not
+  follow from the larger fixture. [The pinned raw reports](docs/evidence/native-disk-10000-development.json)
+  retain all measurement boundaries. Neither larger-than-RAM nor qualifying BM-01/BM-06
+  acceptance is claimed. Repeated page validation/allocation is a concrete next scalability target.
 
 - [Decision 0086](docs/decisions/0086-ordered-cache-eviction.md) replaces linear oldest-page
   selection with a bounded ordered recency map. It preserves exact LRU/reference behavior,
@@ -1434,8 +1475,12 @@ Decisions 0074–0085 connect independent development oracles, native constructi
 real process-loss tests and supervised sampling to the disk path. Profile-derived limits now
 validate across the accepted size range, and the 1,000/10,000 development oracle check passes.
 Native commands remain capped pending qualification readiness. Cached primitive work now complements
-adapter counters, but uncached/recovery/publication accounting is incomplete. Next address cache
-eviction complexity/accounting and remaining resident storage metadata.
+adapter counters, but uncached/recovery/publication accounting is incomplete. Decision 0086
+addresses ordered cache eviction and explicit logical accounting; Decision 0087's larger native
+development run matches every oracle query but records zero query evictions. Decision 0088 adds
+resumable authenticated transaction ranges, not multi-revision graph publication. Next remove
+repeated page-parser work, test actual native cache evictions and address remaining resident
+storage metadata and graph suffix publication.
 Decision 0071 supplies bounded authorized upload
 quota/reconciliation; domain-compatible inventory admission and certified charge transfer remain
 open. The existing graph domain intentionally prohibits inventories. The new first-reference

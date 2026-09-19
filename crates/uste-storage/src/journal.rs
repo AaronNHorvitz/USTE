@@ -165,6 +165,14 @@ impl From<CryptoError> for StorageError {
     }
 }
 
+/// Successful committed-range work. Includes certificates and group envelopes, not independently
+/// bounded inventories, segment headers or blob payloads. No report escapes a partial failure.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct JournalRangeReadReport {
+    pub groups: u64,
+    pub encoded_bytes: u64,
+}
+
 /// One exclusively owned writer plus its authenticated durable frontier.
 pub struct JournalStore<F, W, E, I>
 where
@@ -931,8 +939,32 @@ where
         last: CommitRevision,
         maximum_groups: u64,
         maximum_encoded_bytes: u64,
-        mut visitor: V,
+        visitor: V,
     ) -> Result<(), StorageError>
+    where
+        V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        self.visit_committed_range_report(
+            filesystem,
+            first,
+            last,
+            maximum_groups,
+            maximum_encoded_bytes,
+            visitor,
+        )
+        .map(|_| ())
+    }
+
+    /// As `visit_committed_range`, with exact terminal budget consumption for resumable callers.
+    pub fn visit_committed_range_report<V>(
+        &self,
+        filesystem: &mut F,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+        mut visitor: V,
+    ) -> Result<JournalRangeReadReport, StorageError>
     where
         V: FnMut(&mut F, RecoveredGroup<'_>) -> Result<(), StorageError>,
     {
@@ -1052,7 +1084,10 @@ where
                 },
             )?;
         }
-        Ok(())
+        Ok(JournalRangeReadReport {
+            groups: last.get() - first.get() + 1,
+            encoded_bytes: maximum_encoded_bytes - remaining,
+        })
     }
 
     /// Exact authenticated journal anchor required for publishing a cache at the current frontier.

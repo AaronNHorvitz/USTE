@@ -5,7 +5,10 @@ use uste_storage::{
     BlobInventory, EntryName, IndexEntry, IndexGetLimits, IndexPredecessor, IndexPredecessorLimits,
     IndexReadStats, IndexRunCursor, IndexRunReadLimits, IndexRunReadReport, IndexRunVisitor,
     IndexScan, OwnershipFileSystem, PageCache, RecoveredIndexRoot,
-    journal::{DurableKeyEnvelope, JournalStore, RecoveredGroup, RecoveryReport, StorageError},
+    journal::{
+        DurableKeyEnvelope, JournalRangeReadReport, JournalStore, RecoveredGroup, RecoveryReport,
+        StorageError,
+    },
 };
 use uste_types::{CommitRevision, IdempotencyKey, NamespaceRef};
 
@@ -14,7 +17,7 @@ use super::{
     TransactionOutcome, TransactionState, decode_group, map_open_error, sha256,
 };
 
-/// Opaque owned copy of the authenticated journal frontier transaction.
+/// Opaque owned copy of one authenticated journal transaction, including the frontier.
 ///
 /// Only one bounded canonical request and inventory are retained. Construction is possible only
 /// while the storage journal is fully authenticated.
@@ -99,6 +102,31 @@ impl RecoveredFrontierTransaction {
 pub struct RecoveredPreparedSuffix<P> {
     pub(crate) transaction: RecoveredFrontierTransaction,
     pub(crate) prepared: P,
+}
+
+/// Bounded resumable transaction range pinned to one scope and authenticated journal frontier.
+/// The cursor retains no transaction history. Yielded transactions remain provisional until
+/// terminal finish; callers must separately validate domain, retry and first-owner semantics.
+pub struct TransactionRecoveryCursor {
+    scope: NamespaceRef,
+    anchor: (CommitRevision, [u8; 32]),
+    next: Option<CommitRevision>,
+    last: CommitRevision,
+    total_groups: u64,
+    initial_encoded_bytes: u64,
+    remaining_encoded_bytes: u64,
+    completed_groups: u64,
+    failed: bool,
+}
+
+impl core::fmt::Debug for TransactionRecoveryCursor {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("TransactionRecoveryCursor")
+            .field("completed_groups", &self.completed_groups)
+            .field("failed", &self.failed)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<P> core::fmt::Debug for RecoveredPreparedSuffix<P> {
@@ -288,16 +316,126 @@ where
     where
         V: FnMut(&mut F, RecoveredFrontierTransaction) -> Result<(), StorageError>,
     {
-        self.journal
-            .visit_committed_range(
-                filesystem,
-                first,
-                last,
-                maximum_groups,
-                maximum_encoded_bytes,
-                |filesystem, group| visitor(filesystem, capture_group(self.scope, group)?),
-            )
-            .map_err(map_open_error)
+        let mut cursor =
+            self.open_transaction_cursor(first, last, maximum_groups, maximum_encoded_bytes)?;
+        while let Some(transaction) = self.next_recovered_transaction(filesystem, &mut cursor)? {
+            visitor(filesystem, transaction).map_err(map_open_error)?;
+        }
+        self.finish_transaction_cursor(cursor).map(|_| ())
+    }
+
+    /// Admit an inclusive range before I/O. This is a trusted recovery capability, not a
+    /// consumer-authorized read, and does not establish domain or coordinator validity.
+    pub fn open_transaction_cursor(
+        &self,
+        first: CommitRevision,
+        last: CommitRevision,
+        maximum_groups: u64,
+        maximum_encoded_bytes: u64,
+    ) -> Result<TransactionRecoveryCursor, TransactionError> {
+        let anchor = self
+            .journal
+            .checkpoint_anchor()
+            .ok_or(TransactionError::IntegrityFailure)?;
+        if first > last || last > anchor.0 {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let total_groups = last.get() - first.get() + 1;
+        if total_groups > maximum_groups {
+            return Err(TransactionError::Storage(StorageError::ResourceLimit));
+        }
+        Ok(TransactionRecoveryCursor {
+            scope: self.scope,
+            anchor,
+            next: Some(first),
+            last,
+            total_groups,
+            initial_encoded_bytes: maximum_encoded_bytes,
+            remaining_encoded_bytes: maximum_encoded_bytes,
+            completed_groups: 0,
+            failed: false,
+        })
+    }
+
+    /// Yield one completely authenticated canonical transaction and release its encrypted/read
+    /// buffers before returning. A failed cursor cannot resume; restart with a fresh admission.
+    pub fn next_recovered_transaction(
+        &self,
+        filesystem: &mut F,
+        cursor: &mut TransactionRecoveryCursor,
+    ) -> Result<Option<RecoveredFrontierTransaction>, TransactionError> {
+        let result = (|| {
+            if cursor.failed
+                || cursor.scope != self.scope
+                || self.journal.checkpoint_anchor() != Some(cursor.anchor)
+            {
+                return Err(TransactionError::IntegrityFailure);
+            }
+            let Some(revision) = cursor.next else {
+                return Ok(None);
+            };
+            let mut transaction = None;
+            let report = self
+                .journal
+                .visit_committed_range_report(
+                    filesystem,
+                    revision,
+                    revision,
+                    1,
+                    cursor.remaining_encoded_bytes,
+                    |_, group| {
+                        transaction = Some(capture_group(self.scope, group)?);
+                        Ok(())
+                    },
+                )
+                .map_err(map_open_error)?;
+            let transaction = transaction.ok_or(TransactionError::IntegrityFailure)?;
+            let completed = cursor
+                .completed_groups
+                .checked_add(report.groups)
+                .filter(|completed| *completed <= cursor.total_groups)
+                .ok_or(TransactionError::IntegrityFailure)?;
+            let remaining = cursor
+                .remaining_encoded_bytes
+                .checked_sub(report.encoded_bytes)
+                .ok_or(TransactionError::IntegrityFailure)?;
+            let next = if revision == cursor.last {
+                None
+            } else {
+                Some(
+                    revision
+                        .checked_next()
+                        .map_err(|_| TransactionError::RevisionExhausted)?,
+                )
+            };
+            cursor.completed_groups = completed;
+            cursor.remaining_encoded_bytes = remaining;
+            cursor.next = next;
+            Ok(Some(transaction))
+        })();
+        if result.is_err() {
+            cursor.failed = true;
+        }
+        result
+    }
+
+    /// Release exact terminal range consumption only after every selected group succeeded.
+    pub fn finish_transaction_cursor(
+        &self,
+        cursor: TransactionRecoveryCursor,
+    ) -> Result<JournalRangeReadReport, TransactionError> {
+        if cursor.failed
+            || cursor.next.is_some()
+            || cursor.completed_groups != cursor.total_groups
+            || cursor.scope != self.scope
+            || self.journal.checkpoint_anchor() != Some(cursor.anchor)
+        {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        Ok(JournalRangeReadReport {
+            groups: cursor.completed_groups,
+            encoded_bytes: cursor.initial_encoded_bytes - cursor.remaining_encoded_bytes,
+        })
     }
 
     /// Load storage-authenticated derived roots for trusted recovery code.

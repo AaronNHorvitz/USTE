@@ -37,6 +37,7 @@ pub use disk_metadata::{
 };
 pub use index_recovery::{
     AuthenticatedIndexRecovery, RecoveredFrontierTransaction, RecoveredPreparedSuffix,
+    TransactionRecoveryCursor,
 };
 
 mod disk_coordinator;
