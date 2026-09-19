@@ -297,7 +297,7 @@ pub(super) fn reopen(fs: &mut Fs, name: &EntryName, base_state: PolicyCounter) -
         .into_iter()
         .find(|root| root.revision() == CommitRevision::FIRST)
         .unwrap();
-    let base = uste_txn::admit_coordinator_disk_base(
+    let mut base = uste_txn::admit_coordinator_disk_base(
         &recovery,
         fs,
         root,
@@ -311,6 +311,25 @@ pub(super) fn reopen(fs: &mut Fs, name: &EntryName, base_state: PolicyCounter) -
         &mut cache,
     )
     .unwrap();
+    if let Some(root) = recovery
+        .load_index_root_manifests(fs, uste_txn::COORDINATOR_BLOB_USAGE_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|root| root.anchor() == base.anchor())
+    {
+        base.admit_blob_usage_index(
+            &recovery,
+            fs,
+            root,
+            uste_txn::CoordinatorBlobUsageLimits {
+                run: run(),
+                lookup: lookup(),
+                maximum_owners: 4,
+            },
+            &mut cache,
+        )
+        .unwrap();
+    }
     DiskCommitCoordinator::recover_from_admitted_base(
         recovery,
         fs,

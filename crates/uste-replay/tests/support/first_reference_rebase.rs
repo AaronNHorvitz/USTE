@@ -5,6 +5,8 @@ use uste_txn::{COORDINATOR_FIRST_REFERENCE_PROFILE_V1, CoordinatorFirstReference
 
 #[path = "first_reference_rebase/reverse.rs"]
 mod reverse;
+#[path = "first_reference_rebase/usage.rs"]
+mod usage;
 
 type Fs = FaultFileSystem<MemoryFileSystem>;
 
@@ -161,7 +163,7 @@ fn reopen_storage_mode(
         maximum_encoded_bytes_per_pass: 1_000_000,
     };
     let has_first = first.is_some();
-    let base = if let Some(first) = first {
+    let mut base = if let Some(first) = first {
         uste_txn::admit_coordinator_disk_base_with_first_references(
             &recovery,
             fs,
@@ -184,6 +186,15 @@ fn reopen_storage_mode(
     }
     .unwrap();
     assert_eq!(base.has_first_reference_evidence(), has_first);
+    if let Some(root) = recovery
+        .load_index_root_manifests(fs, uste_txn::COORDINATOR_BLOB_USAGE_PROFILE_V1)
+        .unwrap()
+        .into_iter()
+        .find(|root| root.anchor() == base.anchor())
+    {
+        base.admit_blob_usage_index(&recovery, fs, root, usage::limits(), &mut cache)
+            .unwrap();
+    }
     uste_txn::DiskCommitCoordinator::recover_from_admitted_base(
         recovery,
         fs,

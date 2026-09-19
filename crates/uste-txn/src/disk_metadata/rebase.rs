@@ -18,6 +18,7 @@ pub(crate) fn publish_overlay_base<S, F, W, E, I>(
     base: &CoordinatorDiskBase,
     limits: CoordinatorMetadataRebaseLimits,
     first_reference_limits: Option<CoordinatorFirstReferenceLimits>,
+    usage_limits: Option<CoordinatorBlobUsageLimits>,
 ) -> Result<CoordinatorDiskBase, TransactionError>
 where
     S: crate::DiskCoordinatorState,
@@ -29,6 +30,22 @@ where
     let anchor = coordinator
         .checkpoint_anchor()?
         .ok_or(TransactionError::IntegrityFailure)?;
+    if (base.usage.is_some() && usage_limits.is_none())
+        || (usage_limits.is_some() && base.usage.is_none() && base.owner_count() != 0)
+    {
+        return Err(TransactionError::InvalidRequest);
+    }
+    if let Some(usage) = usage_limits {
+        let count = base
+            .owner_count()
+            .checked_add(coordinator.committed_blob_owners.len() as u64)
+            .ok_or(TransactionError::ResourceLimit)?;
+        if count > usage.maximum_owners
+            || usage.maximum_owners > MAX_COMMITTED_BLOBS_PER_JOURNAL as u64
+        {
+            return Err(TransactionError::ResourceLimit);
+        }
+    }
     let input = coordinator
         .state
         .metadata_publication_input(anchor)
@@ -44,7 +61,11 @@ where
         COORDINATOR_METADATA_PROFILE_V1,
         COORDINATOR_TRANSACTION_PROFILE_V1,
         COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+        COORDINATOR_BLOB_USAGE_PROFILE_V1,
     ] {
+        if profile == COORDINATOR_BLOB_USAGE_PROFILE_V1 && usage_limits.is_none() {
+            continue;
+        }
         if coordinator
             .load_index_root_manifests(filesystem, profile)?
             .iter()
@@ -211,6 +232,11 @@ where
     } else {
         None
     };
+    let usage = usage_limits
+        .map(|usage_limits| {
+            usage::publish_overlay(coordinator, filesystem, base, input, limits, usage_limits)
+        })
+        .transpose()?;
     let metadata = publish_or_reuse(coordinator, filesystem, input, &runs, limits.reuse)?;
     let transactions = publish_or_reuse(
         coordinator,
@@ -240,6 +266,7 @@ where
         metadata,
         transactions: CoordinatorTransactionIndex { root: transactions },
         first_references,
+        usage,
     })
 }
 
@@ -366,7 +393,7 @@ fn exact_merged_run(
     merged.run.ok_or(TransactionError::IntegrityFailure)
 }
 
-fn publish_or_reuse<S, F, W, E, I>(
+pub(super) fn publish_or_reuse<S, F, W, E, I>(
     coordinator: &mut CommitCoordinator<S, F, W, E, I>,
     filesystem: &mut F,
     input: IndexRootInput,

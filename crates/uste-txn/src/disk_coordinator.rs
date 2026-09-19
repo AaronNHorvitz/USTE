@@ -553,6 +553,45 @@ where
         Ok(usage)
     }
 
+    /// Exact quota totals from the admitted principal index plus bounded new-owner overlays.
+    /// Two independently bounded base lookups; no base-owner scan. Missing indexes refuse.
+    pub fn committed_blob_usage_indexed(
+        &self,
+        filesystem: &mut F,
+        principal: PrincipalDigest,
+        maximum_total_owners: u64,
+        limits: IndexGetLimits,
+        cache: &mut PageCache,
+    ) -> Result<CommittedBlobUsage, TransactionError> {
+        self.state()?;
+        let count = self
+            .base
+            .owner_count()
+            .checked_add(self.inner.committed_blob_owners.len() as u64)
+            .ok_or(TransactionError::ResourceLimit)?;
+        if count > maximum_total_owners {
+            return Err(TransactionError::ResourceLimit);
+        }
+        let mut usage = self
+            .base
+            .indexed_usage(&self.inner.journal, filesystem, principal, limits, cache)?
+            .ok_or(TransactionError::InvalidRequest)?;
+        for &(reference, owner) in self.inner.committed_blob_owners.values() {
+            usage.namespace_bytes = usage
+                .namespace_bytes
+                .checked_add(reference.byte_len())
+                .ok_or(TransactionError::ResourceLimit)?;
+            if owner == principal {
+                usage.principal_bytes = usage
+                    .principal_bytes
+                    .checked_add(reference.byte_len())
+                    .ok_or(TransactionError::ResourceLimit)?;
+            }
+        }
+        usage.owners = count;
+        Ok(usage)
+    }
+
     /// Stream the admitted base plus bounded overlays into current-revision metadata roots.
     /// The old base and all overlays remain installed until both root publications succeed.
     /// Bases retaining first-reference evidence require the explicit suffix-bounded variant.
@@ -568,7 +607,7 @@ where
         if self.base.first_references.is_some() {
             return Err(TransactionError::InvalidRequest);
         }
-        self.rebase_metadata_internal(filesystem, limits, None)
+        self.rebase_metadata_internal(filesystem, limits, None, None)
     }
 
     /// Preserve first-reference evidence while rebasing, or bootstrap it from an owner-free base.
@@ -587,7 +626,52 @@ where
         if self.base.first_references.is_none() && self.base.owner_count() != 0 {
             return Err(TransactionError::InvalidRequest);
         }
-        self.rebase_metadata_internal(filesystem, limits, Some(suffix))
+        self.rebase_metadata_internal(filesystem, limits, Some(suffix), None)
+    }
+
+    /// Bootstrap quota projections from an owner-free base, or preserve already admitted ones.
+    /// New-owner sorting is bounded by the existing overlay; no complete owner map is built.
+    pub fn rebase_metadata_with_blob_usage(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorMetadataRebaseLimits,
+        suffix: CoordinatorFirstReferenceLimits,
+        usage: CoordinatorBlobUsageLimits,
+    ) -> Result<(), TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
+        if (!self.base.has_blob_usage_index() && self.base.owner_count() != 0)
+            || (self.inner.outcomes.is_empty() && !self.base.has_blob_usage_index())
+        {
+            return Err(TransactionError::InvalidRequest);
+        }
+        self.rebase_metadata_internal(filesystem, limits, Some(suffix), Some(usage))
+    }
+
+    /// Enable indexed quota accounting at an owner-free, fully rebased frontier, without a
+    /// synthetic transaction. The optional cache publication cannot change committed charges.
+    pub fn bootstrap_blob_usage_index(
+        &mut self,
+        filesystem: &mut F,
+        limits: CoordinatorMetadataRebaseLimits,
+        usage: CoordinatorBlobUsageLimits,
+    ) -> Result<(), TransactionError>
+    where
+        S: DiskCoordinatorState,
+    {
+        self.inner.checkpoint_anchor()?;
+        if self.rebase_required || !self.inner.outcomes.is_empty() {
+            return Err(TransactionError::InvalidRequest);
+        }
+        disk_metadata::bootstrap_empty_usage(
+            &mut self.inner,
+            filesystem,
+            &mut self.base,
+            limits,
+            usage,
+        )
     }
 
     fn rebase_metadata_internal(
@@ -595,11 +679,15 @@ where
         filesystem: &mut F,
         limits: CoordinatorMetadataRebaseLimits,
         first_references: Option<CoordinatorFirstReferenceLimits>,
+        usage: Option<CoordinatorBlobUsageLimits>,
     ) -> Result<(), TransactionError>
     where
         S: DiskCoordinatorState,
     {
         self.inner.checkpoint_anchor()?;
+        if self.base.has_blob_usage_index() && usage.is_none() {
+            return Err(TransactionError::InvalidRequest);
+        }
         if self.inner.outcomes.is_empty() && !self.rebase_required {
             return Ok(());
         }
@@ -610,6 +698,7 @@ where
             &self.base,
             limits,
             first_references,
+            usage,
         )?;
         self.base = next;
         self.inner.outcomes.clear();

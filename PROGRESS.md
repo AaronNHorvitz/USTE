@@ -58,6 +58,41 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Verified on pushed `0b39864` plus this increment: [Decision 0111](docs/decisions/0111-disk-first-owner-quota-projection.md)
+  adds optional disk principal totals and an independently validated principal/owner ordering.
+  Empty-base bootstrap, bounded-overlay construction, quota-preserving rebase, cold admission
+  and exact indexed reads are implemented. Existing authorized facades still use their streaming
+  accounting path; explicit indexed adapter integration is next. Populated legacy-base bootstrap,
+  whole-run rewrite amplification and qualification remain open. Focused assertion-enabled
+  optimized checks pass six tests: four replay/integration (2.20s), one encoding/overflow unit,
+  one empty bootstrap/zero-length-owner test. Coverage includes same/different principal updates,
+  all 216 publication-fault attempts (214 errors, two successful optional cleanup paths), 12
+  authenticated false-cache variants, five cold-admission read faults, exact/minus-one limits,
+  retained prior admission and exact restart. Full serial gate in scope
+  `run-p383697-i21370366.scope` exited 0: the same assertion-enabled optimized command with
+  `--workspace --all-targets --all-features` instead of the focused packages/filter passes
+  391 tests across 46 executables with no failures or ignores,
+  including 123 storage tests (18.63s), 23 coordinator/replay tests (7.27s), 16 disk graph tests
+  (12.73s), 27 transaction tests (0.28s) and unchanged M1 process tests (2.68s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passes 51 active unit tests (43.50s), three process
+  tests (11.90s), with the same two exact-profile oracle ignores. Strict workspace all-target/
+  all-feature Clippy (3.95s), native all-target Clippy (1.89s), and strict txn rustdoc (0.96s)
+  pass using the same locked/offline commands recorded for D0110 below. Sampled scope peak:
+  1,354,973,184 bytes, zero swap, not a final whole-run peak. Format/whitespace, docs (184 links)
+  and task graph (68 tasks) pass. M1 crate trees and workspace lockfile still match the pilot pin.
+  Test development corrected an invalid trailing struct-update comma, an incorrect one-page-visit
+  lookup expectation (binary search and selected access need two even with cache hits), and an
+  overstrict assertion that optional cleanup faults must fail publication. The initial normal
+  unoptimized extended run failed that assertion after 88.70s; the corrected test requires exact
+  successful state/restart and only permits cleanup success for RemoveFile. Actual successful
+  faults are RemoveFile occurrences 1 and 4 with CrashAfter. No production durability rule changed.
+  Focused final command under 3G/4G/512M: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  -p uste-txn -p uste-replay --locked --offline blob_usage -- --test-threads=1 --nocapture`;
+  strict all-target/all-feature Clippy for txn/replay also passes (1.41s). Preflight: 36 GiB
+  available RAM, 3.9 GiB free swap. The previous `0b39864` increment is pushed to origin.
+
 - Tested on pushed `d1da3c2` plus this increment: [Decision 0110](docs/decisions/0110-reverse-first-reference-rebase.md)
   constructs bounded post-base first-reference claims using authenticated reverse streaming.
   Every occurrence checks reference bytes; the completed scan must match the earliest principal.

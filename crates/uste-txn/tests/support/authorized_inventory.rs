@@ -23,6 +23,8 @@ use uste_txn::{
 
 #[path = "authorized_inventory/fixtures.rs"]
 mod fixtures;
+#[path = "authorized_inventory/usage.rs"]
+mod usage;
 use fixtures::*;
 
 fn raw<'a>(

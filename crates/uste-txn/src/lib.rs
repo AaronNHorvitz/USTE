@@ -24,8 +24,9 @@ pub use authorized_disk::{
     AuthorizedDiskWriteState, AuthorizedDiskWriter,
 };
 pub use disk_metadata::{
-    COORDINATOR_FIRST_REFERENCE_PROFILE_V1, COORDINATOR_METADATA_PROFILE_V1,
-    COORDINATOR_TRANSACTION_PROFILE_V1, CoordinatorDiskAdmissionLimits, CoordinatorDiskBase,
+    COORDINATOR_BLOB_USAGE_PROFILE_V1, COORDINATOR_FIRST_REFERENCE_PROFILE_V1,
+    COORDINATOR_METADATA_PROFILE_V1, COORDINATOR_TRANSACTION_PROFILE_V1,
+    CoordinatorBlobUsageLimits, CoordinatorDiskAdmissionLimits, CoordinatorDiskBase,
     CoordinatorFirstReferenceLimits, CoordinatorMetadataCandidate, CoordinatorMetadataLoadLimits,
     CoordinatorMetadataLoadReport, CoordinatorMetadataRebaseLimits,
     CoordinatorTransactionAdmissionLimits, CoordinatorTransactionIndex,

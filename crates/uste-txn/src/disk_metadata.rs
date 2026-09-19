@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 mod admission;
 mod first_reference;
 mod rebase;
+mod usage;
 pub use admission::{
     CoordinatorDiskAdmissionLimits, CoordinatorDiskBase, admit_coordinator_disk_base,
     admit_coordinator_disk_base_with_first_references,
@@ -18,6 +19,8 @@ pub use first_reference::{
 };
 pub use rebase::CoordinatorMetadataRebaseLimits;
 pub(crate) use rebase::publish_overlay_base;
+pub(crate) use usage::bootstrap_empty_usage;
+pub use usage::{COORDINATOR_BLOB_USAGE_PROFILE_V1, CoordinatorBlobUsageLimits};
 
 use uste_crypto::EntropySource;
 use uste_storage::{

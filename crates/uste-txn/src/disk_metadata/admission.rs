@@ -23,6 +23,7 @@ pub struct CoordinatorDiskBase {
     pub(crate) metadata: RecoveredIndexRoot,
     pub(crate) transactions: CoordinatorTransactionIndex,
     pub(crate) first_references: Option<RecoveredIndexRoot>,
+    pub(super) usage: Option<usage::BlobUsageIndex>,
 }
 
 impl CoordinatorDiskBase {
@@ -591,6 +592,7 @@ where
         metadata: candidate.root,
         transactions,
         first_references: first_references.map(|(root, _)| root),
+        usage: None,
     })
 }
 
