@@ -1,8 +1,12 @@
 //! Private first-owner accounting; no consumer policy or publication authority.
 mod admission;
+mod rebuild;
 use super::*;
 pub use admission::{
     PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport, admit_packed_quota_prefix,
+};
+pub use rebuild::{
+    PackedQuotaRebuildLimits, PackedQuotaRebuildReport, rebuild_packed_quota_prefix,
 };
 use uste_storage::ordered_commitment::OrderedCommitment;
 

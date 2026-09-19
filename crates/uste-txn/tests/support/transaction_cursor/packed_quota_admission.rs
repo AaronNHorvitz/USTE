@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_quota_rebuild.rs"]
+mod rebuild;
 use uste_storage::{
     journal::{CertifiedPackedRoot, PackedRootDiscoveryLimits},
     packed_root_manifest::PackedRootClaims,

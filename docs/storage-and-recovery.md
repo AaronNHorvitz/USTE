@@ -239,8 +239,10 @@ prefix: checked first-owner charges, zero-byte ownership, principal aggregates a
 ordering. Exact prefix pairing and authenticated metadata/principal reads precede raw usage results.
 Decision 0145 independently admits cold quota projections by streaming the principal/blob ordering,
 checking a bijection with primary owners, exact per-principal aggregates and namespace totals.
-Even empty primary ledgers recheck live owner/key binding without I/O. Populated rebuilding and
-live authorized integration remain separate work.
+Even empty primary ledgers recheck live owner/key binding without I/O. Decision 0146 rebuilds
+empty or populated quota projections with one bounded primary cursor and 1–512-owner private
+batches, requiring exhaustion before returning accounting. Existing roots are never changed by
+rebuilding; live authorized integration remains separate work.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

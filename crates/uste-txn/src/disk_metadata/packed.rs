@@ -9,7 +9,8 @@ pub use admission::{
 };
 pub use quota::{
     COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport,
-    PackedQuotaPrefix, PackedQuotaReport, admit_packed_quota_prefix, stage_packed_quota_prefix,
+    PackedQuotaPrefix, PackedQuotaRebuildLimits, PackedQuotaRebuildReport, PackedQuotaReport,
+    admit_packed_quota_prefix, rebuild_packed_quota_prefix, stage_packed_quota_prefix,
 };
 use uste_storage::{
     IndexDelta,

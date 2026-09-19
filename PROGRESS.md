@@ -2,6 +2,35 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — bounded packed quota rebuild (Decision 0146)
+
+Implemented on pushed `a3c0ffa` plus this increment: quota reconstruction streams an independently
+admitted primary owner index, sorts/aggregates only 1–512 owners per private batch, and returns a
+paired quota prefix only after exact cursor exhaustion and owner cardinality. Intermediate totals
+are not publishable. Exact aggregate lookup and batch limits remain explicit; reports do not
+claim complete physical I/O or resident-memory measurement. Five focused tests passed, including
+empty/populated partition independence, the exact 512-owner batch, corruption/foreign-owner
+rejection and 318 injected fault cases with cold restart. No v1/native/M1 behavior changed.
+
+Final verification on this tree (excluding the unimplemented Decision 0147 draft):
+
+```sh
+cargo fmt --all -- --check
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d146-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline'
+```
+
+Session 60206 / scope `run-p615689-i21619315.scope` exited 0: 549 tests across 47 executables,
+Clippy and docs passed. Preflight: 32 GiB available RAM and 5.6 GiB free swap; no final peak claimed.
+One Cargo job/test thread and one heavy workload were used. Native standalone last tested version
+remains `42f9abb`; no qualifying campaign ran. T-20/T-19 remain open. Next implement Decision 0147
+live packed coordinator admission and shared bounded commit reads, then packed rebase and domain /
+authorized integration. Full graph-state-v1 scans and incomplete I/O accounting still preclude
+larger-than-memory qualification. This current next action supersedes older chronological entries.
+
 Latest completed task is T-68; M1 is complete at exact implementation `b9689f3`. Decision 0055 selects verified recovery commit `7393def` and freezes
 the executable `memory-pilot-v1` limits in the new safe-Rust `uste-memory` crate. Implementation
 commit `97537e5` adds durable source/fact admission, bounded authorized retrieval, exact citations,
