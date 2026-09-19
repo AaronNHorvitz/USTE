@@ -8,8 +8,8 @@ pub use admission::{
     admit_packed_coordinator_prefix,
 };
 pub use quota::{
-    COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaPrefix, PackedQuotaReport,
-    stage_packed_quota_prefix,
+    COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport,
+    PackedQuotaPrefix, PackedQuotaReport, admit_packed_quota_prefix, stage_packed_quota_prefix,
 };
 use uste_storage::{
     IndexDelta,

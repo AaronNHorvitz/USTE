@@ -237,7 +237,10 @@ escapes on a late failure; an admitted older prefix remains explicitly historica
 Decision 0144 adds separately profiled private packed quota construction from the admitted primary
 prefix: checked first-owner charges, zero-byte ownership, principal aggregates and a principal/blob
 ordering. Exact prefix pairing and authenticated metadata/principal reads precede raw usage results.
-Cold quota admission, populated rebuilding and live authorized integration remain separate work.
+Decision 0145 independently admits cold quota projections by streaming the principal/blob ordering,
+checking a bijection with primary owners, exact per-principal aggregates and namespace totals.
+Even empty primary ledgers recheck live owner/key binding without I/O. Populated rebuilding and
+live authorized integration remain separate work.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

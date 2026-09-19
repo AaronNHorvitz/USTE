@@ -10,8 +10,10 @@ mod packed;
 pub use packed::{
     COORDINATOR_PACKED_PROFILE_V1, COORDINATOR_PACKED_USAGE_PROFILE_V1,
     PackedCoordinatorAdmissionLimits, PackedCoordinatorAdmissionReport, PackedCoordinatorLimits,
-    PackedCoordinatorPrefix, PackedCoordinatorReport, PackedQuotaPrefix, PackedQuotaReport,
-    admit_packed_coordinator_prefix, stage_packed_coordinator_prefix, stage_packed_quota_prefix,
+    PackedCoordinatorPrefix, PackedCoordinatorReport, PackedQuotaAdmissionLimits,
+    PackedQuotaAdmissionReport, PackedQuotaPrefix, PackedQuotaReport,
+    admit_packed_coordinator_prefix, admit_packed_quota_prefix, stage_packed_coordinator_prefix,
+    stage_packed_quota_prefix,
 };
 mod first_reference;
 mod genesis;

@@ -87,6 +87,14 @@ where
         }
         Ok(())
     }
+    /// Recheck a retained capability's live certificate owner and unlocked key without I/O.
+    /// This does not reread ciphertext or establish domain correctness/current consumer access.
+    pub fn validate_packed_tree_binding(
+        &self,
+        tree: &CanonicalPackedTree,
+    ) -> Result<(), StorageError> {
+        self.validate_canonical_packed_tree(tree)
+    }
     /// Full canonical/content admission of one explicit manifest family. Not domain validation.
     pub fn admit_packed_tree(
         &self,

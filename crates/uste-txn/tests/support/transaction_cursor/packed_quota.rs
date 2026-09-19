@@ -1,7 +1,12 @@
 use super::*;
+#[path = "packed_quota_admission.rs"]
+mod admission;
 use uste_txn::{COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaPrefix, stage_packed_quota_prefix};
 
 fn fixture() -> (Fs, EntryName) {
+    fixture_count(5)
+}
+fn fixture_count(transaction_count: u8) -> (Fs, EntryName) {
     let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let name = EntryName::new("packed-quota").unwrap();
     let mut coordinator = CommitCoordinator::create(
@@ -25,7 +30,7 @@ fn fixture() -> (Fs, EntryName) {
             .finish_blob_upload(&mut fs, &mut upload)
             .unwrap()
     });
-    for index in 0_u8..5 {
+    for index in 0_u8..transaction_count {
         let count = usize::from(index.min(3));
         let inventory = (count != 0)
             .then(|| BlobInventory::new(scope(), references[..count].iter().copied()).unwrap());

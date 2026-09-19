@@ -1,5 +1,9 @@
 //! Private first-owner accounting; no consumer policy or publication authority.
+mod admission;
 use super::*;
+pub use admission::{
+    PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport, admit_packed_quota_prefix,
+};
 use uste_storage::ordered_commitment::OrderedCommitment;
 
 pub const COORDINATOR_PACKED_USAGE_PROFILE_V1: [u8; 32] = [
@@ -78,6 +82,9 @@ impl PackedQuotaPrefix {
     {
         if !self.paired(primary) {
             return Err(TransactionError::IntegrityFailure);
+        }
+        for tree in &primary.trees {
+            maintenance.validate_tree_binding(tree)?;
         }
         let metadata = maintenance.get(fs, &self.trees[0], KEY, limits)?;
         if metadata.value.as_ref().map(|v| v.as_slice())

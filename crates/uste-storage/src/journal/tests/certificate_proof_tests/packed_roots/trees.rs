@@ -185,6 +185,7 @@ fn packed_tree_capabilities_private_history_stages_publish_only_terminal_and_reo
         .unwrap();
     let mut f = reopen(f);
     f.fs.arm(FaultPlan::default()).unwrap();
+    assert!(f.store.validate_packed_tree_binding(&old).is_err());
     assert!(
         f.store
             .packed_tree_get(&mut f.fs, &old, b"a", reads())
@@ -561,6 +562,7 @@ fn packed_tree_capabilities_locked_vault_refuses_even_empty_and_finished_reads()
     f.fs.arm(FaultPlan::default()).unwrap();
     f.store.vault.lock();
     let expected = Some(StorageError::Crypto(CryptoError::Locked));
+    assert_eq!(f.store.validate_packed_tree_binding(&tree).err(), expected);
     assert_eq!(
         f.store
             .admit_packed_tree(&mut f.fs, &root, 1, validation())
@@ -585,6 +587,7 @@ fn packed_tree_capabilities_locked_vault_refuses_even_empty_and_finished_reads()
     );
     assert_eq!(stage(&mut f, &target, None, &[]).err(), expected);
     f.store.vault.unlock(&mut TestKeyAdapter).unwrap();
+    assert_eq!(f.store.validate_packed_tree_binding(&tree), Ok(()));
     assert_eq!(
         f.store.next_packed_tree_entry(&mut f.fs, &mut cursor).err(),
         Some(StorageError::NeedsRecovery)

@@ -58,6 +58,31 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `779ad82` plus this increment: [Decision 0145](docs/decisions/0145-packed-quota-cold-admission.md)
+  independently admits packed quota roots against the journal-validated primary prefix. Canonical
+  family admission precedes a bounded principal/blob cursor, exact primary-owner comparisons,
+  checked per-principal groups and namespace totals. Cardinality excludes extra aggregates/owners;
+  missing or failed projections never become zero. Explicit no-I/O tree binding checks reject
+  foreign/locked primary capabilities even for empty ledgers, including raw quota usage.
+  Four tests cover empty/populated cold pairs, exact/minus-one aggregate lookup and cursor bounds,
+  seven authenticated false projections, owner ciphertext corruption and 381 read error/crash
+  cases (42 OpenExisting, 42 Metadata, 43 ReadAt boundaries, three actions). Restart admits the exact
+  old pair. Existing storage tests additionally exercise explicit locked/unlocked/reopened binding
+  validation without I/O. Focused scope `run-p608586-i21610995.scope`: four tests/13.90s and strict
+  workspace Clippy/0.28s passed. Final scope `run-p609213-i21599893.scope` exited 0 under 3G/4G/512M,
+  one job/test thread: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1
+  CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test
+  --workspace --all-targets --all-features --locked --offline -- --test-threads=1` passed
+  544 tests/47 executables (replay 50/115.72s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace
+  --all-targets --all-features --locked --offline -- -D warnings` passed/0.30s;
+  `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage -p uste-txn --no-deps
+  --locked --offline` passed/2.52s. Log `/tmp/uste-d145-workspace-verification.log`; preflight
+  32 GiB RAM/5.6 GiB swap, sampled peak 2,964,242,432 bytes/zero swap (not final peak).
+  Formatting, diff/docs/task checks passed. Native remains `42f9abb`; no qualification,
+  M1/lockfile change or task completion. Unregistered quota rebuild implementation/test and
+  Decision 0146 drafts are excluded next-package work. Next verify populated/owner-free bounded
+  quota rebuilding, then live/domain integration, complete accounting and qualifying campaigns.
+
 - Implemented on pushed `48f7531` plus this increment: [Decision 0144](docs/decisions/0144-packed-first-owner-quota-construction.md)
   adds a separately profiled three-family packed quota prefix. Exact target retry binding precedes
   even empty-inventory construction; first-owner witnesses select charges, checked arithmetic

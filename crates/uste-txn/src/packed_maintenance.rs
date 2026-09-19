@@ -105,6 +105,16 @@ where
             .admit_packed_tree(filesystem, root, family, limits)
             .map_err(TransactionError::Storage)
     }
+    /// Check scope, target ordering, live certificate ownership and key availability, without I/O.
+    pub fn validate_tree_binding(
+        &self,
+        tree: &CanonicalPackedTree,
+    ) -> Result<(), TransactionError> {
+        self.check(tree.context())?;
+        self.journal
+            .validate_packed_tree_binding(tree)
+            .map_err(TransactionError::Storage)
+    }
     pub fn stage(
         &mut self,
         filesystem: &mut F,
