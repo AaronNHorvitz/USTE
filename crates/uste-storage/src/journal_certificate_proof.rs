@@ -326,6 +326,29 @@ where
     }
 
     /// Only callers that just validated publication/stage binding may mint this no-I/O handle.
+    pub(super) fn current_certificate_anchor_proof(
+        &self,
+    ) -> Result<CertificateAnchorProof, StorageError> {
+        if self.poisoned {
+            return Err(StorageError::InvalidState);
+        }
+        let frontier = self.checkpoint_anchor().ok_or(StorageError::InvalidState)?;
+        Ok(CertificateAnchorProof {
+            owner: Arc::clone(&self.proof_owner),
+            database: self.database,
+            epoch: self.epoch,
+            writer: self.writer,
+            log: self.certificate_log_id,
+            anchor: frontier,
+            frontier,
+            report: CertificateAnchorReadReport {
+                certificates: 0,
+                encoded_bytes: 0,
+            },
+        })
+    }
+
+    /// Only callers that just validated publication/stage binding may mint this no-I/O handle.
     pub(super) fn attach_certified_root(
         &self,
         mut root: RecoveredIndexRoot,

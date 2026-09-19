@@ -206,6 +206,12 @@ Decision 0137 verifies the packed primitives on Linux/Btrfs using owned child-pr
 pack-write, pack-sync, partial-manifest and complete-manifest-sync boundaries. Both old and synced
 new trees reopen exactly. The synthetic harness is not production publication or journal admission,
 and process loss is not power-loss or broader filesystem qualification.
+Decision 0138 introduces opt-in certificate-bound packed-root publication into bounded create-new
+attempt slots at an exact revision. No existing root or pack is overwritten or deleted, so ordinary
+publication performs no fallback tree scan. Discovery uses a bounded current-owner certificate proof
+and at most 64 fixed slots; partial/invalid cache files are omitted but operational failures propagate.
+The returned handle proves certificate binding, not canonical/domain admission or authorization;
+attempt exhaustion is an explicit resource refusal and reclamation remains T-35 work.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

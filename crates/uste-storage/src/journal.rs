@@ -39,6 +39,12 @@ use crate::{
 #[path = "journal_index_stage.rs"]
 mod index_stage;
 pub use index_stage::IndexRecoveryStage;
+#[path = "journal_packed_roots.rs"]
+mod packed_roots;
+pub use packed_roots::{
+    CertifiedPackedRoot, MAX_PACKED_ROOT_ATTEMPTS, PackedRootDiscoveryLimits,
+    PackedRootDiscoveryReport,
+};
 #[path = "journal_certificate_proof.rs"]
 mod certificate_proof;
 use certificate_proof::CertificateProofOwner;

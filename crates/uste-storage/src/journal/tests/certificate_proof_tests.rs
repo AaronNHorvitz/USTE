@@ -1,6 +1,7 @@
 use super::*;
 
 mod bound_roots;
+mod packed_roots;
 mod retained;
 mod reverse;
 mod window;

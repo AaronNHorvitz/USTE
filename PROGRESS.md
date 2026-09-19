@@ -58,6 +58,34 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `e64d5b8` plus this increment: [Decision 0138](docs/decisions/0138-append-only-certified-packed-roots.md)
+  adds opt-in immutable revision/attempt root slots, exact current-certificate publication and
+  bounded proof-owned discovery without resident certificate history. Up to 64 fixed slots are
+  admitted; publication never overwrites/deletes a fallback or scans a tree. Returned handles bind
+  certificates only, leaving canonical/domain admission and authorization explicit.
+  Seven tests cover nonempty packed content, same/next-revision fallback retention, cold disk-only
+  discovery, pre-I/O binding/poison/key refusals, all 64 slots/267,328 bytes, exact/minus-one reads,
+  seven malformed/context-swapped candidate classes, 18 injected read failures and 21 write boundary
+  cases (20 actual injected failures plus one explicit harness no-op: CrashAfter an AlreadyExists
+  result cannot inject a crash because the adapter operation failed). Every actual failure retains
+  the old root and permits a bounded retry after restart. An initial test assumed that no-op was
+  an injected failure; inspection of the harness corrected the expectation without weakening the
+  real failure checks. Earlier compilation fixed fixture API/borrowing and adapter-error matching;
+  strict Clippy fixes removed clone-on-Copy and a manual range pattern.
+  Final scope `run-p554628-i21523733.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 512 tests/47 executables, no failures/ignores
+  (replay 50/115.59s). `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features
+  --locked --offline -- -D warnings` passed/2.02s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings"
+  cargo doc -p uste-storage --no-deps --locked --offline` passed/1.10s. Supplemental log:
+  `/tmp/uste-d138-workspace-verification.log`. Preflight 33 GiB RAM/4.0 GiB swap; sampled scope peak
+  1,714,601,984 bytes/zero swap (not final peak). Formatting, diff, documentation and task checks
+  passed. No native matrix rerun (latest native baseline `42f9abb`), benchmark, M1/lockfile change
+  or task completion claimed. Unregistered `journal_packed_trees.rs` and Decision 0139 are excluded
+  next-package work. Next connect opaque canonical-tree admission/read/staging capabilities to
+  the journal, then domain/facade integration, complete accounting and qualification.
+
 - Implemented on pushed `d5f866b` plus this increment: [Decision 0137](docs/decisions/0137-packed-storage-process-loss-evidence.md)
   adds a real Linux/Btrfs process-loss test spanning four owned-child SIGKILL boundaries: first
   successful pack write before sync, complete pack sync without a manifest, partial synced test
