@@ -1,5 +1,6 @@
 //! Private first-owner accounting; no consumer policy or publication authority.
 mod admission;
+mod live_reads;
 mod rebuild;
 use super::*;
 pub use admission::{
@@ -112,13 +113,28 @@ impl PackedQuotaPrefix {
         for tree in &primary.trees {
             maintenance.validate_tree_binding(tree)?;
         }
-        let metadata = maintenance.get(fs, &self.trees[0], KEY, limits)?;
+        self.read_usage(principal, |tree, key| {
+            maintenance.get(fs, tree, key, limits)
+        })
+    }
+    fn read_usage(
+        &self,
+        principal: PrincipalDigest,
+        mut get: impl FnMut(
+            &CanonicalPackedTree,
+            &[u8],
+        ) -> Result<
+            uste_storage::packed_tree_lookup::TreeLookupResult,
+            TransactionError,
+        >,
+    ) -> Result<(crate::CommittedBlobUsage, [TreeLookupReport; 2]), TransactionError> {
+        let metadata = get(&self.trees[0], KEY)?;
         if metadata.value.as_ref().map(|v| v.as_slice())
             != Some(head(self.owners, self.bytes, self.principals).as_slice())
         {
             return Err(TransactionError::IntegrityFailure);
         }
-        let result = maintenance.get(fs, &self.trees[1], &principal.as_bytes(), limits)?;
+        let result = get(&self.trees[1], &principal.as_bytes())?;
         let principal_bytes = result
             .value
             .as_ref()

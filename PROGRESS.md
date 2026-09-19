@@ -2,7 +2,39 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — streamed packed recovery (Decision 0149)
+## Latest verified increment — authorized packed reads (Decision 0150)
+
+Implemented on pushed `ff3a6cd` plus this increment: exact packed retry/transaction reads and
+paired committed-byte accounting now have a restricted, current-durable-policy-bound facade.
+Authorization precedes clock, I/O and cardinality-sensitive admission. Foreign transaction
+ownership is filtered before expiry; uncertainty, missing/pending policy and mismatched kernels
+fail closed. Charges combine the admitted base with bounded first-owner overlays, surviving
+failed rebase. Staged reservations, authorized writes and domain integration remain separate.
+
+Nine new tests cover raw and authorized base/overlay/rebase/recovery reads, independent outcome
+and quota permissions, revocation, corruption, inclusive expiry, zero-byte/first-owner accounting,
+117 raw and 90 authorized observed read-error/crash cases. The earlier commit fault matrix was
+also expanded from 60 to 66 cases after review found omitted SyncData boundaries. Initial test
+compilation used a nonexistent error variant; corrected to the existing Unauthorized variant.
+
+Full gate session 30721 / scope `run-p643633-i21640771.scope` exited 0: 575 tests across 47
+executables (transaction integration 93/100.94 s), Clippy 0.42 s and docs 1.22 s. Preflight:
+32 GiB available RAM and 5.6 GiB free swap; no scope peak is claimed. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d150-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-txn --no-deps --locked --offline'
+```
+
+Next implement bounded reverse packed traversal for historical disk-domain lookup, then packed
+graph integration. T-20/T-19, complete I/O accounting and qualifying BM-01/BM-06 remain open.
+Native standalone remains last tested at `42f9abb`; M1 stays pinned. Earlier next-step paragraphs
+below are historical increment handoffs, superseded by this section.
+
+## Prior verified increment — streamed packed recovery (Decision 0149)
 
 Implemented on pushed `c2e8852` plus this increment: cold recovery consumes the exclusive owner
 with an admitted published historical primary/quota pair and ready base reducer. One authenticated

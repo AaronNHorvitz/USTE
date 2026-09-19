@@ -512,6 +512,7 @@ fn packed_live_every_observed_commit_fault_preserves_cold_exact_retry() {
         Operation::WriteAt,
         Operation::SetLen,
         Operation::SyncAll,
+        Operation::SyncData,
         Operation::SyncDirectory,
     ]
     .map(|op| (op, observed_fs.operation_count(op)));
@@ -628,7 +629,7 @@ fn packed_live_every_observed_commit_fault_preserves_cold_exact_retry() {
             }
         }
     }
-    assert_eq!(cases, 60);
+    assert_eq!(cases, 66);
 }
 
 #[test]

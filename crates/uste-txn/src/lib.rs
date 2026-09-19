@@ -7,15 +7,17 @@
 
 mod authorized;
 mod authorized_disk;
+mod authorized_packed;
+pub use authorized_packed::AuthorizedPackedMetadata;
 mod commit_admission;
 mod disk_metadata;
 mod index_recovery;
 mod packed_coordinator;
 mod packed_maintenance;
 pub use packed_coordinator::{
-    PackedCommitCoordinator, PackedCommitLimits, PackedCoordinatorPublicationState,
-    PackedCoordinatorRecoveryState, PackedCoordinatorState, PackedMetadataRebaseLimits,
-    PackedMetadataRebaseReport,
+    PackedBlobAccountingLimits, PackedCommitCoordinator, PackedCommitLimits,
+    PackedCoordinatorPublicationState, PackedCoordinatorRecoveryState, PackedCoordinatorState,
+    PackedMetadataRebaseLimits, PackedMetadataRebaseReport,
 };
 mod packed_root_maintenance;
 pub use packed_maintenance::{PackedIndexMaintenance, ScopedPackedCursor};

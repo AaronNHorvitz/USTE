@@ -4,6 +4,8 @@ mod admission;
 use admission::validate_packed_base;
 mod recovery;
 pub use recovery::PackedCoordinatorRecoveryState;
+mod reads;
+pub use reads::PackedBlobAccountingLimits;
 mod rebase;
 use crate::disk_coordinator::{DiskCommitMetadata, DiskMetadataBase};
 pub use rebase::{

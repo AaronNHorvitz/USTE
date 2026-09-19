@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_live_reads.rs"]
+mod reads;
 #[path = "packed_recovery.rs"]
 mod recovery;
 use uste_txn::{PackedCoordinatorPublicationState, PackedMetadataRebaseLimits};
