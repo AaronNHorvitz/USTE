@@ -58,6 +58,31 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- Implemented on pushed `d12fe7f` plus this increment: [Decision 0132](docs/decisions/0132-bounded-packed-tree-lookup.md)
+  adds bounded authenticated packed-tree lookup with exact parent summaries, terminal key-route
+  proof and complete value-hash verification before returning a zeroizing result. The separate
+  linked reader admits integral bounded pack geometry; existing descriptor reads retain exact
+  total-length enforcement. Nine new tests cover reference membership/absence/empty values,
+  16 MiB exact value recovery, exact/minus-one admission, 63 observed read/error/crash cases,
+  authenticated false leaf/chunk/cycle/partition/repeated-bit cases, context/ciphertext substitution
+  and strict-versus-linked geometry. The three-chunk fixture pins seven reads/143,815 bytes,
+  three branches and three value chunks. Focused scope `run-p517302-i21065428.scope` passed
+  all 28 packed-storage tests/0.64s and strict workspace Clippy/1.03s.
+  Final scope `run-p518087-i21525127.scope` exited 0 under 3G/4G/512M, one job/test thread:
+  `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+  CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features
+  --locked --offline -- --test-threads=1` passed 477 tests/46 executables, no failures/ignores
+  (replay 50/116.78s, storage 162/19.46s, coordinator 37/0.56s).
+  `CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline
+  -- -D warnings` passed/1.02s; `CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc
+  -p uste-storage --no-deps --locked --offline` passed/1.11s. Preflight 34 GiB RAM/3.9 GiB swap;
+  sampled scope peak 1,649,205,248 bytes, zero swap (not a final peak). Documentation/task and
+  diff checks passed. No native matrix rerun (latest native baseline `42f9abb`), benchmark,
+  authorization/root admission, task completion, packed-tree Linux process qualification or
+  M1/lockfile change is claimed. Decision 0133 is an uncommitted next-package draft, excluded
+  from this tested increment. Next implement bounded reachable-node copy-on-write batches,
+  then admitted manifests, recovery/domain integration, complete accounting and qualification.
+
 - Implemented on pushed `a64fc19` plus this increment: [Decision 0131](docs/decisions/0131-packed-tree-record-contract.md)
   adds strict borrowed tree-node/value-chunk decoding, zeroizing bounded encoding, fixed physical
   locators and structurally bounded imported logical-summary claims. Seven tests pin literal bytes,
@@ -2670,9 +2695,9 @@ removes duplicate staging proofs (pushed `fa3897a`). Decision 0127 adds bounded 
 windows to private forward recovery (pushed `42f9abb`). Decision 0128 adds locally verified
 canonical ordered commitments (pushed `3a2a361`) without changing any persisted v1 profile.
 Decision 0129 adds the encrypted packed-page framing carrier (pushed `7a98146`); Decision 0130
-adds bounded durable pack I/O (pushed `a64fc19`). Decision 0131 adds the typed record codec.
-Next connect and verify bounded authenticated traversal, then reachable-node copy-on-write
-batches, root admission and domain integration, and
+adds bounded durable pack I/O (pushed `a64fc19`). Decision 0131 adds the typed record codec
+(pushed `d12fe7f`); Decision 0132 adds bounded authenticated lookup. Next implement and verify
+reachable-node copy-on-write batches, root admission and domain integration, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
 preserve chronological implementation evidence, not requests to repeat completed work.

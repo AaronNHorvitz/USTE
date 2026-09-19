@@ -10,7 +10,7 @@ use crate::{
     },
 };
 use uste_crypto::{KeyEpoch, WriterIncarnationId};
-use uste_types::CommitRevision;
+use uste_types::{CommitRevision, NamespaceRef};
 use zeroize::Zeroizing;
 
 pub const LOCATOR_BYTES: usize = 54;
@@ -30,6 +30,31 @@ pub struct PackedLocator {
 }
 
 impl PackedLocator {
+    /// Resolve a relative locator under an exact enclosing tree identity, without authorization.
+    pub fn resolve(
+        self,
+        scope: NamespaceRef,
+        profile: [u8; 32],
+        family: u8,
+        maximum_revision: CommitRevision,
+    ) -> Result<PackedPageContext, StorageError> {
+        let context = PackedPageContext {
+            scope,
+            profile,
+            family,
+            object: self.object,
+            creation_revision: self.revision,
+            epoch: self.epoch,
+            writer: self.writer,
+            page: self.page as u64,
+        };
+        context.validate()?;
+        if self.slot >= MAX_SLOTS || self.revision > maximum_revision {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(context)
+    }
+
     /// Scope/profile/family are supplied by the enclosing authenticated tree, not serialized here.
     pub fn from_address(address: PackedRecordAddress) -> Self {
         let c = address.context();

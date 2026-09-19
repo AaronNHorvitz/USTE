@@ -228,7 +228,7 @@ pub fn branch_commitment(
     })
 }
 
-fn bit(key: &[u8], position: u32) -> bool {
+pub(crate) fn bit(key: &[u8], position: u32) -> bool {
     let byte = position as usize / 9;
     let offset = position % 9;
     key.get(byte)

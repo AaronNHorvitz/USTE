@@ -248,11 +248,63 @@ pub fn read_record_page<F: FileSystem, W, E: EntropySource>(
     {
         return Err(StorageError::InvalidState);
     }
+    read_page(
+        filesystem,
+        directory,
+        vault,
+        address.context,
+        address.slot,
+        maximum_encoded_bytes,
+        Some(pack.pages),
+    )
+}
+
+/// Raw linked-page framing: checks integral bounded file geometry, not a complete pack descriptor.
+/// Callers must still authenticate the typed record against its independently trusted parent.
+pub fn read_linked_record_page<F: FileSystem, W, E: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: PackedPageContext,
+    slot: u16,
+    maximum_encoded_bytes: u64,
+) -> Result<(PackedPage, PackReadReport), StorageError> {
+    read_page(
+        filesystem,
+        directory,
+        vault,
+        context,
+        slot,
+        maximum_encoded_bytes,
+        None,
+    )
+}
+
+fn read_page<F: FileSystem, W, E: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: PackedPageContext,
+    slot: u16,
+    maximum_encoded_bytes: u64,
+    expected_pages: Option<u64>,
+) -> Result<(PackedPage, PackReadReport), StorageError> {
+    context.validate()?;
+    if slot >= MAX_SLOTS {
+        return Err(StorageError::InvalidState);
+    }
     if maximum_encoded_bytes < ENCODED_PAGE_BYTES as u64 {
         return Err(StorageError::ResourceLimit);
     }
-    let file = filesystem.open_existing(directory, &pack_name(pack.context.object)?)?;
-    if filesystem.metadata(&file)?.len != pack.pages * ENCODED_PAGE_BYTES as u64 {
+    let file = filesystem.open_existing(directory, &pack_name(context.object)?)?;
+    let length = filesystem.metadata(&file)?.len;
+    let pages = length / ENCODED_PAGE_BYTES as u64;
+    if !length.is_multiple_of(ENCODED_PAGE_BYTES as u64)
+        || pages == 0
+        || pages > MAX_PAGES
+        || context.page >= pages
+        || expected_pages.is_some_and(|expected| expected != pages)
+    {
         return Err(StorageError::IntegrityFailure);
     }
     let mut bytes = Vec::new();
@@ -263,11 +315,11 @@ pub fn read_record_page<F: FileSystem, W, E: EntropySource>(
     read_exact_at(
         filesystem,
         &file,
-        address.context.page * ENCODED_PAGE_BYTES as u64,
+        context.page * ENCODED_PAGE_BYTES as u64,
         &mut bytes,
     )?;
-    let page = PackedPage::open(vault, address.context, &bytes)?;
-    if page.record(address.slot).is_none() {
+    let page = PackedPage::open(vault, context, &bytes)?;
+    if page.record(slot).is_none() {
         return Err(StorageError::IntegrityFailure);
     }
     Ok((

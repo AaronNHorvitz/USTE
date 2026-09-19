@@ -181,6 +181,11 @@ Decision 0131 supplies the closed node/value-chunk grammar and bounded imported-
 Typed parsing recomputes a node's logical commitment but does not prove referenced contents or
 canonical partitioning; traversal must compare each child and the complete recovered value with
 their expected commitments before declaring success.
+Decision 0132 connects those checks in a bounded raw packed-tree lookup: exact parent commitments,
+terminal key-route proof, canonical chunk lengths and complete value hash before returning bytes.
+Its caller still requires independent canonical-root admission and authorization. Linked reads
+check bounded integral pack geometry without a resident pack catalog; descriptor reads retain
+their exact-length requirement. This is not yet a graph/coordinator profile or root-publication path.
 
 Decision 0128 introduces a separate ordered logical-commitment primitive for future copy-on-write
 indexes: context-separated canonical Patricia-tree hashes, bounded lookup proofs and storage-free

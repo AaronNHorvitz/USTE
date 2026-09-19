@@ -564,3 +564,70 @@ fn immutable_pack_failed_rollover_never_resumes_or_finishes_a_prefix() {
     );
     assert_eq!(fs.operation_count(Operation::WriteAt), 0);
 }
+
+#[test]
+fn immutable_pack_linked_geometry_does_not_relax_exact_descriptor_reads() {
+    let mut base = MemoryFileSystem::default();
+    let mut vault = vault();
+    let (pack, addresses) = write_pack(&mut base, &mut vault, 1000).unwrap();
+    for pages in [0, 1, 2, 3, 4] {
+        let mut fs = base.clone();
+        let directory = fs.root();
+        let file = fs
+            .open_existing(&directory, &pack_name(pack.context.object).unwrap())
+            .unwrap();
+        fs.set_len(&file, pages * ENCODED_PAGE_BYTES as u64)
+            .unwrap();
+        for address in &addresses {
+            let linked = read_linked_record_page(
+                &mut fs,
+                &directory,
+                &vault,
+                address.context,
+                address.slot,
+                ENCODED_PAGE_BYTES as u64,
+            );
+            assert_eq!(linked.is_ok(), address.context.page < pages);
+            assert_eq!(read(&mut fs, &vault, pack, *address).is_ok(), pages == 3);
+        }
+        fs.set_len(&file, pages * ENCODED_PAGE_BYTES as u64 + 1)
+            .unwrap();
+        assert!(
+            read_linked_record_page(
+                &mut fs,
+                &directory,
+                &vault,
+                addresses[0].context,
+                0,
+                ENCODED_PAGE_BYTES as u64
+            )
+            .is_err()
+        );
+    }
+    let mut fs = FaultFileSystem::new(base, FaultPlan::default());
+    let root = fs.root();
+    assert_eq!(
+        read_linked_record_page(
+            &mut fs,
+            &root,
+            &vault,
+            addresses[0].context,
+            0,
+            ENCODED_PAGE_BYTES as u64 - 1
+        )
+        .err(),
+        Some(StorageError::ResourceLimit)
+    );
+    assert!(
+        read_linked_record_page(
+            &mut fs,
+            &root,
+            &vault,
+            addresses[0].context,
+            MAX_SLOTS,
+            ENCODED_PAGE_BYTES as u64
+        )
+        .is_err()
+    );
+    assert_eq!(fs.operation_count(Operation::OpenExisting), 0);
+}
