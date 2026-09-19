@@ -13,6 +13,7 @@ pub(crate) struct DiskProfileLimits {
     pub groups: u64,
     pub prefix_bytes: u64,
     pub suffix_bytes: u64,
+    pub certificates: uste_storage::journal::CertificateAnchorReadLimits,
     pub transaction_run: IndexRunReadLimits,
     pub metadata: uste_txn::CoordinatorMetadataLoadLimits,
     pub graph: GraphDiskBaseAdmissionLimits,
@@ -31,6 +32,7 @@ impl DiskProfileLimits {
         let entries = counts.into_iter().try_fold(1_u64, add)?;
         let largest_family = *counts.iter().max().ok_or("missing fixture families")?;
         let groups = materialization_revision_count(profile);
+        let proof_bytes = |count: u64| mul(mul(count, add(count, 1)?)? / 2, 4_161);
         let transaction_run =
             IndexRunReadLimits::new(add(mul(groups, 2)?, 16)?, groups, mul(groups, 256)?)
                 .map_err(debug)?;
@@ -104,8 +106,16 @@ impl DiskProfileLimits {
         .map_err(debug)?;
         Ok(Self {
             groups,
-            prefix_bytes: mul(groups, MAX_CERTIFIED_GROUP)?,
-            suffix_bytes: mul(groups - 1, MAX_CERTIFIED_GROUP)?,
+            prefix_bytes: add(mul(groups, MAX_CERTIFIED_GROUP)?, proof_bytes(groups)?)?,
+            suffix_bytes: add(
+                mul(groups - 1, MAX_CERTIFIED_GROUP)?,
+                proof_bytes(groups - 1)?,
+            )?,
+            certificates: uste_storage::journal::CertificateAnchorReadLimits::new(
+                groups,
+                mul(groups, 4_161)?,
+            )
+            .map_err(debug)?,
             transaction_run,
             metadata,
             graph,
@@ -126,8 +136,8 @@ mod tests {
         }
         let limits = DiskProfileLimits::new(Bm01Profile::qualifying()).unwrap();
         assert_eq!(limits.groups, 212);
-        assert_eq!(limits.prefix_bytes, 212 * 16_785_538);
-        assert_eq!(limits.suffix_bytes, 211 * 16_785_538);
+        assert_eq!(limits.prefix_bytes, 212 * 16_785_538 + 212 * 213 / 2 * 4161);
+        assert_eq!(limits.suffix_bytes, 211 * 16_785_538 + 211 * 212 / 2 * 4161);
         assert_eq!(limits.transaction_run.maximum_entries(), 212);
         assert_eq!(limits.merge_read.maximum_entries(), 3_000_000);
         assert_eq!(

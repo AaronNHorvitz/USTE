@@ -241,13 +241,14 @@ fn open_disk(
 ) -> Result<Disk, String> {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1_000_000);
     let entropy = ENTROPY.fetch_add(1_000_000, std::sync::atomic::Ordering::Relaxed);
-    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
+    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
         fs,
         name,
         scope(),
         CounterEntropy(entropy),
         CounterEntropy(entropy + 500_000),
         &mut TestKeyAdapter,
+        limits.certificates,
     )
     .map_err(debug)?;
     admit_development_disk(

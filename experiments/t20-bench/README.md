@@ -83,7 +83,11 @@ authorized disk writes; resume admits paired metadata roots and a graph base, st
 authenticated suffix privately, publishes only the terminal graph root, then repairs metadata and
 retries the unchanged deterministic plan. The suffix count is bounded by the fixture's planned
 revisions minus its policy bootstrap; one shared certificate/group byte allowance covers metadata
-replay, with explicit per-revision proof/merge limits. Only an empty
+replay, including all certificate-proof re-reads, with explicit per-revision proof/merge limits.
+Disk recovery no longer retains the complete certificate-anchor map; actual residency/counts
+appear in `suffix_recovery.certificate_anchor_residency`. Each range step currently proves its
+certificate to the frontier, so the declared byte bound includes a triangular proof term and
+does not imply constant-time cold recovery. Blob/inventory metadata remains resident. Only an empty
 or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
 Open requires completed, repaired roots and validates the fixture Evidence binding and exact
 current/history/adjacency/provenance/reverse/policy cardinalities. Reports retain the initial

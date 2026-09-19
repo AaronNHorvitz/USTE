@@ -126,7 +126,7 @@ where
                 .pending_publication(transaction.outcome())
                 .map_err(recovery_error)?;
             let mut maintenance = recovery
-                .stage_indexes(transaction)
+                .stage_indexes_with_io(filesystem, transaction)
                 .map_err(transaction_error)?;
             let (published, report) = publish_graph_state_root_delta_with(
                 &mut maintenance,

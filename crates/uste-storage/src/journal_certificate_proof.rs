@@ -12,6 +12,12 @@ pub struct CertificateAnchorReadLimits {
 }
 
 impl CertificateAnchorReadLimits {
+    pub const fn maximum_certificates(self) -> u64 {
+        self.maximum_certificates
+    }
+    pub const fn maximum_encoded_bytes(self) -> u64 {
+        self.maximum_encoded_bytes
+    }
     pub fn new(
         maximum_certificates: u64,
         maximum_encoded_bytes: u64,
@@ -189,7 +195,7 @@ where
         Ok(())
     }
 
-    fn validate_proven_index_root(
+    pub(super) fn validate_proven_index_root(
         &self,
         root: &RecoveredIndexRoot,
         proof: &CertificateAnchorProof,
@@ -201,6 +207,124 @@ where
             return Err(StorageError::InvalidState);
         }
         Ok(())
+    }
+
+    /// Attach already authenticated evidence to a root's existing bounded read handle. This
+    /// does not scrub its runs or establish domain semantics, durability or consumer authority.
+    pub fn bind_index_root_certificate(
+        &self,
+        mut root: RecoveredIndexRoot,
+        proof: CertificateAnchorProof,
+    ) -> Result<RecoveredIndexRoot, StorageError> {
+        self.validate_proven_index_root(&root, &proof)?;
+        root.certificate_proof = Some(proof);
+        Ok(root)
+    }
+
+    /// Discover fixed root slots and bind each non-future manifest directly to the journal.
+    /// Limits apply per candidate (at most two); report totals both candidates' proof reads.
+    /// A certificate-proof error is fatal, not silently treated as an absent optional root.
+    pub fn load_proven_index_root_manifests(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        index_profile: [u8; 32],
+        limits: CertificateAnchorReadLimits,
+    ) -> Result<(Vec<RecoveredIndexRoot>, CertificateAnchorReadReport), StorageError> {
+        if self.poisoned || scope.database() != self.database {
+            return Err(StorageError::InvalidState);
+        }
+        let roots = index::load_manifests(
+            filesystem,
+            IndexContext {
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                directory: &self.database_directory,
+            },
+            &self.vault,
+            scope,
+            index_profile,
+        )?;
+        self.bind_discovered_index_roots(filesystem, roots, limits)
+    }
+
+    pub(super) fn bind_discovered_index_roots(
+        &self,
+        filesystem: &mut F,
+        roots: Vec<RecoveredIndexRoot>,
+        limits: CertificateAnchorReadLimits,
+    ) -> Result<(Vec<RecoveredIndexRoot>, CertificateAnchorReadReport), StorageError> {
+        let mut bound = Vec::new();
+        let mut report = CertificateAnchorReadReport {
+            certificates: 0,
+            encoded_bytes: 0,
+        };
+        for root in roots {
+            if self
+                .frontier
+                .is_none_or(|frontier| root.revision() > frontier)
+            {
+                continue;
+            }
+            let proof = self.authenticate_certificate_anchor(
+                filesystem,
+                root.revision(),
+                *root.certificate_digest(),
+                limits,
+            )?;
+            report.certificates = report
+                .certificates
+                .checked_add(proof.report.certificates)
+                .ok_or(StorageError::ResourceLimit)?;
+            report.encoded_bytes = report
+                .encoded_bytes
+                .checked_add(proof.report.encoded_bytes)
+                .ok_or(StorageError::ResourceLimit)?;
+            bound.push(self.bind_index_root_certificate(root, proof)?);
+        }
+        Ok((bound, report))
+    }
+
+    /// Only callers that just validated publication/stage binding may mint this no-I/O handle.
+    pub(super) fn attach_certified_root(
+        &self,
+        mut root: RecoveredIndexRoot,
+    ) -> Result<RecoveredIndexRoot, StorageError> {
+        if self.certificate_read_limits.is_some() {
+            let frontier = self.checkpoint_anchor().ok_or(StorageError::InvalidState)?;
+            root.certificate_proof = Some(CertificateAnchorProof {
+                owner: Arc::clone(&self.proof_owner),
+                database: self.database,
+                epoch: self.epoch,
+                writer: self.writer,
+                log: self.certificate_log_id,
+                anchor: (root.revision(), *root.certificate_digest()),
+                frontier,
+                report: CertificateAnchorReadReport {
+                    certificates: 0,
+                    encoded_bytes: 0,
+                },
+            });
+        }
+        Ok(root)
+    }
+
+    pub(super) fn certificate_anchor_matches(
+        &self,
+        filesystem: &mut F,
+        revision: CommitRevision,
+        digest: [u8; 32],
+    ) -> Result<bool, StorageError> {
+        if let Some(limits) = self.certificate_read_limits {
+            if self.frontier.is_none_or(|frontier| revision > frontier) {
+                return Ok(false);
+            }
+            self.authenticate_certificate_anchor(filesystem, revision, digest, limits)
+                .map(|_| true)
+        } else {
+            Ok(self.certificate_anchors.get(&revision) == Some(&digest))
+        }
     }
 
     /// Bounded lookup with explicit disk-derived certificate evidence; no resident anchor lookup.

@@ -234,7 +234,7 @@ impl core::fmt::Debug for IndexRootAnchor {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct RecoveredIndexRoot {
     scope: NamespaceRef,
     revision: CommitRevision,
@@ -244,13 +244,29 @@ pub struct RecoveredIndexRoot {
     logical_state_digest: [u8; 32],
     index_profile: [u8; 32],
     runs: Vec<IndexRunDescriptor>,
+    pub(crate) certificate_proof: Option<crate::journal::CertificateAnchorProof>,
 }
+
+// Equality describes persisted content, not which live owner authenticated this handle.
+impl PartialEq for RecoveredIndexRoot {
+    fn eq(&self, other: &Self) -> bool {
+        self.scope == other.scope
+            && self.revision == other.revision
+            && self.generation == other.generation
+            && self.certificate_digest == other.certificate_digest
+            && self.reducer_profile == other.reducer_profile
+            && self.logical_state_digest == other.logical_state_digest
+            && self.index_profile == other.index_profile
+            && self.runs == other.runs
+    }
+}
+impl Eq for RecoveredIndexRoot {}
 
 /// Provisional recovery-only read handle. No root slot or durable manifest publishes this root.
 /// Drop does not reclaim its orphanable runs; only terminal current-frontier publication can
 /// make a recovered result discoverable. This is not domain or consumer authorization.
 pub struct StagedIndexRoot {
-    root: RecoveredIndexRoot,
+    pub(crate) root: RecoveredIndexRoot,
 }
 
 impl StagedIndexRoot {
@@ -289,6 +305,7 @@ pub(crate) fn stage_root<D>(
             logical_state_digest: input.logical_state_digest,
             index_profile: input.index_profile,
             runs: runs.to_vec(),
+            certificate_proof: None,
         },
     })
 }
@@ -1046,6 +1063,7 @@ where
         logical_state_digest: input.logical_state_digest,
         index_profile: input.index_profile,
         runs: runs.to_vec(),
+        certificate_proof: None,
     })
 }
 
@@ -3053,6 +3071,7 @@ impl RootManifest {
             logical_state_digest: self.input.logical_state_digest,
             index_profile: self.input.index_profile,
             runs: self.runs.clone(),
+            certificate_proof: None,
         }
     }
 }

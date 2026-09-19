@@ -128,15 +128,17 @@ fn prepare_session_with_observer(
         .map_err(|_| error("USTE_BM01_DATABASE_CREATE"))?;
         bootstrap(raw, &mut fs, observer)?;
     }
-    let (recovery, report, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
-        &mut fs,
-        &name,
-        scope(),
-        OsEntropy,
-        OsEntropy,
-        &mut adapter,
-    )
-    .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
+    let (recovery, report, frontier) =
+        AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+            &mut fs,
+            &name,
+            scope(),
+            OsEntropy,
+            OsEntropy,
+            &mut adapter,
+            limits.certificates,
+        )
+        .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
     let recovered_revision = report.frontier.map_or(0, |revision| revision.get());
     if recovered_revision > materialization_revision_count(profile) {
         return Err(error("USTE_BM01_FRONTIER_MISMATCH"));
@@ -154,15 +156,17 @@ fn prepare_session_with_observer(
             )
             .map_err(|_| error("USTE_BM01_BOOTSTRAP_RECOVERY"))?;
         bootstrap(raw, &mut fs, observer)?;
-        let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
-            &mut fs,
-            &name,
-            scope(),
-            OsEntropy,
-            OsEntropy,
-            &mut adapter,
-        )
-        .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
+        let (recovery, _, frontier) =
+            AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+                &mut fs,
+                &name,
+                scope(),
+                OsEntropy,
+                OsEntropy,
+                &mut adapter,
+                limits.certificates,
+            )
+            .map_err(|_| error("USTE_BM01_DATABASE_OPEN"))?;
         (recovery, frontier)
     } else {
         (recovery, frontier)
@@ -263,6 +267,10 @@ fn prepare_session_with_observer(
         "pages_read": admission.suffix.pages_read,
         "maximum_revisions": if phase == "open" { 0 } else { limits.groups - 1 },
         "maximum_encoded_journal_bytes": limits.suffix_bytes,
+        "certificate_anchor_residency": {
+            "full_history_resident": disk.certificate_anchor_residency().0,
+            "resident_entries": disk.certificate_anchor_residency().1,
+        },
     });
     let report = format!(
         concat!(

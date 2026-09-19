@@ -62,6 +62,7 @@ fn fixture() -> (RecoveredIndexRoot, IndexRunDescriptor, Vec<u8>) {
         logical_digest: [6; 32],
     };
     let root = RecoveredIndexRoot {
+        certificate_proof: None,
         scope,
         revision: run.revision,
         generation: 1,

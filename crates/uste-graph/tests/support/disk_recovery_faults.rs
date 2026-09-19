@@ -104,16 +104,37 @@ fn prepare(filesystem: &mut FaultFs, name: &EntryName) -> RecoveryInput {
 }
 
 fn prepare_mode(filesystem: &mut FaultFs, name: &EntryName, streaming: bool) -> RecoveryInput {
+    prepare_certificate_mode(filesystem, name, streaming, false)
+}
+
+fn prepare_certificate_mode(
+    filesystem: &mut FaultFs,
+    name: &EntryName,
+    streaming: bool,
+    disk_certificates: bool,
+) -> RecoveryInput {
     static ENTROPY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(200_000);
     let entropy = ENTROPY.fetch_add(10_000, std::sync::atomic::Ordering::Relaxed);
-    let (recovery, _, frontier) = AuthenticatedIndexRecovery::open_with_frontier_transaction(
-        filesystem,
-        name,
-        scope(),
-        CounterEntropy(entropy),
-        CounterEntropy(entropy + 1000),
-        &mut TestKeyAdapter,
-    )
+    let (recovery, _, frontier) = if disk_certificates {
+        AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+            filesystem,
+            name,
+            scope(),
+            CounterEntropy(entropy),
+            CounterEntropy(entropy + 1000),
+            &mut TestKeyAdapter,
+            uste_storage::journal::CertificateAnchorReadLimits::new(4, 4 * 4161).unwrap(),
+        )
+    } else {
+        AuthenticatedIndexRecovery::open_with_frontier_transaction(
+            filesystem,
+            name,
+            scope(),
+            CounterEntropy(entropy),
+            CounterEntropy(entropy + 1000),
+            &mut TestKeyAdapter,
+        )
+    }
     .unwrap();
     let lookup = uste_storage::IndexGetLimits::new(16, 136).unwrap();
     let mut cache = PageCache::new(64 * 1024).unwrap();
@@ -431,10 +452,23 @@ fn streamed_graph_suffix_admits_total_count_and_never_publishes_a_partial_byte_b
 
 #[test]
 fn streamed_graph_suffix_every_io_error_and_crash_keeps_only_old_or_terminal_roots() {
+    streamed_graph_fault_matrix(false);
+}
+
+#[test]
+fn streamed_graph_suffix_disk_certificates_every_io_error_and_crash_keeps_only_terminal_roots() {
+    streamed_graph_fault_matrix(true);
+}
+
+fn streamed_graph_fault_matrix(disk_certificates: bool) {
+    let bytes = 3 * 8322 + if disk_certificates { 6 * 4161 } else { 0 };
     let (mut baseline, name, digest) = fixture_with_suffix(3, 1);
-    let input = prepare_mode(&mut baseline, &name, true);
+    let input = prepare_certificate_mode(&mut baseline, &name, true, disk_certificates);
     baseline.arm(FaultPlan::default()).unwrap();
-    let (disk, _) = recover_stream(&mut baseline, input, 3, 3 * 8322).unwrap();
+    let (disk, _) = recover_stream(&mut baseline, input, 3, bytes).unwrap();
+    if disk_certificates {
+        assert_eq!(disk.certificate_anchor_residency(), (false, 0));
+    }
     drop(disk);
     for operation in [
         FaultOperation::OpenExisting,
@@ -451,7 +485,7 @@ fn streamed_graph_suffix_every_io_error_and_crash_keeps_only_old_or_terminal_roo
     ] {
         let count = baseline.operation_count(operation);
         eprintln!(
-            "streamed_graph_recovery operation={operation:?} boundaries={count} fault_cases={}",
+            "streamed_graph_recovery disk_certificates={disk_certificates} operation={operation:?} boundaries={count} fault_cases={}",
             count * 3
         );
         for occurrence in 1..=count {
@@ -461,7 +495,7 @@ fn streamed_graph_suffix_every_io_error_and_crash_keeps_only_old_or_terminal_roo
                 FaultAction::CrashAfter,
             ] {
                 let (mut fs, name, _) = fixture_with_suffix(3, 1);
-                let input = prepare_mode(&mut fs, &name, true);
+                let input = prepare_certificate_mode(&mut fs, &name, true, disk_certificates);
                 fs.arm(
                     FaultPlan::new([FaultPoint {
                         operation,
@@ -471,7 +505,7 @@ fn streamed_graph_suffix_every_io_error_and_crash_keeps_only_old_or_terminal_roo
                     .unwrap(),
                 )
                 .unwrap();
-                let result = recover_stream(&mut fs, input, 3, 3 * 8322);
+                let result = recover_stream(&mut fs, input, 3, bytes);
                 if action == FaultAction::CrashAfter && !fs.is_crashed() {
                     // The adapter only crashes after successful operations. An optional missing
                     // root-slot open has no successful boundary; do not call it an injected crash.
@@ -495,9 +529,12 @@ fn streamed_graph_suffix_every_io_error_and_crash_keeps_only_old_or_terminal_roo
                 }
                 assert_eq!(fs.pending_faults(), 0);
                 fs.restart().unwrap();
-                let input = prepare_mode(&mut fs, &name, true);
+                let input = prepare_certificate_mode(&mut fs, &name, true, disk_certificates);
                 assert!([1, 4].contains(&input.state.revision().get()));
-                let (disk, _) = recover_stream(&mut fs, input, 3, 3 * 8322).unwrap();
+                let (disk, _) = recover_stream(&mut fs, input, 3, bytes).unwrap();
+                if disk_certificates {
+                    assert_eq!(disk.certificate_anchor_residency(), (false, 0));
+                }
                 let roots = disk
                     .load_index_root_manifests(&mut fs, GRAPH_STATE_PROFILE_V1)
                     .unwrap();

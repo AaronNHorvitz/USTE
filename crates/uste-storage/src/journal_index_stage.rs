@@ -29,6 +29,30 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Use the configured disk proof allowance when the journal has no resident anchor history.
+    pub fn open_index_recovery_stage_with_io(
+        &self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        revision: CommitRevision,
+        certificate_digest: [u8; 32],
+    ) -> Result<IndexRecoveryStage, StorageError> {
+        if scope.database() != self.database || self.poisoned {
+            return Err(StorageError::InvalidState);
+        }
+        if let Some(limits) = self.certificate_read_limits {
+            let proof = self.authenticate_certificate_anchor(
+                filesystem,
+                revision,
+                certificate_digest,
+                limits,
+            )?;
+            self.open_proven_index_recovery_stage(scope, &proof)
+        } else {
+            self.open_index_recovery_stage(scope, revision, certificate_digest)
+        }
+    }
+
     /// Admit a scratch target using a bounded on-disk certificate proof, not the resident map.
     /// Transaction/domain validation remains the recovery coordinator's responsibility.
     pub fn open_proven_index_recovery_stage(
@@ -155,7 +179,7 @@ where
         {
             return Err(StorageError::InvalidState);
         }
-        index::stage_root(
+        let staged = index::stage_root(
             &IndexContext {
                 database: self.database,
                 epoch: self.epoch,
@@ -164,6 +188,9 @@ where
             },
             input,
             runs,
-        )
+        )?;
+        Ok(StagedIndexRoot {
+            root: self.attach_certified_root(staged.root)?,
+        })
     }
 }

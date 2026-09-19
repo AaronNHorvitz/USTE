@@ -26,6 +26,31 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Explicit-I/O variant supporting a journal opened without resident certificate history.
+    pub fn stage_indexes_with_io(
+        &mut self,
+        filesystem: &mut F,
+        transaction: &RecoveredFrontierTransaction,
+    ) -> Result<RecoveryIndexMaintenance<'_, F, W, E, I>, TransactionError> {
+        if transaction.scope != self.scope {
+            return Err(TransactionError::IntegrityFailure);
+        }
+        let stage = self
+            .journal
+            .open_index_recovery_stage_with_io(
+                filesystem,
+                self.scope,
+                transaction.revision,
+                transaction.certificate_digest,
+            )
+            .map_err(map_open_error)?;
+        Ok(RecoveryIndexMaintenance {
+            journal: &mut self.journal,
+            stage: Some(stage),
+            anchor: (transaction.revision, transaction.certificate_digest),
+        })
+    }
+
     pub fn stage_indexes(
         &mut self,
         transaction: &RecoveredFrontierTransaction,

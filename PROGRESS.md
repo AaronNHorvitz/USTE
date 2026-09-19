@@ -54,6 +54,37 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0095](docs/decisions/0095-map-free-certificate-recovery.md) implements opt-in
+  certificate-map-free recovery and proof-bound ordinary root APIs. Both scans and appends skip
+  anchor insertion; range work charges certificate-proof re-reads. Nine focused storage tests
+  passed (0.66s), including map-free open/append/staging/publication, exact byte accounting and
+  no callbacks/repairs on admission or late corruption. Proven discovery covers 3 read boundaries/
+  9 injected failures. Root initializer placement/missing-field compile errors and a test-only
+  clone lint were corrected; review also preserved the existing resync poison guard. Native
+  integration adds profile-derived proof allowances and reports actual zero certificate-anchor
+  residency; a misplaced maintenance method caught by formatting was moved into its intended impl.
+  The separate map-free graph fault sweep passed (275.07s): 231 I/O boundaries/693 attempts,
+  of which six optional missing-file crash-after attempts did not crash (OpenExisting 34/37/38/39/45,
+  RemoveFile 1); 687 actual injected failures refused provisional state and recovered only old or
+  terminal roots. The original resident-map sweep remains intact. On `7040277` plus this increment,
+  `CARGO_BUILD_JOBS=1 cargo test --workspace --all-targets --all-features --locked --offline
+  -- --test-threads=1` passed, including 16 disk-graph tests/both sweeps (531.09s), 82 storage
+  tests (173.61s), 9 coordinator recovery tests (78.95s), 17 transaction tests (5.78s), and M1
+  process recovery/corruption (31.36s). The final test-only checkpoint regression and one-byte-short
+  opening allowance were then verified with `CARGO_BUILD_JOBS=1 cargo test -p uste-storage
+  certificate_proof_tests --locked --offline -- --test-threads=1`: 10 passed (0.78s).
+  `CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml
+  --locked --offline -- --test-threads=1` passed 51 unit tests (42.64s; 2 unchanged exact-profile
+  oracle ignores) and 3 CLI/process tests (11.86s). Workspace all-target/all-feature strict clippy,
+  native all-target strict clippy, and `RUSTDOCFLAGS="-D warnings" cargo doc -p uste-storage
+  -p uste-txn -p uste-graph --no-deps --locked --offline` passed. Format, whitespace, documentation
+  (168 links) and task graph (68 tasks) checks passed. All heavy commands used one job/thread and
+  systemd process-group limits MemoryHigh=3G/MemoryMax=4G/MemorySwapMax=512M; preflight 37 GiB
+  available RAM/3.9 GiB free swap; sampled peaks 1,490,661,376 bytes (workspace), 434,462,720 bytes
+  (final native gate), zero group swap. M1 crate sources and lockfile remain unchanged at the pinned
+  handoff. T-20 remains partial: next implement authenticated disk-backed blob lookup/accounting
+  and remove the remaining resident storage metadata; preserve all qualifying benchmark prerequisites.
+
 - [Decision 0094](docs/decisions/0094-disk-certificate-anchor-proofs.md) implements bounded
   certificate-chain proofs directly from disk without the historical anchor map, plus proven
   index lookup/cursors and scratch target admission. Proofs bind the exact live journal instance;
@@ -72,9 +103,9 @@ unverified external distribution prerequisite.
   -- --test-threads=1`: 51 unit tests (42.97s; 2 existing oracle ignores), 3 CLI tests (11.92s).
   Format, whitespace, docs (167 links) and task graph checks passed. Scope 3G/4G/512M, one
   job/thread; preflight 37 GiB available/3.9 GiB free swap; sampled peak 1,103,712,256 bytes,
-  zero swap. This does not yet remove resident recovery maps or qualify T-20. Next integrate
-  owner-bound proofs with root discovery/read handles and a map-free certificate recovery mode;
-  preserve explicit proof work accounting and fail-closed behavior.
+  zero swap. This increment alone did not remove resident recovery maps or qualify T-20. Decision
+  0095 above subsequently integrated proof-bound roots and map-free certificate recovery; remaining
+  blob metadata and qualification work are the current next actions.
 
 - Decision 0093's native process regression now also restores saved derived manifests from a
   killed revision-two child beneath an unchanged completed revision-four journal. Open refuses

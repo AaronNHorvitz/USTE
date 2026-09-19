@@ -1,5 +1,7 @@
 use super::*;
 
+mod bound_roots;
+
 struct Fixture {
     fs: FaultFileSystem<MemoryFileSystem>,
     store: FaultStore,

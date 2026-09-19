@@ -240,6 +240,39 @@ where
         self.scope
     }
 
+    /// Authenticate the full journal and retain its final transaction without a certificate map.
+    /// Other storage blob/inventory metadata remains resident and independently bounded.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_disk_certificate_anchors<A>(
+        filesystem: &mut F,
+        final_name: &EntryName,
+        scope: NamespaceRef,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        limits: uste_storage::journal::CertificateAnchorReadLimits,
+    ) -> Result<(Self, RecoveryReport, Option<RecoveredFrontierTransaction>), TransactionError>
+    where
+        A: KeyAdapter<Envelope = W>,
+    {
+        let mut frontier = None;
+        let (journal, report) = JournalStore::open_with_disk_certificate_anchors(
+            filesystem,
+            final_name,
+            scope.database(),
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            limits,
+            |group| {
+                frontier = Some(capture_group(scope, group)?);
+                Ok(())
+            },
+        )
+        .map_err(map_open_error)?;
+        Ok((Self { scope, journal }, report, frontier))
+    }
+
     /// Consume this exclusive owner into a deliberately bounded full-replay coordinator.
     /// Intended for small bootstrap prefixes before any derived roots exist. The caller supplies
     /// trusted genesis state; this is not the disk-backed large-history recovery path.

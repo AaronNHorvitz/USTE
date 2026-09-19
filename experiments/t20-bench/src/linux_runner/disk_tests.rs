@@ -227,6 +227,14 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
         assert_eq!(json["full_memory_graph_state"], false);
         assert_eq!(json["full_memory_coordinator_metadata"], false);
         assert_eq!(json["storage_metadata_memory_resident"], true);
+        assert_eq!(
+            json["suffix_recovery"]["certificate_anchor_residency"]["full_history_resident"],
+            false
+        );
+        assert_eq!(
+            json["suffix_recovery"]["certificate_anchor_residency"]["resident_entries"],
+            0
+        );
         assert_eq!(json["engine_benchmark"], false);
         assert_eq!(
             json["final_state_counts"],
@@ -331,10 +339,18 @@ fn native_disk_multi_revision_suffix_repairs_only_on_resume_and_matches_oracle()
         assert_eq!(resumed["suffix_recovery"]["maximum_revisions"], 3);
         assert_eq!(
             resumed["suffix_recovery"]["maximum_encoded_journal_bytes"],
-            3 * 16_785_538_u64
+            3 * 16_785_538_u64 + 6 * 4161
         );
         assert_eq!(resumed["frontier"], 4);
         assert_eq!(resumed["full_memory_graph_state"], false);
+        assert_eq!(
+            resumed["suffix_recovery"]["certificate_anchor_residency"]["full_history_resident"],
+            false
+        );
+        assert_eq!(
+            resumed["suffix_recovery"]["certificate_anchor_residency"]["resident_entries"],
+            0
+        );
         let opened: serde_json::Value =
             serde_json::from_str(&fixture.run("open").unwrap()).unwrap();
         assert_eq!(opened["suffix_recovery"]["revisions"], 0);

@@ -178,6 +178,7 @@ impl From<CryptoError> for StorageError {
 
 /// Successful committed-range work. Includes certificates and group envelopes, not independently
 /// bounded inventories, segment headers or blob payloads. No report escapes a partial failure.
+/// Disk-certificate mode also charges every certificate re-read for frontier proofs.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct JournalRangeReadReport {
     pub groups: u64,
@@ -204,6 +205,7 @@ where
     frontier: Option<CommitRevision>,
     previous_certificate_digest: [u8; 32],
     certificate_anchors: BTreeMap<CommitRevision, [u8; 32]>,
+    certificate_read_limits: Option<CertificateAnchorReadLimits>,
     proof_owner: std::sync::Arc<CertificateProofOwner>,
     committed_blob_inventories: BTreeSet<[u8; 32]>,
     committed_blobs: BTreeMap<(NamespaceRef, crate::blob::BlobId), BlobReference>,
@@ -337,6 +339,7 @@ where
             frontier: None,
             previous_certificate_digest: [0; 32],
             certificate_anchors: BTreeMap::new(),
+            certificate_read_limits: None,
             proof_owner: std::sync::Arc::new(CertificateProofOwner),
             committed_blob_inventories: BTreeSet::new(),
             committed_blobs: BTreeMap::new(),
@@ -361,6 +364,71 @@ where
         vault_entropy: E,
         identity_entropy: I,
         key_adapter: &mut A,
+        visitor: V,
+    ) -> Result<(Self, RecoveryReport), StorageError>
+    where
+        A: KeyAdapter<Envelope = W>,
+        V: FnMut(RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        Self::open_internal(
+            filesystem,
+            final_name,
+            expected_database,
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            None,
+            visitor,
+        )
+    }
+
+    /// Trusted storage residency diagnostic, not an authorized consumer cardinality query.
+    pub fn certificate_anchor_residency(&self) -> (bool, usize) {
+        (
+            self.certificate_read_limits.is_none(),
+            self.certificate_anchors.len(),
+        )
+    }
+
+    /// Authenticate both journal passes without retaining historical certificate anchors.
+    /// Limits admit the initial certificate count/bytes and each later certificate-only proof.
+    /// Blob/inventory collections remain resident; this is not a fully map-free journal.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_with_disk_certificate_anchors<A, V>(
+        filesystem: &mut F,
+        final_name: &EntryName,
+        expected_database: DatabaseId,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        limits: CertificateAnchorReadLimits,
+        visitor: V,
+    ) -> Result<(Self, RecoveryReport), StorageError>
+    where
+        A: KeyAdapter<Envelope = W>,
+        V: FnMut(RecoveredGroup<'_>) -> Result<(), StorageError>,
+    {
+        Self::open_internal(
+            filesystem,
+            final_name,
+            expected_database,
+            vault_entropy,
+            identity_entropy,
+            key_adapter,
+            Some(limits),
+            visitor,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_internal<A, V>(
+        filesystem: &mut F,
+        final_name: &EntryName,
+        expected_database: DatabaseId,
+        vault_entropy: E,
+        identity_entropy: I,
+        key_adapter: &mut A,
+        certificate_read_limits: Option<CertificateAnchorReadLimits>,
         mut visitor: V,
     ) -> Result<(Self, RecoveryReport), StorageError>
     where
@@ -450,6 +518,12 @@ where
         let repaired_certificate_tail_bytes =
             certificate_payload_bytes - complete_certificate_bytes;
         let certificate_count = complete_certificate_bytes / SMALL_ENVELOPE_BYTES;
+        if certificate_read_limits.is_some_and(|limits| {
+            certificate_count > limits.maximum_certificates()
+                || complete_certificate_bytes > limits.maximum_encoded_bytes()
+        }) {
+            return Err(StorageError::ResourceLimit);
+        }
 
         // First pass authenticates the complete committed frontier without exposing logical state.
         // This prevents a later corrupt certificate from producing an observable valid-prefix
@@ -466,6 +540,7 @@ where
             writer,
             certificate_count,
             &no_trusted_inventories,
+            certificate_read_limits.is_none(),
             false,
             &mut |_group| Ok(()),
         )?;
@@ -504,6 +579,7 @@ where
             writer,
             certificate_count,
             &validated.verified_blob_inventories,
+            certificate_read_limits.is_none(),
             true,
             &mut visitor,
         )?;
@@ -541,6 +617,7 @@ where
                 frontier: replayed.frontier,
                 previous_certificate_digest: replayed.previous_certificate_digest,
                 certificate_anchors: replayed.certificate_anchors,
+                certificate_read_limits,
                 proof_owner: std::sync::Arc::new(CertificateProofOwner),
                 committed_blob_inventories: replayed.committed_blob_inventories,
                 committed_blobs: replayed.committed_blobs,
@@ -843,8 +920,10 @@ where
         self.current_segment_offset = group_offset + group_length;
         self.frontier = Some(revision);
         self.previous_certificate_digest = certificate_digest;
-        self.certificate_anchors
-            .insert(revision, certificate_digest);
+        if self.certificate_read_limits.is_none() {
+            self.certificate_anchors
+                .insert(revision, certificate_digest);
+        }
         if blob_inventory_digest != EMPTY_BLOB_INVENTORY_DIGEST {
             self.committed_blob_inventories
                 .insert(blob_inventory_digest);
@@ -1005,7 +1084,20 @@ where
                 SMALL_ENVELOPE_BYTES,
             )?;
             let certificate_digest = sha256(&encoded);
-            if self.certificate_anchors.get(&revision) != Some(&certificate_digest) {
+            if let Some(limits) = self.certificate_read_limits {
+                let proof = self.authenticate_certificate_anchor(
+                    filesystem,
+                    revision,
+                    certificate_digest,
+                    CertificateAnchorReadLimits::new(
+                        limits.maximum_certificates(),
+                        limits.maximum_encoded_bytes().min(remaining),
+                    )?,
+                )?;
+                remaining = remaining
+                    .checked_sub(proof.report().encoded_bytes)
+                    .ok_or(StorageError::ResourceLimit)?;
+            } else if self.certificate_anchors.get(&revision) != Some(&certificate_digest) {
                 return Err(StorageError::IntegrityFailure);
             }
             let certificate = decode_certificate(
@@ -1196,8 +1288,12 @@ where
         )
         .into_iter()
         .filter(|checkpoint| {
-            self.certificate_anchors.get(&checkpoint.revision())
-                == Some(checkpoint.certificate_digest())
+            self.certificate_anchor_matches(
+                filesystem,
+                checkpoint.revision(),
+                *checkpoint.certificate_digest(),
+            )
+            .unwrap_or(false)
         })
         .collect()
     }
@@ -1223,8 +1319,12 @@ where
         )
         .into_iter()
         .filter(|candidate| {
-            self.certificate_anchors.get(&candidate.revision())
-                == Some(candidate.certificate_digest())
+            self.certificate_anchor_matches(
+                filesystem,
+                candidate.revision(),
+                *candidate.certificate_digest(),
+            )
+            .unwrap_or(false)
         })
         .collect()
     }
@@ -1239,8 +1339,11 @@ where
         sink: &mut dyn FnMut(&[u8]) -> Result<(), StorageError>,
     ) -> Result<(), StorageError> {
         if candidate.scope().database() != self.database
-            || self.certificate_anchors.get(&candidate.revision())
-                != Some(candidate.certificate_digest())
+            || !self.certificate_anchor_matches(
+                filesystem,
+                candidate.revision(),
+                *candidate.certificate_digest(),
+            )?
         {
             return Err(StorageError::InvalidState);
         }
@@ -1349,10 +1452,8 @@ where
         if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
             return Err(StorageError::InvalidState);
         }
-        if let Some(root) = base_root
-            && self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
-        {
-            return Err(StorageError::InvalidState);
+        if let Some(root) = base_root {
+            self.validate_index_cursor_root(root)?;
         }
         index::merge_run(
             filesystem,
@@ -1397,10 +1498,8 @@ where
         if self.poisoned || self.frontier != Some(revision) || scope.database() != self.database {
             return Err(StorageError::InvalidState);
         }
-        if let Some(root) = base_root
-            && self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
-        {
-            return Err(StorageError::InvalidState);
+        if let Some(root) = base_root {
+            self.validate_index_cursor_root(root)?;
         }
         index::merge_run_visit(
             filesystem,
@@ -1478,7 +1577,7 @@ where
         {
             return Err(StorageError::InvalidState);
         }
-        index::publish_root(
+        let root = index::publish_root(
             filesystem,
             IndexContext {
                 database: self.database,
@@ -1491,7 +1590,8 @@ where
             input,
             runs,
             fallback_limits,
-        )
+        )?;
+        self.attach_certified_root(root)
     }
 
     /// Load authenticated derived roots whose exact certificate is present in this journal.
@@ -1513,6 +1613,11 @@ where
             scope,
             index_profile,
         )?;
+        if let Some(limits) = self.certificate_read_limits {
+            return self
+                .bind_discovered_index_roots(filesystem, roots, limits)
+                .map(|(roots, _)| roots);
+        }
         Ok(roots
             .into_iter()
             .filter(|root| {
@@ -1533,6 +1638,11 @@ where
         scope: NamespaceRef,
         index_profile: [u8; 32],
     ) -> Result<Vec<RecoveredIndexRoot>, StorageError> {
+        if let Some(limits) = self.certificate_read_limits {
+            return self
+                .load_proven_index_root_manifests(filesystem, scope, index_profile, limits)
+                .map(|(roots, _)| roots);
+        }
         let roots = index::load_manifests(
             filesystem,
             IndexContext {
@@ -1561,11 +1671,10 @@ where
         root: &RecoveredIndexRoot,
         limits: IndexRunReadLimits,
     ) -> Result<(), StorageError> {
-        if self.poisoned
-            || self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
-        {
+        if self.poisoned {
             return Err(StorageError::InvalidState);
         }
+        self.validate_index_cursor_root(root)?;
         index::resync_root(
             filesystem,
             IndexContext {
@@ -1589,9 +1698,7 @@ where
         key: &[u8],
         cache: &mut PageCache,
     ) -> Result<(Option<Vec<u8>>, IndexReadStats), StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::get(
             filesystem,
             &IndexContext {
@@ -1619,9 +1726,7 @@ where
         limits: IndexGetLimits,
         cache: &mut PageCache,
     ) -> Result<(Option<Vec<u8>>, IndexReadStats), StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::get_bounded(
             filesystem,
             &IndexContext {
@@ -1651,9 +1756,7 @@ where
         limits: IndexPredecessorLimits,
         cache: &mut PageCache,
     ) -> Result<IndexPredecessor, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::get_predecessor(
             filesystem,
             &IndexContext {
@@ -1684,9 +1787,7 @@ where
         maximum_result_bytes: usize,
         cache: &mut PageCache,
     ) -> Result<IndexScan, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::scan_prefix(
             filesystem,
             &IndexContext {
@@ -1717,9 +1818,7 @@ where
         limits: IndexScanLimits,
         cache: &mut PageCache,
     ) -> Result<IndexScan, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::scan_prefix_bounded(
             filesystem,
             &IndexContext {
@@ -1752,9 +1851,7 @@ where
         cache: &mut PageCache,
         visitor: &mut dyn FnMut(IndexScanEntry) -> Result<(), StorageError>,
     ) -> Result<IndexReadStats, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::scan_prefix_visit(
             filesystem,
             &IndexContext {
@@ -1785,9 +1882,7 @@ where
         limits: IndexRunReadLimits,
         visitor: &mut IndexRunVisitor<'_>,
     ) -> Result<IndexRunReadReport, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::visit_run(
             filesystem,
             &IndexContext {
@@ -1861,6 +1956,9 @@ where
     }
 
     fn validate_index_cursor_root(&self, root: &RecoveredIndexRoot) -> Result<(), StorageError> {
+        if let Some(proof) = root.certificate_proof.as_ref() {
+            return self.validate_proven_index_root(root, proof);
+        }
         if root.scope().database() != self.database
             || self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest())
         {
@@ -1876,9 +1974,7 @@ where
         root: &RecoveredIndexRoot,
         cache: &mut PageCache,
     ) -> Result<IndexScrubReport, StorageError> {
-        if self.certificate_anchors.get(&root.revision()) != Some(root.certificate_digest()) {
-            return Err(StorageError::InvalidState);
-        }
+        self.validate_index_cursor_root(root)?;
         index::scrub(
             filesystem,
             &IndexContext {
@@ -2285,6 +2381,7 @@ fn scan_certificates<F, W, E, V>(
     writer: WriterIncarnationId,
     certificate_count: u64,
     trusted_blob_inventories: &BTreeMap<[u8; 32], u32>,
+    retain_certificate_anchors: bool,
     invoke_visitor: bool,
     visitor: &mut V,
 ) -> Result<ScanState<F::File>, StorageError>
@@ -2466,7 +2563,9 @@ where
                 inventory
             };
         let certificate_digest = sha256(&encoded_certificate);
-        certificate_anchors.insert(revision, certificate_digest);
+        if retain_certificate_anchors {
+            certificate_anchors.insert(revision, certificate_digest);
+        }
         if invoke_visitor {
             visitor(RecoveredGroup {
                 revision,

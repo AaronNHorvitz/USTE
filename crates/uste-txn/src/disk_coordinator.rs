@@ -8,6 +8,20 @@ mod streaming;
 pub use commit_check::DiskCommitCheck;
 pub use streaming::DiskRecoveryDomain;
 
+impl<S, F, W, E, I> DiskCommitCoordinator<S, F, W, E, I>
+where
+    S: DiskCoordinatorState,
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    /// Trusted storage residency diagnostic; consumer access requires a management facade.
+    pub fn certificate_anchor_residency(&self) -> (bool, usize) {
+        self.inner.journal.certificate_anchor_residency()
+    }
+}
+
 /// Trusted domain proof that the supplied live state is exactly the metadata base's state.
 /// Implementations must check scope, revision, reducer profile and logical state digest (or an
 /// equivalent independently admitted full anchor). Pending/unpublished domain states must fail.
