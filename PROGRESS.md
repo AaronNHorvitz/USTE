@@ -54,6 +54,26 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0089](docs/decisions/0089-allocation-free-page-validation.md) replaces temporary
+  page-fragment vectors with complete allocation-free validation and a retained last-key slice.
+  No cache-hit validation, format, cryptography, budgets or authorization checks are removed.
+  Differential old-validator comparison passed all byte mutations and field boundaries in 0.46s;
+  strict lint initially caught two test-only clones of a Copy descriptor, which were removed.
+  A private native harness now compares all 384 queries under the unchanged 64 MiB public budget
+  and a one-page regression budget, requiring actual evictions with exact oracle equivalence.
+  Tested on `0bc8860` plus this increment: `CARGO_BUILD_JOBS=1 cargo test --release
+  --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1`
+  passed 50 unit tests (40.43s, 2 existing exact-profile ignores) and 3 CLI tests (11.93s),
+  including actual native evictions with all 384 oracle results unchanged. Experiment all-target
+  and workspace all-target/all-feature strict clippy passed. `CARGO_BUILD_JOBS=1 cargo test
+  -p uste-storage -p uste-graph --all-targets --locked --offline -- --test-threads=1` passed,
+  including 67 storage tests (175.49s), both parser matrices, 9 disk graph tests (31.31s),
+  encrypted restart and real process-loss tests. Gates ran sequentially under 3G/4G/512M,
+  one job/thread; sampled peak 1,037,750,272 bytes, zero swap; preflight 29 GiB available RAM
+  and 3.9 GiB free swap. Format/docs/task checks passed (162 links, 68 tasks).
+  Next safely retain validated cache metadata, then measure changed query code on the retained
+  larger fixture; component pressure is not qualifying BM-01/BM-06 acceptance.
+
 - [Decision 0088](docs/decisions/0088-resumable-authenticated-transaction-ranges.md) adds an
   opaque transaction-range cursor with one shared group/encoded-byte allowance, pinned scope and
   authenticated frontier, per-step reauthentication, sticky failure and terminal-only reporting.

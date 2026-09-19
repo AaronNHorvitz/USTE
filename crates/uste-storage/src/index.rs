@@ -1235,7 +1235,7 @@ where
                 stats,
             )?;
             let parsed = ParsedPage::new(page, root, run, middle)?;
-            if parsed.last_key()? < upper_bound {
+            if parsed.last_key() < upper_bound {
                 low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
             } else {
                 high = middle;
@@ -3281,7 +3281,7 @@ where
             stats,
         )?;
         let parsed = ParsedPage::new(page, root, run, middle)?;
-        if parsed.last_key()? < key {
+        if parsed.last_key() < key {
             low = middle.checked_add(1).ok_or(StorageError::ResourceLimit)?;
         } else {
             high = middle;
@@ -3434,7 +3434,12 @@ struct ParsedPage<'a> {
     bytes: &'a [u8],
     used: usize,
     fragment_count: usize,
+    last_key: &'a [u8],
 }
+
+#[cfg(test)]
+#[path = "index_parser_tests.rs"]
+mod parser_tests;
 
 impl<'a> ParsedPage<'a> {
     fn new(
@@ -3466,21 +3471,32 @@ impl<'a> ParsedPage<'a> {
         {
             return Err(StorageError::IntegrityFailure);
         }
-        let page = Self {
+        let mut previous: Option<Fragment<'a>> = None;
+        let mut count = 0;
+        // Exhaust the iterator: even after the declared count, trailing bytes must fail.
+        for fragment in (FragmentIter {
+            remaining: &bytes[PAGE_HEADER_BYTES..used],
+            remaining_count: fragment_count,
+        }) {
+            let fragment = fragment?;
+            if previous.is_some_and(|previous| {
+                previous.key > fragment.key
+                    || (previous.key == fragment.key && previous.offset >= fragment.offset)
+            }) {
+                return Err(StorageError::IntegrityFailure);
+            }
+            previous = Some(fragment);
+            count += 1;
+        }
+        if count != fragment_count {
+            return Err(StorageError::IntegrityFailure);
+        }
+        Ok(Self {
             bytes,
             used,
             fragment_count,
-        };
-        let fragments = page.fragments().collect::<Result<Vec<_>, _>>()?;
-        if fragments.len() != fragment_count
-            || fragments.windows(2).any(|pair| {
-                pair[0].key > pair[1].key
-                    || (pair[0].key == pair[1].key && pair[0].offset >= pair[1].offset)
-            })
-        {
-            return Err(StorageError::IntegrityFailure);
-        }
-        Ok(page)
+            last_key: previous.ok_or(StorageError::IntegrityFailure)?.key,
+        })
     }
 
     fn fragments(&self) -> FragmentIter<'a> {
@@ -3490,11 +3506,8 @@ impl<'a> ParsedPage<'a> {
         }
     }
 
-    fn last_key(&self) -> Result<&'a [u8], StorageError> {
-        self.fragments()
-            .last()
-            .ok_or(StorageError::IntegrityFailure)?
-            .map(|fragment| fragment.key)
+    fn last_key(&self) -> &'a [u8] {
+        self.last_key
     }
 }
 

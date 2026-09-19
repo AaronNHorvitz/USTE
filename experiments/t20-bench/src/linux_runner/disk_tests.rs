@@ -392,6 +392,45 @@ fn native_disk_queries_match_separate_summary_and_reject_substitution() {
     assert_eq!(json["visits"], total_visits);
     assert_eq!(json["logical_result_bytes"], total_bytes);
 
+    // Component cache pressure, not a qualifying workload or an altered public cache budget.
+    // Reopen the same native fixture and compare every query under a one-page cache.
+    let pressured: serde_json::Value = serde_json::from_str(
+        &query::query_correctness_with_cache_budget(
+            &fixture.root,
+            &fixture.password,
+            &path,
+            profile,
+            uste_storage::MIN_INDEX_CACHE_BYTES,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    for field in [
+        "queries",
+        "successful_queries",
+        "expected_visit_limits",
+        "expected_result_limits",
+        "visits",
+        "logical_result_bytes",
+        "oracle_summary_digest",
+        "output_digest",
+    ] {
+        assert_eq!(pressured[field], json[field], "{field}");
+    }
+    assert_eq!(
+        pressured["cache_budget_bytes"],
+        uste_storage::MIN_INDEX_CACHE_BYTES
+    );
+    assert!(pressured["cache_evictions"].as_u64().unwrap() > 0);
+    assert!(
+        pressured["cache_accounted_bytes"].as_u64().unwrap()
+            <= u64::try_from(uste_storage::MIN_INDEX_CACHE_BYTES).unwrap()
+    );
+    assert_eq!(
+        pressured["query_adapter_io"]["operations"]["write_at"]["calls"],
+        0
+    );
+
     fs::write(
         &path,
         OracleSummary::build_warmup(profile).unwrap().to_tsv(),

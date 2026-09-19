@@ -9,6 +9,17 @@ pub fn query_correctness(
     oracle_file: &Path,
     profile: Bm01Profile,
 ) -> Result<String, LinuxRunnerError> {
+    query_correctness_with_cache_budget(root, password_file, oracle_file, profile, 64 * 1024 * 1024)
+}
+
+// Trusted harness control only. Public native commands keep the fixed 64 MiB budget.
+pub(super) fn query_correctness_with_cache_budget(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+    cache_budget: usize,
+) -> Result<String, LinuxRunnerError> {
     validate_native_profile(profile)?;
     let summary = read_oracle_summary(oracle_file)?;
     validate_measured_summary(&summary, profile)?;
@@ -25,7 +36,7 @@ pub fn query_correctness(
                     .map_err(|_| error("USTE_BM01_LIMITS"))?,
             ),
         },
-        64 * 1024 * 1024,
+        cache_budget,
     )
     .map_err(|_| error("USTE_BM01_AUTHORIZED_OPEN"))?;
     let mut timings = Vec::with_capacity(summary.expectations().len());
