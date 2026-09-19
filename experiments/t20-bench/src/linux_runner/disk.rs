@@ -2,7 +2,7 @@
 use super::*;
 use crate::engine::disk::{
     DiskBatchIdentity, admit_development_disk, commit_batch, development_merge_limits,
-    visit_development_batches,
+    fixture_state_counts, visit_development_batches,
 };
 use uste_graph::{GraphDiskLiveState, GraphDiskReadLimits, GraphStateRootMergeLimits};
 use uste_storage::{IndexGetLimits, IndexPredecessorLimits};
@@ -155,7 +155,7 @@ fn prepare_session_with_observer(
     };
     let frontier = frontier.ok_or_else(|| error("USTE_BM01_FRONTIER_MISSING"))?;
     let outcome = frontier.outcome();
-    let mut disk = admit_development_disk(&mut fs, recovery, frontier)
+    let (mut disk, admission) = admit_development_disk(&mut fs, recovery, frontier)
         .map_err(|_| error("USTE_BM01_DISK_ADMISSION"))?;
     if phase == "open"
         && (disk
@@ -224,6 +224,32 @@ fn prepare_session_with_observer(
         .get();
     require_expected_frontier(profile, frontier)?;
     require_binding(&disk, &mut fs, &policy, &principal, profile)?;
+    let final_counts = disk
+        .state()
+        .map_err(|_| error("USTE_BM01_DISK_STATE"))?
+        .current_base()
+        .ok_or_else(|| error("USTE_BM01_DISK_REPAIR_REQUIRED"))?
+        .state_counts();
+    if final_counts != fixture_state_counts(profile) {
+        return Err(error("USTE_BM01_FIXTURE_CARDINALITY"));
+    }
+    let admission_json = serde_json::json!({
+        "measurement_scope": "cold-graph-semantic-admission-only",
+        "complete_authenticated_io": false,
+        "graph_revision": admission.graph_revision,
+        "metadata_revision": admission.metadata_revision,
+        "state_counts": admission.state_counts,
+        "scan_runs": admission.graph.scan.runs,
+        "scan_entries": admission.graph.scan.entries,
+        "scan_logical_bytes": admission.graph.scan.logical_bytes,
+        "scan_pages_read": admission.graph.scan.pages_read,
+        "exact_lookups": admission.graph.exact_lookups,
+        "predecessor_lookups": admission.graph.predecessor_lookups,
+        "semantic_reference_visits": admission.graph.semantic_reference_visits,
+        "lookup_page_visits_including_cache_hits": admission.graph.lookup_page_visits,
+        "lookup_result_bytes": admission.graph.lookup_result_bytes,
+        "peak_history_group_logical_bytes": admission.graph.peak_history_group_logical_bytes,
+    });
     let report = format!(
         concat!(
             "{{\"schema\":\"bm01-linux-disk-development-v1\",",
@@ -232,7 +258,8 @@ fn prepare_session_with_observer(
             "\"full_memory_graph_state\":false,\"full_memory_coordinator_metadata\":false,",
             "\"storage_metadata_memory_resident\":true,\"entities\":{},\"relationships\":{},",
             "\"frontier\":{},\"recovered_revision\":{},\"elapsed_milliseconds\":{},",
-            "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{}}}"
+            "\"repaired_certificate_tail_bytes\":{},\"ignored_uncommitted_journal_bytes\":{},",
+            "\"cold_admission\":{},\"final_state_counts\":{}}}"
         ),
         phase,
         profile.entities(),
@@ -241,7 +268,9 @@ fn prepare_session_with_observer(
         recovered_revision,
         started.elapsed().as_millis(),
         report.repaired_certificate_tail_bytes,
-        report.ignored_uncommitted_journal_bytes
+        report.ignored_uncommitted_journal_bytes,
+        admission_json,
+        serde_json::json!(final_counts)
     );
     Ok((
         DiskSession {

@@ -51,6 +51,25 @@ unverified external distribution prerequisite.
 
 ## Completed this increment
 
+- [Decision 0081](docs/decisions/0081-native-cold-admission-measurements.md) retains authenticated
+  cold graph scan/lookup measurements and initial graph/metadata revisions in native setup
+  reports, separately from final repaired/materialized cardinalities. No extra reads or complete
+  maps are used. Final fixture counts are checked before returning a native query session;
+  the correct Evidence binding and revision no longer suffice for a truncated fixture.
+  The prefix matrix verifies eight runs/1,845 entries on completed 20/200 cold admission and
+  separates initial revision 1/2 bases from final revision 4. These are graph-admission-only
+  counters, not complete authenticated I/O or qualifying measurements.
+  Verified on pushed `b42ee30` plus this increment under MemoryHigh=3G/MemoryMax=4G/
+  MemorySwapMax=512M, one job/thread: `cargo test --release --manifest-path
+  experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1` passed 40 unit tests
+  (2 existing exact-profile oracle tests ignored) in 28.48s and 3 real CLI tests in 13.58s.
+  After adding the final negative fixture, the same release command filtered by
+  `native_disk_binding_and_frontier` passed (1 test, 1.09s); experiment all-target strict clippy
+  passed on the final tree. Docs/task checks pass (154 links, 68 tasks). Host preflight remains
+  29 GiB available RAM, 3.9 GiB free swap. No qualifying campaign ran. Next validate scalable
+  aggregate admission work bounds against repeated lookups, then derive exact-profile driver
+  limits and complete I/O accounting. T-20/T-19 and release qualification remain open.
+
 - [Decision 0080](docs/decisions/0080-trusted-disk-writer-cache-budget.md) adds trusted writer
   cache configuration without changing the default, request limits or durable formats. Benchmark
   writer batches now explicitly select 64 MiB, independently of the later query cache. Oversize

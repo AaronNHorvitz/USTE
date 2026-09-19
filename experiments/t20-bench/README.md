@@ -75,7 +75,13 @@ credentials, retaining the 1,000-entity development ceiling. Create streams the 
 authorized disk writes; resume admits paired metadata roots and a ready graph base or one pending
 transaction, repairs derived roots, then retries the unchanged deterministic plan. Only an empty
 or policy-only bootstrap may use bounded full replay. Missing roots on a larger prefix fail closed.
-Open requires completed, repaired roots and validates the fixture Evidence binding. Construction
+Open requires completed, repaired roots and validates the fixture Evidence binding and exact
+current/history/adjacency/provenance/reverse/policy cardinalities. Reports retain the initial
+`cold_admission` graph/metadata revisions, graph scan and semantic lookup work, and admitted
+counts separately from `final_state_counts` after repair/materialization. Count order is current,
+history, outgoing, incoming, provenance, reverse, policy history, current policy. These privileged
+setup measurements exclude coordinator journal passes, suffix preparation, publication and query
+work; they are not complete authenticated-I/O counters. Construction
 and open do not themselves run query verification or qualify BM-01/BM-06; storage metadata remains resident.
 The native tests require the experiment's `target` directory to reside on Btrfs:
 `CARGO_BUILD_JOBS=1 cargo test --release --locked --offline native_disk -- --test-threads=1`.

@@ -94,6 +94,37 @@ impl Fixture {
             return;
         }
         install_policy(&mut raw, &mut fs).unwrap();
+        if prefix == 12 {
+            // Valid profile Evidence and final revision, but only one relationship. A binding
+            // digest alone is not proof that every fixture record was materialized.
+            visit_development_batches(Bm01Profile::new(20).unwrap(), |sequence, mut operations| {
+                if sequence > 2 {
+                    operations.truncate(1);
+                }
+                let encoded =
+                    encode_transaction(&GraphTransaction::new(scope(), operations)).unwrap();
+                raw.commit(
+                    &mut fs,
+                    TransactionRequest {
+                        principal: PRINCIPAL,
+                        idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
+                        transaction_id: identity(sequence, TransactionId::from_bytes),
+                        canonical_request: &encoded,
+                        blob_inventory: None,
+                    },
+                    &mut SystemClock::new(),
+                    &NeverCancel,
+                )
+                .unwrap();
+                Ok(())
+            })
+            .unwrap();
+            let snapshot = raw.read_view().unwrap().state().clone();
+            uste_graph::publish_graph_state_root(&mut raw, &mut fs, &snapshot).unwrap();
+            uste_txn::publish_coordinator_metadata_root(&mut raw, &mut fs).unwrap();
+            uste_txn::publish_coordinator_transaction_index(&mut raw, &mut fs).unwrap();
+            return;
+        }
         if prefix == 1 {
             return;
         }
@@ -158,7 +189,40 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
         assert_eq!(json["full_memory_coordinator_metadata"], false);
         assert_eq!(json["storage_metadata_memory_resident"], true);
         assert_eq!(json["engine_benchmark"], false);
-        fixture.run("open").unwrap();
+        assert_eq!(
+            json["final_state_counts"],
+            serde_json::json!([221, 421, 200, 200, 200, 600, 1, 1])
+        );
+        assert_eq!(
+            json["cold_admission"]["graph_revision"],
+            if prefix >= 3 { 2 } else { 1 }
+        );
+        assert_eq!(json["cold_admission"]["metadata_revision"], 1);
+        let opened: serde_json::Value =
+            serde_json::from_str(&fixture.run("open").unwrap()).unwrap();
+        let admission = &opened["cold_admission"];
+        assert_eq!(admission["graph_revision"], 4);
+        assert_eq!(admission["metadata_revision"], 4);
+        assert_eq!(admission["state_counts"], json["final_state_counts"]);
+        assert_eq!(admission["scan_entries"], 1845);
+        assert_eq!(admission["scan_runs"], 8);
+        assert_eq!(admission["complete_authenticated_io"], false);
+        assert_eq!(
+            admission["measurement_scope"],
+            "cold-graph-semantic-admission-only"
+        );
+        for field in [
+            "scan_logical_bytes",
+            "scan_pages_read",
+            "exact_lookups",
+            "predecessor_lookups",
+            "semantic_reference_visits",
+            "lookup_page_visits_including_cache_hits",
+            "lookup_result_bytes",
+            "peak_history_group_logical_bytes",
+        ] {
+            assert!(admission[field].as_u64().unwrap() > 0, "{field}");
+        }
         fixture.run("resume").unwrap();
         assert_eq!(
             run(
@@ -172,6 +236,18 @@ fn native_disk_bootstrap_pending_and_partial_metadata_resume() {
             "USTE_BM01_PROFILE_BINDING"
         );
         fixture.run("open").unwrap();
+    }
+}
+
+#[test]
+fn native_disk_binding_and_frontier_do_not_substitute_for_fixture_cardinality() {
+    let fixture = Fixture::new();
+    fixture.seed(12);
+    for _ in 0..2 {
+        assert_eq!(
+            fixture.run("open").unwrap_err().code(),
+            "USTE_BM01_FIXTURE_CARDINALITY"
+        );
     }
 }
 

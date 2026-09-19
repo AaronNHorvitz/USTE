@@ -21,6 +21,36 @@ type Disk = DiskCommitCoordinator<
     CounterEntropy,
 >;
 
+/// Privileged setup measurements, never consumer query results or complete I/O accounting.
+pub(crate) struct DiskAdmissionMeasurement {
+    pub graph_revision: u64,
+    pub metadata_revision: u64,
+    pub state_counts: [u64; 8],
+    pub graph: uste_graph::GraphDiskBaseAdmissionReport,
+}
+
+type AdmittedDisk<F, W, E, I> = (
+    DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>,
+    DiskAdmissionMeasurement,
+);
+
+/// Exact final state cardinalities for this fixture, not general graph admission ceilings.
+pub(crate) fn fixture_state_counts(profile: Bm01Profile) -> [u64; 8] {
+    let entities = profile.entities();
+    let relationships = profile.relationships();
+    // Bm01Profile validates entities <= 100,000 and relationships = 10 * entities.
+    [
+        entities + relationships + 1,
+        entities + 2 * relationships + 1,
+        relationships,
+        relationships,
+        relationships,
+        3 * relationships,
+        1,
+        1,
+    ]
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DiskDevelopmentVerification {
     pub entities: u64,
@@ -133,6 +163,16 @@ pub fn verify_disk_development_profile(
     drop(disk);
     fs.restart().map_err(debug)?;
     let disk = open_disk(&mut fs, &name)?;
+    if disk
+        .state()
+        .map_err(debug)?
+        .current_base()
+        .ok_or("pending final base")?
+        .state_counts()
+        != fixture_state_counts(profile)
+    {
+        return Err("disk fixture cardinality mismatch".into());
+    }
     let recovered_revision = disk
         .checkpoint_anchor()
         .map_err(debug)?
@@ -202,6 +242,7 @@ fn open_disk(fs: &mut MemoryFileSystem, name: &EntryName) -> Result<Disk, String
     )
     .map_err(debug)?;
     admit_development_disk(fs, recovery, frontier.ok_or("missing disk frontier")?)
+        .map(|(disk, _)| disk)
 }
 
 /// Shared adapter-independent development recovery. No full graph/coordinator fallback is allowed.
@@ -210,7 +251,7 @@ pub(crate) fn admit_development_disk<F, W, E, I>(
     fs: &mut F,
     recovery: AuthenticatedIndexRecovery<F, W, E, I>,
     frontier: uste_txn::RecoveredFrontierTransaction,
-) -> Result<DiskCommitCoordinator<GraphDiskLiveState, F, W, E, I>, String>
+) -> Result<AdmittedDisk<F, W, E, I>, String>
 where
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
@@ -262,6 +303,7 @@ where
         &mut cache,
     )
     .map_err(debug)?;
+    let metadata_revision = candidate.revision().get();
     let metadata = uste_txn::admit_coordinator_disk_base(
         &recovery,
         fs,
@@ -302,7 +344,7 @@ where
         IndexPredecessorLimits::new(64, 16 * 1024).map_err(debug)?,
     )
     .map_err(debug)?;
-    let (base, _) = uste_graph::admit_graph_disk_base_candidate_for_recovery(
+    let (base, graph_report) = uste_graph::admit_graph_disk_base_candidate_for_recovery(
         &recovery,
         fs,
         &graph_candidate,
@@ -310,6 +352,12 @@ where
         &mut cache,
     )
     .map_err(debug)?;
+    let measurement = DiskAdmissionMeasurement {
+        graph_revision: base.revision().get(),
+        metadata_revision,
+        state_counts: base.state_counts(),
+        graph: graph_report,
+    };
     let suffix = if base.revision() == frontier.revision() {
         None
     } else {
@@ -349,6 +397,7 @@ where
         },
         &mut cache,
     )
+    .map(|disk| (disk, measurement))
     .map_err(debug)
 }
 
@@ -528,6 +577,19 @@ pub(crate) fn development_merge_limits() -> Result<(IndexRunReadLimits, IndexRun
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fixture_cardinalities_include_policy_and_both_relationship_versions() {
+        assert_eq!(
+            fixture_state_counts(Bm01Profile::new(20).unwrap()),
+            [221, 421, 200, 200, 200, 600, 1, 1]
+        );
+        assert_eq!(
+            fixture_state_counts(Bm01Profile::qualifying()),
+            [
+                1_100_001, 2_100_001, 1_000_000, 1_000_000, 1_000_000, 3_000_000, 1, 1
+            ]
+        );
+    }
     #[test]
     fn disk_engine_matches_frozen_development_oracle_after_cold_admission() {
         let report = verify_disk_development_profile(Bm01Profile::new(20).unwrap()).unwrap();
