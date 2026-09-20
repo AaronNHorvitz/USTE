@@ -2,7 +2,88 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — bounded packed process output (Decision 0205)
+## Latest measurement — native 20,000 entities; sampling incomplete (Decision 0206)
+
+Pushed/clean baseline `18a45e41d754b914b735fe413c15b09fb6d3b812`; release binary SHA-256
+`0f7a7ee6c5172d59b3998fc5e1d2a4d48b74eda39f246d5c72f8c163801315ce`. Root/standalone lock hashes
+remain `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b` /
+`4d348b4b13db7e0834d3cc998166d2eddf9e4fe4f96765a8ad7a172efbf21dd4`; standalone manifest defaults
+and declared dependency features, release profile. No model/native/qualifying admission change.
+
+Retain `experiments/t20-bench/target/native-packed20000.ggoHSe` on either success or failure.
+Fixture session 71356 / `uste-d206-fixture.scope` exited zero, serial 600-second command limits:
+manifest 0.16 s/2,776 KiB RSS; independent oracle summary 2.67 s/16,760 KiB; oracle bundle
+3.45 s/17,488 KiB. Post-workload scope peak 22,675,456 bytes/zero swap. Manifest pins 20,000
+entities/200,000 relationships, 44 durable revisions, 384 measured/96 warm-up query shapes.
+SHA-256: manifest `e7e0e0c6229dded778948f9f1de71876e7c671ea32ae3554f90eef2c38a2f946`,
+summary `aa3e6939c372351d6dfff0a8eaae989411c4a10d34244f2298114da34194af2c`,
+bundle `f667f4420fce69e773d55e4c8ace4ed16878f063f4afc11ce1e1c6a234e5797b`.
+Each command invoked the pinned binary with `manifest`, `oracle-summary` or `oracle-bundle`
+and `--entities 20000`; outputs and GNU time files are retained in that directory.
+
+Fresh preflight before generation and create: 26 GiB available RAM/2.0 GiB free swap/954 GiB
+disk, no competing compiler/test/measurement. Same Fedora 44 Btrfs/NVMe zstd:1 profile, kernel
+7.1.10-200.fc44.x86_64, i9-13900KF/32 logical CPUs; host caches/background applications are
+uncontrolled. One heavy workload, 3G/4G/512M scope. The existing synthetic password file is
+regular, 0600, one link/80 bytes; its contents are not printed or distributed.
+
+Native create session 99976 passed under `uste-d206-create.scope`, 1,800-second timeout with 10-second
+TERM grace. Report/error/time/post-scope paths are `create.json`, `create.stderr`, `create.time`,
+`create.scope` in the retained root. It reached revision 44 and reports the complete fixture;
+elapsed 161,373 ms (wall 161.37 s), peak RSS 345,200 KiB, post-workload scope peak 2,680,999,936
+bytes/zero swap. Adapter reads 30,591,846,347 bytes/writes 2,542,755,209 bytes; three owner
+lifetimes account for 1,462,683 completed decrypts/30,592,387,163 encoded bytes. These are
+distinct measurement boundaries, not device traffic. State digest
+`6880abb54859af231d877c8bbc1a9a665127a9953228c90e4a8278c048d1ecab`; certificate SHA-256
+`b8fea4e223947316555069db1869b7ef57e121077e84ceff02a1930061f1e6cd`.
+
+Fresh-process open session 13044 passed under `uste-d206-open.scope`, with the same command/limits
+below substituting `open` for `create` in the command, scope and four result paths. Fresh
+headroom 26 GiB RAM/2.0 GiB swap/952 GiB disk, no competing workload and unused scope name.
+It reproduced the state digest and source-certificate hash, with zero adapter writes. Elapsed
+69,508 ms/wall 69.51 s, RSS 265,348 KiB, scope peak 277,151,744 bytes/zero swap. Adapter reads
+21,647,766,637 bytes; one owner reports 1,032,459 decrypts/21,647,762,379 encoded bytes.
+
+Independent correctness queries passed under `uste-d206-query.scope` (session 22945, exit zero). Same fresh
+26 GiB RAM/2.0 GiB swap/952 GiB disk and no competing workload; same 1,800-second/3G/4G/512M
+bounds. Command substitutes `query` for `create` and adds `--oracle-file` with the retained
+root's absolute `oracle-summary` path. Reports use `query.*` files. Expected independent corpus
+is 384 queries: all 313 successes, 71 result-limit refusals and zero visit-limit refusals matched.
+Output digest `0c978f102932e082ed1f1012e037a299658cb8d8ff26c5051438c67750b8ee42`,
+4,095,526 successful visits/46,474,984 logical result bytes match the independent oracle.
+Query-only 870,407 ms; total wall 940.53 s/RSS 265,588 KiB; scope peak 277,086,208 bytes,
+zero swap. Actual cache evictions 17,781,965, hits 545,294,528/misses 18,779,324;
+385,821,211,580 query adapter/decrypt encoded bytes and zero writes. Cache pressure is now
+observed, but this is neither a qualifying sample nor evidence that latency targets pass.
+
+Supervised sampling session 47650 exited 124 under `uste-d206-sample.scope`, invocation
+`4fe26fd6d97f4b4f960c6fe7559c2d2e`, after fresh 26 GiB RAM/2.0 GiB swap/952 GiB disk preflight.
+The same command below substitutes `sample` and uses `--oracle-file` with the retained root's
+absolute `oracle-bundle` path. The original 1,800-second command/30-second query limits remain.
+It reached the 1,800-second command deadline with empty stdout/stderr and no latency report;
+no sample/qualification pass is claimed and no unchanged retry is admitted. Scope peak
+277,757,952 bytes/zero swap, aggregate CPU 1,796.394 s; last worker sample at 29:45 was
+89,340 KiB RSS/29:41 CPU and last memory-event sample at 27:38 was all zero. GNU time's
+2,644 KiB/0.04 CPU-second parent-only result omits the terminated worker and is not its peak.
+Both owned processes were gone before the next workload. Certificate hash still matches.
+All raw reports, commands and provenance are in
+`docs/evidence/native-packed-20000-development.json`; the synthetic store remains retained.
+Qualification remains withheld and T-20/T-19 remain open; M1's pinned result is unchanged.
+
+Decision 0207's record-commitment reuse change is excluded from the pinned D0206 binary.
+Its full workspace verification is now running in session 97961 / `uste-d207-workspace.scope`
+(invocation `972604c7dada401dbe79265343b6a3ff`), after fresh 26 GiB RAM/2.0 GiB swap/952 GiB
+disk preflight and confirmation that sampling left no competing worker. One Cargo job/test
+thread, test opt-level 1 with debug assertions/overflow checks, 3G/4G/512M scope. The pipeline
+is workspace/all-target/all-feature locked offline tests, strict workspace Clippy and
+warnings-denied no-deps docs; output `/tmp/uste-d207-workspace-verification.log`. Do not claim
+these pending tests passed. Next finish verification and commit/push the reviewed capability.
+
+```sh
+systemd-run --user --scope --unit=uste-d206-create.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-packed20000.ggoHSe/create.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-create --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 > experiments/t20-bench/target/native-packed20000.ggoHSe/create.json 2> experiments/t20-bench/target/native-packed20000.ggoHSe/create.stderr; measurement_status=$?; systemctl --user show uste-d206-create.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-packed20000.ggoHSe/create.scope; exit "$measurement_status"'
+```
+
+## Prior verified increment — bounded packed process output (Decision 0205)
 
 Pushed `2245a0a` records verified BM-06 owner accounting. The separately reviewed BM-01 process
 test supervisor now drains stdout and stderr concurrently with 256 KiB + one sentinel byte per
@@ -5331,7 +5412,19 @@ remaining mixed workload have not passed.
 
 ## Next dependency-permitted work
 
-Current action: T-20 remains the priority. Decisions 0108–0120, including the retained native
+Current action: T-20 remains the priority. Decisions 0133–0205 have since implemented the
+packed copy-on-write, admission/domain integration, native construction/recovery and bounded
+cache work that the older handoff below proposed. Do not restart those capabilities. The
+current verified baseline is `18a45e4`; D0206's larger correctness pass and sampling timeout
+are archived at that exact binary and D0207's redundant commitment-computation removal awaits verification.
+Verify the source change under the established
+one-workload safeguards, then continue measured native scaling and remaining accounting/lifecycle
+prerequisites for qualifying BM-01/BM-06. A 20,000-entity oracle match and an 8,192-entity BM-06
+development run do not satisfy the exact qualifying profiles or reserved-runner requirements.
+T-19 follows T-20; M1 remains pinned separately. The topmost sections carry current commands,
+results and next actions. The following chronological evidence is historical, not an active plan.
+
+Historical handoff through Decision 0132: Decisions 0108–0120, including the retained native
 20,000-entity comparison and explicit BM-06 origin rebuild, are committed and pushed through
 `3f793a6`; their evidence is recorded above, not in flight. Decisions 0121–0122 extend primary-owner
 suffix staging and bounded inventory-bearing genesis bootstrap. Decision 0123 maintains first
@@ -5342,7 +5435,7 @@ windows to private forward recovery (pushed `42f9abb`). Decision 0128 adds local
 canonical ordered commitments (pushed `3a2a361`) without changing any persisted v1 profile.
 Decision 0129 adds the encrypted packed-page framing carrier (pushed `7a98146`); Decision 0130
 adds bounded durable pack I/O (pushed `a64fc19`). Decision 0131 adds the typed record codec
-(pushed `d12fe7f`); Decision 0132 adds bounded authenticated lookup. Next implement and verify
+(pushed `d12fe7f`); Decision 0132 adds bounded authenticated lookup. At that point the next work was
 reachable-node copy-on-write batches, root admission and domain integration, and
 complete accounting before qualifying BM-01/BM-06 campaigns. Preserve retained fixtures, caps,
 M1's exact-version handoff and all qualification targets. T-19 follows T-20. The entries below
