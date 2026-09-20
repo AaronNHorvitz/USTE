@@ -11,9 +11,11 @@ pub use admission::{
 };
 pub(crate) use quota::stage_packed_quota_prefix_on_journal;
 pub use quota::{
-    COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport,
-    PackedQuotaPrefix, PackedQuotaRebuildLimits, PackedQuotaRebuildReport, PackedQuotaReport,
-    admit_packed_quota_prefix, rebuild_packed_quota_prefix, stage_packed_quota_prefix,
+    COORDINATOR_PACKED_USAGE_PROFILE_V1, PackedQuotaAdmissionCacheReport,
+    PackedQuotaAdmissionLimits, PackedQuotaAdmissionReport, PackedQuotaPrefix,
+    PackedQuotaRebuildLimits, PackedQuotaRebuildReport, PackedQuotaReport,
+    admit_packed_quota_prefix, admit_packed_quota_prefix_buffered, rebuild_packed_quota_prefix,
+    stage_packed_quota_prefix,
 };
 use uste_storage::{
     IndexDelta,

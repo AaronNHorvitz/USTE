@@ -115,6 +115,13 @@ fn root_fixture(
 
 #[test]
 fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
+    packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits_case(false);
+}
+#[test]
+fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits_buffered() {
+    packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits_case(true);
+}
+fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits_case(buffered: bool) {
     for count in [1, 5] {
         let (mut fs, name, recovery, old_primary, old_quota, _, _) = root_fixture(count);
         drop(recovery);
@@ -144,7 +151,8 @@ fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
             .remove(0);
         fs.arm(FaultPlan::default()).unwrap();
         assert!(
-            admit_packed_quota_prefix(
+            admit_selected(
+                buffered,
                 &mut recovery,
                 &mut fs,
                 &old_primary,
@@ -163,9 +171,15 @@ fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
         .unwrap()
         .0;
         fs.arm(FaultPlan::default()).unwrap();
-        let (quota, report) =
-            admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &quota_root, admission())
-                .unwrap();
+        let (quota, report) = admit_selected(
+            buffered,
+            &mut recovery,
+            &mut fs,
+            &primary,
+            &quota_root,
+            admission(),
+        )
+        .unwrap();
         assert_eq!(fs.operation_count(Operation::CreateNew), 0);
         assert_eq!(fs.operation_count(Operation::WriteAt), 0);
         assert_eq!(
@@ -177,7 +191,15 @@ fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
             maximum_lookup_bytes: report.lookup_bytes,
             ..admission()
         };
-        admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &quota_root, exact).unwrap();
+        admit_selected(
+            buffered,
+            &mut recovery,
+            &mut fs,
+            &primary,
+            &quota_root,
+            exact,
+        )
+        .unwrap();
         for selected in [
             PackedQuotaAdmissionLimits {
                 maximum_lookup_pages: report.lookup_pages - 1,
@@ -189,8 +211,15 @@ fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
             },
         ] {
             assert!(
-                admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &quota_root, selected)
-                    .is_err()
+                admit_selected(
+                    buffered,
+                    &mut recovery,
+                    &mut fs,
+                    &primary,
+                    &quota_root,
+                    selected
+                )
+                .is_err()
             );
         }
         let maintenance = recovery
@@ -219,6 +248,17 @@ fn packed_quota_admission_empty_and_populated_cold_pairing_and_exact_limits() {
 
 #[test]
 fn packed_quota_admission_authenticated_false_totals_principals_and_owners_are_rejected() {
+    packed_quota_admission_authenticated_false_totals_principals_and_owners_are_rejected_case(
+        false,
+    );
+}
+#[test]
+fn packed_quota_admission_authenticated_false_totals_principals_and_owners_are_rejected_buffered() {
+    packed_quota_admission_authenticated_false_totals_principals_and_owners_are_rejected_case(true);
+}
+fn packed_quota_admission_authenticated_false_totals_principals_and_owners_are_rejected_case(
+    buffered: bool,
+) {
     for case in 0..7 {
         let (mut fs, _, mut recovery, primary, _, _, root) = root_fixture(5);
         let mut cursor = recovery
@@ -331,20 +371,43 @@ fn packed_quota_admission_authenticated_false_totals_principals_and_owners_are_r
             .unwrap();
         fs.arm(FaultPlan::default()).unwrap();
         assert!(
-            admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &false_root, admission())
-                .is_err(),
+            admit_selected(
+                buffered,
+                &mut recovery,
+                &mut fs,
+                &primary,
+                &false_root,
+                admission()
+            )
+            .is_err(),
             "case {case}"
         );
         assert_eq!(fs.operation_count(Operation::CreateNew), 0);
-        admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, admission()).unwrap();
+        admit_selected(
+            buffered,
+            &mut recovery,
+            &mut fs,
+            &primary,
+            &root,
+            admission(),
+        )
+        .unwrap();
     }
 }
 
 #[test]
 fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable() {
+    packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable_case(false);
+}
+#[test]
+fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable_buffered() {
+    packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable_case(true);
+}
+fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable_case(buffered: bool) {
     let (mut observed_fs, _, mut observed, primary, _, _, root) = root_fixture(5);
     observed_fs.arm(FaultPlan::default()).unwrap();
-    let expected = admit_packed_quota_prefix(
+    let expected = admit_selected(
+        buffered,
         &mut observed,
         &mut observed_fs,
         &primary,
@@ -378,8 +441,15 @@ fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable() {
                 )
                 .unwrap();
                 assert!(
-                    admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, admission())
-                        .is_err(),
+                    admit_selected(
+                        buffered,
+                        &mut recovery,
+                        &mut fs,
+                        &primary,
+                        &root,
+                        admission()
+                    )
+                    .is_err(),
                     "{operation:?}/{occurrence}/{action:?}"
                 );
                 assert_eq!(fs.pending_faults(), 0);
@@ -412,7 +482,8 @@ fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable() {
                 )
                 .unwrap()
                 .0;
-                let actual = admit_packed_quota_prefix(
+                let actual = admit_selected(
+                    buffered,
                     &mut recovery,
                     &mut fs,
                     &primary,
@@ -430,20 +501,44 @@ fn packed_quota_admission_every_observed_read_fault_keeps_pair_recoverable() {
             }
         }
     }
-    assert_eq!(cases, 381);
+    if buffered {
+        assert_eq!(
+            cases,
+            boundaries.iter().map(|(_, count)| count * 3).sum::<u64>()
+        );
+        assert!(cases > 0 && cases < 381);
+    } else {
+        assert_eq!(cases, 381);
+    }
 }
 
 #[test]
 fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_closed() {
+    packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_closed_case(false);
+}
+#[test]
+fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_closed_buffered() {
+    packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_closed_case(true);
+}
+fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_closed_case(
+    buffered: bool,
+) {
     let (mut fs, name, mut recovery, primary, quota, _, root) = root_fixture(5);
-    let (_, report) =
-        admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, admission()).unwrap();
+    let (_, report) = admit_selected(
+        buffered,
+        &mut recovery,
+        &mut fs,
+        &primary,
+        &root,
+        admission(),
+    )
+    .unwrap();
     let mut exact = admission();
     exact.cursor.maximum_pages = report.cursor.pages;
     exact.cursor.maximum_encoded_bytes = report.cursor.encoded_bytes;
     exact.cursor.maximum_candidates = report.cursor.candidates;
     exact.cursor.maximum_returned_bytes = report.cursor.returned_bytes;
-    admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, exact).unwrap();
+    admit_selected(buffered, &mut recovery, &mut fs, &primary, &root, exact).unwrap();
     for cursor in [
         TreeCursorLimits {
             maximum_pages: report.cursor.pages - 1,
@@ -463,7 +558,8 @@ fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_clos
         },
     ] {
         assert!(
-            admit_packed_quota_prefix(
+            admit_selected(
+                buffered,
                 &mut recovery,
                 &mut fs,
                 &primary,
@@ -475,7 +571,8 @@ fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_clos
     }
     fs.arm(FaultPlan::default()).unwrap();
     assert!(
-        admit_packed_quota_prefix(
+        admit_selected(
+            buffered,
             &mut recovery,
             &mut fs,
             &primary,
@@ -517,8 +614,112 @@ fn packed_quota_admission_cursor_limits_and_late_ciphertext_corruption_fail_clos
     fs.sync_all(&file).unwrap();
     fs.arm(FaultPlan::default()).unwrap();
     assert!(
-        admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, admission()).is_err()
+        admit_selected(
+            buffered,
+            &mut recovery,
+            &mut fs,
+            &primary,
+            &root,
+            admission()
+        )
+        .is_err()
     );
     assert_eq!(fs.operation_count(Operation::CreateNew), 0);
     assert_eq!(fs.operation_count(Operation::WriteAt), 0);
+}
+
+fn admit_selected(
+    buffered: bool,
+    recovery: &mut Recovery,
+    fs: &mut Fs,
+    primary: &PackedCoordinatorPrefix,
+    root: &CertifiedPackedRoot,
+    limits: PackedQuotaAdmissionLimits,
+) -> Result<(PackedQuotaPrefix, uste_txn::PackedQuotaAdmissionReport), TransactionError> {
+    if buffered {
+        uste_txn::admit_packed_quota_prefix_buffered(
+            recovery,
+            fs,
+            primary,
+            root,
+            limits,
+            1024 * 1024,
+        )
+        .map(|(prefix, report, _)| (prefix, report))
+    } else {
+        admit_packed_quota_prefix(recovery, fs, primary, root, limits)
+    }
+}
+
+#[test]
+fn packed_quota_admission_buffering_is_fresh_bounded_and_proof_equivalent() {
+    for count in [1, 5] {
+        let (mut fs, _, mut recovery, primary, _, _, root) = root_fixture(count);
+        fs.arm(FaultPlan::default()).unwrap();
+        let (expected, proof) =
+            admit_packed_quota_prefix(&mut recovery, &mut fs, &primary, &root, admission())
+                .unwrap();
+        let uncached_reads = fs.operation_count(Operation::ReadAt);
+        for budget in [uste_storage::MIN_INDEX_CACHE_BYTES, 1024 * 1024] {
+            let mut prior = None;
+            for _ in 0..2 {
+                fs.arm(FaultPlan::default()).unwrap();
+                let (actual, report, cache) = uste_txn::admit_packed_quota_prefix_buffered(
+                    &mut recovery,
+                    &mut fs,
+                    &primary,
+                    &root,
+                    admission(),
+                    budget,
+                )
+                .unwrap();
+                assert_eq!(actual.anchor(), expected.anchor());
+                assert!(actual.families() == expected.families());
+                assert_eq!(actual.anchor(), primary.anchor());
+                assert_eq!(report.families, proof.families);
+                assert_eq!(report.cursor, proof.cursor);
+                assert_eq!(report.lookup_pages, proof.lookup_pages);
+                assert_eq!(report.lookup_bytes, proof.lookup_bytes);
+                for (phase, family) in cache.canonical.iter().zip(report.families) {
+                    assert_eq!(phase.hits + phase.misses, family.pages);
+                }
+                assert_eq!(
+                    cache.correspondence.hits + cache.correspondence.misses,
+                    report.lookup_pages + report.cursor.pages
+                );
+                for phase in cache.canonical.into_iter().chain([cache.correspondence]) {
+                    assert_eq!(phase.budget_bytes, budget);
+                    assert!(phase.accounted_bytes <= budget);
+                }
+                let reads = fs.operation_count(Operation::ReadAt);
+                assert!(reads < uncached_reads);
+                assert_eq!(fs.operation_count(Operation::WriteAt), 0);
+                assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+                if let Some((previous_cache, previous_reads)) = prior {
+                    assert_eq!(cache, previous_cache);
+                    assert_eq!(reads, previous_reads);
+                }
+                prior = Some((cache, reads));
+            }
+        }
+        for budget in [
+            0,
+            uste_storage::MIN_INDEX_CACHE_BYTES - 1,
+            uste_storage::MAX_INDEX_CACHE_BYTES + 1,
+        ] {
+            fs.arm(FaultPlan::default()).unwrap();
+            assert!(
+                uste_txn::admit_packed_quota_prefix_buffered(
+                    &mut recovery,
+                    &mut fs,
+                    &primary,
+                    &root,
+                    admission(),
+                    budget
+                )
+                .is_err()
+            );
+            assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+        }
+    }
 }

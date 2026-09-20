@@ -2,6 +2,7 @@
 use super::*;
 use uste_storage::{
     journal::{CertificateAnchorReadReport, CertifiedPackedRoot},
+    packed_page_cache::{PackedCacheReport, PackedPageCache},
     packed_tree_cursor::{TreeCursorLimits, TreeCursorReport},
     packed_tree_validation::{TreeValidationLimits, TreeValidationReport},
 };
@@ -16,12 +17,19 @@ pub struct PackedQuotaAdmissionLimits {
     pub maximum_lookup_pages: u64,
     pub maximum_lookup_bytes: u64,
 }
+/// Logical proof work, including buffered hits; not physical I/O.
 pub struct PackedQuotaAdmissionReport {
     pub certificate: CertificateAnchorReadReport,
     pub families: [TreeValidationReport; 3],
     pub cursor: TreeCursorReport,
     pub lookup_pages: u64,
     pub lookup_bytes: u64,
+}
+/// Sequential canonical caches followed by a fresh correspondence cache.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PackedQuotaAdmissionCacheReport {
+    pub canonical: [PackedCacheReport; 3],
+    pub correspondence: PackedCacheReport,
 }
 struct LookupBudget {
     pages: u64,
@@ -59,6 +67,56 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    admit_inner(recovery, fs, primary, root, limits, None)
+        .map(|(prefix, report, _)| (prefix, report))
+}
+
+/// Independently admit quota correspondence using fresh bounded caches, never caller-warmed pages.
+pub fn admit_packed_quota_prefix_buffered<F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    fs: &mut F,
+    primary: &PackedCoordinatorPrefix,
+    root: &CertifiedPackedRoot,
+    limits: PackedQuotaAdmissionLimits,
+    cache_bytes: usize,
+) -> Result<
+    (
+        PackedQuotaPrefix,
+        PackedQuotaAdmissionReport,
+        PackedQuotaAdmissionCacheReport,
+    ),
+    TransactionError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_inner(recovery, fs, primary, root, limits, Some(cache_bytes))
+}
+
+fn admit_inner<F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    fs: &mut F,
+    primary: &PackedCoordinatorPrefix,
+    root: &CertifiedPackedRoot,
+    limits: PackedQuotaAdmissionLimits,
+    cache_bytes: Option<usize>,
+) -> Result<
+    (
+        PackedQuotaPrefix,
+        PackedQuotaAdmissionReport,
+        PackedQuotaAdmissionCacheReport,
+    ),
+    TransactionError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let manifest = root.manifest();
     let families = manifest.families();
     if primary.scope != recovery.scope()
@@ -83,6 +141,10 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
+    if let Some(bytes) = cache_bytes {
+        PackedPageCache::new(bytes).map_err(TransactionError::Storage)?;
+    }
+    let mut cache_report = PackedQuotaAdmissionCacheReport::default();
     for tree in &primary.trees {
         recovery
             .journal
@@ -113,7 +175,14 @@ where
         .try_reserve_exact(3)
         .map_err(|_| TransactionError::ResourceLimit)?;
     for family in 1..=3 {
-        let (tree, report) = maintenance.admit(fs, root, family, limits.family)?;
+        let (tree, report) = if let Some(bytes) = cache_bytes {
+            let (tree, report, cache) =
+                maintenance.admit_buffered(fs, root, family, limits.family, bytes)?;
+            cache_report.canonical[usize::from(family - 1)] = cache;
+            (tree, report)
+        } else {
+            maintenance.admit(fs, root, family, limits.family)?
+        };
         trees.push(tree);
         reports.push(report);
     }
@@ -121,7 +190,18 @@ where
         pages: limits.maximum_lookup_pages,
         bytes: limits.maximum_lookup_bytes,
     };
-    let metadata = maintenance.get(fs, &trees[0], KEY, budget.limits(limits.lookup))?;
+    let mut cache = cache_bytes
+        .map(PackedPageCache::new)
+        .transpose()
+        .map_err(TransactionError::Storage)?;
+    let metadata = metadata_get(
+        &maintenance,
+        fs,
+        &trees[0],
+        KEY,
+        budget.limits(limits.lookup),
+        cache.as_mut(),
+    )?;
     budget.debit(metadata.report)?;
     let metadata = metadata.value.ok_or(TransactionError::IntegrityFailure)?;
     let metadata = metadata.as_slice();
@@ -144,7 +224,16 @@ where
     let mut expected = (0_u64, 0_u64);
     let mut seen_principals = 0_u64;
     let mut total_bytes = 0_u64;
-    while let Some(entry) = maintenance.next(fs, &mut cursor)? {
+    loop {
+        let next = match cache.as_mut() {
+            Some(cache) => maintenance
+                .as_reader()
+                .next_cached(fs, &mut cursor, cache)?,
+            None => maintenance.next(fs, &mut cursor)?,
+        };
+        let Some(entry) = next else {
+            break;
+        };
         if entry.key().len() != 48 {
             return Err(TransactionError::IntegrityFailure);
         }
@@ -153,11 +242,12 @@ where
         if entry.key()[..32] != principal.as_bytes() {
             return Err(TransactionError::IntegrityFailure);
         }
-        let (owner, work) = primary.owner(
+        let (owner, work) = primary.owner_with_cache(
             &maintenance,
             fs,
             reference.id(),
             budget.limits(limits.lookup),
+            cache.as_mut(),
         )?;
         budget.debit(work)?;
         if owner != Some((reference, principal)) {
@@ -167,11 +257,13 @@ where
             if current.is_some() && actual != expected {
                 return Err(TransactionError::IntegrityFailure);
             }
-            let value = maintenance.get(
+            let value = metadata_get(
+                &maintenance,
                 fs,
                 &trees[1],
                 &principal.as_bytes(),
                 budget.limits(limits.lookup),
+                cache.as_mut(),
             )?;
             budget.debit(value.report)?;
             expected = decode_pair(
@@ -207,6 +299,9 @@ where
         lookup_pages: limits.maximum_lookup_pages - budget.pages,
         lookup_bytes: limits.maximum_lookup_bytes - budget.bytes,
     };
+    if let Some(cache) = cache {
+        cache_report.correspondence = cache.report().map_err(TransactionError::Storage)?;
+    }
     Ok((
         PackedQuotaPrefix {
             scope: primary.scope,
@@ -220,5 +315,6 @@ where
             principals,
         },
         report,
+        cache_report,
     ))
 }

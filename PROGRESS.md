@@ -2,7 +2,42 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — buffered primary coordinator admission (Decision 0186)
+## Latest verified increment — buffered quota admission (Decision 0187)
+
+Built and tested on pushed baseline `b51a037`: opt-in quota admission now uses fresh sequential
+canonical-family caches followed by a separate correspondence cache for metadata/principals,
+owner traversal and primary-owner lookups. Uncached APIs, exact proof charges, checked totals,
+owner pairing and late-corruption refusal remain intact. Reports are fixed per-phase diagnostics,
+not concurrent memory sums or complete I/O measurements. Native integration is not included yet.
+
+Initial session 78800 failed to compile a new test's call to the private `paired` helper. Corrected
+the test to compare public anchors and commitments; the existing wrong-pair refusal cases remain.
+Session 71977 / `run-p1061304-i22061752.scope` passed all nine focused quota-admission cases/17.38 s,
+compile 26.09 s and strict workspace Clippy/8.01 s. Sampled peak 626,294,784 bytes/zero swap.
+Focused command selected `cargo test -p uste-txn --all-features --locked --offline packed_quota_admission
+-- --test-threads=1` with the optimized/asserting profile and memory scope below.
+
+Full session 16264 / `run-p1062326-i22019197.scope` exited 0: **687 tests across 47 executables**,
+zero failures/ignored. Graph disk-index 98/439.85 s, replay 50/107.30 s, storage library 219/32.71 s,
+transaction coordinator 108/101.19 s. Compile 1m 03s; strict Clippy 0.05 s and rustdoc 10.64 s.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d187-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+```
+
+Preflight 21 GiB available RAM/2.2 GiB free swap. Sampled full scope peak 2,039,599,104 bytes/
+zero swap, not final lifetime peak. Format/diff/docs/task checks pass. Root lockfile unchanged.
+This full core run includes Decision 0186 primary buffering; pending standalone integration is
+excluded and not verified by it. Last full standalone harness remains 109 at `98bcd86`. Next
+verify/commit that integration, then perform resource-safe larger native construction and
+accounting work. No larger-than-memory or qualifying campaign pass is claimed. T-20/T-19,
+pinned M1, the full roadmap and external release gates remain unchanged. Supersedes older next steps.
+
+## Prior verified increment — buffered primary coordinator admission (Decision 0186)
 
 Implemented on pushed `98bcd86`: opt-in primary admission creates fresh sequential canonical
 family caches, then a fresh correspondence cache for streamed retry/transaction/owner/witness
