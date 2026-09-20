@@ -2,6 +2,25 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest development observation — allocation-free cache sampling (Decision 0223)
+
+D0222 is committed/pushed as `017a6e3`; release executable SHA-256
+`fbcfaec143517f3f2c129b9727dd2beacff129761f976822017c77af4f504e0a`. Its supervised wide
+positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0221: 96 warm-ups, 768 executions, 40 groups,
+digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`, successful work,
+cache counters, adapter I/O and vault work. This is cross-binary, sequential and nonqualifying.
+
+The round took 673,948 ms versus 707,800 ms (-4.78%). Retained all-class successful p99 is
+**9.397449 / 605.082078 / 387.319532 / 1302.698520 ms**. One-hop worsened 5.31%; four-hop
+improved 16.54% but remains over five times the 250 ms target. No target or T-20 gate passes.
+Process peak RSS 265,616 KiB; wall/user/system 859.28/809.16/46.55 seconds; zero process swaps.
+The shared scope recorded soft-limit throttling but zero swap/max/OOM events. Source certificate
+and executable hashes stayed unchanged. Local artifacts:
+`experiments/t20-bench/target/native-d222-positive.IXKfZE`; complete report:
+`docs/evidence/allocation-free-positive-cache-sampling.json`. Next commit/push this evidence, then
+profile or remove a higher-level repeated traversal cost before another capacity campaign.
+
 ## Latest verified implementation — allocation-free positive-cache probes (Decision 0222)
 
 D0221 evidence is committed/pushed as `d725ef4`. D0222 source now replaces the flat allocated
