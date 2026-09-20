@@ -105,6 +105,42 @@ where
         family: u8,
         limits: TreeValidationLimits,
     ) -> Result<(CanonicalPackedTree, TreeValidationReport), StorageError> {
+        self.admit_packed_tree_inner(filesystem, root, family, limits, None)
+    }
+    /// Cold canonical admission with a fresh bounded operation-local plaintext cache.
+    /// Never reuses a previous admission's pages. Proof-work limits include cache hits.
+    /// The cache is dropped on success or failure; no domain or consumer authority is added.
+    pub fn admit_packed_tree_buffered(
+        &self,
+        filesystem: &mut F,
+        root: &CertifiedPackedRoot,
+        family: u8,
+        limits: TreeValidationLimits,
+        cache_bytes: usize,
+    ) -> Result<
+        (
+            CanonicalPackedTree,
+            TreeValidationReport,
+            crate::packed_page_cache::PackedCacheReport,
+        ),
+        StorageError,
+    > {
+        self.validate_packed_root_certificate(root)?;
+        self.require_packed_tree_key()?;
+        let mut cache = crate::packed_page_cache::PackedPageCache::new(cache_bytes)?;
+        cache.bind(root.certificate_proof(), self.vault.unlocked_session()?)?;
+        let (tree, report) =
+            self.admit_packed_tree_inner(filesystem, root, family, limits, Some(&mut cache))?;
+        Ok((tree, report, cache.report()?))
+    }
+    fn admit_packed_tree_inner(
+        &self,
+        filesystem: &mut F,
+        root: &CertifiedPackedRoot,
+        family: u8,
+        limits: TreeValidationLimits,
+        cache: Option<&mut crate::packed_page_cache::PackedPageCache>,
+    ) -> Result<(CanonicalPackedTree, TreeValidationReport), StorageError> {
         self.validate_packed_root_certificate(root)?;
         self.require_packed_tree_key()?;
         let manifest = root.manifest();
@@ -119,7 +155,7 @@ where
             family,
             revision: manifest.claims().revision,
         };
-        let validated = packed_tree_validation::validate_tree(
+        let validated = packed_tree_validation::validate_tree_buffered(
             filesystem,
             &self.database_directory,
             &self.vault,
@@ -127,6 +163,7 @@ where
             descriptor.commitment,
             descriptor.root,
             limits,
+            cache,
         )?;
         Ok((
             CanonicalPackedTree {

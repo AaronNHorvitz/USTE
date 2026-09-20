@@ -2,7 +2,38 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native packed 1,000-entity measurement (Decision 0177)
+## Latest verified increment — fresh buffered canonical admission (Decision 0178)
+
+Implemented on pushed `b3df3b8`: opt-in storage canonical admission creates, binds and destroys
+its own bounded cache. All canonical/value-hash validation and logical proof ceilings remain;
+cache hits do not buy additional proof budget. No prewarmed cache can be supplied. Five new
+tests cover exact results/counters, every proof ceiling, one-page/larger budgets, empty/missing/
+foreign/stale/locked cases, authenticated noncanonical branches, later corruption and every
+actual read fault with fresh-owner recovery. Existing uncached behavior remains unchanged.
+
+Focused session 43102 passed four initial tests/0.08 s after 26.03 s compile; sampled scope peak
+1,113,026,560 bytes/zero swap. Session 42028 failed compilation in the added false-tree fixture
+(incorrect physical context field); corrected by deriving the complete physical context from
+a staged root. Final session 46483 / `run-p936965-i21927139.scope` exited 0: all 238 storage
+tests across eight executables (including one zero-test example), 219 library tests/33.02 s,
+compile 0.95 s. Workspace strict Clippy passed/7.74 s. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d178-storage-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings'
+```
+
+Preflight 24 GiB available RAM/3.5 GiB free swap; final scope sampled peak 365,899,776 bytes/
+zero swap. Format/diff/docs/task checks pass. No full-workspace test rerun is claimed for this
+storage-only slice; previous full core baseline is 664 tests at `e2ca489`, standalone 104 active
+at `9b9fccc`. Next integrate bounded buffering into graph cold admission and prove unchanged
+semantic/source binding, limits and fault behavior before new native measurements. Coordinator
+correspondence buffering and qualification prerequisites remain open. M1, TASKS and gates are
+unchanged. This supersedes older next-step text.
+
+## Prior verified increment — native packed 1,000-entity measurement (Decision 0177)
 
 Pushed implementation `9b9fccc`, release binary SHA-256
 `8edc933d0b4be898a998da4ccbe4f8ac13ec3892c1972bfbfd351e38afe8934e`:

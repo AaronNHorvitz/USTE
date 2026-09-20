@@ -16,7 +16,7 @@ use uste_crypto::{EntropySource, KeyVault};
 use uste_types::{CommitRevision, NamespaceRef};
 use zeroize::Zeroizing;
 mod read_page;
-use read_page::ReadPage;
+pub(crate) use read_page::ReadPage;
 
 pub const MAX_LOOKUP_PAGES: u64 =
     logical::MAX_BRANCH_BITS as u64 + 1 + logical::MAX_VALUE_BYTES.div_ceil(MAX_CHUNK_DATA) as u64;

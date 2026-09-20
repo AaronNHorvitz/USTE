@@ -4,8 +4,9 @@ use crate::{
     journal::StorageError,
     ordered_commitment::{self as logical, CommitmentContext, OrderedCommitment, ValueStream},
     packed_index_pack::read_linked_record_page,
-    packed_index_page::{ENCODED_PAGE_BYTES, PackedPage},
-    packed_tree_lookup::TreeReadContext,
+    packed_index_page::ENCODED_PAGE_BYTES,
+    packed_page_cache::PackedPageCache,
+    packed_tree_lookup::{ReadPage, TreeReadContext},
     packed_tree_record::{ChildReference, MAX_CHUNK_DATA, PackedLocator, TreeNode, ValueChunk},
 };
 use uste_crypto::{EntropySource, KeyVault};
@@ -32,7 +33,9 @@ pub struct TreeValidationReport {
     pub nodes: u64,
     pub entries: u64,
     pub logical_bytes: u64,
+    /// Logical page proof-work units, including hits during buffered admission.
     pub pages: u64,
+    /// Encoded-byte proof-work units, not physical I/O or successful decrypt bytes.
     pub encoded_bytes: u64,
     pub value_chunks: u64,
     pub maximum_depth: u32,
@@ -72,9 +75,10 @@ struct Reader<'a, F: FileSystem, W, E: EntropySource> {
     context: TreeReadContext,
     limits: TreeValidationLimits,
     report: TreeValidationReport,
+    cache: Option<&'a mut PackedPageCache>,
 }
 impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
-    fn page(&mut self, location: PackedLocator) -> Result<PackedPage, StorageError> {
+    fn page(&mut self, location: PackedLocator) -> Result<ReadPage, StorageError> {
         if self.report.pages >= self.limits.maximum_pages
             || ENCODED_PAGE_BYTES as u64
                 > self.limits.maximum_encoded_bytes - self.report.encoded_bytes
@@ -83,6 +87,19 @@ impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
         }
         let c = self.context;
         let physical = location.resolve(c.scope, c.profile, c.family, c.revision)?;
+        if let Some(cache) = self.cache.as_deref_mut() {
+            let page = cache.page(
+                self.filesystem,
+                self.directory,
+                self.vault,
+                physical,
+                location.slot(),
+            )?;
+            // Hits still consume the identical logical proof-work allowance.
+            self.report.pages += 1;
+            self.report.encoded_bytes += ENCODED_PAGE_BYTES as u64;
+            return Ok(ReadPage::Cached(page));
+        }
         let (page, report) = read_linked_record_page(
             self.filesystem,
             self.directory,
@@ -93,7 +110,7 @@ impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
         )?;
         self.report.pages += report.pages;
         self.report.encoded_bytes += report.encoded_bytes;
-        Ok(page)
+        Ok(ReadPage::Owned(page))
     }
 
     fn value(
@@ -140,6 +157,22 @@ pub fn validate_tree<F: FileSystem, W, E: EntropySource>(
     root: Option<PackedLocator>,
     limits: TreeValidationLimits,
 ) -> Result<ValidatedPackedTree, StorageError> {
+    validate_tree_buffered(
+        filesystem, directory, vault, context, expected, root, limits, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_tree_buffered<F: FileSystem, W, E: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: TreeReadContext,
+    expected: OrderedCommitment,
+    root: Option<PackedLocator>,
+    limits: TreeValidationLimits,
+    cache: Option<&mut PackedPageCache>,
+) -> Result<ValidatedPackedTree, StorageError> {
     let logical_context = CommitmentContext::new(context.scope, context.profile, context.family)
         .map_err(|_| StorageError::InvalidState)?;
     if limits.maximum_path_branches > logical::MAX_BRANCH_BITS
@@ -171,6 +204,7 @@ pub fn validate_tree<F: FileSystem, W, E: EntropySource>(
         context,
         limits,
         report: TreeValidationReport::default(),
+        cache,
     };
     let mut current = root.map(|location| ChildReference {
         location,
