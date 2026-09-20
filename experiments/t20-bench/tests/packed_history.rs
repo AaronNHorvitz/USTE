@@ -341,7 +341,7 @@ fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
         "resume",
         "tail-crash-probe",
     ] {
-        for records in ["4097", "100000"] {
+        for records in ["8193", "100000"] {
             let mut command = Command::new(EXE);
             command.arg(format!("bm06-packed-linux-{phase}")).args([
                 "--root",

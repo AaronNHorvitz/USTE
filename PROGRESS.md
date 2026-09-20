@@ -2,7 +2,58 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native proof buffering (Decision 0200)
+## Latest verified increment — sixteen-batch native history check (Decision 0201)
+
+Pushed `fb65972` preserves the verified proof-buffering result. Only packed native experimental
+admission is raised to 8,192 records; the shared explicit scale test adds checkpoint 1,585,
+terminal 1,601 and sixteen tail batches. Old 513/4,096 tests remain; out-of-range cases now test
+8,193 plus unchanged 100,000 refusal. The 4,096-byte payload, 100 versions/record, logical proof
+budgets, nonce/session cap, model/legacy caps and benchmark targets are unchanged.
+
+Session 36786 / `run-p1174533-i22151710.scope` passed the ordinary standalone release suite
+and strict Clippy. Log `/tmp/uste-d201-native-suite.log`; same command as Decision
+0200 with this log path. Preflight 27 GiB available RAM/2.0 GiB free swap/969 GiB disk; one
+job/thread, 3G/4G/512M process-group limits. All 118 active tests passed; five opt-in cases
+ignored. Library 88/130.89 s, legacy BM-01 process 3/11.89 s, history CLI 11/59.66 s,
+packed terminal 5/35.26 s, manifest 3/0.92 s, legacy history 8/73.12 s. Compile 54.44 s;
+strict Clippy 1.46 s. Sampled peak 554,811,392 bytes/zero swap, not final lifetime peak.
+
+The existing manifest command for 8,192 records reports 819,200 events, 3,355,443,200 payload
+bytes, checkpoint 1,585/frontier 1,601, 8,192 tail events/16 revisions and synthetic stream digest
+`cd07ca446292c0c1c847390e81ac9946c35a8d12d2b33794477497e8434cd1f8`. It is fixture arithmetic,
+not materialization or qualification. Exact emitted JSON/newline SHA-256 is
+`16c7bfff3370ca798b8e3b0947c91166dc584db090d410aa7fe18001abac712e`.
+
+The explicit 8,192-record case passed in `uste-d201-native-history-8192.scope`, log
+`/tmp/uste-d201-native-8192.log`. Fresh preflight 27 GiB available RAM/2.0 GiB swap/968 GiB disk,
+no competing build/test and scope name unused. Same 1,800-second child/5,400-second overall
+deadlines, one job/thread and 3G/4G/512M bounds, with post-workload scope peak capture.
+Binary SHA-256 `1c524d7de77c101996dfe771598af83d6f8c4d06f3e239a83cb97fca6cd59fce`, based on
+`fb6597224c1ed4ba84604f0adee0d60ab5a916c5` plus six source/test edits identified by hash.
+Decision 0202 owner-diagnostic edits were made after this binary was built and are excluded.
+
+Session 71382 exited zero: one test passed in 1,343.09 s (wall 1,343.15 s). All five phases
+passed: create 311,711 ms, resume 288,029 ms, explicit checkpoint recovery 171,298 ms,
+repeated resume 288,153 ms and cold open 170,759 ms. Checkpoint 1,585 contains 811,008 versions;
+terminal 1,601 contains 819,200. Explicit checkpoint recovery replayed sixteen groups. All
+terminal digests equal `b9c0e5feb5d9999c6479266fe8b506e3da05e068cd01d4f5cfaff789a6926091`;
+repeated resume/open write zero adapter bytes and preserve the exact certificate log.
+Construction used 577,772/1,048,576 nonces; this excludes bootstrap/key adapter/other owners.
+
+Process peak RSS 349,020 KiB; post-workload cgroup peak 3,222,265,856 bytes and zero swap.
+Last sampled events high 714,996/max 0/OOM 0/OOM-kill 0 are not final lifetime event totals.
+Retained root `experiments/t20-bench/target/packed-history-cli-1176977-1789893893141352207`;
+CERTIFICATES 6,665,922 bytes, SHA-256
+`c889a36ba96c1543f9057d4384841ac4344a2dc1e9a97e482e9ba04bbf3b8ca8`.
+[Exact command, provenance, manifest and full reports](docs/evidence/native-packed-history-8192-development.json)
+archive the development result. No qualifying latency, complete authenticated I/O or
+larger-than-24-GiB claim follows. T-20/T-19 remain open; M1 stays pinned unchanged.
+
+Next T-20: verify the pending Decision 0202 trusted owner diagnostics, then explicitly account
+for disjoint vault lifetimes without double-counting consuming handoffs. Continue native BM-01
+scale and safe larger-history/lifecycle prerequisites before reserved-host qualification.
+
+## Prior verified increment — native proof buffering (Decision 0200)
 
 Pushed `a6b6f47` contains the locally verified domain integration. Native packed commands now
 select separate 64 MiB fresh preparation caches for writer and suffix/origin work; report fields
@@ -44,7 +95,7 @@ archive the result. Relative to Decision 0197, creation adapter reads fell from
 elapsed fell from 273,191 to 152,380 ms. Other phase times do not establish a general recovery
 improvement. Both measurements have uncontrolled host/device caches and are nonqualifying.
 
-Next T-20: extend the same explicit native history test to 8,192 records/16 suffix batches,
+Historical next action (now completed by Decision 0201): extend the native history test to 8,192 records/16 suffix batches,
 with unchanged source/payload/version semantics, nonce limit and process limits. Require fresh
 host admission and full reference/recovery assertions; do not raise model/legacy or qualifying
 limits or claim larger-than-memory qualification. Native BM-01 scale, complete authenticated I/O,

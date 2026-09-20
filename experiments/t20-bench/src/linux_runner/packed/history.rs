@@ -2,7 +2,7 @@
 use super::*;
 use crate::recovery_materialization::Bm06Profile;
 const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
-const MAX_RECORDS: u64 = 4096;
+const MAX_RECORDS: u64 = 8192;
 mod bootstrap;
 mod continuation;
 mod measurement;

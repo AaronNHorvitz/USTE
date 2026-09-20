@@ -259,7 +259,7 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
 #[test]
 fn packed_history_native_admission_precedes_filesystem_access() {
     let absent = Path::new("absent-packed-history-admission");
-    for records in [4097, 100000] {
+    for records in [8193, 100000] {
         for phase in [
             "create",
             "open",
@@ -278,17 +278,24 @@ fn packed_history_native_admission_precedes_filesystem_access() {
             );
         }
     }
-    assert_eq!(
-        run(absent, absent, Bm06Profile::new(2).unwrap(), "unexpected")
+    for records in [2, 8192] {
+        assert_eq!(
+            run(
+                absent,
+                absent,
+                Bm06Profile::new(records).unwrap(),
+                "unexpected"
+            )
             .unwrap_err()
             .code(),
-        "USTE_BM06_PACKED_PHASE"
-    );
+            "USTE_BM06_PACKED_PHASE"
+        );
+    }
 }
 
 #[test]
 fn packed_history_binding_budget_covers_the_declared_certificate_distance() {
-    for records in [1, 2, 513, 4096, 100_000] {
+    for records in [1, 2, 513, 4096, 8192, 100_000] {
         let profile = Bm06Profile::new(records).unwrap();
         let limits = Limits::recovery(profile).unwrap();
         assert_eq!(

@@ -1,0 +1,2117 @@
+{
+  "schema": "uste-native-packed-history-development-v1",
+  "date": "2026-09-20",
+  "decision": "0201",
+  "qualification": "nonqualifying-development-profile",
+  "base_commit": "fb6597224c1ed4ba84604f0adee0d60ab5a916c5",
+  "provenance": "fb6597224c1ed4ba84604f0adee0d60ab5a916c5\n1c524d7de77c101996dfe771598af83d6f8c4d06f3e239a83cb97fca6cd59fce  experiments/t20-bench/target/release/uste-t20-bench\nfdf8786b643a5e350096f6ec8ecc0c45d07a9224e7cd2df368f7594ac268f6a7  experiments/t20-bench/src/linux_runner/packed/history.rs\n3893c1d137507f066aa8cf9a44b2a79039a7cf7a3349386c34a8114c382603fc  experiments/t20-bench/src/linux_runner/packed/history/tests.rs\n7b6a4261caf736d9482902f3478e7516a0b7ae9471f3b8db92e40871bcb801a9  experiments/t20-bench/src/main.rs\nc63d0c1439dfbfff9eddf3d54c8f7c66e03eb2d458cc59e23563ef0ceea49f70  experiments/t20-bench/tests/packed_history.rs\n9f2fb590fc9525f14b46ebda95dbc654f4eddd2d53fb4c627f927b3820da7a27  experiments/t20-bench/tests/packed_history/prefix.rs\n753b38cf4af80e0f61026f4eb090417622d906eb49cce788f460cbeac3f50a38  experiments/t20-bench/tests/packed_history/scale.rs\n7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b  Cargo.lock\n4d348b4b13db7e0834d3cc998166d2eddf9e4fe4f96765a8ad7a172efbf21dd4  experiments/t20-bench/Cargo.lock\n5ea4bea8c7fcb0999ae9ebf7c587cb33b9ce824d8b2d38762ea1d9ff77ccbe54  experiments/t20-bench/Cargo.toml\n7.1.10-200.fc44.x86_64\nTARGET    FSTYPE SOURCE                OPTIONS\n/var/home btrfs  /dev/nvme1n1p3[/home] rw,relatime,seclabel,compress=zstd:1,ssd,discard=async,space_cache=v2,subvolid=257,subvol=/home\nMemoryPeak=407416832\nMemorySwapPeak=0\n",
+  "features": "Standalone manifest defaults and declared dependency features; release profile, no overrides. Memory sample embedded in provenance belongs to the ordinary suite, not the large run.",
+  "excluded_pending_work": "Decision 0202 owner diagnostics and tests were edited after the executable was built and are not part of this measured baseline.",
+  "invocation": "systemd-run --user --scope --unit=uste-d201-native-history-8192.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; /usr/bin/time -v timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_8192_record_sixteen_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/uste-d201-native-8192.log; history_status=$?; systemctl --user show uste-d201-native-history-8192.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec | tee -a /tmp/uste-d201-native-8192.log; exit \"$history_status\"'",
+  "fixture": "experiments/t20-bench/target/packed-history-cli-1176977-1789893893141352207",
+  "fixture_manifest": {
+    "exact_json": "{\"profile\":\"bm06-materialization-v1\",\"engine_benchmark\":false,\"qualification\":\"nonqualifying-small-scale\",\"records\":8192,\"events\":819200,\"versions_per_record\":100,\"payload_bytes_per_event\":4096,\"history_payload_bytes\":3355443200,\"batch_records\":512,\"frontier_revision\":1601,\"checkpoint_revision\":1585,\"tail_events\":8192,\"tail_revisions\":16,\"synthetic_stream_digest\":\"cd07ca446292c0c1c847390e81ac9946c35a8d12d2b33794477497e8434cd1f8\",\"canonical_request_stream_digest\":null,\"database_materialized\":false,\"recovery_trials_run\":0}\n",
+    "sha256": "16c7bfff3370ca798b8e3b0947c91166dc584db090d410aa7fe18001abac712e",
+    "scope": "Arithmetic fixture manifest; not itself materialization evidence."
+  },
+  "environment": {
+    "available_ram_gib": 27,
+    "free_swap_gib": 2,
+    "free_disk_gib": 968,
+    "cargo_jobs": 1,
+    "test_threads": 1,
+    "rust": "1.95.0 (59807616e 2026-04-14)"
+  },
+  "regression": {
+    "active_tests_passed": 118,
+    "ignored": 5,
+    "strict_clippy": "passed",
+    "log": "/tmp/uste-d201-native-suite.log",
+    "domain_baseline": "a6b6f47: 12 new integration tests and 53 matching graph regressions; prior primitive baseline 01020ef tested in 710-test full workspace run."
+  },
+  "limitations": [
+    "No qualifying BM-01/BM-06 campaign or larger-than-24-GiB qualification.",
+    "Adapter counters are not physical-device or complete authenticated I/O.",
+    "Per-owner nonce diagnostics exclude bootstrap/key adapter/other owners; writer rotation is not implemented.",
+    "T-20/T-19 remain open; pinned M1 evidence unchanged."
+  ],
+  "final_certificates": {
+    "bytes": 6665922,
+    "sha256": "c889a36ba96c1543f9057d4384841ac4344a2dc1e9a97e482e9ba04bbf3b8ca8"
+  },
+  "result": {
+    "passed": 1,
+    "failed": 0,
+    "test_seconds": 1343.09,
+    "wall_seconds": 1343.15,
+    "process_peak_rss_kib": 349020,
+    "post_workload_scope_memory_peak_bytes": 3222265856,
+    "post_workload_scope_swap_peak_bytes": 0,
+    "post_workload_scope_swap_current_bytes": 0,
+    "rusage_swaps": 0,
+    "memory_high_bytes": 3221225472,
+    "memory_max_bytes": 4294967296,
+    "memory_swap_max_bytes": 536870912,
+    "cpu_usage_ns": 1289854651000,
+    "sampled_memory_events": {
+      "high": 714996,
+      "max": 0,
+      "oom": 0,
+      "oom_kill": 0
+    },
+    "memory_events_are_final": false
+  },
+  "completion_log": "    Finished `release` profile [optimized] target(s) in 0.04s\n     Running tests/packed_history.rs (experiments/t20-bench/target/release/deps/packed_history-1dc109200a58c621)\n\nrunning 1 test\ntest scale::packed_history_native_8192_record_sixteen_batch_tail_sigkill_resumes ... retained_native_history_root=/var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/packed-history-cli-1176977-1789893893141352207\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 13 filtered out; finished in 1343.09s\n\n\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_8192_record_sixteen_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1\"\n\tUser time (seconds): 1108.15\n\tSystem time (seconds): 181.57\n\tPercent of CPU this job got: 96%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 22:23.15\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 349020\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 27113180\n\tVoluntary context switches: 624437\n\tInvoluntary context switches: 201765\n\tSwaps: 0\n\tFile system inputs: 582691064\n\tFile system outputs: 34522872\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\nMemoryCurrent=3109994496\nMemoryPeak=3222265856\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=1289854651000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+  "phases": [
+    {
+      "phase": "create",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 1,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 12701,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 3932652,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 3918372,
+              "failures": 48
+            },
+            "read_at": {
+              "calls": 3995717,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 2,
+              "failures": 2
+            },
+            "rename_no_replace": {
+              "calls": 1,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 12684,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 12701,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 3173,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 12700,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 4,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 582525,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 111534725460,
+          "read_returned_bytes": 111534725460,
+          "write_requested_bytes": 15166338121,
+          "write_returned_bytes": 15166338121
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "construction_nonce_session": {
+          "includes_bootstrap_owner": false,
+          "includes_key_adapter": false,
+          "includes_other_vaults": false,
+          "issued_nonces": 577772,
+          "measurement_scope": "construction-owner-only",
+          "memory_bytes_measured": false,
+          "nonce_limit": 1048576,
+          "remaining_nonces": 470804,
+          "writer_rotation_implemented": false
+        },
+        "construction_target_revision": null,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 54460,
+        "derived_terminal_pending": false,
+        "development_record_limit": 8192,
+        "elapsed_milliseconds": 311711,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 1585,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 1585,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "create",
+        "phase_work": {
+          "complete_authenticated_io": false,
+          "measured_elapsed_microseconds": 311710999,
+          "measurement_scope": "sequential-command-phases-through-terminal-digest",
+          "physical_device_io": false,
+          "qualifying_recovery_latency": false,
+          "stages": {
+            "history_verification": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1530852,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1530852,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 1530852,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 31451354340,
+                "read_returned_bytes": 31451354340,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 54895258
+            },
+            "post_verification_tail_or_retry": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 0,
+                "read_returned_bytes": 0,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 12
+            },
+            "setup_and_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 12701,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1789224,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1781290,
+                    "failures": 27
+                  },
+                  "read_at": {
+                    "calls": 1823930,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 2,
+                    "failures": 2
+                  },
+                  "rename_no_replace": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 12684,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 12701,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 3172,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 12700,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 3,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 582525,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 53830058794,
+                "read_returned_bytes": 53830058794,
+                "write_requested_bytes": 15166338121,
+                "write_returned_bytes": 15166338121
+              },
+              "elapsed_microseconds": 199657351
+            },
+            "terminal_digest_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 612576,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 606230,
+                    "failures": 21
+                  },
+                  "read_at": {
+                    "calls": 640935,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26253312326,
+                "read_returned_bytes": 26253312326,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 57158377
+            }
+          }
+        },
+        "process_peak_rss_kib": 311044,
+        "proof_cache_bytes": 67108864,
+        "proof_cache_scope": "fresh-per-preparation",
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 8192,
+        "recovered_frontier": 1,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 1585,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "024e832ae1e5a8d6b663d10021721bdf7931e8ff7d4946c9a36ad983b64d93f4",
+        "verified_history_versions": 811008
+      }
+    },
+    {
+      "phase": "resume",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 134,
+              "failures": 1
+            },
+            "metadata": {
+              "calls": 4967010,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 4947850,
+              "failures": 99
+            },
+            "read_at": {
+              "calls": 5051586,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 2,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 132,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 133,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 33,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 135,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 3,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 5965,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 143366947931,
+          "read_returned_bytes": 143366947931,
+          "write_requested_bytes": 152637691,
+          "write_returned_bytes": 152637691
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "construction_nonce_session": {
+          "includes_bootstrap_owner": false,
+          "includes_key_adapter": false,
+          "includes_other_vaults": false,
+          "issued_nonces": 5915,
+          "measurement_scope": "construction-owner-only",
+          "memory_bytes_measured": false,
+          "nonce_limit": 1048576,
+          "remaining_nonces": 1042661,
+          "writer_rotation_implemented": false
+        },
+        "construction_target_revision": null,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 89272,
+        "derived_terminal_pending": false,
+        "development_record_limit": 8192,
+        "elapsed_milliseconds": 288029,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 1601,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 1601,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "resume",
+        "phase_work": {
+          "complete_authenticated_io": false,
+          "measured_elapsed_microseconds": 288029332,
+          "measurement_scope": "sequential-command-phases-through-terminal-digest",
+          "physical_device_io": false,
+          "qualifying_recovery_latency": false,
+          "stages": {
+            "history_verification": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 31893544375,
+                "read_returned_bytes": 31893544375,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 55343403
+            },
+            "post_verification_tail_or_retry": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 0,
+                "read_returned_bytes": 0,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 13
+            },
+            "setup_and_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 134,
+                    "failures": 1
+                  },
+                  "metadata": {
+                    "calls": 2795799,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 2783051,
+                    "failures": 78
+                  },
+                  "read_at": {
+                    "calls": 2853122,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 132,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 133,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 32,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 135,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 5965,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 84959307964,
+                "read_returned_bytes": 84959307964,
+                "write_requested_bytes": 152637691,
+                "write_returned_bytes": 152637691
+              },
+              "elapsed_microseconds": 176404848
+            },
+            "terminal_digest_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 618836,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 612424,
+                    "failures": 21
+                  },
+                  "read_at": {
+                    "calls": 646089,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26514095592,
+                "read_returned_bytes": 26514095592,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 56281067
+            }
+          }
+        },
+        "process_peak_rss_kib": 349020,
+        "proof_cache_bytes": 67108864,
+        "proof_cache_scope": "fresh-per-preparation",
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 8192,
+        "recovered_frontier": 1586,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": 1585,
+        "resume_suffix_groups": 1,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 1601,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "b9c0e5feb5d9999c6479266fe8b506e3da05e068cd01d4f5cfaff789a6926091",
+        "verified_history_versions": 819200
+      }
+    },
+    {
+      "phase": "recover-checkpoint",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 86,
+              "failures": 3
+            },
+            "metadata": {
+              "calls": 2793482,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 2,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 2780654,
+              "failures": 39
+            },
+            "read_at": {
+              "calls": 2849702,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 83,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 83,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 2,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 83,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 2,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 5838,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 84999357716,
+          "read_returned_bytes": 84999357716,
+          "write_requested_bytes": 119830971,
+          "write_returned_bytes": 119830971
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": true,
+        "complete_authenticated_io": false,
+        "construction_nonce_session": null,
+        "construction_target_revision": null,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 85260,
+        "derived_terminal_pending": false,
+        "development_record_limit": 8192,
+        "elapsed_milliseconds": 171298,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 1601,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 1601,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "recover-checkpoint",
+        "phase_work": {
+          "complete_authenticated_io": false,
+          "measured_elapsed_microseconds": 171298364,
+          "measurement_scope": "sequential-command-phases-through-terminal-digest",
+          "physical_device_io": false,
+          "qualifying_recovery_latency": false,
+          "stages": {
+            "history_verification": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 31893544375,
+                "read_returned_bytes": 31893544375,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 55280924
+            },
+            "post_verification_tail_or_retry": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 182,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 182,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 182,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 3739190,
+                "read_returned_bytes": 3739190,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 54229
+            },
+            "setup_and_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 86,
+                    "failures": 3
+                  },
+                  "metadata": {
+                    "calls": 622086,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 615673,
+                    "failures": 21
+                  },
+                  "read_at": {
+                    "calls": 651053,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 83,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 83,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 83,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 5838,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26587966028,
+                "read_returned_bytes": 26587966028,
+                "write_requested_bytes": 119830971,
+                "write_returned_bytes": 119830971
+              },
+              "elapsed_microseconds": 59330846
+            },
+            "terminal_digest_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 618839,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 612424,
+                    "failures": 18
+                  },
+                  "read_at": {
+                    "calls": 646092,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26514108123,
+                "read_returned_bytes": 26514108123,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 56632363
+            }
+          }
+        },
+        "process_peak_rss_kib": 348812,
+        "proof_cache_bytes": 67108864,
+        "proof_cache_scope": "fresh-per-preparation",
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 8192,
+        "recovered_frontier": 1601,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 1585,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 16,
+        "v1_state_digest": "b9c0e5feb5d9999c6479266fe8b506e3da05e068cd01d4f5cfaff789a6926091",
+        "verified_history_versions": 819200
+      }
+    },
+    {
+      "phase": "resume",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 4983531,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 4964303,
+              "failures": 72
+            },
+            "read_at": {
+              "calls": 5066895,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 3,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 3,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 143793374428,
+          "read_returned_bytes": 143793374428,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "construction_nonce_session": {
+          "includes_bootstrap_owner": false,
+          "includes_key_adapter": false,
+          "includes_other_vaults": false,
+          "issued_nonces": 0,
+          "measurement_scope": "construction-owner-only",
+          "memory_bytes_measured": false,
+          "nonce_limit": 1048576,
+          "remaining_nonces": 1048576,
+          "writer_rotation_implemented": false
+        },
+        "construction_target_revision": null,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 79300,
+        "derived_terminal_pending": false,
+        "development_record_limit": 8192,
+        "elapsed_milliseconds": 288153,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 1601,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 1601,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "resume",
+        "phase_work": {
+          "complete_authenticated_io": false,
+          "measured_elapsed_microseconds": 288152937,
+          "measurement_scope": "sequential-command-phases-through-terminal-digest",
+          "physical_device_io": false,
+          "qualifying_recovery_latency": false,
+          "stages": {
+            "history_verification": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 31893544375,
+                "read_returned_bytes": 31893544375,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 55310220
+            },
+            "post_verification_tail_or_retry": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 0,
+                "read_returned_bytes": 0,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 11
+            },
+            "setup_and_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 2812317,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 2799504,
+                    "failures": 54
+                  },
+                  "read_at": {
+                    "calls": 2868428,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 2,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 85385721930,
+                "read_returned_bytes": 85385721930,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 176183800
+            },
+            "terminal_digest_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 618839,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 612424,
+                    "failures": 18
+                  },
+                  "read_at": {
+                    "calls": 646092,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26514108123,
+                "read_returned_bytes": 26514108123,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 56658904
+            }
+          }
+        },
+        "process_peak_rss_kib": 345380,
+        "proof_cache_bytes": 67108864,
+        "proof_cache_scope": "fresh-per-preparation",
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 8192,
+        "recovered_frontier": 1601,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": 1601,
+        "resume_suffix_groups": 0,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 1601,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "b9c0e5feb5d9999c6479266fe8b506e3da05e068cd01d4f5cfaff789a6926091",
+        "verified_history_versions": 819200
+      }
+    },
+    {
+      "phase": "open",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 2790055,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 2,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 2777224,
+              "failures": 36
+            },
+            "read_at": {
+              "calls": 2846163,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 2,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 2,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 84928434865,
+          "read_returned_bytes": 84928434865,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "construction_nonce_session": null,
+        "construction_target_revision": null,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 79328,
+        "derived_terminal_pending": false,
+        "development_record_limit": 8192,
+        "elapsed_milliseconds": 170759,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 1601,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 1601,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "open",
+        "phase_work": {
+          "complete_authenticated_io": false,
+          "measured_elapsed_microseconds": 170759753,
+          "measurement_scope": "sequential-command-phases-through-terminal-digest",
+          "physical_device_io": false,
+          "qualifying_recovery_latency": false,
+          "stages": {
+            "history_verification": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 1552375,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 31893544375,
+                "read_returned_bytes": 31893544375,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 55408948
+            },
+            "post_verification_tail_or_retry": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "read_at": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 0,
+                "read_returned_bytes": 0,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 10
+            },
+            "setup_and_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 618841,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 612425,
+                    "failures": 18
+                  },
+                  "read_at": {
+                    "calls": 647696,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26520782367,
+                "read_returned_bytes": 26520782367,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 58678750
+            },
+            "terminal_digest_admission": {
+              "adapter_io": {
+                "complete_authenticated_index_io": false,
+                "measurement_scope": "filesystem-adapter-calls",
+                "operations": {
+                  "create_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "create_new": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "metadata": {
+                    "calls": 618839,
+                    "failures": 0
+                  },
+                  "open_directory": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "open_existing": {
+                    "calls": 612424,
+                    "failures": 18
+                  },
+                  "read_at": {
+                    "calls": 646092,
+                    "failures": 0
+                  },
+                  "remove_file": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "rename_no_replace": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "set_len": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_all": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "sync_data": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "sync_directory": {
+                    "calls": 0,
+                    "failures": 0
+                  },
+                  "try_lock_exclusive": {
+                    "calls": 1,
+                    "failures": 0
+                  },
+                  "write_at": {
+                    "calls": 0,
+                    "failures": 0
+                  }
+                },
+                "physical_device_io": false,
+                "read_requested_bytes": 26514108123,
+                "read_returned_bytes": 26514108123,
+                "write_requested_bytes": 0,
+                "write_returned_bytes": 0
+              },
+              "elapsed_microseconds": 56672043
+            }
+          }
+        },
+        "process_peak_rss_kib": 346012,
+        "proof_cache_bytes": 67108864,
+        "proof_cache_scope": "fresh-per-preparation",
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 8192,
+        "recovered_frontier": 1601,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 1601,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "b9c0e5feb5d9999c6479266fe8b506e3da05e068cd01d4f5cfaff789a6926091",
+        "verified_history_versions": 819200
+      }
+    }
+  ]
+}

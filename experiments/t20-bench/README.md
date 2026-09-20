@@ -218,7 +218,7 @@ formatting. Adapter bytes still exclude credential/root setup, internal syscalls
 they are not physical-device I/O. Neither these phase times nor total `elapsed_milliseconds`
 constitute qualifying recovery latency. Older pinned reports are not retroactively split.
 
-Decision 0193 experimentally raises only the packed native ceiling to **4,096 records**
+Decision 0193 established the **4,096-record packed native case**
 (409,600 retained versions; checkpoint 793, terminal 801, eight tail batches). The explicit
 case below constructs the checkpoint, kills its owned child after graph publication at 794,
 resumes through 801, replays all eight groups from 793 and compares repeated-resume/open digests.
@@ -247,6 +247,22 @@ Decision 0200 separately selects 64 MiB fresh per-preparation proof caches for n
 writer/suffix/origin work. Reports declare `proof_cache_bytes` and `proof_cache_scope`; the
 cache drops before staging and is not retained across revisions. Model/default constructors
 remain uncached. Logical proof limits and native/qualifying admission caps are unchanged.
+
+Decision 0201 raises only packed native experimental admission to **8,192 records** and adds a
+separate opt-in sixteen-batch case (819,200 versions; checkpoint 1,585; terminal 1,601). It retains
+the original 513/4,096 cases and all proof, source-prefix, digest, nonce and resource assertions.
+Admission is not a measured-capacity claim; inspect PROGRESS for the actual result. After a fresh
+host resource check, with no competing heavy workload, run:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_8192_record_sixteen_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1'
+```
+
+The same 1,800-second child and 5,400-second overall measurement deadlines apply. The fixture is
+retained on success or failure. Larger/qualifying 100,000-record native workloads still refuse
+before I/O; model and legacy native limits remain two. No nonce reset/rotation or qualification
+claim follows from this extension.
 
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),

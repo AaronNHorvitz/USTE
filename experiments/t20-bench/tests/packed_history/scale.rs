@@ -13,6 +13,12 @@ fn packed_history_native_4096_record_eight_batch_tail_sigkill_resumes() {
     native_history_scale(4096, 793, 801);
 }
 
+#[test]
+#[ignore = "bounded native 8192-record development run requires an explicit serial memory-limited invocation"]
+fn packed_history_native_8192_record_sixteen_batch_tail_sigkill_resumes() {
+    native_history_scale(8192, 1585, 1601);
+}
+
 fn native_history_scale(records: u64, checkpoint_revision: u64, terminal_revision: u64) {
     // Retain this synthetic database on success or failure for resource/recovery inspection.
     let fixture = std::mem::ManuallyDrop::new(Fixture::new());
@@ -28,7 +34,7 @@ fn native_history_scale(records: u64, checkpoint_revision: u64, terminal_revisio
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_phase_work(&report);
         println!("phase={phase} report={report}");
-        assert_eq!(report["development_record_limit"], 4096);
+        assert_eq!(report["development_record_limit"], 8192);
         assert_eq!(report["qualifying_recovery_trials"], 0);
         assert_eq!(report["engine_benchmark"], false);
         let nonces = &report["construction_nonce_session"];
@@ -100,7 +106,7 @@ fn packed_history_tail_prefix_probe_admits_only_a_bounded_tail_before_io() {
         (513, 202, "USTE_BM06_PACKED_PROBE_REVISION"),
         (2, 100, "USTE_BM06_PACKED_PROBE_REVISION"),
         (2, u64::MAX, "USTE_BM06_PACKED_PROBE_REVISION"),
-        (4097, 0, "USTE_BM06_PACKED_DEVELOPMENT_LIMIT"),
+        (8193, 0, "USTE_BM06_PACKED_DEVELOPMENT_LIMIT"),
         (100_000, 19_406, "USTE_BM06_PACKED_DEVELOPMENT_LIMIT"),
     ] {
         let mut command = Command::new(EXE);
