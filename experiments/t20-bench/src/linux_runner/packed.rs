@@ -20,8 +20,12 @@ type Recovery = engine::RecoveryEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntrop
 const DATABASE: &str = "bm01-linux-packed-engine";
 const STAGING_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const STAGING_CACHE_SCOPE: &str = "fresh-per-private-tree-batch";
+const PROOF_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const PROOF_CACHE_SCOPE: &str = "fresh-per-preparation";
 
-fn buffered_staging(mut limits: Limits) -> Limits {
+fn buffered_limits(mut limits: Limits) -> Limits {
+    limits.preparation.proof_cache_bytes = Some(PROOF_CACHE_BYTES);
+    limits.origin.suffix.proof_cache_bytes = Some(PROOF_CACHE_BYTES);
     limits.origin.genesis.stage.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
     limits.origin.suffix.graph.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
     limits.origin.suffix.metadata.staging.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
@@ -197,7 +201,7 @@ fn prepare_observed(
     if !matches!(phase, "create" | "open" | "rebuild" | "resume") {
         return Err(error("USTE_BM01_PACKED_PHASE"));
     }
-    let limits = buffered_staging(Limits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?);
+    let limits = buffered_limits(Limits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?);
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password_file)?);
@@ -374,6 +378,8 @@ fn prepare_observed(
         "bounded_bootstrap_resume": bootstrap_resume, "recovered_frontier": recovered_frontier,
         "resume_base_revision": resume_base_revision, "resume_suffix_groups": resume_suffix_groups,
     });
+    session.report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
+    session.report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
     Ok(session)
 }
 

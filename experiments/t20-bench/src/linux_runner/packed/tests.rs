@@ -2,7 +2,7 @@ use super::*;
 use std::{collections::BTreeMap, fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
 #[test]
-fn native_staging_buffer_selection_preserves_model_defaults_and_work_limits() {
+fn native_buffer_selection_preserves_model_defaults_and_work_limits() {
     use crate::recovery_materialization::Bm06Profile;
     for original in [
         Limits::new(Bm01Profile::new(20).unwrap()).unwrap(),
@@ -11,7 +11,51 @@ fn native_staging_buffer_selection_preserves_model_defaults_and_work_limits() {
         Limits::recovery(Bm06Profile::new(4096).unwrap()).unwrap(),
         Limits::recovery(Bm06Profile::new(100_000).unwrap()).unwrap(),
     ] {
-        let selected = buffered_staging(original);
+        let selected = buffered_limits(original);
+        assert_eq!(original.preparation.proof_cache_bytes, None);
+        assert_eq!(original.origin.suffix.proof_cache_bytes, None);
+        assert_eq!(
+            selected.preparation.proof_cache_bytes,
+            Some(PROOF_CACHE_BYTES)
+        );
+        assert_eq!(
+            selected.origin.suffix.proof_cache_bytes,
+            Some(PROOF_CACHE_BYTES)
+        );
+        for (before, after) in [
+            (original.preparation.proof, selected.preparation.proof),
+            (
+                original.origin.suffix.preparation,
+                selected.origin.suffix.preparation,
+            ),
+        ] {
+            assert_eq!(
+                (
+                    before.maximum_point_lookups,
+                    before.maximum_pages,
+                    before.maximum_encoded_bytes,
+                    before.maximum_scan_candidates
+                ),
+                (
+                    after.maximum_point_lookups,
+                    after.maximum_pages,
+                    after.maximum_encoded_bytes,
+                    after.maximum_scan_candidates
+                )
+            );
+            assert_eq!(
+                (
+                    before.lookup.maximum_pages,
+                    before.lookup.maximum_encoded_bytes,
+                    before.lookup.maximum_value_bytes
+                ),
+                (
+                    after.lookup.maximum_pages,
+                    after.lookup.maximum_encoded_bytes,
+                    after.lookup.maximum_value_bytes
+                )
+            );
+        }
         for (before, after) in [
             (original.origin.genesis.stage, selected.origin.genesis.stage),
             (original.origin.suffix.graph, selected.origin.suffix.graph),

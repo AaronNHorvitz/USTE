@@ -243,6 +243,11 @@ coordinator prefix/rebase work; model/default staging remains uncached. Reports 
 proof-work ceilings are unchanged. This selection is not a performance result: exact-version
 verification and measurements are recorded in PROGRESS and the corresponding evidence archive.
 
+Decision 0200 separately selects 64 MiB fresh per-preparation proof caches for native packed
+writer/suffix/origin work. Reports declare `proof_cache_bytes` and `proof_cache_scope`; the
+cache drops before staging and is not retained across revisions. Model/default constructors
+remain uncached. Logical proof limits and native/qualifying admission caps are unchanged.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

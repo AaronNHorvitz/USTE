@@ -2,7 +2,55 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — writer and suffix proof integration (Decision 0199)
+## Latest verified increment — native proof buffering (Decision 0200)
+
+Pushed `a6b6f47` contains the locally verified domain integration. Native packed commands now
+select separate 64 MiB fresh preparation caches for writer and suffix/origin work; report fields
+and configuration assertions distinguish them from staging/admission caches. No model/default
+cache choice, logical proof budget, nonce cap, native scale limit or qualifying target changes.
+
+Session 93643 / `run-p1169799-i22156525.scope` runs the full release standalone suite and
+strict standalone Clippy. Log `/tmp/uste-d200-native-suite.log`; preflight 27 GiB available RAM,
+2.0 GiB free swap, 976 GiB disk, no competing build/test. Same 3 GiB high/4 GiB max/512 MiB swap
+scope and one Cargo job/test thread. Invocation is the full standalone command under Decision
+0197 with this new log path. **All 118 active tests passed; four opt-in cases ignored.** Library
+88/129.70 s, legacy BM-01 process 3/11.88 s, history CLI 11/59.65 s, packed terminal 5/35.17 s,
+manifest 3/0.92 s, legacy history 8/72.69 s. Release compilation 1m00s; strict Clippy 1.61 s.
+Sampled peak 408,989,696 bytes/zero swap (not final lifetime peak).
+
+The unchanged fresh 4,096-record eight-batch process-loss test passed in session 36773 under
+`uste-d200-native-history-4096.scope`, log `/tmp/uste-d200-native-4096.log`. Fresh preflight
+27 GiB RAM/2.0 GiB swap/976 GiB disk, no competing build/test and new scope name unused.
+Same 1,800-second child/5,400-second overall deadlines, one job/thread, 3G/4G/512M limits and
+post-workload scope peak capture as Decision 0197. Exact binary SHA-256
+`3153f72477580d7f68a02fc674411ce8627a74d05523bc1038510af647c4849d`, based on
+`a6b6f4766c8e877676fdab8dcc69da95c9dca2d7` plus the five pending native/test source edits.
+Retained root `experiments/t20-bench/target/packed-history-cli-1172398-1789892590364740922`.
+One test passed/658.16 s (wall 658.23 s), all five phases and source-prefix assertions intact.
+Create 152,380 ms; resume 141,389 ms; checkpoint recovery 83,948 ms; repeated resume 141,254 ms;
+cold open 83,772 ms. Checkpoint 793/405,504 versions and terminal 801/409,600 versions retain
+the pinned digests. Written bytes and construction nonces match Decision 0197; repeated resume
+and cold open write zero bytes. Final CERTIFICATES 3,337,122 bytes, SHA-256
+`8f32aeade1cd9506f6c0895f981b7fd634f0d8c6178256bd412d3dc66341c995`.
+
+Process peak RSS 349,248 KiB; post-workload scope peak 3,222,016,000 bytes, swap peak
+16,269,312 bytes (3,096,576 bytes still swapped at observation). GNU time's `Swaps: 0` does
+not mean zero cgroup swap. Last sampled memory events: high 198,060/max 0/OOM 0/OOM-kill 0;
+these event counts are not final lifetime totals.
+
+[Exact invocation, provenance and all phase reports](docs/evidence/native-buffered-proof-4096-development.json)
+archive the result. Relative to Decision 0197, creation adapter reads fell from
+169,026,198,092 to 55,545,418,057 bytes (5,523,523 fewer 20,545-byte page loads), and creation
+elapsed fell from 273,191 to 152,380 ms. Other phase times do not establish a general recovery
+improvement. Both measurements have uncontrolled host/device caches and are nonqualifying.
+
+Next T-20: extend the same explicit native history test to 8,192 records/16 suffix batches,
+with unchanged source/payload/version semantics, nonce limit and process limits. Require fresh
+host admission and full reference/recovery assertions; do not raise model/legacy or qualifying
+limits or claim larger-than-memory qualification. Native BM-01 scale, complete authenticated I/O,
+nonce/rotation lifecycle and qualifying campaigns remain outstanding.
+
+## Prior verified increment — writer and suffix proof integration (Decision 0199)
 
 Pushed `01020ef` contains the verified primitive. Optional `proof_cache_bytes` now selects it
 for authorized writer preparation and each suffix/origin revision, independently of staging.

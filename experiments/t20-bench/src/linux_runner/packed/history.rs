@@ -253,8 +253,7 @@ fn run_bounded_observed(
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
-    let limits =
-        buffered_staging(Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?);
+    let limits = buffered_limits(Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?);
     if is_create {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
             .map_err(|_| error("USTE_BM06_KEY_CREATE"))?;
@@ -473,5 +472,7 @@ fn run_bounded_observed(
     });
     report["staging_cache_bytes"] = serde_json::json!(STAGING_CACHE_BYTES);
     report["staging_cache_scope"] = serde_json::json!(STAGING_CACHE_SCOPE);
+    report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
+    report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
     Ok(report.to_string())
 }

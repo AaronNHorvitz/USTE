@@ -146,6 +146,8 @@ impl Drop for Fixture {
 }
 struct OwnedChild(Option<Child>);
 fn assert_phase_work(report: &serde_json::Value) {
+    assert_eq!(report["proof_cache_bytes"], 64 * 1024 * 1024);
+    assert_eq!(report["proof_cache_scope"], "fresh-per-preparation");
     assert_eq!(report["staging_cache_bytes"], 64 * 1024 * 1024);
     assert_eq!(
         report["staging_cache_scope"],
