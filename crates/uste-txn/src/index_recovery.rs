@@ -280,6 +280,11 @@ where
         self.scope
     }
 
+    /// Actual already-authenticated frontier, not a new disk observation or consumer authority.
+    pub fn authenticated_frontier_anchor(&self) -> Option<(CommitRevision, [u8; 32])> {
+        self.journal.checkpoint_anchor()
+    }
+
     /// Authenticate the full journal and retain its final transaction without a certificate map.
     /// Other storage blob/inventory metadata remains resident and independently bounded.
     #[allow(clippy::too_many_arguments)]

@@ -2,7 +2,55 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — private packed graph genesis (Decision 0164)
+## Latest verified increment — terminal-only packed origin recovery (Decision 0165)
+
+Implemented on pushed `92e5e8c` plus this increment: explicit journal-origin reconstruction needs
+no derived graph/primary/quota root, stages only bounded genesis, releases that reducer, then
+streams the authenticated suffix through the shared packed recovery implementation. Publication
+occurs only at the actual authenticated frontier. No live state escapes an error or partial
+three-manifest publication. Ordinary open still requires independently admitted roots; there is
+no silent fallback, rollback or atomic-three-file claim. The caller still selects storage's
+certificate/blob recovery mode. Reports are bounded staging/proof work, not complete adapter I/O.
+
+Seven new tests cover first-only and multi-revision root-free reconstruction, full-reducer digest
+equality, every exact retry including genesis, zero outcome/owner overlays, cold admission and
+continued writes, eight limit refusals, retained/corrupt derived roots, late committed-certificate
+corruption, authenticated retry/transaction collisions and false results. All 909 observed I/O
+error/crash cases restart successfully without intermediate publication. The graph-only path
+refuses authenticated inventories at genesis or suffix; generic first-owner/quota behavior remains
+unchanged. An initial fixture incorrectly tried to certify an empty inventory, already rejected
+by coordinator admission. It was corrected to assert that refusal separately and certify an actual
+synthetic blob inventory; no production guard changed.
+
+Final full gate session 88698 / `run-p748201-i21762360.scope` exited 0: 658 tests across 47
+executables, zero ignored/failures; graph integration 89/414.66 s, transaction integration
+97/96.16 s, Clippy/2.28 s and workspace docs/9.12 s. Preflight 30 GiB available RAM/5.7 GiB free
+swap; sampled scope peak 694,444,032 bytes/zero swap. A final test-only review restored the original
+explicit restart in the shared genesis fixture; session 94343 / `run-p751801-i21762617.scope`
+passed all four genesis tests/1.59 s and seven origin tests/27.48 s afterward (compile 12.74 s).
+Earlier session 72172 failed only the malformed empty-inventory fixture; focused correction 12132
+passed before the full gate was rerun. All workloads used one build job/thread and 3G/4G/512M limits.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d165-workspace-final.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --locked --offline packed_genesis -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --locked --offline packed_graph_origin -- --test-threads=1 --nocapture'
+```
+
+Format/diff/docs/task graph checks pass. Native regression remains 71 active tests at `35bc482`,
+not a new run here. Pending benchmark integration is deliberately excluded from this core increment.
+Next execute/review the packed BM-01 development oracle integration, then connect the native
+construction/recovery/query runner and BM-06 packed history path. Full authenticated I/O accounting,
+exact-scale construction and reserved-host qualification remain open; no benchmark target changed.
+T-20/T-19 remain unchecked. Pinned M1 interfaces/evidence and the lockfile are unchanged. This section
+supersedes earlier next steps; full-project and distribution prerequisites remain as recorded below.
+
+## Prior verified increment — private packed graph genesis (Decision 0164)
 
 Implemented on pushed `a32693d` plus this increment: stage all eight packed graph families directly
 from an opaque authenticated first-transaction reconstruction, without requiring v1 roots. Borrow

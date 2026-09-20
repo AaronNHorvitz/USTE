@@ -3,7 +3,7 @@ use uste_graph::{PackedGraphGenesisLimits, PackedGraphStageLimits, stage_packed_
 use uste_storage::journal::PackedRootDiscoveryLimits;
 use uste_txn::RecoveredGenesis;
 
-fn genesis_limits(batch: usize) -> PackedGraphGenesisLimits {
+pub(super) fn genesis_limits(batch: usize) -> PackedGraphGenesisLimits {
     let old = limits(batch);
     PackedGraphGenesisLimits {
         stage: PackedGraphStageLimits {
@@ -37,12 +37,18 @@ fn reopen_genesis(fs: &mut Fs, entropy: u64) -> (Recovery, RecoveredGenesis<Grap
     (recovery, genesis)
 }
 fn genesis_fixture(kind: u8) -> (Fs, Recovery, RecoveredGenesis<GraphState>, [u8; 32]) {
+    genesis_fixture_named(kind, "packed-genesis")
+}
+pub(super) fn genesis_fixture_named(
+    kind: u8,
+    name: &str,
+) -> (Fs, Recovery, RecoveredGenesis<GraphState>, [u8; 32]) {
     let mut memory = MemoryFileSystem::new(64 * 1024 * 1024);
     let mut live = CommitCoordinator::create(
         &mut memory,
         scope(),
         RetentionDays::new(30).unwrap(),
-        EntryName::new("packed-genesis").unwrap(),
+        EntryName::new(name).unwrap(),
         create_vault(scope().database(), 2_100_000),
         CounterEntropy(2_110_000),
         GraphState::new(scope()),
@@ -105,7 +111,21 @@ fn genesis_fixture(kind: u8) -> (Fs, Recovery, RecoveredGenesis<GraphState>, [u8
     let expected = GraphState::logical_state_digest(live.read_view().unwrap().state()).unwrap();
     drop(live);
     let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
-    let (recovery, genesis) = reopen_genesis(&mut fs, 2_120_000);
+    fs.restart().unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    let (recovery, _, _) = AuthenticatedIndexRecovery::open_with_disk_certificate_anchors(
+        &mut fs,
+        &EntryName::new(name).unwrap(),
+        scope(),
+        CounterEntropy(2_120_000),
+        CounterEntropy(2_130_000),
+        &mut TestKeyAdapter,
+        limits(2).certificates,
+    )
+    .unwrap();
+    let genesis = recovery
+        .recover_primary_genesis(&mut fs, GraphState::new(scope()), 4 * 1024 * 1024, 512)
+        .unwrap();
     fs.arm(FaultPlan::default()).unwrap();
     (fs, recovery, genesis, expected)
 }

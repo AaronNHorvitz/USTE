@@ -6,7 +6,9 @@ mod authorized_write;
 pub use authorized_write::{PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits};
 mod recovery;
 pub use recovery::{
-    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport, recover_packed_graph_suffix,
+    PackedGraphOriginRecoveryLimits, PackedGraphOriginRecoveryReport,
+    PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport, recover_packed_graph_origin,
+    recover_packed_graph_suffix,
 };
 use uste_storage::journal::{CertifiedPackedRoot, JournalStore};
 use uste_txn::{

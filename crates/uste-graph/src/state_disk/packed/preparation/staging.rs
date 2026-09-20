@@ -3,9 +3,10 @@ use super::*;
 mod live;
 pub use live::{
     GraphPackedLivePublication, GraphPackedLiveSnapshot, GraphPackedLiveState,
-    PackedGraphExpansionLimits, PackedGraphReadLimits, PackedGraphSuffixRecoveryLimits,
-    PackedGraphSuffixRecoveryReport, PackedGraphWritePreparationLimits,
-    PackedGraphWritePublicationLimits, publish_packed_graph_live_base, recover_packed_graph_suffix,
+    PackedGraphExpansionLimits, PackedGraphOriginRecoveryLimits, PackedGraphOriginRecoveryReport,
+    PackedGraphReadLimits, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
+    PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits,
+    publish_packed_graph_live_base, recover_packed_graph_origin, recover_packed_graph_suffix,
 };
 
 pub struct PackedGraphDelta {

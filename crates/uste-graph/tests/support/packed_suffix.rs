@@ -1,6 +1,8 @@
 use super::*;
 #[path = "packed_authorized_writes.rs"]
 mod authorized_write;
+#[path = "packed_origin.rs"]
+mod origin;
 use uste_graph::{
     PackedGraphAdmissionLimits, PackedGraphSuffixRecoveryLimits, PackedGraphSuffixRecoveryReport,
     admit_packed_graph_base, recover_packed_graph_suffix,
