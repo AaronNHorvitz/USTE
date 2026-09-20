@@ -2,25 +2,34 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Current work — logical-first positive-cache keys (Decision 0220)
+## Latest verified increment — logical-first positive-cache keys (Decision 0220)
 
-D0219's completed sampling evidence is committed/pushed as `b6cb359`. D0220 core verification
-is now running under `uste-d220-workspace.scope`: focused `uste-storage` filter
-`packed_page_cache::lookup`, then full all-target/all-feature workspace tests, strict Clippy and
-warnings-denied documentation, all locked/offline. One Cargo job, one Rust test thread,
-test opt-level 1 with debug assertions/overflow checks enabled; 3G/4G/512M process-group limits.
-Fresh preflight 21 GiB available RAM, 2.1 GiB free swap, 952 GiB disk; both sample processes exited,
-no competing heavy workload. Log `/tmp/uste-d220-workspace-verification.log`.
-Started 2026-09-20 16:01:21 UTC, session 26813, invocation `4a446332d3d344ec998e2630e1fabeba`.
-Exact command:
+D0219's completed sampling evidence is committed/pushed as `b6cb359`. D0220 is implemented and
+verified from the pushed WIP baseline `8cadf6b`: the private positive-cache encoding now compares
+the complete logical key before the unchanged fixed 175-byte identity. Variable-length, prefix and
+maximum-length keys remain injective; every identity substitution remains distinct. Allocation,
+accounting, LRU, authorization, work limits, on-disk formats and public APIs are unchanged. This is
+not a measured performance improvement and does not complete T-20 or any benchmark target.
 
-```sh
-systemd-run --user --scope --unit=uste-d220-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --all-features --locked --offline packed_page_cache::lookup -- --test-threads=1 && CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d220-workspace-verification.log; verification_status=$?; systemctl --user show uste-d220-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
-```
+The pre-restart transient verification left no process or log. On resume, 51 GiB RAM and 47 GiB
+swap were available and no competing build/benchmark existed. The sandbox could not connect to
+the user service manager to create the planned nested 3G/4G scope. Both gates therefore ran
+sequentially inside the existing verified `uste-codex.scope` (MemoryHigh 5,368,709,120;
+MemoryMax 6,442,450,944; MemorySwapMax 536,870,912 bytes), with `ulimit -v 4194304` enforcing the
+repository's stricter 4 GiB per-process address-space ceiling. One Cargo job, one Rust test thread
+and one heavy workload were used. The enclosing shared scope reached 2,504,941,568 bytes peak,
+zero swap and no memory pressure/OOM events; this is not isolated workload RSS.
 
-Do not mark the source verified until the complete gate passes. Then run the separate native
-release regression/strict Clippy gate, inspect/stage only reviewed relevant changes and commit/push.
-No M1 or T-20 completion follows from this private optimization or unit tests.
+Workspace log `/tmp/uste-d220-workspace-verification-resumed.log`, started 18:36:34 UTC: focused
+`packed_page_cache::lookup` passed 5 tests; the full locked/offline all-target/all-feature workspace
+passed **761 tests**, zero failures/ignores, followed by strict Clippy and warnings-denied docs.
+The test profile kept opt-level 1, debug assertions and overflow checks. Native log
+`/tmp/uste-d220-native-verification-resumed.log`, started 18:49:55 UTC: release suite passed
+**136 active tests with five unchanged opt-in ignores**, zero failures; strict Clippy passed.
+Formatting across all manifests, standalone rustfmt checks, `scripts/check_docs.py` and
+`scripts/check_task_graph.py` passed (`documentation=ok`, 294 links; `task_graph=ok`, 68 tasks).
+Next commit/push this verified closure separately, then continue bounded T-20 performance and
+accounting work while preserving the failed latency evidence and qualification prerequisites.
 
 ## Completed sampling implementation and development comparison (Decision 0219)
 

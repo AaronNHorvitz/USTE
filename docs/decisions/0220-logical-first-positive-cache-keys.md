@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 
-Status: Implementation in progress; uncompiled and unverified. Excluded from D0219 measurements.
+Status: Implemented and locally verified. Excluded from D0219 measurements; no performance claim.
 
 D0216/D0218 retain cold-query regressions for the optional positive-cache partitions. Do not
 reinterpret those results or change the default. One bounded CPU-cost hypothesis is that ordered
@@ -27,3 +27,12 @@ all existing resource/fault/corruption/authorization tests and run full workspac
 before adopting the change. Reduced shared-prefix length is not a measured performance gain:
 native timing and work-count comparison remain separate, with failures/regressions retained.
 No M1 interface, authoritative migration, erasure guarantee or benchmark threshold changes.
+
+The resumed 2026-09-20 verification passed the focused lookup tests, 761 workspace tests, strict
+workspace Clippy, warnings-denied documentation, and 136 active native release tests with five
+unchanged opt-in ignores plus strict native Clippy. Formatting, documentation and task-graph
+checks also passed. The sandbox could not create the originally planned nested transient scope
+after restart, so both sequential one-job/one-thread gates ran inside the verified enclosing
+`uste-codex.scope` (5 GiB high, 6 GiB maximum, 512 MiB swap maximum) with an inherited 4 GiB
+virtual-address limit. The enclosing scope reached 2,504,941,568 bytes peak and zero swap; that
+shared peak is a session bound, not an isolated workload RSS measurement.
