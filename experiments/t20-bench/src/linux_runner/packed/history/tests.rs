@@ -259,7 +259,7 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
 #[test]
 fn packed_history_native_admission_precedes_filesystem_access() {
     let absent = Path::new("absent-packed-history-admission");
-    for records in [3, 100000] {
+    for records in [514, 100000] {
         for phase in [
             "create",
             "open",

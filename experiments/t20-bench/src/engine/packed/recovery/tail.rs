@@ -18,6 +18,38 @@ pub(crate) fn certify_generation_tail<
     clock: &mut impl uste_storage::Clock,
     make_batch: &mut impl FnMut(u64) -> Result<disk::DiskBatch, String>,
 ) -> Result<uste_txn::TransactionOutcome, String> {
+    certify_generation_tail_observed(
+        live,
+        fs,
+        kernel,
+        principal,
+        profile,
+        generation,
+        limits,
+        clock,
+        make_batch,
+        &mut |_| Ok(()),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn certify_generation_tail_observed<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    live: &mut PackedEngine<F, W, E, I>,
+    fs: &mut F,
+    kernel: &mut PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    profile: Bm06Profile,
+    generation: u64,
+    limits: Limits,
+    clock: &mut impl uste_storage::Clock,
+    make_batch: &mut impl FnMut(u64) -> Result<disk::DiskBatch, String>,
+    observer: &mut impl FnMut(u64) -> Result<(), String>,
+) -> Result<uste_txn::TransactionOutcome, String> {
     if !(1..VERSIONS).contains(&generation) {
         return Err("BM-06 tail generation outside update range".into());
     }
@@ -39,7 +71,9 @@ pub(crate) fn certify_generation_tail<
             return Err("BM-06 tail batch sequence mismatch".into());
         }
         if sequence != terminal {
-            commit_batch(live, fs, kernel, principal, request, clock, limits)?;
+            commit_batch_observed(
+                live, fs, kernel, principal, request, clock, limits, observer,
+            )?;
             continue;
         }
         let bytes = encode_transaction(&GraphTransaction::new(scope(), request.operations))
@@ -48,7 +82,7 @@ pub(crate) fn certify_generation_tail<
         publication.stage.maximum_batches = 1;
         let mut writer = AuthorizedPackedWriter::new(live, kernel, limits.preparation, publication)
             .map_err(debug)?;
-        return match writer.commit(
+        let outcome = match writer.commit(
             fs,
             principal,
             AuthorizedTransactionRequest {
@@ -69,7 +103,9 @@ pub(crate) fn certify_generation_tail<
             }) if outcome.revision.get() == terminal => Ok(outcome),
             Ok(_) => Err("BM-06 terminal publication unexpectedly completed".into()),
             Err(error) => Err(format!("BM-06 unexpected terminal refusal: {error:?}")),
-        };
+        }?;
+        observer(outcome.revision.get())?;
+        return Ok(outcome);
     }
     Err("BM-06 empty tail".into())
 }

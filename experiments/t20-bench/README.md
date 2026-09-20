@@ -101,8 +101,9 @@ measurement likewise predates coordinator buffering.
 ## BM-06 materialization
 
 Decision 0182 supplies exact prefix counts and historical verification even when a certified
-prefix ends partway through a 512-record-batch generation. The native/model full-history commands
-remain capped at two records. A bounded test-only 513-record prefix checks 512 creates, the final
+prefix ends partway through a 512-record-batch generation. The model full-history command remains
+capped at two records; Decision 0189 separately extends the native development ceiling below.
+A bounded test-only 513-record prefix checks 512 creates, the final
 create, then 512 updates against the reference reducer, cold admission and exact retry. It does
 not run 100 generations or qualify larger native construction. Decisions 0183–0185 add multi-batch
 tail/continuation primitives; safe native scale qualification remains separate work.
@@ -113,8 +114,8 @@ batch. Recovery exact-retries every tail batch. A test-only 513-record/two-gener
 forces recovery from its earlier checkpoint despite a newer intermediate root, verifies both
 suffix groups and all 1,026 payload versions. Ordinary native recovery selects the latest complete
 triple; Decision 0184 adds explicit whole-tail checkpoint selection and Decision 0185 handles
-interrupted multi-batch continuation. The native two-record cap remains unchanged pending safe
-larger construction and measurement.
+interrupted multi-batch continuation. Decision 0189 enables the first bounded native multi-batch
+development profile; larger construction and qualification remain separate.
 
 Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions
 through packed authorized writes, verifies certified-tail recovery from the checkpoint, checks every
@@ -152,7 +153,7 @@ already certified frontier 101 stays 101. Only zero/one-revision prefixes use bo
 bootstrap. Decision 0185 generalizes continuation for multi-batch generations: a prefix strictly
 past the frozen checkpoint finishes the final generation, never targets the earlier checkpoint.
 The shared path is tested on a bounded 513-record partial model, including interruption before
-metadata rebase; this does not raise the full-history CLI caps. Zero/one-revision prefixes retain
+metadata rebase; Decision 0189 separately changes only native admission. Zero/one-revision prefixes retain
 bootstrap (one outcome/zero owners/1 MiB replay); certified policy identities must match exactly.
 Rebuild explicitly reconstructs the actual authenticated prefix, including incomplete construction,
 without appending events. After all-cache loss, run rebuild before resume. Ordinary open still
@@ -162,7 +163,30 @@ requires a complete checkpoint/terminal triple; resume never silently reconstruc
 `bm06-packed-linux-tail-crash-probe ...` are test-only parked-child controls. Run them only under an
 owning supervisor that terminates/reaps its child. Regression tests use real SIGKILL at bootstrap,
 incomplete graph/metadata publication and final certified-tail boundaries, not simulated power loss.
-The two-record cap is unchanged. None of these commands qualifies BM-06 or measures complete I/O.
+The two-record regression cases remain. None of these commands qualifies BM-06 or measures complete I/O.
+
+Decision 0189 admits at most **513 records on the packed native path only** (51,300 historical
+versions; checkpoint 199, terminal 201). The model and legacy native paths stay capped at two.
+`bm06-packed-linux-tail-prefix-crash-probe ... --pause-after-revision 200 --records 513` parks
+after intermediate graph publication before metadata rebase. Use only an owning supervisor;
+the explicit opt-in test below owns, kills and reaps its child, resumes the partial tail and
+checks full checkpoint replay. It retains its synthetic database on success or failure and
+prints its path and phase reports. Each phase has a 1800-second test deadline, not a benchmark
+latency budget. `development_record_limit` is an admission policy, not a capacity guarantee.
+
+From the repository root, after checking host RAM/swap/disk and competing workloads:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_513_record_intermediate_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1'
+```
+
+Do not run this alongside another heavy USTE workload. The normal suite does not run this scale
+case automatically; record its explicit result, including failures, before relying on it. The
+100,000-record qualifying profile still refuses before I/O. No 30-trial/120-second qualification,
+complete accounting, controlled host caches or larger-than-memory claim follows from this test.
+See the [pinned development reports](../../docs/evidence/native-packed-history-513-development.json)
+for the exact source/binary, retained fixtures, initial test failure and successful run.
 
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),

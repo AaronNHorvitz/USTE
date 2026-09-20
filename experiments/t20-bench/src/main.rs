@@ -60,16 +60,27 @@ fn run() -> Result<(), String> {
         let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(
             records.ok_or("BM-06 native command requires --records")?,
         )?;
-        if (phase == "create-crash-probe") != pause.is_some() {
-            return Err("only BM-06 create-crash-probe requires --pause-after-revision".into());
+        if (phase == "create-crash-probe" || (packed_history && phase == "tail-prefix-crash-probe"))
+            != pause.is_some()
+        {
+            return Err(
+                "BM-06 prefix crash probes require --pause-after-revision; other phases refuse it"
+                    .into(),
+            );
         }
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let report = if packed_history {
                 if let Some(pause) = pause {
-                    uste_t20_bench::linux_runner::packed::history::create_crash_probe(
-                        &root, &password, profile, pause,
-                    )
+                    if phase == "create-crash-probe" {
+                        uste_t20_bench::linux_runner::packed::history::create_crash_probe(
+                            &root, &password, profile, pause,
+                        )
+                    } else {
+                        uste_t20_bench::linux_runner::packed::history::tail_prefix_crash_probe(
+                            &root, &password, profile, pause,
+                        )
+                    }
                 } else {
                     uste_t20_bench::linux_runner::packed::history::run(
                         &root, &password, profile, phase,
@@ -441,8 +452,9 @@ fn print_usage() {
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench bm06-packed-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|recover-checkpoint|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 2; nonqualifying)\n\
+         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|recover-checkpoint|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 513; nonqualifying)\n\
          uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
+         uste-t20-bench bm06-packed-linux-tail-prefix-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying development sampling)\n\

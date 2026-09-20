@@ -14,6 +14,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 const EXE: &str = env!("CARGO_BIN_EXE_uste-t20-bench");
+#[path = "packed_history/scale.rs"]
+mod scale;
 struct Fixture {
     root: PathBuf,
     password: PathBuf,
@@ -64,7 +66,16 @@ impl Fixture {
         serde_json::from_slice(&output.stdout).unwrap()
     }
     fn kill_at(&self, phase: &str, pause: Option<u64>) -> u64 {
-        let mut command = self.command(phase, 2);
+        self.kill_at_records(phase, pause, 2, Duration::from_secs(60))
+    }
+    fn kill_at_records(
+        &self,
+        phase: &str,
+        pause: Option<u64>,
+        records: u64,
+        deadline: Duration,
+    ) -> u64 {
+        let mut command = self.command(phase, records);
         if let Some(pause) = pause {
             command.arg("--pause-after-revision").arg(pause.to_string());
         }
@@ -82,10 +93,7 @@ impl Fixture {
             let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
             let _ = sender.send(result);
         });
-        let line = receiver
-            .recv_timeout(Duration::from_secs(60))
-            .unwrap()
-            .unwrap();
+        let line = receiver.recv_timeout(deadline).unwrap().unwrap();
         let marker: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(marker["schema"], "bm06-packed-durable-prefix-v1");
         child.0.as_mut().unwrap().kill().unwrap();
@@ -123,7 +131,10 @@ impl Drop for OwnedChild {
         }
     }
 }
-fn complete(mut command: Command) -> Output {
+fn complete(command: Command) -> Output {
+    complete_with_deadline(command, Duration::from_secs(90))
+}
+fn complete_with_deadline(mut command: Command, deadline: Duration) -> Output {
     let mut child = OwnedChild(Some(
         command
             .stdout(Stdio::piped())
@@ -134,7 +145,7 @@ fn complete(mut command: Command) -> Output {
     let started = Instant::now();
     while child.0.as_mut().unwrap().try_wait().unwrap().is_none() {
         assert!(
-            started.elapsed() < Duration::from_secs(90),
+            started.elapsed() < deadline,
             "owned packed history child deadline"
         );
         thread::sleep(Duration::from_millis(10));
@@ -203,7 +214,7 @@ fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
         "resume",
         "tail-crash-probe",
     ] {
-        for records in ["3", "100000"] {
+        for records in ["514", "100000"] {
             let mut command = Command::new(EXE);
             command.arg(format!("bm06-packed-linux-{phase}")).args([
                 "--root",

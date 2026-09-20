@@ -2,7 +2,64 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native coordinator buffering (Decision 0188)
+## Latest verified increment — native multi-batch history (Decision 0189)
+
+Built and tested on pushed `b892f12`: packed native BM-06 admits at most 513 records; model and
+legacy native caps remain two. A new owned-child tail-prefix probe stops after intermediate
+graph publication before metadata rebase. Qualifying dimensions still refuse before I/O.
+The opt-in scale case constructs 50,787 versions at checkpoint 199, SIGKILLs its child at 200,
+resumes the remaining batch through 201/all 51,300 versions, explicitly replays both groups
+from 199 despite newer roots, and verifies repeated resume/open without certificate appends.
+The expanded native cap is backed by an actual run, not just prefix arithmetic.
+
+[Pinned evidence](docs/evidence/native-packed-history-513-development.json) binds base commit,
+exact replacement-source SHA-256s, binary SHA-256, lockfiles and all five phase reports. Runtime
+binary SHA-256 is `8b52a7403d4baf7dd992b1e2c4792e304435eda5c5698a15cb8b4a238055a202`.
+Checkpoint v1 digest `a1f9fa3f9ce93320dc63866673150f257602276c4b2980f4067b279b9abdd2e8`;
+terminal `f192f7c3a8f5efb74972869875736fe67ed0068c6abc11d71cb00c7f596d0b3c` agrees across
+resume, explicit checkpoint replay, repeated resume and open.
+
+Session 62048 passed four model cases/2.48 s and six CLI cases/50.58 s, with the new scale case
+explicitly ignored in that normal invocation; compile 25.63/25.46 s, strict Clippy 1.58 s.
+First explicit scale session 10694 failed a test-only byte-count assertion after constructing
+checkpoint 199 and killing the owned child at 200: expected 832,200 bytes instead of 836,361,
+omitting the encrypted certificate-header frame. Fixed the fixture assertion; no guard relaxed.
+Its database remains at `experiments/t20-bench/target/packed-history-cli-1102869-1789882494172776422`
+(926 MiB apparent size), with original failure/binary details in the evidence. Wall 44.59 s,
+peak RSS 277,624 KiB/zero swaps. No unchanged failing workload was relaunched.
+
+Corrected scale session 12260 / `run-p1106364-i21948294.scope` exited 0: one explicit test/90.02 s,
+compile 25.33 s, total wall 115.37 s, peak RSS including compilation 430,908 KiB, zero swaps.
+Successful retained root `experiments/t20-bench/target/packed-history-cli-1107106-1789882647354994945`
+is 940 MiB apparent size. Phase elapsed/peak RSS KiB: create 38,576 ms/278,384; resume
+14,343/347,264; explicit checkpoint replay 8,943/346,076; repeated resume 13,987/346,544;
+open 8,685/346,624. These durations include historical verification, not recovery-only latency.
+Preflight 20–21 GiB available RAM/2.0 GiB free swap/~1000 GiB free disk; other host workloads
+were present and untouched. Sampled corrected scope peak 905,940,992 bytes/zero swap is not its
+final lifetime peak. Both source stores were retained, not removed or rewritten into a migration.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+/usr/bin/time -v timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_513_record_intermediate_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/uste-d189-native-513-final.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d189-full-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Full session 91910 / `run-p1108784-i22088176.scope` exited 0: **110 active tests**, two pre-existing
+ignored campaigns plus the separately passed opt-in scale case, seven executables plus empty
+doctests. Library 85/133.91 s, legacy BM-01 process 3/11.97 s, packed history 6/49.58 s,
+packed BM-01 process 5/36.46 s, manifest 3/0.92 s, legacy history process 8/74.31 s. Compile
+30.83 s, strict Clippy 1.50 s; sampled scope peak 400,658,432 bytes/zero swap, not final lifetime
+peak. Format/diff/docs/task checks pass; full core remains 687 at `c3b7047`, root lock unchanged.
+Next define bounded native construction steps and verify writer/session resource constraints
+before further scale increases, then complete accounting and reserved-host campaigns. Never
+clear/bypass nonce tracking or claim writer-incarnation rotation from an ordinary reopen.
+T-20/T-19, pinned M1, the full roadmap and release gates remain unchanged. Supersedes older next steps.
+
+## Prior verified increment — native coordinator buffering (Decision 0188)
 
 Built and tested on pushed `c3b7047`: the packed development engine selects fresh buffered
 primary and quota admission with sequential 64 MiB phase budgets. Native BM-01/BM-06 reports

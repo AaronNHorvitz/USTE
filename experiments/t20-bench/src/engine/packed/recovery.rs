@@ -2,7 +2,7 @@
 use super::*;
 use crate::recovery_materialization::{Bm06Profile, PAYLOAD_BYTES, VERSIONS};
 mod tail;
-pub(crate) use tail::certify_generation_tail;
+pub(crate) use tail::{certify_generation_tail, certify_generation_tail_observed};
 mod continuation;
 pub(crate) use continuation::complete_generation_prefix;
 

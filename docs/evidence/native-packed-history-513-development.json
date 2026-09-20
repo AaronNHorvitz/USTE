@@ -1,0 +1,632 @@
+{
+  "schema": "uste-native-packed-history-development-v1",
+  "qualification": "nonqualifying-development-correctness",
+  "date": "2026-09-20",
+  "implementation": {
+    "base_commit": "b892f125d94aafb5586942b40e3fc8c0fb572187",
+    "source_version": "base commit plus the exact replacement source files below; this evidence is committed with those changes",
+    "source_files_sha256": {
+      "experiments/t20-bench/src/engine/packed/recovery.rs": "9591fe9e857ea270078fc4c1d28d59fdc91716adc89af069e2fc8ba87e20a7fb",
+      "experiments/t20-bench/src/engine/packed/recovery/tail.rs": "aa6bb39be4c72eb78b5bf0c14ea42697ce1279f47c73f1fa89ed90e811eddd94",
+      "experiments/t20-bench/src/linux_runner/packed/history.rs": "7efe13d44d68801ed1b49c61a53852bb283ac91f3e71997d664f9d7ae0a2f6fa",
+      "experiments/t20-bench/src/linux_runner/packed/history/tests.rs": "ad59ab653c4f8dd29aa04b7739671e8136365c43214063c9753e2e44a2f2e1cc",
+      "experiments/t20-bench/src/main.rs": "2ec474a5e42047e7d4507c9d182a3131f8a2b84bff04e0d06550b5097575c43f",
+      "experiments/t20-bench/tests/packed_history.rs": "ce7a97f9f7b141947b577366e301687896608a9b5d28ea87100477a78b8a0816",
+      "experiments/t20-bench/tests/packed_history/scale.rs": "d12d39cd6d34a098e623d10f47f4b0a8e0d2d24c97530029f1c90029e3e9cbf8"
+    },
+    "binary_sha256": "8b52a7403d4baf7dd992b1e2c4792e304435eda5c5698a15cb8b4a238055a202",
+    "workspace_lock_sha256": "7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b",
+    "standalone_lock_sha256": "4d348b4b13db7e0834d3cc998166d2eddf9e4fe4f96765a8ad7a172efbf21dd4",
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "features": "standalone default; release; locked; offline"
+  },
+  "environment": {
+    "kernel": "Linux 7.1.10-200.fc44.x86_64",
+    "filesystem": "Btrfs compress=zstd:1 on /dev/nvme1n1p3",
+    "preflight_available_ram_gib": 21,
+    "preflight_free_swap_gib": 2,
+    "preflight_free_disk_gib_approx": 1000,
+    "exclusive_reservation": false,
+    "host_caches": "uncontrolled",
+    "background_work": "other workloads present; untouched",
+    "cargo_jobs": 1,
+    "rust_test_threads": 1,
+    "memory_high_bytes": 3221225472,
+    "memory_max_bytes": 4294967296,
+    "memory_swap_max_bytes": 536870912,
+    "sampled_scope_peak_bytes": 905940992,
+    "sampled_scope_swap_peak_bytes": 0,
+    "sample_is_final_lifetime_peak": false
+  },
+  "fixture": {
+    "records": 513,
+    "versions_per_record": 100,
+    "payload_bytes_per_version": 4096,
+    "history_payload_bytes": 210124800,
+    "checkpoint": 199,
+    "intermediate_tail_revision": 200,
+    "terminal": 201,
+    "retained_root": "experiments/t20-bench/target/packed-history-cli-1107106-1789882647354994945",
+    "terminal_certificates_sha256": "5fd5b1bf3e807fc255f0c718a7d85f51c4d7259fb1edf96ce421183bcf4c9b0c"
+  },
+  "invocation": "systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; /usr/bin/time -v timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_513_record_intermediate_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/uste-d189-native-513-final.log'",
+  "result": {
+    "exit_code": 0,
+    "tests_passed": 1,
+    "test_seconds": 90.02,
+    "compile_seconds": 25.33,
+    "total_wall_seconds": 115.37,
+    "maximum_rss_kib_including_compile": 430908,
+    "swaps": 0,
+    "owned_child_signal": 9,
+    "marker_revision": 200,
+    "source_certificate_prefixes_preserved": true,
+    "repeated_resume_appended_certificates": false,
+    "full_checkpoint_suffix_groups": 2
+  },
+  "initial_failure": {
+    "retained_root": "experiments/t20-bench/target/packed-history-cli-1102869-1789882494172776422",
+    "binary_sha256": "a69a69f6a815fd00827f9cf332ab15f99233b28a42f69054256ba5a729e1aca7",
+    "exit_code": 101,
+    "wall_seconds": 44.59,
+    "maximum_rss_kib": 277624,
+    "swaps": 0,
+    "stage": "test assertion after acknowledged revision-200 marker and owned-child SIGKILL",
+    "cause": "test omitted the encrypted certificate-header frame; observed 836361 bytes, incorrectly expected 832200",
+    "disposition": "corrected fixture framing assertion; retained interrupted database; no engine, durability or resource guard relaxed"
+  },
+  "phases": [
+    {
+      "phase": "create",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 1,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 1601,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 1066842,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 1065084,
+              "failures": 48
+            },
+            "read_at": {
+              "calls": 1070483,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 2,
+              "failures": 2
+            },
+            "rename_no_replace": {
+              "calls": 1,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 1596,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 1601,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 401,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 1600,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 4,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 37734,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 23817861666,
+          "read_returned_bytes": 23817861666,
+          "write_requested_bytes": 961088080,
+          "write_returned_bytes": 961088080
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 17936,
+        "derived_terminal_pending": false,
+        "development_record_limit": 513,
+        "elapsed_milliseconds": 38576,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 199,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 199,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "create",
+        "process_peak_rss_kib": 278384,
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 513,
+        "recovered_frontier": 1,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 199,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "a1f9fa3f9ce93320dc63866673150f257602276c4b2980f4067b279b9abdd2e8",
+        "verified_history_versions": 50787
+      }
+    },
+    {
+      "phase": "resume",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 21,
+              "failures": 1
+            },
+            "metadata": {
+              "calls": 169152,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 166826,
+              "failures": 99
+            },
+            "read_at": {
+              "calls": 173281,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 2,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 20,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 20,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 5,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 22,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 3,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 379,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 6034709562,
+          "read_returned_bytes": 6034709562,
+          "write_requested_bytes": 7462579,
+          "write_returned_bytes": 7462579
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 86200,
+        "derived_terminal_pending": false,
+        "development_record_limit": 513,
+        "elapsed_milliseconds": 14343,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 201,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 201,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "resume",
+        "process_peak_rss_kib": 347264,
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 513,
+        "recovered_frontier": 200,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": 199,
+        "resume_suffix_groups": 1,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 201,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "f192f7c3a8f5efb74972869875736fe67ed0068c6abc11d71cb00c7f596d0b3c",
+        "verified_history_versions": 51300
+      }
+    },
+    {
+      "phase": "recover-checkpoint",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 16,
+              "failures": 3
+            },
+            "metadata": {
+              "calls": 108395,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 2,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 106819,
+              "failures": 39
+            },
+            "read_at": {
+              "calls": 111088,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 13,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 13,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 2,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 13,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 2,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 365,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 3931737566,
+          "read_returned_bytes": 3931737566,
+          "write_requested_bytes": 7388186,
+          "write_returned_bytes": 7388186
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": true,
+        "complete_authenticated_io": false,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 86080,
+        "derived_terminal_pending": false,
+        "development_record_limit": 513,
+        "elapsed_milliseconds": 8943,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 201,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 201,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "recover-checkpoint",
+        "process_peak_rss_kib": 346076,
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 513,
+        "recovered_frontier": 201,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 199,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 2,
+        "v1_state_digest": "f192f7c3a8f5efb74972869875736fe67ed0068c6abc11d71cb00c7f596d0b3c",
+        "verified_history_versions": 51300
+      }
+    },
+    {
+      "phase": "resume",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 159214,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 3,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 156864,
+              "failures": 72
+            },
+            "read_at": {
+              "calls": 163133,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 3,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 3,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 5827538186,
+          "read_returned_bytes": 5827538186,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 81480,
+        "derived_terminal_pending": false,
+        "development_record_limit": 513,
+        "elapsed_milliseconds": 13987,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 201,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 201,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "resume",
+        "process_peak_rss_kib": 346544,
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 513,
+        "recovered_frontier": 201,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": 201,
+        "resume_suffix_groups": 0,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 201,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "f192f7c3a8f5efb74972869875736fe67ed0068c6abc11d71cb00c7f596d0b3c",
+        "verified_history_versions": 51300
+      }
+    },
+    {
+      "phase": "open",
+      "report": {
+        "adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 98462,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 2,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 96883,
+              "failures": 36
+            },
+            "read_at": {
+              "calls": 101140,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 2,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 2,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 3727552562,
+          "read_returned_bytes": 3727552562,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "bounded_bootstrap_resume": false,
+        "checkpoint_tail_replay": false,
+        "complete_authenticated_io": false,
+        "coordinator_admission_buffered": true,
+        "coordinator_admission_cache_bytes": 67108864,
+        "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+        "current_rss_kib": 85764,
+        "derived_terminal_pending": false,
+        "development_record_limit": 513,
+        "elapsed_milliseconds": 8685,
+        "engine_benchmark": false,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 201,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "graph_admission_cache_bytes": 67108864,
+        "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+        "history_verified_through_revision": 201,
+        "ignored_uncommitted_journal_bytes": 0,
+        "incomplete_prefix_resume_implemented": true,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "origin_suffix_groups": null,
+        "phase": "open",
+        "process_peak_rss_kib": 346624,
+        "qualification": "nonqualifying-development-profile",
+        "qualifying_recovery_trials": 0,
+        "records": 513,
+        "recovered_frontier": 201,
+        "repaired_certificate_tail_bytes": 0,
+        "resume_base_revision": null,
+        "resume_suffix_groups": null,
+        "schema": "bm06-linux-packed-development-v1",
+        "selected_base_revision": 201,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "suffix_groups": 0,
+        "v1_state_digest": "f192f7c3a8f5efb74972869875736fe67ed0068c6abc11d71cb00c7f596d0b3c",
+        "verified_history_versions": 51300
+      }
+    }
+  ],
+  "limitations": [
+    "Development profile, not the qualifying 100000-record/100-version workload.",
+    "Phase duration includes historical verification and cold admission, not recovery-only latency.",
+    "Adapter calls/bytes are partial accounting, not complete authenticated or physical-device I/O.",
+    "This fixture does not exceed available RAM; no larger-than-memory or production claim.",
+    "One owned SIGKILL interruption is not physical power-loss qualification or thirty independent recovery trials."
+  ]
+}

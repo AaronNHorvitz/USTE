@@ -2,7 +2,7 @@
 use super::*;
 use crate::recovery_materialization::Bm06Profile;
 const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
-const MAX_RECORDS: u64 = 2;
+const MAX_RECORDS: u64 = 513;
 mod bootstrap;
 mod continuation;
 #[cfg(test)]
@@ -135,6 +135,27 @@ pub fn create_crash_probe(
         return Err(error("USTE_BM06_PACKED_PROBE_REVISION"));
     }
     run_observed(root, password, profile, "create", &mut |revision| {
+        if revision == pause {
+            park_after_marker(revision)?;
+        }
+        Ok(())
+    })
+}
+
+/// Owned-child control at graph publication before intermediate metadata rebase, or terminal acknowledgement.
+pub fn tail_prefix_crash_probe(
+    root: &Path,
+    password: &Path,
+    profile: Bm06Profile,
+    pause: u64,
+) -> Result<String, LinuxRunnerError> {
+    if profile.records() > MAX_RECORDS {
+        return Err(error("USTE_BM06_PACKED_DEVELOPMENT_LIMIT"));
+    }
+    if pause <= profile.checkpoint_revision() || pause > profile.frontier() {
+        return Err(error("USTE_BM06_PACKED_PROBE_REVISION"));
+    }
+    run_observed(root, password, profile, "tail", &mut |revision| {
         if revision == pause {
             park_after_marker(revision)?;
         }
@@ -296,7 +317,7 @@ fn run_observed(
         }
     }
     if is_tail {
-        engine::recovery::certify_generation_tail(
+        engine::recovery::certify_generation_tail_observed(
             &mut live,
             &mut fs,
             &mut kernel,
@@ -306,6 +327,7 @@ fn run_observed(
             limits,
             &mut SystemClock::new(),
             &mut |sequence| batch(profile, sequence).map_err(|error| error.code().to_string()),
+            &mut |revision| observer(revision).map_err(|error| error.code().to_string()),
         )
         .map_err(|_| error("USTE_BM06_PACKED_EXPECTED_TAIL"))?;
         if phase == "tail-crash-probe" {
