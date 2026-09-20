@@ -30,23 +30,39 @@ pub(crate) fn verify_history<
     if versions == 0 || versions > VERSIONS {
         return Err("BM-06 unsupported generation frontier".into());
     }
+    verify_prefix_history(
+        live,
+        fs,
+        kernel,
+        principal,
+        profile,
+        1 + versions * profile.batches_per_version(),
+    )
+}
+
+/// Stream all and only the events committed at an arbitrary (possibly partial-generation) prefix.
+pub(crate) fn verify_prefix_history<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    live: &PackedEngine<F, W, E, I>,
+    fs: &mut F,
+    kernel: &PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    profile: Bm06Profile,
+    frontier: u64,
+) -> Result<u64, String> {
+    let counts = profile.prefix_state_counts(frontier)?;
     let base = live
         .state()
         .map_err(debug)?
         .current_base()
         .ok_or("BM-06 pending packed base")?;
-    if base.anchor().0.get() != 1 + versions * profile.batches_per_version()
+    if base.anchor().0.get() != frontier
         || base.families().map(|family| family.commitment.entries())
-            != [
-                1,
-                profile.records(),
-                profile.records() * versions,
-                0,
-                0,
-                0,
-                0,
-                2,
-            ]
+            != [1, counts[0], counts[1], 0, 0, 0, 0, 2]
     {
         return Err("BM-06 packed profile/frontier mismatch".into());
     }
@@ -56,42 +72,41 @@ pub(crate) fn verify_history<
         AuthorizedPackedReader::new_with_cache_budget(live, kernel, read, 64 * 1024 * 1024)
             .map_err(debug)?;
     let mut verified = 0;
-    for generation in 0..versions {
-        for record in 0..profile.records() {
-            let ordinal = generation * profile.records() + record;
-            let revision =
-                uste_types::CommitRevision::new(profile.event_revision(ordinal)?).map_err(debug)?;
-            let actual = reader
-                .read(
-                    fs,
-                    principal,
-                    &GraphReadRequest::RecordAt {
-                        id: profile.record_ref(scope(), record)?,
-                        revision,
-                    },
-                    &NeverCancel,
-                )
-                .map_err(debug)?;
-            let GraphReadOutput::Record(Some(actual)) = actual else {
-                return Err("BM-06 missing packed history".into());
-            };
-            let uste_graph::Record::Entity(actual) = *actual else {
-                return Err("BM-06 wrong packed record kind".into());
-            };
-            if actual.version.get() != generation + 1
-                || actual.modified_revision != revision
-                || actual.id != profile.record_ref(scope(), record)?
-                || actual.created_revision.get() != profile.event_revision(record)?
-                || actual.lifecycle != uste_graph::EntityLifecycle::Active
-                || actual.entity_type.as_str() != crate::recovery_materialization::PROFILE
-                || actual.schema_version != 1
-                || actual.properties
-                    != Value::bytes(profile.payload(ordinal)?.to_vec()).map_err(debug)?
-            {
-                return Err("BM-06 packed historical oracle mismatch".into());
-            }
-            verified += 1;
+    for ordinal in 0..counts[1] {
+        let generation = ordinal / profile.records();
+        let record = ordinal % profile.records();
+        let revision =
+            uste_types::CommitRevision::new(profile.event_revision(ordinal)?).map_err(debug)?;
+        let actual = reader
+            .read(
+                fs,
+                principal,
+                &GraphReadRequest::RecordAt {
+                    id: profile.record_ref(scope(), record)?,
+                    revision,
+                },
+                &NeverCancel,
+            )
+            .map_err(debug)?;
+        let GraphReadOutput::Record(Some(actual)) = actual else {
+            return Err("BM-06 missing packed history".into());
+        };
+        let uste_graph::Record::Entity(actual) = *actual else {
+            return Err("BM-06 wrong packed record kind".into());
+        };
+        if actual.version.get() != generation + 1
+            || actual.modified_revision != revision
+            || actual.id != profile.record_ref(scope(), record)?
+            || actual.created_revision.get() != profile.event_revision(record)?
+            || actual.lifecycle != uste_graph::EntityLifecycle::Active
+            || actual.entity_type.as_str() != crate::recovery_materialization::PROFILE
+            || actual.schema_version != 1
+            || actual.properties
+                != Value::bytes(profile.payload(ordinal)?.to_vec()).map_err(debug)?
+        {
+            return Err("BM-06 packed historical oracle mismatch".into());
         }
+        verified += 1;
     }
     Ok(verified)
 }
@@ -299,6 +314,7 @@ pub fn verify(profile: Bm06Profile) -> Result<PackedRecoveryVerification, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod prefix;
     #[test]
     fn packed_bm06_preserves_every_version_after_suffix_and_origin_recovery() {
         for records in [1, 2] {

@@ -2,7 +2,43 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — buffered native comparison (Decision 0181)
+## Latest verified increment — BM-06 partial-generation prefixes (Decision 0182)
+
+Implemented on pushed `5adf5a9`: exact prefix counts and streaming historical verification no
+longer equate one revision with one generation. Native history verification/continuation uses
+the exact frontier; full-generation callers retain their previous contract. Both CLI record
+caps remain two. A bounded 513-record model test executes three real data batches (512 creates,
+one create, 512 updates), cold-admits/retries each prefix, verifies every committed payload and
+matches the full reference v1 digest. Independent event scans check all prefixes across seven
+small batch-boundary profiles; qualifying-size literal arithmetic is not materialization evidence.
+
+Initial focused compile under `run-p986300-i21984133.scope` failed due to a missing test-only
+CheckpointState trait import; fixed. Session 62995 / `run-p987326-i21941247.scope` then passed
+the partial-generation case/0.59 s and independent counts/0.00 s (compile 25.32 s); sampled peak
+374,050,816 bytes/zero swap. Focused commands selected `--lib bm06_partial_generations` and
+`--lib bm06_prefix_counts` with the same release/offline/locked/serial settings below.
+After wiring all native phase verification, full session 55693 /
+`run-p989138-i21980454.scope` exited 0: **106 active tests**, two existing ignored campaigns,
+seven executables plus empty doctests. Library 82/128.21 s, legacy BM-01 process 3/12.12 s,
+packed BM-06 CLI 5/52.46 s, packed BM-01 CLI 5/36.96 s, BM-06 manifest 3/1.09 s,
+legacy BM-06 process 8/76.93 s. Compile 55.10 s, strict Clippy 1.57 s.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d182-prefix-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 24 GiB available RAM/2.7 GiB free swap; sampled full-scope peak 603,316,224 bytes/
+zero swap. One job/thread and one heavy workload. Format/diff/docs/task checks pass. Core remains
+676 tests at `0322067`; the Decision 0181 measured binary remains pinned to `edc0845`, not this
+new build. Next implement/test generation-wide packed tail materialization and bounded recovery
+from its selected checkpoint, preserving exact retries before raising any native cap. Complete
+accounting, safe larger construction and qualifying campaigns remain T-20 prerequisites.
+M1, TASKS, T-19/full roadmap and release gates are unchanged. This supersedes older next steps.
+
+## Prior verified increment — buffered native comparison (Decision 0181)
 
 Measured pushed `edc0845`, binary SHA-256
 `0a5b2fa572647ac0c1bb2ad8ada7814daf3a8a05d85383878c0c4d28f36c6579`, against the retained

@@ -89,21 +89,14 @@ fn binding(
     }
     Ok(())
 }
-// The native cap keeps one batch per generation. This is not a general qualifying prefix formula.
+// Native admission stays separately capped; prefix arithmetic also supports partial generations.
 fn counts(profile: Bm06Profile, revision: u64) -> Result<[u64; 8], LinuxRunnerError> {
     if profile.records() > MAX_RECORDS || revision == 0 || revision > profile.frontier() {
         return Err(error("USTE_BM06_PACKED_FRONTIER"));
     }
-    Ok([
-        if revision == 1 { 0 } else { profile.records() },
-        profile.records() * (revision - 1),
-        0,
-        0,
-        0,
-        0,
-        1,
-        1,
-    ])
+    profile
+        .prefix_state_counts(revision)
+        .map_err(|_| error("USTE_BM06_PACKED_FRONTIER"))
 }
 
 pub fn run(
@@ -267,13 +260,10 @@ fn run_observed(
         counts(profile, base.get())?,
     )
     .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
-    let versions = frontier - 1; // Native cap guarantees one batch per generation.
-    let verified = if versions == 0 {
-        0
-    } else {
-        engine::recovery::verify_history(&live, &mut fs, &kernel, &principal, profile, versions)
-            .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?
-    };
+    let verified = engine::recovery::verify_prefix_history(
+        &live, &mut fs, &kernel, &principal, profile, frontier,
+    )
+    .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
     if phase == "recover" {
         engine::commit_batch(
             &mut live,

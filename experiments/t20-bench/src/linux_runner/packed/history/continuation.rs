@@ -40,7 +40,7 @@ pub(super) fn complete(
             counts(profile, base.get())?,
         )
         .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
-        engine::recovery::verify_history(&live, fs, kernel, principal, profile, frontier - 1)
+        engine::recovery::verify_prefix_history(&live, fs, kernel, principal, profile, frontier)
             .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
         (live, base.get(), groups)
     };

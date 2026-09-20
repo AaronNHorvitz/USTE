@@ -95,6 +95,13 @@ do not attribute their timings to the newer implementation.
 
 ## BM-06 materialization
 
+Decision 0182 supplies exact prefix counts and historical verification even when a certified
+prefix ends partway through a 512-record-batch generation. The native/model full-history commands
+remain capped at two records. A bounded test-only 513-record prefix checks 512 creates, the final
+create, then 512 updates against the reference reducer, cold admission and exact retry. It does
+not run 100 generations or qualify larger native construction; multi-batch native tail handling
+and safe scale qualification remain separate prerequisites.
+
 Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions
 through packed authorized writes, verifies certified-tail recovery from the checkpoint, checks every
 historical payload, then explicitly rebuilds from origin with zero overlays and checks all data-batch

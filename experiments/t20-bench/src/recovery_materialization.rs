@@ -44,6 +44,19 @@ impl Bm06Profile {
     pub fn history_payload_bytes(self) -> u64 {
         self.events() * PAYLOAD_BYTES as u64
     }
+    /// Exact graph counts at any certified prefix, including a partial generation.
+    /// Revision one contains only the current policy and its first historical version.
+    pub fn prefix_state_counts(self, revision: u64) -> Result<[u64; 8], &'static str> {
+        if !(1..=self.frontier()).contains(&revision) {
+            return Err("BM-06 prefix revision outside profile");
+        }
+        let batches = revision - 1;
+        let complete = batches / self.batches_per_version();
+        let partial = batches % self.batches_per_version() * BATCH_RECORDS;
+        let current = if complete == 0 { partial } else { self.records };
+        let history = complete * self.records + partial;
+        Ok([current, history, 0, 0, 0, 0, 1, 1])
+    }
     pub fn event_revision(self, ordinal: u64) -> Result<u64, &'static str> {
         if ordinal >= self.events() {
             return Err("BM-06 event ordinal outside profile");
@@ -211,6 +224,49 @@ mod tests {
             assert!(!batch.is_empty() && batch.len() <= 512);
             let encoded = encode_transaction(&GraphTransaction::new(scope(), batch)).unwrap();
             assert!(encoded.len() < 3 * 1024 * 1024);
+        }
+    }
+
+    #[test]
+    fn bm06_prefix_counts_match_independent_event_revision_scan() {
+        for records in [1, 2, 511, 512, 513, 1024, 1025] {
+            let profile = Bm06Profile::new(records).unwrap();
+            let mut increments = vec![[0_u64; 2]; profile.frontier() as usize + 1];
+            for ordinal in 0..profile.events() {
+                let revision = profile.event_revision(ordinal).unwrap() as usize;
+                increments[revision][0] += u64::from(ordinal < records);
+                increments[revision][1] += 1;
+            }
+            let mut totals = [0; 2];
+            for revision in 1..=profile.frontier() {
+                for (total, increment) in totals.iter_mut().zip(increments[revision as usize]) {
+                    *total += increment;
+                }
+                assert_eq!(
+                    profile.prefix_state_counts(revision).unwrap(),
+                    [totals[0], totals[1], 0, 0, 0, 0, 1, 1]
+                );
+            }
+            for invalid in [0, profile.frontier() + 1, u64::MAX] {
+                assert!(profile.prefix_state_counts(invalid).is_err());
+            }
+        }
+        let qualifying = Bm06Profile::new(100_000).unwrap();
+        for (revision, current, history) in [
+            (1, 0, 0),
+            (2, 512, 512),
+            (196, 99_840, 99_840),
+            (197, 100_000, 100_000),
+            (198, 100_000, 100_512),
+            (19_405, 100_000, 9_900_000),
+            (19_406, 100_000, 9_900_512),
+            (19_600, 100_000, 9_999_840),
+            (19_601, 100_000, 10_000_000),
+        ] {
+            assert_eq!(
+                qualifying.prefix_state_counts(revision).unwrap(),
+                [current, history, 0, 0, 0, 0, 1, 1]
+            );
         }
     }
 
