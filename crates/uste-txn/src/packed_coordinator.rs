@@ -131,6 +131,12 @@ where
     ) -> Result<uste_crypto::VaultDecryptReport, TransactionError> {
         self.inner.vault_decrypt_report()
     }
+    /// Trusted per-owner encryption diagnostics; not an authorized consumer surface.
+    pub fn vault_encrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultEncryptReport, TransactionError> {
+        self.inner.vault_encrypt_report()
+    }
     /// Trusted per-owner nonce diagnostics; not caller authorization or a rotation operation.
     pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
         self.inner.vault_nonce_report()

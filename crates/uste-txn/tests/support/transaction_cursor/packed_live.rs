@@ -196,12 +196,15 @@ fn commit_limits() -> PackedCommitLimits {
 fn owner_work_packed_handoff_keeps_exact_vault_counters_without_io() {
     let mut parts = parts(5);
     let work = parts.recovery.vault_decrypt_report().unwrap();
+    let encryption = parts.recovery.vault_encrypt_report().unwrap();
+    assert!(encryption.successful_calls > 0 && encryption.produced_encoded_bytes > 0);
     let nonces = parts.recovery.vault_nonce_report().unwrap();
     assert!(work.successful_calls > 0 && nonces.issued_nonces > 0);
     parts.fs.arm(FaultPlan::default()).unwrap();
     let (fs, _, live, _) = install(parts, 1, 0);
     for _ in 0..3 {
         assert_eq!(live.vault_decrypt_report().unwrap(), work);
+        assert_eq!(live.vault_encrypt_report().unwrap(), encryption);
         assert_eq!(live.vault_nonce_report().unwrap(), nonces);
     }
     for operation in [

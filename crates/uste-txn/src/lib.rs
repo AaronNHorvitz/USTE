@@ -1155,6 +1155,18 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted per-owner encryption diagnostics; no reducer snapshot, I/O or consumer grant.
+    pub fn vault_encrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultEncryptReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .vault_encrypt_report()
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted nonce headroom for this owner only; no reset, rotation or allocation-size claim.
     pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
         if self.uncertain {

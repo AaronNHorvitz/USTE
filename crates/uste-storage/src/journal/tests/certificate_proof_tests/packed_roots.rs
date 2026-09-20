@@ -200,7 +200,13 @@ fn packed_roots_binding_limits_and_poison_refuse_before_output_or_reads() {
     );
     let nonce_report = f.store.vault_nonce_report().unwrap();
     assert_eq!(nonce_report, f.store.vault.nonce_report());
+    let encryption_report = f.store.vault_encrypt_report().unwrap();
+    assert_eq!(encryption_report, f.store.vault.encrypt_report().unwrap());
     f.store.poisoned = true;
+    assert_eq!(
+        f.store.vault_encrypt_report(),
+        Err(StorageError::NeedsRecovery)
+    );
     assert_eq!(
         f.store.vault_nonce_report(),
         Err(StorageError::NeedsRecovery)
@@ -211,6 +217,7 @@ fn packed_roots_binding_limits_and_poison_refuse_before_output_or_reads() {
     assert_eq!(f.fs.operation_count(Operation::CreateNew), 0);
     assert_eq!(f.fs.operation_count(Operation::OpenExisting), 0);
     f.store.vault.lock();
+    assert_eq!(f.store.vault_encrypt_report().unwrap(), encryption_report);
     assert_eq!(f.store.vault_nonce_report().unwrap(), nonce_report);
     assert!(publish(&mut f, 2).is_err());
     assert!(discover(&mut f, &proof, limits(2)).is_err());

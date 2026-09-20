@@ -639,6 +639,10 @@ fn lost_response_is_outcome_unknown_then_durable_retry_after_restart() {
         Err(TransactionError::OutcomeUnknown)
     );
     assert_eq!(
+        coordinator.vault_encrypt_report(),
+        Err(TransactionError::OutcomeUnknown)
+    );
+    assert_eq!(
         coordinator.vault_nonce_report(),
         Err(TransactionError::OutcomeUnknown)
     );

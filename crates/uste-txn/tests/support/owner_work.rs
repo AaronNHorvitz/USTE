@@ -39,6 +39,11 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
     .unwrap();
     let initial = coordinator.vault_decrypt_report().unwrap();
     assert_eq!(initial, uste_crypto::VaultDecryptReport::default());
+    let initial_encryption = coordinator.vault_encrypt_report().unwrap();
+    assert_eq!(initial_encryption.successful_calls, 3);
+    assert_eq!(initial_encryption.failed_calls, 0);
+    assert_eq!(initial_encryption.produced_encoded_bytes, 3 * 4161);
+    assert!(initial_encryption.accepted_plaintext_bytes > 0);
     let nonces = coordinator.vault_nonce_report().unwrap();
     assert_eq!(nonces.issued_nonces, 3); // Creation manifest, certificate header, segment header.
     assert_eq!(
@@ -51,6 +56,12 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
         .unwrap();
     let after = coordinator.vault_decrypt_report().unwrap();
     let after_nonce = coordinator.vault_nonce_report().unwrap();
+    let after_encryption = coordinator.vault_encrypt_report().unwrap();
+    assert_eq!(after_encryption.successful_calls, 5);
+    assert_eq!(after_encryption.produced_encoded_bytes, 5 * 4161);
+    assert!(
+        after_encryption.accepted_plaintext_bytes > initial_encryption.accepted_plaintext_bytes
+    );
     assert_eq!(after_nonce.issued_nonces, nonces.issued_nonces + 2);
     fs.arm(
         FaultPlan::new([FaultPoint {
@@ -64,6 +75,10 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
     for _ in 0..3 {
         assert_eq!(coordinator.vault_decrypt_report().unwrap(), after);
         assert_eq!(coordinator.vault_nonce_report().unwrap(), after_nonce);
+        assert_eq!(
+            coordinator.vault_encrypt_report().unwrap(),
+            after_encryption
+        );
     }
     assert_eq!(fs.pending_faults(), 1);
     assert_eq!(fs.operation_count(Operation::ReadAt), 0);
@@ -95,6 +110,11 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
     .unwrap();
     let storage_report = journal.vault_decrypt_report().unwrap();
     let storage_nonce = journal.vault_nonce_report().unwrap();
+    let storage_encryption = journal.vault_encrypt_report().unwrap();
+    assert_eq!(
+        storage_encryption,
+        uste_crypto::VaultEncryptReport::default()
+    );
     assert!(storage_report.successful_calls > 0);
     assert_eq!(storage_nonce.issued_nonces, 0);
     drop(journal);
@@ -110,6 +130,10 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
     )
     .unwrap();
     assert_eq!(coordinator.vault_decrypt_report().unwrap(), storage_report);
+    assert_eq!(
+        coordinator.vault_encrypt_report().unwrap(),
+        storage_encryption
+    );
     assert_eq!(coordinator.vault_nonce_report().unwrap(), storage_nonce);
     assert_eq!(
         coordinator
@@ -118,6 +142,10 @@ fn owner_work_ordinary_reports_are_cumulative_read_only_and_never_snapshot() {
         outcome
     );
     assert_eq!(coordinator.vault_nonce_report().unwrap(), storage_nonce);
+    assert_eq!(
+        coordinator.vault_encrypt_report().unwrap(),
+        storage_encryption
+    );
 }
 
 #[test]
@@ -165,6 +193,8 @@ fn owner_work_recovery_reports_include_open_and_cursor_work_without_reset() {
     )
     .unwrap();
     assert_eq!(recovery.vault_decrypt_report().unwrap(), expected);
+    let encryption = recovery.vault_encrypt_report().unwrap();
+    assert_eq!(encryption, uste_crypto::VaultEncryptReport::default());
     let nonces = recovery.vault_nonce_report().unwrap();
     assert_eq!(nonces.issued_nonces, 0);
     fs.arm(
@@ -219,6 +249,7 @@ fn owner_work_recovery_reports_include_open_and_cursor_work_without_reset() {
     assert_eq!(recovery.vault_nonce_report().unwrap(), nonces);
     for _ in 0..3 {
         assert_eq!(recovery.vault_decrypt_report().unwrap(), after);
+        assert_eq!(recovery.vault_encrypt_report().unwrap(), encryption);
     }
     assert_eq!(fs.operation_count(Operation::ReadAt), reads);
 }

@@ -148,6 +148,7 @@ mod tests {
             used_nonces: Default::default(),
             nonce_limit: 1,
             measurement: Measurement::new(),
+            encryption_measurement: super::super::encrypt_measurement::Measurement::new(),
         };
         let context = CryptoContext::new(
             db,

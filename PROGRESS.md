@@ -2,20 +2,38 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## In progress — vault encryption accounting verification (Decisions 0212/0213)
+## Latest verified core increment — vault encryption accounting (Decision 0212)
 
 D0211 completed below without a competing compiler. After confirming both sample processes
 exited, unchanged source certificate, 25 GiB available RAM/2.0 GiB free swap/952 GiB disk,
 focused crypto/coordinator verification started in session 50678 / `uste-d212-focused.scope`,
 invocation `c2d18bbf447044ff94d0ec702e2758fa`. One job/thread, 3G/4G/512M group,
-assertion/overflow-enabled test opt-level 1; result pending. Exact command:
+assertion/overflow-enabled test opt-level 1. **164 tests passed** in five executables, no failures
+or ignores: crypto unit 9/0.00s, crypto boundary 14/2.22s, transaction unit 10/0.00s, authorization
+13/0.03s, coordinator 118/106.28s, after 30.01s compile. Final scope peak 859,082,752 bytes,
+zero swap, CPU 138,802,534,000 ns. Exact command:
 
 ```sh
 systemd-run --user --scope --unit=uste-d212-focused.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-crypto -p uste-txn --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d212-focused-verification.log; verification_status=$?; systemctl --user show uste-d212-focused.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
 ```
 
-Next fix any failure, run full workspace tests/strict Clippy/docs, commit the verified core
-boundary, then verify and commit the separate native wiring. Do not mark T-20/T-19 complete.
+After fresh 25 GiB available RAM/2.0 GiB free swap/952 GiB disk and no competing workload,
+full workspace verification passed in session 54222 / `uste-d212-workspace.scope`, invocation
+`ea32544adc434cc4832ba0045bf894a8`, with the same limits/job/thread/test profile. **736 tests
+passed in 47 executables, none failed/ignored**. Compile 1m45s; graph disk 120/478.48s,
+checkpoint 50/109.72s, storage 231/33.90s, coordinator 118/106.02s. Strict all-feature Clippy
+passed in 11.85s and warnings-denied docs in 15.88s. Final scope peak 3,221,434,368 bytes,
+zero swap, CPU 869,086,515,000 ns. This includes D0210 and D0212, not standalone D0213.
+Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d212-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d212-workspace-verification.log; verification_status=$?; systemctl --user show uste-d212-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Next commit/push the reviewed core boundary, then verify and commit the separate native wiring.
+D0213 includes paired atomic owner admission and per-owner encryption output totals across all
+native phase/process paths; its release tests and strict lint are still pending. D0211 is pushed
+as `21b2bda`; no large measurement will be rerun unchanged. T-20/T-19 remain incomplete.
 
 ## Completed development measurement — single-pass/cache comparison (Decision 0211)
 
@@ -66,7 +84,7 @@ Decision 0212 is source-only work prepared during this run and explicitly exclud
 binary: separate fixed-size vault encryption-work diagnostics, trusted journal/coordinator/
 recovery/packed getters preserving poison/uncertainty and no-snapshot/no-I/O guards, plus
 overflow/poison, nonce/error, exact framing, lock/unlock and owner-handoff tests. These edits
-are undergoing focused verification above. Decision 0213 separately drafts native
+passed core verification above. Decision 0213 separately drafts native
 paired owner admission with a sibling encryption ledger; unchanged decrypt output and explicit
 partial-accounting flags remain. No consumer facade changes; complete authenticated I/O stays
 false. Review corrected copied getter comments and the repeat-resume zero-encryption test

@@ -143,6 +143,8 @@ mod session;
 pub use session::UnlockedKeySession;
 mod measurement;
 pub use measurement::VaultDecryptReport;
+mod encrypt_measurement;
+pub use encrypt_measurement::VaultEncryptReport;
 
 /// Privileged cardinality diagnostics for one vault's bounded nonce registry.
 /// Not an encryption-success count, memory measurement or permission to reset a session.
@@ -163,6 +165,7 @@ pub struct KeyVault<W, E> {
     used_nonces: BTreeSet<[u8; NONCE_BYTES]>,
     nonce_limit: usize,
     measurement: measurement::Measurement,
+    encryption_measurement: encrypt_measurement::Measurement,
 }
 
 impl<W, E: EntropySource> KeyVault<W, E> {
@@ -186,6 +189,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
             measurement: measurement::Measurement::new(),
+            encryption_measurement: encrypt_measurement::Measurement::new(),
         })
     }
 
@@ -201,6 +205,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
             measurement: measurement::Measurement::new(),
+            encryption_measurement: encrypt_measurement::Measurement::new(),
         }
     }
 
@@ -244,6 +249,21 @@ impl<W, E: EntropySource> KeyVault<W, E> {
 
     /// Encrypt and pad an object, consuming a fresh entropy-supplied nonce.
     pub fn encrypt(
+        &mut self,
+        context: CryptoContext,
+        plaintext: &[u8],
+    ) -> Result<EncryptedEnvelope, CryptoError> {
+        let result = self.encrypt_inner(context, plaintext);
+        self.encryption_measurement.record(
+            result
+                .as_ref()
+                .ok()
+                .map(|envelope| (HEADER_BYTES + envelope.ciphertext.len(), plaintext.len())),
+        );
+        result
+    }
+
+    fn encrypt_inner(
         &mut self,
         context: CryptoContext,
         plaintext: &[u8],
@@ -296,6 +316,14 @@ impl<W, E: EntropySource> KeyVault<W, E> {
     /// Overflow/poison invalidates only reports, never alters cryptographic operation results.
     pub fn decrypt_report(&self) -> Result<VaultDecryptReport, CryptoError> {
         self.measurement.report()
+    }
+
+    /// Privileged cumulative completed encryption calls for this vault's lifetime.
+    /// Success is not envelope serialization, durable publication or a nonce count.
+    /// Excludes key wrapping, other vaults and failed-call byte work. Lock/unlock
+    /// retains counts; diagnostic overflow/poison never changes encryption results.
+    pub fn encrypt_report(&self) -> Result<VaultEncryptReport, CryptoError> {
+        self.encryption_measurement.report()
     }
 
     /// Trusted diagnostics only: authorize before exposing cardinality to a caller.
@@ -512,6 +540,7 @@ mod tests {
             used_nonces: Default::default(),
             nonce_limit: 0,
             measurement: super::measurement::Measurement::new(),
+            encryption_measurement: super::encrypt_measurement::Measurement::new(),
         };
         let context = CryptoContext::new(
             database,

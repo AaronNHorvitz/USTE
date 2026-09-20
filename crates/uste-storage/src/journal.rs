@@ -276,6 +276,14 @@ where
         self.vault.decrypt_report().map_err(StorageError::Crypto)
     }
 
+    /// Trusted per-owner encryption diagnostics; not durable bytes, other owners or key wrapping.
+    pub fn vault_encrypt_report(&self) -> Result<uste_crypto::VaultEncryptReport, StorageError> {
+        if self.poisoned {
+            return Err(StorageError::NeedsRecovery);
+        }
+        self.vault.encrypt_report().map_err(StorageError::Crypto)
+    }
+
     /// Trusted nonce headroom for this owner only; no reset, rotation or total-process claim.
     pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, StorageError> {
         if self.poisoned {

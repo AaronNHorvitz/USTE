@@ -14,6 +14,80 @@ const SECURITY_VECTORS: &str = include_str!("../../../acceptance/r0/security-lif
 const CRYPTO_VECTORS: &str = include_str!("../../../acceptance/r1/crypto-v1.tsv");
 
 #[test]
+fn vault_encrypt_measurements_preserve_framing_failures_locking_and_nonce_accounting() {
+    use uste_crypto::VaultEncryptReport;
+    let db = database(1);
+    let ctx = context(db, FrameClass::Small4KiB, 1);
+    let mut vault = test_vault(db, vec![[0x21; 24], [0x21; 24], [0x22; 24], [0x23; 24]]);
+    assert_eq!(
+        vault.encrypt_report().unwrap(),
+        VaultEncryptReport::default()
+    );
+    let first = vault.encrypt(ctx, b"synthetic canary").unwrap();
+    let encoded = first.encode().unwrap();
+    let mut expected = VaultEncryptReport {
+        successful_calls: 1,
+        failed_calls: 0,
+        produced_encoded_bytes: encoded.len() as u64,
+        accepted_plaintext_bytes: 16,
+    };
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    assert_eq!(
+        vault
+            .encrypt(context(database(9), FrameClass::Small4KiB, 1), b"foreign")
+            .unwrap_err(),
+        CryptoError::InvalidContext
+    );
+    assert_eq!(
+        vault
+            .encrypt(ctx, &vec![0; MAX_PLAINTEXT_BYTES + 1])
+            .unwrap_err(),
+        CryptoError::ResourceLimit
+    );
+    assert_eq!(
+        vault.encrypt(ctx, b"duplicate").unwrap_err(),
+        CryptoError::IntegrityFailure
+    );
+    vault.lock();
+    assert_eq!(
+        vault.encrypt(ctx, b"locked").unwrap_err(),
+        CryptoError::Locked
+    );
+    expected.failed_calls = 4;
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    vault.unlock(&mut TestAdapter).unwrap();
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    let blob_ctx = context(db, FrameClass::Blob64KiB, 2);
+    let blob = vault.encrypt(blob_ctx, &[7; 65537]).unwrap();
+    expected.successful_calls += 1;
+    expected.produced_encoded_bytes += blob.encode().unwrap().len() as u64;
+    expected.accepted_plaintext_bytes += 65537;
+    assert_eq!(expected.produced_encoded_bytes, 4161 + 131137);
+    assert_eq!(expected.accepted_plaintext_bytes, 65553);
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    assert_eq!(vault.nonce_report().issued_nonces, 2);
+    let empty = vault.encrypt(ctx, b"").unwrap();
+    assert_eq!(empty.encode().unwrap().len(), 4161);
+    expected.successful_calls += 1;
+    expected.produced_encoded_bytes += 4161;
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    assert_eq!(
+        vault.encrypt(ctx, b"entropy exhausted").unwrap_err(),
+        CryptoError::RetryableUnavailable
+    );
+    expected.failed_calls += 1;
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    assert_eq!(vault.nonce_report().issued_nonces, 3);
+    assert_eq!(
+        vault.decrypt(ctx, &first).unwrap().as_slice(),
+        b"synthetic canary"
+    );
+    assert_eq!(first.encode().unwrap(), encoded);
+    assert_eq!(vault.encrypt_report().unwrap(), expected);
+    assert!(!format!("{expected:?}").contains("synthetic canary"));
+}
+
+#[test]
 fn vault_decrypt_measurements_preserve_errors_locking_and_envelope_bytes() {
     use uste_crypto::VaultDecryptReport;
     let id = database(1);

@@ -296,6 +296,15 @@ where
             .map_err(TransactionError::Storage)
     }
 
+    /// Trusted encryption diagnostics retained through consuming handoff, not durable byte counts.
+    pub fn vault_encrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultEncryptReport, TransactionError> {
+        self.journal
+            .vault_encrypt_report()
+            .map_err(TransactionError::Storage)
+    }
+
     /// Trusted per-owner nonce headroom; no reset/rotation or whole-process accounting.
     pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
         self.journal
