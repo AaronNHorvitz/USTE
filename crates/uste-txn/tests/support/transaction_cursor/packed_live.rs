@@ -547,6 +547,10 @@ fn packed_live_every_observed_commit_fault_preserves_cold_exact_retry() {
                 assert_eq!(fs.pending_faults(), 0);
                 assert!(result.is_err(), "{operation:?}/{occurrence}/{action:?}");
                 if result == Err(TransactionError::OutcomeUnknown) {
+                    assert_eq!(
+                        live.vault_nonce_report(),
+                        Err(TransactionError::OutcomeUnknown)
+                    );
                     assert!(matches!(
                         live.packed_index_reader(),
                         Err(TransactionError::OutcomeUnknown)

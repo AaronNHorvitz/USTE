@@ -11,7 +11,24 @@ fn report(output: Output) -> serde_json::Value {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    serde_json::from_slice(&output.stdout).unwrap()
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let nonces = &report["construction_nonce_session"];
+    assert_eq!(nonces["measurement_scope"], "construction-owner-only");
+    for flag in [
+        "includes_bootstrap_owner",
+        "includes_other_vaults",
+        "includes_key_adapter",
+        "memory_bytes_measured",
+        "writer_rotation_implemented",
+    ] {
+        assert_eq!(nonces[flag], false);
+    }
+    assert_eq!(nonces["nonce_limit"], 1_048_576);
+    assert_eq!(
+        nonces["issued_nonces"].as_u64().unwrap() + nonces["remaining_nonces"].as_u64().unwrap(),
+        1_048_576
+    );
+    report
 }
 
 #[test]
@@ -42,6 +59,12 @@ fn bounded_prefix_policy_only_exact_resume_and_rewind_refusal() {
 fn bounded_prefix_multibatch_clean_restart_preserves_source() {
     let fixture = Fixture::new();
     let first = report(prefix(&fixture, "create-prefix", 513, 3));
+    assert!(
+        first["construction_nonce_session"]["issued_nonces"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(first["verified_history_versions"], 513);
     let certificates = fs::read(fixture.certificates()).unwrap();
     let second = report(prefix(&fixture, "resume-prefix", 513, 5));

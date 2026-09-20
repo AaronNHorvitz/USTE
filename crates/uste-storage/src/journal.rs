@@ -276,6 +276,14 @@ where
         self.vault.decrypt_report().map_err(StorageError::Crypto)
     }
 
+    /// Trusted nonce headroom for this owner only; no reset, rotation or total-process claim.
+    pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, StorageError> {
+        if self.poisoned {
+            return Err(StorageError::NeedsRecovery);
+        }
+        Ok(self.vault.nonce_report())
+    }
+
     /// Create, fully flush and atomically publish a database directory.
     pub fn create(
         filesystem: &mut F,

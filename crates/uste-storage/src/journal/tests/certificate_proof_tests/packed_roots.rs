@@ -198,13 +198,20 @@ fn packed_roots_binding_limits_and_poison_refuse_before_output_or_reads() {
             .discover_packed_roots_proven(&mut f.fs, scoped, PROFILE, &proof, limits(2))
             .is_err()
     );
+    let nonce_report = f.store.vault_nonce_report().unwrap();
+    assert_eq!(nonce_report, f.store.vault.nonce_report());
     f.store.poisoned = true;
+    assert_eq!(
+        f.store.vault_nonce_report(),
+        Err(StorageError::NeedsRecovery)
+    );
     assert!(publish(&mut f, 2).is_err());
     assert!(discover(&mut f, &proof, limits(2)).is_err());
     f.store.poisoned = false;
     assert_eq!(f.fs.operation_count(Operation::CreateNew), 0);
     assert_eq!(f.fs.operation_count(Operation::OpenExisting), 0);
     f.store.vault.lock();
+    assert_eq!(f.store.vault_nonce_report().unwrap(), nonce_report);
     assert!(publish(&mut f, 2).is_err());
     assert!(discover(&mut f, &proof, limits(2)).is_err());
     assert_eq!(f.fs.operation_count(Operation::CreateNew), 0);

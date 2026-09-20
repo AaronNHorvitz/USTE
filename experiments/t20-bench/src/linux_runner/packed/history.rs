@@ -271,6 +271,7 @@ fn run_bounded_observed(
     let principal = authenticate(&kernel)?;
     let mut resume_base_revision = None;
     let mut resume_suffix_groups = None;
+    let mut construction_nonce_session = None;
     if is_create || is_resume {
         if is_create && recovered_frontier != 1 {
             return Err(error("USTE_BM06_PACKED_FRONTIER"));
@@ -289,6 +290,17 @@ fn run_bounded_observed(
             resume_base_revision = Some(base);
             resume_suffix_groups = Some(groups);
         }
+        let nonces = live
+            .vault_nonce_report()
+            .map_err(|_| error("USTE_BM06_NONCE_REPORT"))?;
+        construction_nonce_session = Some(serde_json::json!({
+            "measurement_scope": "construction-owner-only",
+            "includes_bootstrap_owner": false, "includes_other_vaults": false,
+            "includes_key_adapter": false, "memory_bytes_measured": false,
+            "writer_rotation_implemented": false,
+            "issued_nonces": nonces.issued_nonces,
+            "nonce_limit": nonces.nonce_limit, "remaining_nonces": nonces.remaining_nonces,
+        }));
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
     }
@@ -409,6 +421,7 @@ fn run_bounded_observed(
         "complete_authenticated_io": false, "kernel_filesystem_device_cache": "uncontrolled",
         "records": profile.records(), "frontier": if is_tail { profile.frontier() } else { frontier },
         "construction_target_revision": target,
+        "construction_nonce_session": construction_nonce_session,
         "selected_base_revision": base.get(), "suffix_groups": suffix, "origin_suffix_groups": origin_groups,
         "checkpoint_tail_replay": is_checkpoint_recovery,
         "verified_history_versions": verified, "history_verified_through_revision": frontier, "v1_state_digest": digest,

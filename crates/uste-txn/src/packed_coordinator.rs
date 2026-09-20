@@ -135,6 +135,14 @@ where
             .vault_decrypt_report()
             .map_err(TransactionError::Storage)
     }
+    /// Trusted per-owner nonce diagnostics; not caller authorization or a rotation operation.
+    pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
+        self.state()?;
+        self.inner
+            .journal
+            .vault_nonce_report()
+            .map_err(TransactionError::Storage)
+    }
     pub fn reducer_and_index_maintenance(
         &mut self,
     ) -> Result<ReducerIndexMaintenance<'_, S, F, W, E, I>, TransactionError> {

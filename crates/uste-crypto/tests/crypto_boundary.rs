@@ -165,6 +165,62 @@ fn wrong_key_context_nonce_ciphertext_tag_and_truncation_fail_closed() {
 }
 
 #[test]
+fn nonce_headroom_reports_exact_reservations_without_reset_or_cross_vault_totals() {
+    let db = database(3);
+    let cap = MAX_NONCES_PER_WRITER_SESSION;
+    let mut vault = test_vault(db, vec![[0x42; 24], [0x42; 24], [0x43; 24]]);
+    let ctx = context(db, FrameClass::Small4KiB, 2);
+    let empty = vault.nonce_report();
+    assert_eq!(
+        (
+            empty.issued_nonces,
+            empty.nonce_limit,
+            empty.remaining_nonces
+        ),
+        (0, cap, cap)
+    );
+    assert_eq!(
+        vault
+            .encrypt(context(database(9), FrameClass::Small4KiB, 2), b"foreign")
+            .unwrap_err(),
+        CryptoError::InvalidContext
+    );
+    assert_eq!(vault.nonce_report(), empty);
+    let encrypted = vault.encrypt(ctx, b"first").unwrap();
+    let first = vault.nonce_report();
+    assert_eq!((first.issued_nonces, first.remaining_nonces), (1, cap - 1));
+    assert_eq!(
+        vault.encrypt(ctx, b"duplicate").unwrap_err(),
+        CryptoError::IntegrityFailure
+    );
+    assert_eq!(vault.nonce_report(), first);
+    assert_eq!(vault.decrypt(ctx, &encrypted).unwrap().as_slice(), b"first");
+    assert_eq!(vault.nonce_report(), first);
+    vault.lock();
+    assert_eq!(vault.nonce_report(), first);
+    assert_eq!(
+        vault.encrypt(ctx, b"locked").unwrap_err(),
+        CryptoError::Locked
+    );
+    vault.unlock(&mut TestAdapter).unwrap();
+    assert_eq!(vault.nonce_report(), first);
+    vault.encrypt(ctx, b"second").unwrap();
+    assert_eq!(vault.nonce_report().issued_nonces, 2);
+    let mut failed = KeyVault::create(
+        db,
+        &mut TestAdapter,
+        ScriptedEntropy::with_failure(vec![vec![0x41; 32]]),
+    )
+    .unwrap();
+    assert_eq!(
+        failed.encrypt(ctx, b"entropy").unwrap_err(),
+        CryptoError::RetryableUnavailable
+    );
+    assert_eq!(failed.nonce_report(), empty);
+    assert_eq!(vault.nonce_report().issued_nonces, 2);
+}
+
+#[test]
 fn entropy_failure_duplicate_nonce_and_locked_state_match_literal_vectors() {
     let database = database(3);
     let mut adapter = TestAdapter;

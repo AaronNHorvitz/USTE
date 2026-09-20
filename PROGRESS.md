@@ -2,7 +2,58 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — bounded native construction (Decision 0190)
+## Latest verified increment — construction nonce headroom (Decision 0191)
+
+Built and tested on pushed `ed0bdd6`: privileged per-vault nonce diagnostics expose exact issued,
+limit and remaining counts without resetting or changing encryption. Lock/unlock retains counts;
+journal poison/coordinator uncertainty refuse diagnostics. Native construction samples its actual
+owner before dropping it, explicitly excluding bootstrap, other vaults and key-adapter work.
+Other phases report null. No consumer authorization surface or ciphertext format changes.
+
+Initial focused session 44257 failed compilation on an unnecessary qualification in the new test;
+removed that qualification, without changing lint policy. Corrected session 40493 /
+`run-p1124147-i22089072.scope` passed all 19 crypto tests (13 integration/2.29 s), one storage
+poison/refusal case and the packed live every-observed-commit-fault sweep/1.11 s. Compile times
+1.18/40.15/19.76 s; strict workspace Clippy 11.96 s. Scope peak was not captured.
+Native session 52750 / `run-p1126858-i22123479.scope` passed nine active history CLI tests/62.27 s,
+one explicit scale case ignored in that invocation; compile 37.52 s, strict standalone Clippy
+1.62 s, sampled peak 375,693,312 bytes/zero swap. Warning-denying workspace docs session 77624
+passed/14.02 s. Full historical core remains 687 at `c3b7047`; full standalone 113 at `ed0bdd6`.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+export CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true
+{ cargo test -p uste-crypto --all-features --locked --offline -- --test-threads=1 &&
+cargo test -p uste-storage --all-features --locked --offline packed_roots_binding_limits_and_poison -- --test-threads=1 &&
+cargo test -p uste-txn --all-features --locked --offline packed_live_every_observed_commit_fault -- --test-threads=1 &&
+cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d191-focused.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d191-native.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+```
+
+[Pinned native measurement](docs/evidence/native-packed-nonce-headroom-development.json) includes
+exact replacement-source/binary/lock hashes, invocation and all five phase reports. Explicit scale
+session 56027 / `run-p1127945-i22107643.scope` passed/90.75 s, total wall 90.81 s, peak RSS
+347,652 KiB/zero swaps. Construction through checkpoint 199 used **37,127 nonces**, leaving
+1,011,449; interrupted-tail resume used 370, repeated terminal resume zero. These are per-owner
+observations, not extrapolated exact-size bounds or successful-encryption totals. All terminal
+digests match the earlier pinned fixture. Retained synthetic root:
+`experiments/t20-bench/target/packed-history-cli-1128123-1789884453940092208`.
+Preflight 28 GiB available RAM/2.0 GiB free swap/998 GiB free disk; sampled scope peak
+1,370,808,320 bytes/zero swap is not its final lifetime peak. Other workloads remained untouched.
+
+Format/diff/docs/task checks pass. Next separate packed recovery/admission, history verification
+and terminal-digest work before larger bounded development runs. Complete accounting and safe
+exact-size construction/30-trial reserved-host qualification remain open; current headroom is not
+a benchmark reservation. T-20/T-19, pinned M1 and the entire roadmap/release gates remain unchanged.
+Supersedes older next-step text.
+
+## Prior verified increment — bounded native construction (Decision 0190)
 
 Built and tested on pushed `8cfd933`: packed native create-prefix/resume-prefix accept explicit
 complete-generation targets through the checkpoint, including policy-only revision one.

@@ -203,6 +203,13 @@ checkpoint, while ordinary open still requires checkpoint/terminal state. Report
 `construction_target_revision` (null on other phases). These commands do not rotate the writer
 incarnation, clear nonce tracking, bypass exhausted-session limits or qualify larger scale.
 
+Decision 0191 adds `construction_nonce_session` to create/resume reports, sampled before the
+construction owner is dropped. It declares issued/remaining nonces and the unchanged 1,048,576
+limit, excluding bootstrap and other owners and key-adapter work. Other phases report null.
+These are cardinalities, not allocator bytes, successful-encryption totals or a transaction
+capacity guarantee. Lock/unlock cannot reset the registry; exhaustion still requires durable
+writer-incarnation rotation, which these commands do not implement.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

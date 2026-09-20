@@ -19,6 +19,21 @@ fn packed_history_native_513_record_intermediate_tail_sigkill_resumes() {
         assert_eq!(report["development_record_limit"], 513);
         assert_eq!(report["qualifying_recovery_trials"], 0);
         assert_eq!(report["engine_benchmark"], false);
+        let nonces = &report["construction_nonce_session"];
+        if matches!(phase, "create" | "resume") {
+            assert_eq!(nonces["measurement_scope"], "construction-owner-only");
+            assert_eq!(nonces["nonce_limit"], 1_048_576);
+            assert_eq!(
+                nonces["issued_nonces"].as_u64().unwrap()
+                    + nonces["remaining_nonces"].as_u64().unwrap(),
+                1_048_576
+            );
+            if phase == "create" {
+                assert!(nonces["issued_nonces"].as_u64().unwrap() > 0);
+            }
+        } else {
+            assert!(nonces.is_null());
+        }
         report
     };
     let checkpoint = run("create");

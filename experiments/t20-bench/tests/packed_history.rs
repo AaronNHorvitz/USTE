@@ -183,6 +183,7 @@ fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
     assert_eq!(tail["history_verified_through_revision"], 100);
     assert!(tail["v1_state_digest"].is_null());
     let recovered = fixture.run("recover");
+    assert!(recovered["construction_nonce_session"].is_null());
     assert_eq!(recovered["suffix_groups"], 1);
     assert_eq!(recovered["verified_history_versions"], 200);
     assert_eq!(recovered["engine_benchmark"], false);

@@ -144,6 +144,15 @@ pub use session::UnlockedKeySession;
 mod measurement;
 pub use measurement::VaultDecryptReport;
 
+/// Privileged cardinality diagnostics for one vault's bounded nonce registry.
+/// Not an encryption-success count, memory measurement or permission to reset a session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct VaultNonceReport {
+    pub issued_nonces: usize,
+    pub nonce_limit: usize,
+    pub remaining_nonces: usize,
+}
+
 /// Lockable master key plus one bounded in-memory writer nonce session.
 pub struct KeyVault<W, E> {
     database: DatabaseId,
@@ -287,6 +296,20 @@ impl<W, E: EntropySource> KeyVault<W, E> {
     /// Overflow/poison invalidates only reports, never alters cryptographic operation results.
     pub fn decrypt_report(&self) -> Result<VaultDecryptReport, CryptoError> {
         self.measurement.report()
+    }
+
+    /// Trusted diagnostics only: authorize before exposing cardinality to a caller.
+    /// Counts distinct nonces reserved even if encryption subsequently fails. Entropy failures,
+    /// duplicate nonces and pre-admission refusals reserve nothing. Lock/unlock never resets it.
+    /// Excludes key-adapter nonces and every other vault; does not expose nonce values.
+    #[must_use]
+    pub fn nonce_report(&self) -> VaultNonceReport {
+        let issued_nonces = self.used_nonces.len();
+        VaultNonceReport {
+            issued_nonces,
+            nonce_limit: self.nonce_limit,
+            remaining_nonces: self.nonce_limit - issued_nonces,
+        }
     }
 
     /// Derive a deterministic public opaque identifier under the dedicated name-token role.
@@ -505,6 +528,14 @@ mod tests {
         assert_eq!(
             vault.encrypt(context, b"refused").unwrap_err(),
             CryptoError::NonceSessionExhausted
+        );
+        assert_eq!(
+            vault.nonce_report(),
+            super::VaultNonceReport {
+                issued_nonces: 0,
+                nonce_limit: 0,
+                remaining_nonces: 0,
+            }
         );
     }
 }
