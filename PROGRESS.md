@@ -2,7 +2,77 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — newest page-cache fast path (Decision 0210)
+## In progress — vault encryption accounting verification (Decisions 0212/0213)
+
+D0211 completed below without a competing compiler. After confirming both sample processes
+exited, unchanged source certificate, 25 GiB available RAM/2.0 GiB free swap/952 GiB disk,
+focused crypto/coordinator verification started in session 50678 / `uste-d212-focused.scope`,
+invocation `c2d18bbf447044ff94d0ec702e2758fa`. One job/thread, 3G/4G/512M group,
+assertion/overflow-enabled test opt-level 1; result pending. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d212-focused.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-crypto -p uste-txn --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d212-focused-verification.log; verification_status=$?; systemctl --user show uste-d212-focused.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Next fix any failure, run full workspace tests/strict Clippy/docs, commit the verified core
+boundary, then verify and commit the separate native wiring. Do not mark T-20/T-19 complete.
+
+## Completed development measurement — single-pass/cache comparison (Decision 0211)
+
+Pushed/clean capability baseline `d3302394743d558a1f9e29dce7875effe446717d`; release binary
+SHA-256 `2577c8ab7635f49d472aaf88f6f44de04d13ea19c12b46242089790e0f3d22d7`.
+D0209 single-pass authentication and D0210 newest-slot cache lookup are measured together,
+not attributed individually. Root/standalone locks, features and all fixture/oracle/cache/
+query limits remain unchanged from D0206/D0208. No qualifying profile is admitted.
+
+Session 96516 / `uste-d211-query.scope`, invocation `ac8e603fba7945749f036c2a2c3d8af1`, exited
+zero after the complete independent correctness query pass on retained
+`experiments/t20-bench/target/native-packed20000.ggoHSe`; separate report root
+`experiments/t20-bench/target/native-lookup-fast20000.pG8YCJ`. Fresh preflight 25 GiB available
+RAM/2.0 GiB free swap/952 GiB free disk, no competing workload. Same 3G/4G/512M group,
+1,800-second command timeout/10-second TERM grace. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d211-query.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-lookup-fast20000.pG8YCJ/query.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-lookup-fast20000.pG8YCJ/query.json 2> experiments/t20-bench/target/native-lookup-fast20000.pG8YCJ/query.stderr; measurement_status=$?; systemctl --user show uste-d211-query.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-lookup-fast20000.pG8YCJ/query.scope; exit "$measurement_status"'
+```
+
+All 384 outcomes (313 successful, 71 expected result-limit, zero visit-limit), output/oracle
+digests, logical work, cache counters, query adapter/vault work and setup owner work exactly
+match D0208. Query 699,843 ms versus 793,165 ms (11.8% lower); setup 53,535 ms versus 61,895 ms.
+Wall 753.54s, user 679.81s/system 72.01s, peak RSS 265,864 KiB; scope peak 276,152,320 bytes,
+zero swap, CPU 751,961,695,000 ns. Source certificate SHA-256 remains
+`b8fea4e223947316555069db1869b7ef57e121077e84ceff02a1930061f1e6cd`; binary identity unchanged.
+
+After fresh 25 GiB available RAM/2.0 GiB free swap/952 GiB disk and no competing workload,
+one changed-binary supervised sample was admitted with the original deadlines and scope limits.
+Session 57280 / `uste-d211-sample.scope`, invocation `b0ecd85c5c4c464ba8ff407967c4c532`,
+exited zero. Exact command is the query command above with scope `uste-d211-sample.scope`,
+output basenames `sample`, command `linux-packed-sample` and oracle `oracle-bundle`.
+No unchanged retry or deadline extension. Wall 1,631.14s (27m11.14s), user 1,469.29s/system
+158.12s; peak RSS 265,896 KiB, scope peak 278,847,488 bytes/zero swap, CPU 1,627,542,770,000 ns.
+Supervisor verified 96 warm-ups (75 successful/21 expected result limits) and one 768-execution
+paired round, 313 successes/71 expected result limits per cache state; no visit limits. Measured
+round 1,397,258 ms. Empty-cache work exactly matches the query pass. Retained-cache misses
+18,352,026/read bytes 377,042,374,170 versus empty 18,779,324/385,821,211,580; both report
+4,095,526 successful visits and 46,474,984 logical result bytes. Retained successful all-class
+p99 is 21.106773 ms at depth one and 5,093.321509 ms at depth four: a substantial development
+performance gap, not a qualifying pass or permission to lower 20/250 ms targets.
+Source certificate unchanged after completion and both processes exited before the build.
+Raw reports, every latency population, exact commands, locks/features and resource provenance
+are archived in [the D0211 record](docs/evidence/single-pass-cache-native-comparison.json).
+D0206's timeout and all earlier artifacts remain intact; no qualifying campaign was run.
+
+Decision 0212 is source-only work prepared during this run and explicitly excluded from its
+binary: separate fixed-size vault encryption-work diagnostics, trusted journal/coordinator/
+recovery/packed getters preserving poison/uncertainty and no-snapshot/no-I/O guards, plus
+overflow/poison, nonce/error, exact framing, lock/unlock and owner-handoff tests. These edits
+are undergoing focused verification above. Decision 0213 separately drafts native
+paired owner admission with a sibling encryption ledger; unchanged decrypt output and explicit
+partial-accounting flags remain. No consumer facade changes; complete authenticated I/O stays
+false. Review corrected copied getter comments and the repeat-resume zero-encryption test
+expectation before verification. Both source increments are excluded from the pinned measurement.
+
+## Prior verified increment — newest page-cache fast path (Decision 0210)
 
 Pushed `ef4c1a9` records the verified single-pass lookup; its release binary SHA-256 is
 `2fb5eb87c10f771a42d61e6d59a9e4b021fe2914becc718bc69cc79c20057338`.
@@ -36,7 +106,7 @@ job/thread. Formatting, documentation and task graph checks passed. Exact comman
 systemd-run --user --scope --unit=uste-d210-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d210-native-verification.log; verification_status=$?; systemctl --user show uste-d210-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
 ```
 
-Next commit/push the reviewed capability and admit a read-only native comparison. The prior
+The capability is pushed as `d330239`; D0211 above records the completed native comparison. The prior
 730-test full workspace result belongs to D0209 and excludes this later
 cache change. A subsequent native comparison must pin both increments, preserve D0206/D0208
 artifacts and keep qualifying targets/reservations unchanged. T-20/T-19 remain open.
