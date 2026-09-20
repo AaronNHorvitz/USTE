@@ -185,6 +185,41 @@ where
             )
             .map_err(TransactionError::Storage)
     }
+    /// Private staging with a fresh per-call cache and unchanged scope, target and proof budgets.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_buffered(
+        &mut self,
+        filesystem: &mut F,
+        profile: [u8; 32],
+        family: u8,
+        base: Option<&CanonicalPackedTree>,
+        deltas: &[IndexDelta],
+        limits: TreeBatchLimits,
+        cache_bytes: usize,
+    ) -> Result<
+        (
+            CertifiedPackedTreeStage,
+            uste_storage::packed_page_cache::PackedCacheReport,
+        ),
+        TransactionError,
+    > {
+        if let Some(base) = base {
+            self.check(base.context())?;
+        }
+        self.journal
+            .stage_packed_tree_batch_proven_buffered(
+                filesystem,
+                self.scope,
+                profile,
+                family,
+                &self.target,
+                base,
+                deltas,
+                limits,
+                cache_bytes,
+            )
+            .map_err(TransactionError::Storage)
+    }
     pub fn get(
         &self,
         filesystem: &mut F,

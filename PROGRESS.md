@@ -2,7 +2,54 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — eight-batch native development (Decision 0193)
+## Latest verified increment — buffered staging and scoped bridge (Decisions 0194–0195)
+
+Pushed `3afb5ac` preserves the verified eight-batch development result below. Decision 0194
+adds fresh bounded packed-tree staging without changing proof charges or output publication.
+Focused session 88762 / `run-p1138925-i22108221.scope` passed all five new storage cases/0.27 s,
+compile 35.13 s. Command: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --all-features --locked --offline buffered_staging -- --test-threads=1`
+inside the usual 3 GiB high/4 GiB maximum/512 MiB swap scope; log `/tmp/uste-d194-focused.log`.
+
+Full workspace session 82116 / `run-p1140008-i22124383.scope` passed, log
+`/tmp/uste-d194-workspace-verification.log`. Preflight 28 GiB available RAM/2.0 GiB free swap/
+983 GiB disk; one Cargo job/test thread. Compilation finished in 59.96 s; sampled scope peak
+2,350,116,864 bytes/zero swap (sample, not final lifetime peak). All 693 tests across 47
+executables passed, zero failed/ignored. Graph disk 98/400.56 s, replay checkpoint 50/103.91 s,
+storage unit 224/32.67 s, coordinator 108/104.14 s. Strict workspace Clippy passed/7.72 s and
+warning-denying workspace docs passed/11.76 s.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d194-workspace-verification.log'
+```
+
+Decision 0195's additive transaction maintenance bridge and two new tests were written after
+the full-suite test executables finished compiling; they were **not tested by that invocation**.
+Its later Clippy/doc steps included them. Separate session 53118 /
+`run-p1146075-i22124832.scope` passed three maintenance tests/0.01 s, compile 14.84 s, including
+both new tests and the original ordinary retry path. This verifies the bridge independently;
+do not describe the full workspace invocation as 695 tests. Command below also starts the
+full standalone regression run, which is **still active**; inspect that session before launching
+any competing build. Preflight 28 GiB available RAM/2.0 GiB free swap.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --test transaction_coordinator --all-features --locked --offline maintenance -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d195-bridge-and-native.log'
+```
+
+Format/diff/docs/task checks pass. Next collect the active standalone result, then integrate
+optional bounded staging into graph/coordinator callers with unchanged proof-work limits,
+reference/fault/recovery tests and actual native measurements. Neither new API is itself native
+performance evidence; T-20/T-19 and all full-roadmap gates remain open. M1's pinned handoff is
+unchanged: these are privileged maintenance additions, not a consumer-interface migration.
+
+## Prior verified increment — eight-batch native development (Decision 0193)
 
 Pushed baseline `0f17918`; uncommitted experiment raises only packed native admission to 4,096
 records and retains the 513-record case. The supervisor now concurrently drains both output pipes

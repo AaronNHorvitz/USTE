@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_buffered_stage.rs"]
+mod buffered_stage;
 #[path = "packed_coordinator.rs"]
 mod coordinator;
 #[path = "packed_roots.rs"]
@@ -47,6 +49,15 @@ fn cursors() -> TreeCursorLimits {
 
 #[test]
 fn packed_ordinary_maintenance_checks_frontier_budget_and_keeps_retry_semantics() {
+    ordinary_maintenance_retry(false);
+}
+
+#[test]
+fn packed_buffered_ordinary_maintenance_keeps_retry_semantics() {
+    ordinary_maintenance_retry(true);
+}
+
+fn ordinary_maintenance_retry(buffered: bool) {
     let mut fs = FaultFileSystem::new(MemoryFileSystem::default(), FaultPlan::default());
     let mut coordinator = CommitCoordinator::create(
         &mut fs,
@@ -87,16 +98,25 @@ fn packed_ordinary_maintenance_checks_frontier_budget_and_keeps_retry_semantics(
             .unwrap();
         assert_eq!(maintenance.anchor().0, outcome.revision);
         assert_eq!(fs.operation_count(Operation::ReadAt), 1);
-        let staged = maintenance
-            .stage(
-                &mut fs,
-                [7; 32],
-                1,
-                None,
-                &[IndexDelta::new(b"key".to_vec(), None, Some(b"value".to_vec())).unwrap()],
-                batches(),
-            )
-            .unwrap();
+        let deltas = [IndexDelta::new(b"key".to_vec(), None, Some(b"value".to_vec())).unwrap()];
+        let staged = if buffered {
+            maintenance
+                .stage_buffered(
+                    &mut fs,
+                    [7; 32],
+                    1,
+                    None,
+                    &deltas,
+                    batches(),
+                    uste_storage::MIN_INDEX_CACHE_BYTES,
+                )
+                .unwrap()
+                .0
+        } else {
+            maintenance
+                .stage(&mut fs, [7; 32], 1, None, &deltas, batches())
+                .unwrap()
+        };
         let mut cursor = maintenance
             .cursor(staged.tree(), b"", None, cursors())
             .unwrap();

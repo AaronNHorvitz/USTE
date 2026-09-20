@@ -5,6 +5,7 @@ use crate::{
     },
     packed_index_pack::read_linked_record_page,
     packed_index_page::ENCODED_PAGE_BYTES,
+    packed_tree_lookup::ReadPage,
     packed_tree_record::TreeNode,
 };
 use zeroize::Zeroizing;
@@ -97,16 +98,29 @@ impl Plan<'_> {
                 }
                 let c = self.context;
                 let physical = location.resolve(c.scope, c.profile, c.family, c.revision)?;
-                let (page, report) = read_linked_record_page(
-                    filesystem,
-                    directory,
-                    vault,
-                    physical,
-                    location.slot(),
-                    ENCODED_PAGE_BYTES as u64,
-                )?;
-                self.report.read_pages += report.pages;
-                self.report.read_bytes += report.encoded_bytes;
+                let page = if let Some(cache) = self.cache.as_deref_mut() {
+                    ReadPage::Cached(cache.page(
+                        filesystem,
+                        directory,
+                        vault,
+                        physical,
+                        location.slot(),
+                    )?)
+                } else {
+                    ReadPage::Owned(
+                        read_linked_record_page(
+                            filesystem,
+                            directory,
+                            vault,
+                            physical,
+                            location.slot(),
+                            ENCODED_PAGE_BYTES as u64,
+                        )?
+                        .0,
+                    )
+                };
+                self.report.read_pages += 1;
+                self.report.read_bytes += ENCODED_PAGE_BYTES as u64;
                 let node = TreeNode::decode(
                     physical,
                     page.record(location.slot())

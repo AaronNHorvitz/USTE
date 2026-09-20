@@ -5,6 +5,7 @@ use crate::{
     ordered_commitment::{self as logical, CommitmentContext, OrderedCommitment},
     packed_index_pack::{ImmutablePack, PackWriteLimits},
     packed_index_page::PackedPageContext,
+    packed_page_cache::PackedPageCache,
     packed_tree_lookup::TreeReadContext,
     packed_tree_record::{ChildReference, PackedLocator},
 };
@@ -36,7 +37,9 @@ pub struct TreeBatchLimits {
 pub struct TreeBatchReport {
     pub input_bytes: u64,
     pub metadata_admitted_bytes: u64,
+    /// Authenticated proof-work units, including opt-in cache hits; not physical I/O.
     pub read_pages: u64,
+    /// Encoded-byte proof-work units, including opt-in cache hits.
     pub read_bytes: u64,
     pub dirty_nodes: u64,
     pub written_nodes: u64,
@@ -109,6 +112,7 @@ struct Plan<'a> {
     nodes: Vec<DirtyNode>,
     limits: TreeBatchLimits,
     report: TreeBatchReport,
+    cache: Option<&'a mut PackedPageCache>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -123,6 +127,25 @@ pub fn stage_batch<F: FileSystem, W, E: EntropySource, I: EntropySource>(
     deltas: &[IndexDelta],
     write: PackedPageContext,
     limits: TreeBatchLimits,
+) -> Result<StagedTreeBatch, StorageError> {
+    stage_batch_with_cache(
+        filesystem, directory, vault, entropy, context, expected, root, deltas, write, limits, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn stage_batch_with_cache<F: FileSystem, W, E: EntropySource, I: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &mut KeyVault<W, E>,
+    entropy: &mut I,
+    context: TreeReadContext,
+    expected: OrderedCommitment,
+    root: Option<PackedLocator>,
+    deltas: &[IndexDelta],
+    write: PackedPageContext,
+    limits: TreeBatchLimits,
+    cache: Option<&mut PackedPageCache>,
 ) -> Result<StagedTreeBatch, StorageError> {
     let (input_bytes, metadata_admitted_bytes) = admit(context, deltas, write, limits)?;
     let logical_context = CommitmentContext::new(context.scope, context.profile, context.family)
@@ -145,6 +168,7 @@ pub fn stage_batch<F: FileSystem, W, E: EntropySource, I: EntropySource>(
         .try_reserve_exact(limits.maximum_dirty_nodes)
         .map_err(|_| StorageError::ResourceLimit)?;
     let mut plan = Plan {
+        cache,
         deltas,
         context,
         logical_context,

@@ -277,6 +277,63 @@ where
         deltas: &[IndexDelta],
         limits: TreeBatchLimits,
     ) -> Result<CertifiedPackedTreeStage, StorageError> {
+        self.stage_packed_tree_batch_proven_inner(
+            filesystem, scope, profile, family, target, base, deltas, limits, None,
+        )
+    }
+
+    /// Private staging with fresh operation-local plaintext pages, never a caller-warmed cache.
+    /// Proof-work limits are unchanged; cache residency has its separately declared byte budget.
+    #[allow(clippy::too_many_arguments)]
+    pub fn stage_packed_tree_batch_proven_buffered(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        profile: [u8; 32],
+        family: u8,
+        target: &CertificateAnchorProof,
+        base: Option<&CanonicalPackedTree>,
+        deltas: &[IndexDelta],
+        limits: TreeBatchLimits,
+        cache_bytes: usize,
+    ) -> Result<
+        (
+            CertifiedPackedTreeStage,
+            crate::packed_page_cache::PackedCacheReport,
+        ),
+        StorageError,
+    > {
+        self.validate_certificate_anchor_proof(target)?;
+        self.require_packed_tree_key()?;
+        let mut cache = crate::packed_page_cache::PackedPageCache::new(cache_bytes)?;
+        cache.bind(target, self.vault.unlocked_session()?)?;
+        let staged = self.stage_packed_tree_batch_proven_inner(
+            filesystem,
+            scope,
+            profile,
+            family,
+            target,
+            base,
+            deltas,
+            limits,
+            Some(&mut cache),
+        )?;
+        Ok((staged, cache.report()?))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stage_packed_tree_batch_proven_inner(
+        &mut self,
+        filesystem: &mut F,
+        scope: NamespaceRef,
+        profile: [u8; 32],
+        family: u8,
+        target: &CertificateAnchorProof,
+        base: Option<&CanonicalPackedTree>,
+        deltas: &[IndexDelta],
+        limits: TreeBatchLimits,
+        cache: Option<&mut crate::packed_page_cache::PackedPageCache>,
+    ) -> Result<CertifiedPackedTreeStage, StorageError> {
         self.validate_certificate_anchor_proof(target)?;
         self.require_packed_tree_key()?;
         if scope.database() != self.database || family == 0 {
@@ -304,7 +361,7 @@ where
                 .map_err(|_| StorageError::InvalidState)?;
             (context, ordered_commitment::empty_commitment(logical), None)
         };
-        let staged = packed_tree_batch::stage_batch(
+        let staged = packed_tree_batch::stage_batch_with_cache(
             filesystem,
             &self.database_directory,
             &mut self.vault,
@@ -324,6 +381,7 @@ where
                 page: 0,
             },
             limits,
+            cache,
         )?;
         let tree = CanonicalPackedTree {
             context: staged.context(),
