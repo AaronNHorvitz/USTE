@@ -87,11 +87,16 @@ Decision 0180 selects Decision 0179's fresh buffered graph admission for packed 
 development paths. Each canonical family is validated with a fresh 64 MiB logical cache budget;
 those caches are dropped sequentially, then semantic validation uses a separate fresh cache of
 that size. Neither cache survives admission or supplies the consumer's query cache. Reports
-declare `graph_admission_cache_bytes`, `graph_admission_cache_scope` and
-`coordinator_admission_buffered: false`. The primary/quota correspondence path remains uncached.
+declare `graph_admission_cache_bytes` and `graph_admission_cache_scope`.
+Decision 0188 additionally selects fresh buffered primary and quota admission. Each uses a fresh
+64 MiB canonical-family budget sequentially, then a fresh correspondence cache of that size;
+no cache is shared across graph, primary or quota admission or retained for queries. Reports now
+declare `coordinator_admission_buffered: true`, `coordinator_admission_cache_bytes` and
+`coordinator_admission_cache_scope`. The supervisor requires these exact setup declarations.
 Logical proof ceilings, complete semantic validation, fixture identities and oracle digests stay
 unchanged. Decision 0177's archived native 1,000-entity measurements predate this optimization;
-do not attribute their timings to the newer implementation.
+do not attribute their timings to the newer implementation. Decision 0181's graph-buffered
+measurement likewise predates coordinator buffering.
 
 ## BM-06 materialization
 
@@ -99,16 +104,17 @@ Decision 0182 supplies exact prefix counts and historical verification even when
 prefix ends partway through a 512-record-batch generation. The native/model full-history commands
 remain capped at two records. A bounded test-only 513-record prefix checks 512 creates, the final
 create, then 512 updates against the reference reducer, cold admission and exact retry. It does
-not run 100 generations or qualify larger native construction; multi-batch native tail handling
-and safe scale qualification remain separate prerequisites.
+not run 100 generations or qualify larger native construction. Decisions 0183–0185 add multi-batch
+tail/continuation primitives; safe native scale qualification remains separate work.
 
 Decision 0183 shares generation-wide packed tail construction: ordinary publication/rebase for
 intermediate batches, the existing deliberate publication refusal only for the final certified
 batch. Recovery exact-retries every tail batch. A test-only 513-record/two-generation fixture
 forces recovery from its earlier checkpoint despite a newer intermediate root, verifies both
-suffix groups and all 1,026 payload versions. Native recovery still selects the latest complete
-triple; explicit whole-tail checkpoint selection and interrupted multi-batch-tail continuation
-remain prerequisites before raising the unchanged two-record native cap.
+suffix groups and all 1,026 payload versions. Ordinary native recovery selects the latest complete
+triple; Decision 0184 adds explicit whole-tail checkpoint selection and Decision 0185 handles
+interrupted multi-batch continuation. The native two-record cap remains unchanged pending safe
+larger construction and measurement.
 
 Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions
 through packed authorized writes, verifies certified-tail recovery from the checkpoint, checks every

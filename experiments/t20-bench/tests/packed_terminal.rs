@@ -238,7 +238,15 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
             report["graph_admission_cache_scope"],
             "fresh-per-canonical-family-then-fresh-semantic"
         );
-        assert_eq!(report["coordinator_admission_buffered"], false);
+        assert_eq!(report["coordinator_admission_buffered"], true);
+        assert_eq!(
+            report["coordinator_admission_cache_bytes"],
+            64 * 1024 * 1024
+        );
+        assert_eq!(
+            report["coordinator_admission_cache_scope"],
+            "fresh-per-canonical-family-then-fresh-correspondence"
+        );
         assert_eq!(
             report["terminal_vault_work_scope"],
             "last-cold-open-owner-only"

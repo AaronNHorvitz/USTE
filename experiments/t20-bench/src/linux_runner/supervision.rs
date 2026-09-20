@@ -375,7 +375,17 @@ fn finalize_report(
             "graph_admission_cache_scope",
             crate::engine::packed::GRAPH_ADMISSION_CACHE_SCOPE,
         )?;
-        expect_bool(setup, "coordinator_admission_buffered", false)?;
+        expect_bool(setup, "coordinator_admission_buffered", true)?;
+        expect_u64(
+            setup,
+            "coordinator_admission_cache_bytes",
+            crate::engine::packed::COORDINATOR_ADMISSION_CACHE_BYTES as u64,
+        )?;
+        expect_string(
+            setup,
+            "coordinator_admission_cache_scope",
+            crate::engine::packed::COORDINATOR_ADMISSION_CACHE_SCOPE,
+        )?;
         expect_u64(
             setup,
             "frontier",
@@ -905,7 +915,9 @@ mod tests {
             "setup": {"complete_fixture": true, "frontier": 4,
                 "graph_admission_cache_bytes": 64 * 1024 * 1024,
                 "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
-                "coordinator_admission_buffered": false},
+                "coordinator_admission_buffered": true,
+                "coordinator_admission_cache_bytes": 64 * 1024 * 1024,
+                "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence"},
             "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12,
                 "vault_work": [{"cache": "uste-empty", "work": work.clone()},
                     {"cache": "uste-retained-after-identical-query", "work": work.clone()}]}],
@@ -945,6 +957,8 @@ mod tests {
             "/setup/graph_admission_cache_bytes",
             "/setup/graph_admission_cache_scope",
             "/setup/coordinator_admission_buffered",
+            "/setup/coordinator_admission_cache_bytes",
+            "/setup/coordinator_admission_cache_scope",
             "/setup/frontier",
             "/query_deadline_enforced",
             "/query_deadline_postchecked",
@@ -965,9 +979,36 @@ mod tests {
         for mode in [super::SampleMode::Legacy, super::SampleMode::Disk] {
             assert!(finalize_report(&report.to_string(), profile, 864, mode).is_err());
         }
+        let mut unbuffered = report.clone();
+        unbuffered["setup"]["coordinator_admission_buffered"] = false.into();
+        assert!(
+            finalize_report(
+                &unbuffered.to_string(),
+                profile,
+                864,
+                super::SampleMode::Packed
+            )
+            .is_err()
+        );
+        for (field, value) in [
+            (
+                "coordinator_admission_cache_bytes",
+                serde_json::json!(32 * 1024 * 1024),
+            ),
+            (
+                "coordinator_admission_cache_scope",
+                serde_json::json!("caller-warmed"),
+            ),
+        ] {
+            let mut wrong = report.clone();
+            wrong["setup"][field] = value;
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Packed)
+                    .is_err()
+            );
+        }
         for pointer in [
             "/setup_vault_work/physical_device_io",
-            "/setup/coordinator_admission_buffered",
             "/warmup_vault_work/complete_authenticated_io",
             "/samples/0/vault_work/0/work/includes_key_unwrap",
             "/samples/0/vault_work/1/work/includes_other_vaults",

@@ -2,7 +2,35 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — buffered quota admission (Decision 0187)
+## Latest verified increment — native coordinator buffering (Decision 0188)
+
+Built and tested on pushed `c3b7047`: the packed development engine selects fresh buffered
+primary and quota admission with sequential 64 MiB phase budgets. Native BM-01/BM-06 reports
+declare the exact budget/scope; the sampler supervisor refuses missing/null/wrong declarations
+and unbuffered setup. Query caches remain independent, proof limits and all workload caps unchanged.
+Archived measurements retain their original binary attribution; no new timing claim is made.
+
+Session 21696 / `run-p1079242-i22086805.scope` exited 0: **109 active tests**, two existing ignored
+campaigns, seven executables plus empty doctests. Library 85/134.80 s, legacy BM-01 process 3/12.09 s,
+packed BM-06 CLI 5/50.47 s, packed BM-01 CLI 5/36.73 s, manifest 3/0.95 s, legacy BM-06 process
+8/73.72 s. Compile 1m 04s; strict standalone Clippy 3.37 s. No failures.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d188-native-integration.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 22 GiB available RAM/2.0 GiB free swap; sampled scope peak 644,067,328 bytes/zero swap,
+not final lifetime peak. Formatting/diff/docs/task checks pass. Full core is **687 tests at
+`c3b7047`**; root lockfile unchanged. Next enable and verify a bounded native multi-batch BM-06
+development profile and intermediate-tail process interruption, with fresh resource admission;
+do not infer qualification from arithmetic or the existing two-record runs. Complete accounting,
+safe larger construction and reserved-host campaigns remain required. T-20/T-19, pinned M1,
+the preserved full roadmap and external release gates are unchanged. Supersedes older next steps.
+
+## Prior verified increment — buffered quota admission (Decision 0187)
 
 Built and tested on pushed baseline `b51a037`: opt-in quota admission now uses fresh sequential
 canonical-family caches followed by a separate correspondence cache for metadata/principals,

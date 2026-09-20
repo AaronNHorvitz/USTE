@@ -24,8 +24,8 @@ use uste_txn::{
     AuthenticatedIndexRecovery, AuthorizedPackedReader, AuthorizedPackedWriter,
     COORDINATOR_PACKED_PROFILE_V1, COORDINATOR_PACKED_USAGE_PROFILE_V1, CoordinatorRecoveryLimits,
     PackedCommitCoordinator, PackedCoordinatorAdmissionLimits, PackedCoordinatorLimits,
-    PackedMetadataRebaseLimits, PackedQuotaAdmissionLimits, admit_packed_coordinator_prefix,
-    admit_packed_quota_prefix,
+    PackedMetadataRebaseLimits, PackedQuotaAdmissionLimits,
+    admit_packed_coordinator_prefix_buffered, admit_packed_quota_prefix_buffered,
 };
 pub(crate) type RecoveryEngine<F, W, E, I> = AuthenticatedIndexRecovery<F, W, E, I>;
 pub(crate) type PackedEngine<F, W, E, I> =
@@ -37,6 +37,9 @@ type Packed = PackedEngine<MemoryFileSystem, TestEnvelope, CounterEntropy, Count
 pub(crate) const GRAPH_ADMISSION_CACHE_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const GRAPH_ADMISSION_CACHE_SCOPE: &str =
     "fresh-per-canonical-family-then-fresh-semantic";
+pub(crate) const COORDINATOR_ADMISSION_CACHE_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const COORDINATOR_ADMISSION_CACHE_SCOPE: &str =
+    "fresh-per-canonical-family-then-fresh-correspondence";
 
 #[derive(Debug)]
 pub struct PackedDevelopmentVerification {
@@ -195,7 +198,7 @@ pub(crate) fn admit_at<
     let digest = *base
         .source_v1_digest()
         .ok_or("missing cold reference digest")?;
-    let (primary, _) = admit_packed_coordinator_prefix(
+    let (primary, _, _) = admit_packed_coordinator_prefix_buffered(
         &mut recovery,
         fs,
         &primary_root,
@@ -210,9 +213,10 @@ pub(crate) fn admit_at<
             maximum_lookup_pages: limits.legacy.groups * 4 * 516,
             maximum_lookup_bytes: limits.legacy.groups * 4 * 516 * 20545,
         },
+        COORDINATOR_ADMISSION_CACHE_BYTES,
     )
     .map_err(debug)?;
-    let (quota, _) = admit_packed_quota_prefix(
+    let (quota, _, _) = admit_packed_quota_prefix_buffered(
         &mut recovery,
         fs,
         &primary,
@@ -226,6 +230,7 @@ pub(crate) fn admit_at<
             maximum_lookup_pages: 516,
             maximum_lookup_bytes: 516 * 20545,
         },
+        COORDINATOR_ADMISSION_CACHE_BYTES,
     )
     .map_err(debug)?;
     let (live, suffix) = recover_packed_graph_suffix(
