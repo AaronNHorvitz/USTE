@@ -4,7 +4,7 @@ use crate::{
     FileSystem,
     journal::StorageError,
     ordered_commitment::{
-        self as logical, BranchProof, CommitmentContext, CommitmentLimits, LeafProof, LookupProof,
+        self as logical, BranchProof, CommitmentContext, CommitmentLimits, LeafProof,
         OrderedCommitment, ValueCommitment,
     },
     packed_index_pack::read_linked_record_page,
@@ -284,23 +284,45 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
                 value,
                 first_chunk,
             } => {
-                let found = logical::verify_lookup(
-                    logical_context,
-                    expected,
+                // Each node above matched the trusted root or its authenticated
+                // parent's selected claim. Thus the terminal leaf is already
+                // cryptographically bound to that root. Preserve admission and
+                // leaf routing checks without rehashing the same complete path.
+                logical::validate_lookup_route(
                     key,
-                    LookupProof {
-                        leaf: Some(LeafProof {
-                            key: leaf_key,
-                            value,
-                        }),
-                        branches: &path,
+                    LeafProof {
+                        key: leaf_key,
+                        value,
                     },
+                    &path,
                     CommitmentLimits {
                         maximum_branches: limits.maximum_path_branches,
                         maximum_input_bytes: logical::MAX_PROOF_INPUT_BYTES,
                     },
                 )
                 .map_err(|_| StorageError::IntegrityFailure)?;
+                let found = (leaf_key == key).then_some(value);
+                // Keep the complete hash-fold verifier as a test-only cross-check
+                // for every successful packed unit-test traversal.
+                #[cfg(test)]
+                assert!(
+                    logical::verify_lookup(
+                        logical_context,
+                        expected,
+                        key,
+                        logical::LookupProof {
+                            leaf: Some(LeafProof {
+                                key: leaf_key,
+                                value
+                            }),
+                            branches: &path,
+                        },
+                        CommitmentLimits {
+                            maximum_branches: limits.maximum_path_branches,
+                            maximum_input_bytes: logical::MAX_PROOF_INPUT_BYTES,
+                        },
+                    ) == Ok(found)
+                );
                 drop(page);
                 drop(path);
                 let value = match found {

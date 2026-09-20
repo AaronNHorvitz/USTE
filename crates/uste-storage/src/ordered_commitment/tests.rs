@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use uste_types::{DatabaseId, NamespaceId};
 
 mod reference;
+mod route;
 use reference::Tree;
 
 fn context() -> CommitmentContext {

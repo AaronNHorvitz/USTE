@@ -238,6 +238,24 @@ fn query<F: FileSystem>(
 }
 
 #[test]
+fn packed_tree_authenticated_chain_matches_reference_for_all_byte_and_prefix_queries() {
+    let mut f = fixture(7);
+    for byte in 0..=255_u8 {
+        for key in [vec![byte], vec![byte, 0], vec![byte, 255]] {
+            let result = query(&mut f.fs, &f.vault, f.root, &key, limits()).unwrap();
+            assert_eq!(
+                result.value.as_ref().map(PackedLookupValue::as_slice),
+                f.values.get(&key).map(Vec::as_slice)
+            );
+            assert_eq!(
+                result.report.pages,
+                result.report.path_branches as u64 + 1 + result.report.value_chunks as u64
+            );
+        }
+    }
+}
+
+#[test]
 fn packed_tree_lookup_matches_sorted_reference_membership_absence_empty_and_multichunk() {
     let mut f = fixture(2 * MAX_CHUNK_DATA + 7);
     for key in f

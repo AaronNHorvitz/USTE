@@ -335,6 +335,45 @@ fn admit(
     Ok(())
 }
 
+fn validate_route(
+    key: &[u8],
+    leaf: LeafProof<'_>,
+    branches: &[BranchProof],
+) -> Result<(), CommitmentError> {
+    let mut previous = None;
+    for step in branches {
+        if previous.is_some_and(|prior| prior >= step.bit)
+            || step.bit > leaf.key.len() as u32 * 9
+            || bit(key, step.bit) != bit(leaf.key, step.bit)
+        {
+            return Err(CommitmentError::InvalidProof);
+        }
+        previous = Some(step.bit);
+    }
+    Ok(())
+}
+
+/// Structural routing/admission only, NOT a root or membership proof.
+/// The packed reader uses this only after independently binding every visited
+/// node commitment, starting at the trusted root and ending at this exact leaf.
+pub(crate) fn validate_lookup_route(
+    key: &[u8],
+    leaf: LeafProof<'_>,
+    branches: &[BranchProof],
+    limits: CommitmentLimits,
+) -> Result<(), CommitmentError> {
+    admit(
+        key,
+        LookupProof {
+            leaf: Some(leaf),
+            branches,
+        },
+        limits,
+        0,
+    )?;
+    validate_route(key, leaf, branches)
+}
+
 fn verify(
     context: CommitmentContext,
     expected: OrderedCommitment,
@@ -348,16 +387,7 @@ fn verify(
             Err(CommitmentError::InvalidProof)
         };
     };
-    let mut previous = None;
-    for step in proof.branches {
-        if previous.is_some_and(|prior| prior >= step.bit)
-            || step.bit > leaf.key.len() as u32 * 9
-            || bit(key, step.bit) != bit(leaf.key, step.bit)
-        {
-            return Err(CommitmentError::InvalidProof);
-        }
-        previous = Some(step.bit);
-    }
+    validate_route(key, leaf, proof.branches)?;
     if fold(
         context,
         key,

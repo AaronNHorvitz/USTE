@@ -2,7 +2,53 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest measurement — retained-commitment native comparison (Decision 0208)
+## Latest verified increment — single-pass packed lookup authentication (Decision 0209)
+
+Pushed baseline `b4a26f6` records D0208's complete read-only comparison. The follow-up uses the
+already root-bound per-node chain instead of rehashing it at the leaf. Identical structural
+routing/proof-input admission and all encrypted node, value, owner, budget and authorization
+checks remain. The public full proof verifier retains its hash fold; every successful packed
+unit-test traversal cross-checks that verifier. Four new reference/admission tests cover 768
+logical and 768 packed byte/prefix queries, exact/minus-one limits and malformed routing.
+
+Focused storage session 56438 / `uste-d209-storage.scope` exited zero: 229 passed, none failed/
+ignored, 31.31 s after 27.99 s compile. Final scope peak 955,846,656 bytes/zero swap.
+Exact command, one job/thread and assertion/overflow-enabled test opt-level 1:
+
+```sh
+systemd-run --user --scope --unit=uste-d209-storage.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --lib --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d209-storage-verification.log; verification_status=$?; systemctl --user show uste-d209-storage.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Full workspace verification passed in session 96340 / `uste-d209-workspace.scope`,
+invocation `3e6168bc3e81417d92b6e2946cf6ce6b`. Fresh preflight 26 GiB RAM/2.0 GiB swap/952 GiB
+disk, no competing workload, same 3G/4G/512M scope. **730 tests passed across 47 executables,
+zero failures/ignores**; compile 14.74s, graph disk 120/440.45s, checkpoint recovery
+50/103.74s, storage 229/30.89s, transaction coordinator 118/106.98s. Strict Clippy 7.33s
+and warnings-denied docs 12.25s passed. Final scope peak 2,973,106,176 bytes/zero swap.
+Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d209-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d209-workspace-verification.log; verification_status=$?; systemctl --user show uste-d209-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Native regression passed in session 70267 / `uste-d209-native.scope`, invocation
+`48d3a09c7640497caca910515e40ca84`, after fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk preflight
+and confirmation of no competing workload. **122 active tests passed, five unchanged opt-in
+ignores**; release build 1m05s, library 90/128.39s, legacy process 3/11.86s, packed history
+11/59.61s, packed terminal 7/31.47s, manifest 3/0.91s, legacy recovery 8/72.83s. Strict native
+Clippy passed in 2.12s. Final scope peak 565,596,160 bytes/zero swap. Same memory group bounds,
+one job/thread. Root/standalone formatting, documentation and task graph checks pass. Command:
+
+```sh
+systemd-run --user --scope --unit=uste-d209-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d209-native-verification.log; verification_status=$?; systemctl --user show uste-d209-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Next commit/push the reviewed change, then check the cache's newest-slot fast path before a
+separately pinned comparison. No sampling or qualification pass is claimed. Preserve D0206's
+timeout, D0208's exact older binary evidence,
+all retained fixtures and M1's separate pinned handoff. T-20 and T-19 remain open.
+
+## Prior measurement — retained-commitment native comparison (Decision 0208)
 
 Verified capability `184b54bc7f508e8668e6850febabb766ef1442c4` is committed and pushed;
 release binary SHA-256 `b35e6349961fc3885ff3a85745f0f67e0ce8082ccb2fbaefe884ae5fe158268d`.
@@ -33,15 +79,15 @@ While D0208 ran, Decision 0209 prepared a source-only follow-up: reuse the alrea
 root-bound node chain instead of rehashing its complete path at the leaf, retaining the
 identical structural route and proof-input admission checks. The public full verifier is
 unchanged semantically and remains a test-only cross-check for successful packed traversals.
-Four new reference/admission regressions and the existing corruption/fault matrix await
-verification. These edits are NOT in D0208's binary. After its exit and fresh 26 GiB RAM/
+Four new reference/admission regressions and the existing corruption/fault matrix passed
+focused storage verification. These edits are NOT in D0208's binary. After its exit and fresh 26 GiB RAM/
 2.0 GiB swap/952 GiB disk admission with no competing process, storage verification started
 in session 56438 / `uste-d209-storage.scope` (invocation `ba19e4e35f1c4cc183871d66ffc6a69b`).
 Command: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
 CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --lib --all-features
 --locked --offline -- --test-threads=1`, in the established 3G/4G/512M scope, output
-`/tmp/uste-d209-storage-verification.log`. Do not claim pending tests passed. Next finish
-focused verification, full workspace/native regression and commit/push the reviewed change.
+`/tmp/uste-d209-storage-verification.log`. Current full-workspace status and the next action
+are recorded in the D0209 section above.
 
 ## Prior verified increment — retain validated packed-record commitments (Decision 0207)
 
@@ -5496,7 +5542,8 @@ cache work that the older handoff below proposed. Do not restart those capabilit
 current verified baseline is `184b54b`; D0206's larger correctness pass and sampling timeout
 are archived at its earlier `18a45e4` binary. D0207's redundant commitment-computation removal passed
 726 workspace and 122 native tests; D0208 measured its separately pinned read-only behavior.
-Verify D0209 under the one-workload safeguards, then continue native scaling and remaining accounting/lifecycle
+D0209 passed 730 workspace and 122 native tests. Continue bounded cache lookup work and separately
+pinned measurement under the one-workload safeguards, then native scaling and remaining accounting/lifecycle
 prerequisites for qualifying BM-01/BM-06. A 20,000-entity oracle match and an 8,192-entity BM-06
 development run do not satisfy the exact qualifying profiles or reserved-runner requirements.
 T-19 follows T-20; M1 remains pinned separately. The topmost sections carry current commands,
