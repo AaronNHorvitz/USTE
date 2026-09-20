@@ -14,6 +14,74 @@ const SECURITY_VECTORS: &str = include_str!("../../../acceptance/r0/security-lif
 const CRYPTO_VECTORS: &str = include_str!("../../../acceptance/r1/crypto-v1.tsv");
 
 #[test]
+fn vault_decrypt_measurements_preserve_errors_locking_and_envelope_bytes() {
+    use uste_crypto::VaultDecryptReport;
+    let id = database(1);
+    let mut vault = test_vault(id, vec![[0x21; 24], [0x22; 24]]);
+    let ctx = context(id, FrameClass::Small4KiB, 1);
+    let envelope = vault.encrypt(ctx, b"synthetic canary").unwrap();
+    let encoded = envelope.encode().unwrap();
+    assert_eq!(
+        vault.decrypt_report().unwrap(),
+        VaultDecryptReport::default()
+    );
+    assert_eq!(
+        vault.decrypt(ctx, &envelope).unwrap().as_slice(),
+        b"synthetic canary"
+    );
+    let mut expected = VaultDecryptReport {
+        successful_calls: 1,
+        failed_calls: 0,
+        authenticated_encoded_bytes: encoded.len() as u64,
+        returned_plaintext_bytes: 16,
+    };
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    let wrong = context(database(9), FrameClass::Small4KiB, 1);
+    assert_eq!(
+        vault.decrypt(wrong, &envelope).unwrap_err(),
+        CryptoError::IntegrityFailure
+    );
+    let mut damaged = encoded.clone();
+    *damaged.last_mut().unwrap() ^= 1;
+    let damaged = EncryptedEnvelope::decode(&damaged).unwrap();
+    assert_eq!(
+        vault.decrypt(ctx, &damaged).unwrap_err(),
+        CryptoError::IntegrityFailure
+    );
+    vault.lock();
+    assert_eq!(
+        vault.decrypt(ctx, &envelope).unwrap_err(),
+        CryptoError::Locked
+    );
+    expected.failed_calls = 3;
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    vault.unlock(&mut TestAdapter).unwrap();
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    assert_eq!(
+        vault.decrypt(ctx, &envelope).unwrap().as_slice(),
+        b"synthetic canary"
+    );
+    expected.successful_calls += 1;
+    expected.authenticated_encoded_bytes += encoded.len() as u64;
+    expected.returned_plaintext_bytes += 16;
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    assert!(EncryptedEnvelope::decode(&encoded[..10]).is_err());
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    let blob_ctx = context(id, FrameClass::Blob64KiB, 2);
+    let blob = vault.encrypt(blob_ctx, &[7; 65537]).unwrap();
+    assert_eq!(
+        vault.decrypt(blob_ctx, &blob).unwrap().as_slice().len(),
+        65537
+    );
+    expected.successful_calls += 1;
+    expected.authenticated_encoded_bytes += blob.encode().unwrap().len() as u64;
+    expected.returned_plaintext_bytes += 65537;
+    assert_eq!(vault.decrypt_report().unwrap(), expected);
+    assert_eq!(envelope.encode().unwrap(), encoded);
+    assert!(!format!("{expected:?}").contains("synthetic canary"));
+}
+
+#[test]
 fn object_envelope_round_trips_exact_bytes_and_padding_classes() {
     let database = database(1);
     let mut vault = test_vault(database, vec![[0x21; 24], [0x22; 24], [0x23; 24]]);

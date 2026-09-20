@@ -141,6 +141,8 @@ impl EncryptedEnvelope {
 
 mod session;
 pub use session::UnlockedKeySession;
+mod measurement;
+pub use measurement::VaultDecryptReport;
 
 /// Lockable master key plus one bounded in-memory writer nonce session.
 pub struct KeyVault<W, E> {
@@ -151,6 +153,7 @@ pub struct KeyVault<W, E> {
     entropy: E,
     used_nonces: BTreeSet<[u8; NONCE_BYTES]>,
     nonce_limit: usize,
+    measurement: measurement::Measurement,
 }
 
 impl<W, E: EntropySource> KeyVault<W, E> {
@@ -173,6 +176,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             entropy,
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
+            measurement: measurement::Measurement::new(),
         })
     }
 
@@ -187,6 +191,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             entropy,
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
+            measurement: measurement::Measurement::new(),
         }
     }
 
@@ -260,11 +265,28 @@ impl<W, E: EntropySource> KeyVault<W, E> {
         context: CryptoContext,
         envelope: &EncryptedEnvelope,
     ) -> Result<SecretBytes, CryptoError> {
-        if context.database() != self.database {
-            return Err(CryptoError::IntegrityFailure);
-        }
-        let key = self.key.as_ref().ok_or(CryptoError::Locked)?;
-        decrypt(key, context, envelope)
+        let result = (|| {
+            if context.database() != self.database {
+                return Err(CryptoError::IntegrityFailure);
+            }
+            let key = self.key.as_ref().ok_or(CryptoError::Locked)?;
+            decrypt(key, context, envelope)
+        })();
+        self.measurement
+            .record(result.as_ref().ok().map(|plaintext| {
+                (
+                    HEADER_BYTES + envelope.ciphertext.len(),
+                    plaintext.as_slice().len(),
+                )
+            }));
+        result
+    }
+
+    /// Privileged cumulative diagnostics for this vault's lifetime, retained across lock/unlock.
+    /// Excludes structural decode failures before decrypt, key wrapping, and filesystem I/O.
+    /// Overflow/poison invalidates only reports, never alters cryptographic operation results.
+    pub fn decrypt_report(&self) -> Result<VaultDecryptReport, CryptoError> {
+        self.measurement.report()
     }
 
     /// Derive a deterministic public opaque identifier under the dedicated name-token role.
@@ -466,6 +488,7 @@ mod tests {
             entropy: NoEntropy,
             used_nonces: Default::default(),
             nonce_limit: 0,
+            measurement: super::measurement::Measurement::new(),
         };
         let context = CryptoContext::new(
             database,

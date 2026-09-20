@@ -267,6 +267,15 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Privileged work through this owner's vault, including cold-open work on that same vault.
+    /// Not filesystem I/O, other owners' work, key unwrap or semantic acceptance. No counter reset.
+    pub fn vault_decrypt_report(&self) -> Result<uste_crypto::VaultDecryptReport, StorageError> {
+        if self.poisoned {
+            return Err(StorageError::NeedsRecovery);
+        }
+        self.vault.decrypt_report().map_err(StorageError::Crypto)
+    }
+
     /// Create, fully flush and atomically publish a database directory.
     pub fn create(
         filesystem: &mut F,

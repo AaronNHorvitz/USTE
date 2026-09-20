@@ -97,6 +97,139 @@ fn queries() -> Vec<GraphReadRequest> {
 }
 
 #[test]
+fn authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work() {
+    let (mut fs, live, kernel, admin, bob, _) = setup_cached();
+    let reader = AuthorizedPackedReader::new_with_cache_budget(
+        &live,
+        &kernel,
+        expansion_limits(ample()),
+        CACHE_BYTES,
+    )
+    .unwrap();
+    let before = live.vault_decrypt_report().unwrap();
+    assert!(before.successful_calls > 0); // This owner's bootstrap/admission work is retained.
+    let request = adjacent();
+    let output = reader
+        .read(&mut fs, &admin, &request, &NeverCancel)
+        .unwrap();
+    let cold = live.vault_decrypt_report().unwrap();
+    let cache = reader.cache_report(&admin).unwrap().unwrap();
+    assert!(cache.misses > 0);
+    assert_eq!(
+        cold.successful_calls - before.successful_calls,
+        cache.misses
+    );
+    assert_eq!(
+        cold.authenticated_encoded_bytes - before.authenticated_encoded_bytes,
+        cache.misses * 20545
+    );
+    assert_eq!(
+        cold.returned_plaintext_bytes - before.returned_plaintext_bytes,
+        cache.misses * 16384
+    );
+    assert_eq!(cold.failed_calls, before.failed_calls);
+    assert_eq!(
+        reader
+            .read(&mut fs, &admin, &request, &NeverCancel)
+            .unwrap(),
+        output
+    );
+    assert_eq!(live.vault_decrypt_report().unwrap(), cold);
+    let foreign = PolicyKernel::new().authenticate(&mut Identity, &1).unwrap();
+    let absent = kernel.authenticate(&mut Identity, &9).unwrap();
+    for principal in [&foreign, &absent] {
+        assert!(matches!(
+            reader.read(&mut fs, principal, &request, &NeverCancel),
+            Err(AuthorizedReadError::Authorization(
+                AuthorizedError::Unauthorized
+            ))
+        ));
+    }
+    assert!(
+        reader
+            .read(
+                &mut fs,
+                &bob,
+                &GraphReadRequest::Record { id: record(2) },
+                &NeverCancel
+            )
+            .is_err()
+    );
+    reader.clear_cache(&admin).unwrap();
+    assert_eq!(live.vault_decrypt_report().unwrap(), cold);
+    let uncached = AuthorizedPackedReader::new(&live, &kernel, expansion_limits(ample())).unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    assert_eq!(
+        uncached
+            .read(&mut fs, &admin, &request, &NeverCancel)
+            .unwrap(),
+        output
+    );
+    let after = live.vault_decrypt_report().unwrap();
+    assert_eq!(
+        after.successful_calls - cold.successful_calls,
+        fs.operation_count(FsOp::ReadAt)
+    );
+    assert!(after.successful_calls > cold.successful_calls);
+    assert_eq!(live.vault_decrypt_report().unwrap(), after); // Shared owner, not per-reader.
+}
+
+#[test]
+fn authorized_packed_revocation_denies_reads_before_vault_work() {
+    let (mut fs, mut live, mut kernel, admin, _, _) = setup_cached();
+    let quota = QuotaLimits::new(1024 * 1024, 1024 * 1024, 1024 * 1024, 8, 1024).unwrap();
+    let mut policy = NamespacePolicy::new(scope(), PolicyVersion::new(5).unwrap(), quota);
+    policy
+        .grant(
+            PrincipalDigest::from_bytes([1; 32]),
+            NamespaceGrant::new(
+                PermissionSet::from_actions([Action::Commit, Action::ManagePolicy]),
+                quota,
+            ),
+        )
+        .unwrap();
+    let bytes = encode_transaction(&GraphTransaction::with_policy_mutation(
+        scope(),
+        vec![],
+        DurablePolicyMutation::Replace {
+            expected: PolicyVersion::new(4).unwrap(),
+            policy,
+        },
+    ))
+    .unwrap();
+    AuthorizedPackedWriter::new(
+        &mut live,
+        &mut kernel,
+        preparation(4 * 1024 * 1024),
+        publication(10000),
+    )
+    .unwrap()
+    .commit(
+        &mut fs,
+        &admin,
+        request(9, &bytes),
+        &mut clock(9),
+        &NeverCancel,
+    )
+    .unwrap();
+    live.rebase_metadata(&mut fs, rebase_limits()).unwrap();
+    let before = live.vault_decrypt_report().unwrap();
+    let reader = AuthorizedPackedReader::new(&live, &kernel, read_limits()).unwrap();
+    assert!(matches!(
+        reader.read(
+            &mut fs,
+            &admin,
+            &GraphReadRequest::Record { id: record(1) },
+            &NeverCancel
+        ),
+        Err(AuthorizedReadError::Authorization(
+            AuthorizedError::Unauthorized
+        ))
+    ));
+    assert_eq!(live.vault_decrypt_report().unwrap(), before);
+}
+
+#[test]
 fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth() {
     let (mut fs, live, kernel, admin, _, _) = setup_cached();
     for historical in [false, true] {
@@ -442,23 +575,33 @@ fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate() {
         assert_eq!(fs.read_at(&file, offset, &mut byte).unwrap(), 1);
         byte[0] ^= 1;
         fs.write_at(&file, offset, &byte).unwrap();
+        let before_failure = live.vault_decrypt_report().unwrap();
         assert_eq!(
             reader
                 .read(&mut fs, &admin, &request, &NeverCancel)
                 .unwrap(),
             expected
         );
+        assert_eq!(live.vault_decrypt_report().unwrap(), before_failure);
         assert!(
             AuthorizedPackedReader::new(&live, &kernel, expansion_limits(ample()))
                 .unwrap()
                 .read(&mut fs, &admin, &request, &NeverCancel)
                 .is_err()
         );
+        assert_eq!(
+            live.vault_decrypt_report().unwrap().failed_calls,
+            before_failure.failed_calls + 1
+        );
         reader.clear_cache(&admin).unwrap();
         assert!(
             reader
                 .read(&mut fs, &admin, &request, &NeverCancel)
                 .is_err()
+        );
+        assert_eq!(
+            live.vault_decrypt_report().unwrap().failed_calls,
+            before_failure.failed_calls + 2
         );
         byte[0] ^= 1;
         fs.write_at(&file, offset, &byte).unwrap();

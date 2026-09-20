@@ -125,6 +125,16 @@ where
         }
         Ok(&self.inner.state)
     }
+    /// Trusted per-owner cryptographic diagnostics, not an authorized consumer surface.
+    pub fn vault_decrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultDecryptReport, TransactionError> {
+        self.state()?;
+        self.inner
+            .journal
+            .vault_decrypt_report()
+            .map_err(TransactionError::Storage)
+    }
     pub fn reducer_and_index_maintenance(
         &mut self,
     ) -> Result<ReducerIndexMaintenance<'_, S, F, W, E, I>, TransactionError> {

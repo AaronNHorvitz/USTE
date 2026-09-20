@@ -21,7 +21,7 @@ pub use entropy::{EntropyFailure, EntropySource, OsEntropy};
 pub use envelope::{
     ENVELOPE_FORMAT_MAJOR, ENVELOPE_FORMAT_MINOR, EncryptedEnvelope, KeyVault,
     MAX_NONCES_PER_WRITER_SESSION, MAX_PLAINTEXT_BYTES, OBJECT_ENVELOPE_HEADER_BYTES,
-    OBJECT_ENVELOPE_KIND, UnlockedKeySession,
+    OBJECT_ENVELOPE_KIND, UnlockedKeySession, VaultDecryptReport,
 };
 pub use error::CryptoError;
 pub use key::{SecretBytes, SecretKeyMaterial};

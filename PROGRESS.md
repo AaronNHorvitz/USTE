@@ -2,7 +2,63 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — supervised packed BM-01 sampling (Decision 0174)
+## Latest verified increment — trusted per-vault authentication work (Decision 0175)
+
+Pushed baseline is `394512a` (supervised packed sampling). Decision 0175 adds fixed-size checked
+vault decrypt diagnostics on raw trusted maintenance handles only. Successful/failed calls,
+encoded authenticated bytes and returned plaintext bytes remain separate from physical I/O and
+semantic admission. Diagnostic overflow/poison cannot change decrypt outcomes or reset nonces.
+Decision 0176 benchmark wiring is separate pending work, excluded from the core verification.
+
+Initial crypto session 32168 failed compilation because an existing test-only vault literal needed
+the new field; repaired. Session 95370 passed 17 then-current crypto tests but its graph target
+selected zero cases, so that was not counted as graph verification. Corrected session 71201 passed
+all 18 crypto tests (six unit/12 integration; 2.26 s integration) and the actual disk-index graph
+measurement test/0.13 s. Session 1562 / `run-p846180-i21849062.scope` passed 24 authorized packed
+tests/270.65 s, compile 13.29 s and workspace strict Clippy/11.89 s. Sampled peak 397,250,560 bytes/
+zero swap. Exact focused commands used one job/thread and test opt-level 1 with debug assertions
+and overflow checks retained:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-crypto --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --locked --offline authorized_packed_vault_work -- --test-threads=1'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --locked --offline authorized_packed -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --locked --offline -- -D warnings'
+```
+
+Full core session 44463 / `run-p857704-i21794771.scope` was deliberately interrupted with SIGINT
+(exit 130) during graph tests after review found that namespace ManageSchema cannot authorize
+vault-wide historical totals. Removed the uncommitted consumer report method; benchmark operators
+use their existing raw coordinator. Tests now prove denied/revoked reads incur no decrypt work.
+This was a design correction, not memory pressure or a passing full gate. Preflight
+29 GiB available RAM/3.7 GiB free swap; compile 1m47s, sampled peak 2,708,295,680 bytes/zero swap.
+The final uncertainty-report assertion is included in this full build. Command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d175-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+```
+
+Corrected session 47444 / `run-p863452-i21839197.scope` passed both actual vault-work/denied-read
+tests in 0.24 s after 14.11 s compilation. Consumer API has no vault report method. Final full
+session 49479 / `run-p864363-i21876844.scope` exited 0 using the same full command with log
+`/tmp/uste-d175-workspace-final.log`: 664 tests/47 executables, zero failures/ignored tests.
+Graph disk/index 91/436.36 s, checkpoint/replay 50/106.74 s, transaction coordinator 97/103.94 s.
+Compile 4.18 s; all-features Clippy 5.11 s; warning-denying documentation 13.50 s. Preflight
+28 GiB available RAM/3.7 GiB free swap; sampled scope peak 1,744,416,768 bytes/zero swap.
+All resource safeguards retained. Format/diff/docs/task checks pass; lockfile unchanged.
+
+The separate Decision 0176 benchmark counter wiring is unverified and excluded from this increment.
+Next verify that wiring, then continue complete accounting and resource-safe
+scale work toward T-20. No qualification or task completion is claimed; all earlier roadmap and
+external gates remain. Core changes alter no consumer interface, persisted format or M1 handoff.
+
+## Prior verified increment — supervised packed BM-01 sampling (Decision 0174)
 
 Implemented on pushed `c372c6a` plus this increment: native packed sampling cold-admits the
 complete triple and runs the unchanged bounded oracle/warm-up/paired-query plan with a 64 MiB

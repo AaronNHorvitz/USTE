@@ -451,6 +451,10 @@ fn packed_live_graph_uncertain_commit_quarantines_reads_and_maintenance() {
         Err(TransactionError::OutcomeUnknown)
     ));
     assert!(matches!(
+        live.vault_decrypt_report(),
+        Err(TransactionError::OutcomeUnknown)
+    ));
+    assert!(matches!(
         live.reducer_and_index_maintenance(),
         Err(TransactionError::OutcomeUnknown)
     ));

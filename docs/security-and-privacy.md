@@ -79,6 +79,14 @@ telemetry. Report and cache-clear operations require a fresh `ManageSchema` deci
 root bound to the issuing authorized coordinator and a certain transaction outcome; revoked,
 foreign-instance and outcome-uncertain calls fail before observing or changing the cache.
 
+Decision 0175 adds per-vault completed-decrypt counts and authenticated/returned byte totals.
+These fixed-size diagnostics retain no identities or content but remain cardinality-sensitive.
+They are available only on raw trusted vault/journal/coordinator maintenance handles, never the
+consumer reader: namespace `ManageSchema` does not grant database-wide historical telemetry.
+Cache clearing and key lock/unlock do not reset counters. Diagnostic overflow or
+poison refuses reporting without changing cryptographic results. Vault work is not physical I/O,
+semantic acceptance, other owners' work or complete benchmark accounting.
+
 Decision 0023 composes import authorization across namespace `Import`/`Commit`, the job, immutable
 source and mapping Evidence, graph operations and every spatial external reference. Job projection
 requires `ReadBlob` plus current `ReadRecord` access to both embedded Evidence records before it
