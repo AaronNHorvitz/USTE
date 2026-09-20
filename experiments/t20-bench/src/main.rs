@@ -152,6 +152,8 @@ fn run() -> Result<(), String> {
             | "linux-packed-resume"
             | "linux-packed-rebuild"
             | "linux-packed-query"
+            | "linux-packed-sample"
+            | "linux-packed-sample-worker"
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
@@ -282,10 +284,15 @@ fn run() -> Result<(), String> {
         {
             let root = root.ok_or("--root is required")?;
             let password_file = password_file.ok_or("--password-file is required")?;
-            if command == "linux-sample-worker" || command == "linux-disk-sample-worker" {
+            if matches!(
+                command.as_str(),
+                "linux-sample-worker" | "linux-disk-sample-worker" | "linux-packed-sample-worker"
+            ) {
                 uste_t20_bench::linux_runner::start_parent_watchdog()
                     .map_err(|error| error.code().to_owned())?;
-                let worker = if command == "linux-disk-sample-worker" {
+                let worker = if command == "linux-packed-sample-worker" {
+                    uste_t20_bench::linux_runner::packed::sample_worker
+                } else if command == "linux-disk-sample-worker" {
                     uste_t20_bench::linux_runner::disk::sample_worker
                 } else {
                     uste_t20_bench::linux_runner::sample_worker
@@ -300,6 +307,17 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-packed-sample" => {
+                    let executable = env::current_exe()
+                        .map_err(|_| "cannot resolve current benchmark executable")?;
+                    uste_t20_bench::linux_runner::supervise_packed_sample(
+                        &executable,
+                        &root,
+                        &password_file,
+                        &oracle_file.ok_or("--oracle-file is required")?,
+                        profile,
+                    )
+                }
                 "linux-packed-create-crash-probe" => {
                     uste_t20_bench::linux_runner::packed::create_crash_probe(
                         &root,
@@ -427,6 +445,7 @@ fn print_usage() {
          uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
+         uste-t20-bench linux-packed-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying development sampling)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

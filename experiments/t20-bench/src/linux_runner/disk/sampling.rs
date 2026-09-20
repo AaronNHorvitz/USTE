@@ -242,13 +242,13 @@ impl Engine<'_> {
 }
 
 #[derive(Clone, Copy, Default)]
-struct CacheWork {
+pub(in crate::linux_runner) struct CacheWork {
     visits: u64,
     bytes: u64,
     cache: Option<AuthorizedDiskCacheReport>,
 }
 impl CacheWork {
-    fn add(
+    pub(in crate::linux_runner) fn add(
         &mut self,
         outcome: ValidatedOutcome,
         before: AuthorizedDiskCacheReport,
@@ -290,7 +290,10 @@ impl CacheWork {
         self.cache = Some(updated);
         Ok(())
     }
-    fn json(self, state: CacheState) -> Result<serde_json::Value, LinuxRunnerError> {
+    pub(in crate::linux_runner) fn json(
+        self,
+        state: CacheState,
+    ) -> Result<serde_json::Value, LinuxRunnerError> {
         let cache = self
             .cache
             .ok_or_else(|| error("USTE_BM01_SAMPLE_OBSERVATIONS"))?;

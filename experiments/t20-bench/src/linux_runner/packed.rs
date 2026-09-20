@@ -10,7 +10,9 @@ use uste_txn::{AuthenticatedIndexRecovery, AuthorizedPackedReader, CoordinatorRe
 mod bootstrap;
 pub mod history;
 mod query;
+mod sampling;
 pub use query::query_correctness;
+pub use sampling::sample_worker;
 type Fs = ObservedFileSystem<LinuxFileSystem>;
 type Packed = engine::PackedEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;
 type Recovery = engine::RecoveryEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;

@@ -59,7 +59,7 @@ impl Fixture {
             .arg("--password-file")
             .arg(&self.password)
             .args(["--entities", "20"]);
-        if phase == "query" {
+        if matches!(phase, "query" | "sample") {
             command.arg("--oracle-file").arg(&self.oracle);
         }
         command
@@ -259,7 +259,7 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
 }
 #[test]
 fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
-    for phase in ["create", "open", "rebuild", "resume", "query"] {
+    for phase in ["create", "open", "rebuild", "resume", "query", "sample"] {
         let mut command = Command::new(EXECUTABLE);
         command.arg(format!("linux-packed-{phase}")).args([
             "--root",
@@ -269,7 +269,7 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
             "--entities",
             "100000",
         ]);
-        if phase == "query" {
+        if matches!(phase, "query" | "sample") {
             command.args(["--oracle-file", "absent-packed-oracle"]);
         }
         let output = complete(command);
@@ -281,4 +281,83 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
         );
         assert!(output.stdout.is_empty());
     }
+}
+
+#[test]
+fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
+    use uste_t20_bench::{Bm01Profile, OracleBundle, OracleExpectedOutcome};
+    let fixture = Fixture::new();
+    fixture.run("create");
+    let certificates = fixture.root.join("bm01-linux-packed-engine/CERTIFICATES");
+    let before = fs::read(&certificates).unwrap();
+    let mut command = Command::new(EXECUTABLE);
+    command.args(["oracle-bundle", "--entities", "20"]);
+    let output = complete(command);
+    assert!(output.status.success());
+    fs::write(&fixture.oracle, output.stdout).unwrap();
+    let report = fixture.run("sample");
+    assert_eq!(report["schema"], "bm01-linux-packed-sampling-v1");
+    assert_eq!(report["query_deadline_enforced"], true);
+    assert_eq!(report["query_deadline_postchecked"], true);
+    assert_eq!(report["query_deadline_seconds"], 30);
+    assert_eq!(report["engine_benchmark"], true);
+    assert_eq!(
+        report["qualification"],
+        "nonqualifying-development-sampling"
+    );
+    assert_eq!(report["budget_evaluation"], "not-performed");
+    assert_eq!(report["complete_authenticated_io"], false);
+    assert_eq!(report["authenticated_io_accounting"], "not-measured");
+    assert_eq!(report["warmup"]["queries"], 96);
+    assert_eq!(report["samples"].as_array().unwrap().len(), 1);
+    let sample = &report["samples"][0];
+    assert_eq!(sample["rounds"], 1);
+    assert_eq!(sample["timed_executions"], 768);
+    assert_eq!(sample["minimum_duration_milliseconds"], 0);
+    assert_eq!(sample["latency_groups"].as_array().unwrap().len(), 32);
+    assert!(sample.get("cached_index_work").is_none());
+    let empty = &sample["cache_work"][0];
+    let retained = &sample["cache_work"][1];
+    assert_eq!(empty["index_cache_budget_bytes"], 64 * 1024 * 1024);
+    assert!(empty["index_cache_misses"].as_u64().unwrap() > 0);
+    assert_eq!(retained["index_cache_misses"], 0);
+    assert!(retained["index_cache_hits"].as_u64().unwrap() > 0);
+    assert!(
+        sample["adapter_io"][0]["work"]["read_returned_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(sample["adapter_io"][1]["work"]["read_returned_bytes"], 0);
+    assert_eq!(sample["adapter_io"][0]["work"]["write_returned_bytes"], 0);
+    assert_eq!(sample["adapter_io"][1]["work"]["write_returned_bytes"], 0);
+    let bundle = OracleBundle::build(Bm01Profile::new(20).unwrap()).unwrap();
+    let mut digest = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
+    digest.update(&1_u64.to_be_bytes());
+    for expected in bundle.measured().expectations() {
+        let (kind, output) = match expected.outcome {
+            OracleExpectedOutcome::Output { output_digest, .. } => (1, output_digest),
+            OracleExpectedOutcome::VisitLimit => (2, [0; 32]),
+            OracleExpectedOutcome::ResultLimit => (3, [0; 32]),
+        };
+        for cache in [1, 2] {
+            digest.update(&[
+                cache,
+                kind,
+                expected.query.class.code(),
+                expected.query.direction.code(),
+                expected.query.depth,
+            ]);
+            digest.update(&expected.query.ordinal.to_be_bytes());
+            digest.update(&output);
+        }
+    }
+    assert_eq!(
+        sample["output_digest"],
+        digest.finalize().to_hex().to_string()
+    );
+    assert!(
+        fs::read(&certificates).unwrap() == before,
+        "sampling changed authority"
+    );
 }

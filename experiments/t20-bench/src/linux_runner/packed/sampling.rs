@@ -1,0 +1,221 @@
+//! Packed native sampling with the frozen plan, oracle and owned-worker deadline protocol.
+use super::*;
+use crate::linux_runner::{
+    disk::sampling::CacheWork,
+    sampling::{
+        CacheState, GroupKey, LatencyClass, MAX_TIMED_EXECUTIONS_PER_SAMPLE, OutcomeKind,
+        ProtocolObserver, QUERY_DEADLINE, QueryObserver, SamplingPlan, ValidatedOutcome,
+        latency_class_name, read_oracle_bundle, record_latency, summarize, validate_bundle,
+        validate_outcome,
+    },
+};
+use crate::{OracleExpectation, engine::execute_query_with};
+use std::{collections::BTreeMap, time::Duration};
+use uste_txn::AuthorizedDiskCacheReport;
+type Reader<'a> = AuthorizedPackedReader<
+    'a,
+    uste_graph::GraphPackedLiveState,
+    Fs,
+    RecoveryEnvelope,
+    OsEntropy,
+    OsEntropy,
+>;
+
+pub fn sample_worker(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    let mut observer = ProtocolObserver::new();
+    match sample(root, password, bundle, profile, &mut observer) {
+        Ok(report) => observer.report(&report),
+        Err(error) => {
+            let _ = observer.error(error.code());
+            Err(error)
+        }
+    }
+}
+fn sample(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+    observer: &mut dyn QueryObserver,
+) -> Result<String, LinuxRunnerError> {
+    disk::validate_native_profile(profile)?;
+    let bundle = read_oracle_bundle(bundle)?;
+    validate_bundle(&bundle, profile)?;
+    let mut session = prepare(root, password, profile, "open")?;
+    let reader = AuthorizedPackedReader::new_with_cache_budget(
+        &session.coordinator,
+        &session.policy,
+        session
+            .limits
+            .read()
+            .map_err(|_| error("USTE_BM01_LIMITS"))?,
+        64 * 1024 * 1024,
+    )
+    .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))?;
+    let setup = session.filesystem.snapshot()?;
+    let mut engine = Engine {
+        reader,
+        filesystem: &mut session.filesystem,
+        principal: &session.principal,
+        materializer: Materializer::new(profile),
+    };
+    let mut warmup = [0_usize; 3];
+    for expected in bundle.warmup().expectations() {
+        engine.clear()?;
+        let (outcome, _) = engine.execute(expected, observer)?;
+        warmup[match outcome.kind {
+            OutcomeKind::Success => 0,
+            OutcomeKind::VisitLimit => 1,
+            OutcomeKind::ResultLimit => 2,
+        }] += 1;
+    }
+    let warmup_io = engine.filesystem.snapshot()?.delta(setup)?;
+    let plan = SamplingPlan::for_profile(profile);
+    let mut samples = Vec::with_capacity(plan.samples);
+    for ordinal in 1..=plan.samples {
+        samples.push(engine.sample(bundle.measured().expectations(), plan, ordinal, observer)?);
+    }
+    Ok(serde_json::json!({
+        "schema": "bm01-linux-packed-sampling-v1", "engine_benchmark": true,
+        "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
+        "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",
+        "result_size_profile": "bm01-result-v1", "oracle_adjacency_memory_resident": false,
+        "cache_pairing": "empty-then-retained-identical-query", "kernel_filesystem_device_cache": "uncontrolled",
+        "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery", "complete_authenticated_io": false,
+        "authenticated_io_accounting": "not-measured", "adapter_io_accounting": "filesystem-adapter-calls",
+        "setup": session.report, "setup_adapter_io": setup.json()?, "warmup_adapter_io": warmup_io.json()?,
+        "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
+        "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
+        "entities": profile.entities(), "relationships": profile.relationships(),
+        "frontier": materialization_revision_count(profile), "development_entity_limit": disk::MAX_NATIVE_DEVELOPMENT_ENTITIES,
+        "warmup": { "queries": bundle.warmup().expectations().len(), "successes": warmup[0], "visit_limits": warmup[1], "result_limits": warmup[2] },
+        "oracle_bundle_digest": hex(&bundle.digest()), "samples": samples,
+    }).to_string())
+}
+
+struct Engine<'a> {
+    reader: Reader<'a>,
+    filesystem: &'a mut Fs,
+    principal: &'a AuthenticatedPrincipal,
+    materializer: Materializer,
+}
+impl Engine<'_> {
+    fn clear(&self) -> Result<(), LinuxRunnerError> {
+        self.reader
+            .clear_cache(self.principal)
+            .map_err(|_| error("USTE_BM01_PACKED_CACHE"))
+    }
+    fn report(&self) -> Result<AuthorizedDiskCacheReport, LinuxRunnerError> {
+        let cache = self
+            .reader
+            .cache_report(self.principal)
+            .map_err(|_| error("USTE_BM01_PACKED_CACHE"))?
+            .ok_or_else(|| error("USTE_BM01_PACKED_CACHE"))?;
+        // Normalize only the five real cache counters for the shared checked accumulator.
+        // This does not claim v1 index primitives or fabricate authenticated work counters.
+        Ok(AuthorizedDiskCacheReport {
+            budget_bytes: cache.budget_bytes,
+            accounted_bytes: cache.accounted_bytes,
+            hits: cache.hits,
+            misses: cache.misses,
+            evictions: cache.evictions,
+        })
+    }
+    fn execute(
+        &mut self,
+        expected: &OracleExpectation,
+        observer: &mut dyn QueryObserver,
+    ) -> Result<(ValidatedOutcome, Duration), LinuxRunnerError> {
+        observer.query_started()?;
+        let started = Instant::now();
+        let actual = execute_query_with(self.materializer, expected.query, |request| {
+            self.reader
+                .read(self.filesystem, self.principal, request, &NeverCancel)
+                .map_err(|_| EngineQueryError::Engine("USTE_BM01_PACKED_QUERY".into()))
+        });
+        let elapsed = started.elapsed();
+        observer.query_finished()?;
+        if elapsed > QUERY_DEADLINE {
+            return Err(error("USTE_BM01_QUERY_DEADLINE"));
+        }
+        Ok((validate_outcome(expected, actual)?, elapsed))
+    }
+    fn sample(
+        &mut self,
+        expectations: &[OracleExpectation],
+        plan: SamplingPlan,
+        ordinal: usize,
+        observer: &mut dyn QueryObserver,
+    ) -> Result<serde_json::Value, LinuxRunnerError> {
+        let started = Instant::now();
+        let mut rounds = 0;
+        let mut groups = BTreeMap::new();
+        let mut executions = 0;
+        let mut work = [CacheWork::default(); 2];
+        let mut io_work = [disk::io::IoSnapshot::default(); 2];
+        let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
+        aggregate.update(&(ordinal as u64).to_be_bytes());
+        loop {
+            for expected in expectations {
+                self.clear()?;
+                for cache in [CacheState::Empty, CacheState::Retained] {
+                    if executions == MAX_TIMED_EXECUTIONS_PER_SAMPLE {
+                        return Err(error("USTE_BM01_SAMPLE_OBSERVATIONS"));
+                    }
+                    let before = self.report()?;
+                    let before_io = self.filesystem.snapshot()?;
+                    let (outcome, elapsed) = self.execute(expected, observer)?;
+                    work[cache.index()].add(outcome, before, self.report()?)?;
+                    io_work[cache.index()]
+                        .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
+                    executions += 1;
+                    aggregate.update(&[
+                        cache.code(),
+                        outcome.kind.code(),
+                        expected.query.class.code(),
+                        expected.query.direction.code(),
+                        expected.query.depth,
+                    ]);
+                    aggregate.update(&expected.query.ordinal.to_be_bytes());
+                    aggregate.update(&outcome.digest);
+                    for class in [LatencyClass::All, LatencyClass::Query(expected.query.class)] {
+                        record_latency(
+                            &mut groups,
+                            GroupKey {
+                                cache,
+                                outcome: outcome.kind,
+                                class,
+                                depth: expected.query.depth,
+                            },
+                            elapsed.as_nanos(),
+                        )?;
+                    }
+                }
+            }
+            rounds += 1;
+            if started.elapsed() >= plan.minimum_duration {
+                break;
+            }
+        }
+        let (rss, peak) = process_rss()?;
+        let latencies: Vec<_> = summarize(groups).into_iter().map(|latency| serde_json::json!({
+            "cache": latency.cache.name(), "outcome": latency.outcome.name(), "class": latency_class_name(latency.class),
+            "depth": latency.depth, "count": latency.count, "p50_nanoseconds": latency.p50_nanoseconds,
+            "p95_nanoseconds": latency.p95_nanoseconds, "p99_nanoseconds": latency.p99_nanoseconds,
+        })).collect();
+        Ok(serde_json::json!({
+            "sample": ordinal, "minimum_duration_milliseconds": plan.minimum_duration.as_millis(),
+            "elapsed_milliseconds": started.elapsed().as_millis(), "rounds": rounds, "timed_executions": executions,
+            "current_rss_kib": rss, "process_peak_rss_kib": peak, "output_digest": hex(aggregate.finalize().as_bytes()),
+            "cache_work": [work[0].json(CacheState::Empty)?, work[1].json(CacheState::Retained)?],
+            "adapter_io": [{"cache": CacheState::Empty.name(), "work": io_work[0].json()?},
+                {"cache": CacheState::Retained.name(), "work": io_work[1].json()?}], "latency_groups": latencies,
+        }))
+    }
+}

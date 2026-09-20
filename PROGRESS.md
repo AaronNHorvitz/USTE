@@ -2,7 +2,51 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed BM-01 partial-origin rebuild (Decision 0173)
+## Latest verified increment — supervised packed BM-01 sampling (Decision 0174)
+
+Implemented on pushed `c372c6a` plus this increment: native packed sampling cold-admits the
+complete triple and runs the unchanged bounded oracle/warm-up/paired-query plan with a 64 MiB
+authorized cache. The existing owned-worker protocol enforces the fixed 30-second deadline;
+parent finalization binds packed schema, fixture frontier, counts and nonqualification disclosures.
+The unchanged 20,000-entity pre-I/O cap still refuses qualifying dimensions. Actual cache and
+adapter counters are reported separately; authenticated work is explicitly unmeasured.
+
+Initial session 93668 failed compilation on two unqualified names in the new supervisor test;
+qualified them without changing behavior. Focused session 35164 /
+`run-p833248-i21837283.scope` then passed 21 packed library tests/104.98 s, five packed CLI
+tests/58.52 s, compile 49.06 s and strict Clippy/1.40 s. The new CLI case independently verifies
+the paired digest, 96 warm-ups, 768 measured executions, 32 latency groups, retained cache hits/
+zero retained reads on the small fixture and unchanged source certificates. Sampled scope peak
+365,637,632 bytes/zero swap; preflight 30 GiB available RAM/3.7 GiB free swap.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --test packed_terminal --locked --offline packed -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Full session 5852 / `run-p835216-i21785549.scope` exited 0: 103 active tests across seven test
+executables, two existing ignored campaigns, zero failures. Library 79/150.57 s; legacy BM-01
+process 3/11.90 s; packed BM-06 CLI 5/53.05 s; packed BM-01 CLI 5/58.53 s; BM-06 manifest
+3/1.11 s; legacy BM-06 process 8/74.26 s. Compile 4.96 s, Clippy 0.04 s. Preflight 29 GiB
+available RAM/3.7 GiB free swap; sampled scope peak 525,119,488 bytes/zero swap. One job/thread,
+one heavy workload and 3G/4G/512M limits retained. Full command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d174-sampling-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Format/diff/docs/task checks pass. No core source is included in this increment; the
+unreferenced next-increment vault measurement module is excluded. Core retains its 658-test gate
+at `6bb43a4`. Next implement privileged authentication-work diagnostics, then resource-safe scale
+prerequisites before qualifying campaigns. T-20/T-19 remain unchecked; pinned M1, full roadmap,
+lockfile and release gates are unchanged. This section supersedes older next-step text; neither
+sampling plumbing nor capped correctness tests are performance/larger-than-memory qualification.
+
+## Prior verified increment — packed BM-01 partial-origin rebuild (Decision 0173)
 
 Implemented on pushed `885ca5a` plus this increment: explicit BM-01 rebuild restores the actual
 authenticated prefix, cold-admits exact prefix counts and reports `complete_fixture`. It does not

@@ -58,7 +58,23 @@ admission ceiling is not measured packed qualification. The explicit test-only
 policy acknowledgement (1), or graph publication before metadata rebase (data revisions). Use it
 only with an owning supervisor that terminates and reaps its child. The process regression exercises
 all five 20/200 boundaries, exact resume and all oracle queries; it does not emulate power loss.
-Packed BM-06 history, complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required.
+Complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required. Native packed
+BM-06 development history and recovery are described below.
+
+Decision 0174 adds supervised packed sampling over a completed fixture. Generate the two-section
+oracle bundle (not the single-section summary used by `linux-packed-query`):
+
+```sh
+cargo run --release --locked --offline -- oracle-bundle --entities 20 > /tmp/uste-packed-bundle.tsv
+cargo run --release --locked --offline -- linux-packed-sample --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20 --oracle-file /tmp/uste-packed-bundle.tsv
+```
+
+The parent enforces the fixed 30-second query deadline and validates the worker's closed protocol.
+One worker cold-admits the complete triple, executes 96 warm-ups and one development round of 384
+empty/retained identical-query pairs with a 64 MiB packed cache. Reports separate successful and
+typed-limit latency populations, cache work and adapter I/O. They do not claim complete authenticated
+I/O, controlled host caches, performance qualification or budget evaluation. The unchanged native
+20,000-entity cap rejects qualifying dimensions before filesystem access; it is not measured capacity.
 
 ## BM-06 materialization
 
@@ -386,5 +402,5 @@ returning a truncated answer.
 - BM-01 still needs the exact sampler campaign under the accepted host reservation. The legacy
   sampler retains its full-memory graph boundary; the native disk driver now uses disk-backed
   graph/coordinator bases, bounded suffix recovery, disk certificate proofs and bounded storage
-  blob/inventory catalogs. Packed-index native integration, BM-06 and larger-than-memory
-  qualification remain open.
+  blob/inventory catalogs. Native packed development integration and BM-06 prefix/recovery tests
+  exist, but complete authenticated I/O, scale and larger-than-memory qualification remain open.

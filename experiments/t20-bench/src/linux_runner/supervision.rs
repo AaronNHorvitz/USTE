@@ -31,6 +31,25 @@ enum WorkerMessage {
 enum SampleMode {
     Legacy,
     Disk,
+    Packed,
+}
+
+pub fn supervise_packed_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::Packed,
+    )
 }
 
 pub fn supervise_sample(
@@ -80,6 +99,7 @@ fn supervise_mode(
         .arg(match mode {
             SampleMode::Legacy => "linux-sample-worker",
             SampleMode::Disk => "linux-disk-sample-worker",
+            SampleMode::Packed => "linux-packed-sample-worker",
         })
         .arg("--root")
         .arg(root)
@@ -303,8 +323,43 @@ fn finalize_report(
         match mode {
             SampleMode::Legacy => "bm01-linux-sampling-v1",
             SampleMode::Disk => "bm01-linux-disk-sampling-v1",
+            SampleMode::Packed => "bm01-linux-packed-sampling-v1",
         },
     )?;
+    if matches!(mode, SampleMode::Packed) {
+        super::disk::validate_native_profile(profile)?;
+        expect_bool(object, "engine_benchmark", true)?;
+        expect_bool(object, "full_memory_graph_state", false)?;
+        expect_bool(object, "full_memory_coordinator_metadata", false)?;
+        expect_bool(object, "complete_authenticated_io", false)?;
+        expect_string(
+            object,
+            "storage_metadata_mode",
+            "disk-certificate-and-blob-recovery",
+        )?;
+        expect_string(object, "authenticated_io_accounting", "not-measured")?;
+        expect_string(
+            object,
+            "qualification",
+            "nonqualifying-development-sampling",
+        )?;
+        expect_string(object, "budget_evaluation", "not-performed")?;
+        expect_u64(
+            object,
+            "frontier",
+            crate::engine::materialization_revision_count(profile),
+        )?;
+        let setup = object
+            .get("setup")
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+        expect_bool(setup, "complete_fixture", true)?;
+        expect_u64(
+            setup,
+            "frontier",
+            crate::engine::materialization_revision_count(profile),
+        )?;
+    }
     if matches!(mode, SampleMode::Disk) {
         expect_bool(object, "full_memory_graph_state", false)?;
         expect_bool(object, "full_memory_coordinator_metadata", false)?;
@@ -575,7 +630,11 @@ mod tests {
 
     #[test]
     fn deadline_terminates_the_exact_worker_process() {
-        for mode in [super::SampleMode::Legacy, super::SampleMode::Disk] {
+        for mode in [
+            super::SampleMode::Legacy,
+            super::SampleMode::Disk,
+            super::SampleMode::Packed,
+        ] {
             let child = Command::new("sleep")
                 .arg("60")
                 .stdin(Stdio::piped())
@@ -752,6 +811,84 @@ mod tests {
                 super::SampleMode::Legacy
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn supervisor_binds_packed_schema_and_never_upgrades_missing_io_or_qualification() {
+        let report = serde_json::json!({
+            "schema": "bm01-linux-packed-sampling-v1", "engine_benchmark": true,
+            "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
+            "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
+            "complete_authenticated_io": false, "authenticated_io_accounting": "not-measured",
+            "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+            "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
+            "entities": 20, "relationships": 200, "frontier": 4, "warmup": {"queries": 96},
+            "setup": {"complete_fixture": true, "frontier": 4},
+            "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12}],
+        });
+        let profile = Bm01Profile::new(20).unwrap();
+        let finalized =
+            finalize_report(&report.to_string(), profile, 864, super::SampleMode::Packed).unwrap();
+        let finalized: serde_json::Value = serde_json::from_str(&finalized).unwrap();
+        assert_eq!(finalized["query_deadline_enforced"], true);
+        assert_eq!(finalized["complete_authenticated_io"], false);
+        assert_eq!(
+            finalized["qualification"],
+            "nonqualifying-development-sampling"
+        );
+        for pointer in [
+            "/schema",
+            "/engine_benchmark",
+            "/full_memory_graph_state",
+            "/full_memory_coordinator_metadata",
+            "/complete_authenticated_io",
+            "/authenticated_io_accounting",
+            "/storage_metadata_mode",
+            "/qualification",
+            "/budget_evaluation",
+            "/frontier",
+            "/setup/complete_fixture",
+            "/setup/frontier",
+            "/query_deadline_enforced",
+            "/query_deadline_postchecked",
+            "/query_deadline_seconds",
+            "/warmup/queries",
+            "/samples/0/timed_executions",
+            "/samples/0/rounds",
+            "/samples/0/minimum_duration_milliseconds",
+        ] {
+            let mut wrong = report.clone();
+            *wrong.pointer_mut(pointer).unwrap() = serde_json::Value::Null;
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Packed)
+                    .is_err(),
+                "{pointer}"
+            );
+        }
+        for mode in [super::SampleMode::Legacy, super::SampleMode::Disk] {
+            assert!(finalize_report(&report.to_string(), profile, 864, mode).is_err());
+        }
+        assert!(
+            finalize_report(&report.to_string(), profile, 863, super::SampleMode::Packed).is_err()
+        );
+        let mut wrong = report.clone();
+        wrong["query_deadline_enforced"] = true.into();
+        assert!(
+            finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Packed).is_err()
+        );
+        let absent = std::path::Path::new("absent-packed-supervisor");
+        assert_eq!(
+            super::supervise_packed_sample(
+                absent,
+                absent,
+                absent,
+                absent,
+                Bm01Profile::qualifying()
+            )
+            .unwrap_err()
+            .code(),
+            "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
         );
     }
 }

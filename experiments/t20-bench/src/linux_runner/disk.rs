@@ -26,7 +26,7 @@ mod index_work;
 pub(super) mod io;
 mod query;
 pub mod recovery;
-mod sampling;
+pub(super) mod sampling;
 mod storage_work;
 pub use query::query_correctness;
 pub use sampling::sample_worker;
