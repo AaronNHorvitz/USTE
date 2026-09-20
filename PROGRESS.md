@@ -2,7 +2,62 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — explicit domain staging buffers (Decision 0196)
+## Latest verified increment — native buffered staging measurement (Decision 0197)
+
+Pushed `9b07d0f` is the verified 705-test core baseline. Native packed commands now opt into
+64 MiB per-private-batch staging, while model/default constructors remain uncached. New report
+and configuration assertions passed as recorded below. No scale increase is claimed.
+The first build, session 91221 / `run-p1156496-i22147849.scope`, exited 101 because
+the enlarged history `serde_json::json!` macro exceeded its compile-time recursion limit.
+Log `/tmp/uste-d197-native-suite.log`; no tests ran. Split the two new fields into separate
+insertions, retaining the same output schema and default compiler recursion limit.
+
+Corrected full standalone session 29056 / `run-p1156998-i22109325.scope` passed all 118 active
+tests; four opt-in cases ignored. Library 88/131.26 s, legacy process 3/11.84 s, history CLI
+11/60.21 s, packed terminal 5/35.73 s, manifest 3/0.93 s, legacy history 8/72.54 s.
+Release compile 54.57 s; strict standalone Clippy 1.81 s. Sampled peak 398,331,904 bytes/zero
+swap (not final peak). Preflight 28 GiB available RAM/2.0 GiB free swap/983 GiB disk.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d197-native-suite-fixed.log'
+```
+
+Also backfilled explicit lock hashes/features in Decision 0193's archive, checked against its
+pinned `0f17918` base; its historical measurements are unchanged.
+
+The explicit fresh 4,096-record run passed: session 58344,
+`uste-d197-native-history-4096.scope`, log `/tmp/uste-d197-native-4096.log`. Preflight 27 GiB
+available RAM/2.0 GiB free swap/983 GiB disk, no competing Cargo workload. Same 1,800-second
+child/5,400-second overall deadlines and 3 GiB high/4 GiB maximum/512 MiB swap bounds. Wrapper
+records post-workload scope peak/swap statistics before exit and preserves the workload status.
+Retained synthetic root: `experiments/t20-bench/target/packed-history-cli-1159451-1789889951482048000`.
+Binary SHA-256 `fc0e14d081c7b9a91f617d4ceaa7119e6ee4baa45b81e8f3a4d6ae3597f4ea8a`, based on
+`9b07d0f15f9d0021e69e6381cecfe11c11c31812` plus the pending Decision 0197 source edits.
+One test passed in 780.74 s (wall 780.80 s). All five phases preserved exact digests and source
+certificate-prefix assertions: create 273,191 ms; resume 142,885 ms; checkpoint recovery 84,602 ms;
+repeated resume 141,231 ms; cold open 83,479 ms. Terminal history is 409,600 versions at revision
+801; checkpoint revision 793 plus eight suffix groups. Repeated resume and cold open wrote zero
+bytes. Process peak RSS 349,636 KiB; post-workload scope MemoryPeak 3,222,011,904 bytes and
+MemorySwapPeak zero. Final CERTIFICATES 3,337,122 bytes, SHA-256
+`c7fc7584318b87b4606009c9804f5a1694e9279783a418c5a3c41a656aee6020`.
+
+[Exact invocation, provenance and all phase reports](docs/evidence/native-buffered-staging-4096-development.json)
+retain the measured result. Compared with Decision 0193, create adapter reads fell from
+219,650,187,522 to 169,026,198,092 bytes and elapsed time from 321,264 to 273,191 ms; writes and
+nonce counts are identical. Other phase elapsed times do not show a consistent improvement.
+These are uncontrolled-host development comparisons, not physical-device I/O, complete
+authenticated I/O, qualifying recovery latency or larger-than-memory acceptance.
+
+Next T-20 action: isolate remaining construction/read amplification, preserve full proof checks,
+and implement bounded improvements with reference/corruption/fault coverage before increasing
+native admission or running qualifying campaigns. Inspection ruled out unconditional historical
+proof loading: preparation scans history only for explicit read-view predicates, while this
+fixture uses version predicates. T-20/T-19 stay open; M1 qualification remains pinned unchanged.
+
+## Prior verified increment — explicit domain staging buffers (Decision 0196)
 
 Pushed baseline `6b35b3b`. Optional per-batch budgets now flow through packed graph genesis,
 delta/live staging and coordinator primary/quota staging; all existing constructors explicitly
@@ -36,12 +91,10 @@ command as Decision 0194 below, with that new log path. Preflight 28 GiB availab
 free swap; sampled peak 1,581,711,360 bytes/zero swap, not final lifetime peak.
 
 Separate Decision 0197 experiment edits select 64 MiB per-private-batch staging in native packed
-paths and add report/configuration checks. They are uncompiled/unverified and not part of the
-workspace run. Keep them out of the Decision 0196 commit until separately verified. The
+paths and add report/configuration checks. They were not part of this workspace run and were
+subsequently verified separately above. The
 `experiments/t20-bench/src/engine/packed/limits.rs` compatibility additions (`None`) belong to
-Decision 0196; the other pending experiment paths belong to Decision 0197. Next
-run the standalone suite, then only with a fresh resource check run the explicit 4,096-record
-measurement and preserve its source/binary hashes and retained synthetic database.
+Decision 0196; the other experiment paths belong to Decision 0197.
 
 ## Prior verified increment — buffered staging and scoped bridge (Decisions 0194–0195)
 

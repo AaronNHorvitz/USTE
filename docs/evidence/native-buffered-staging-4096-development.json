@@ -1,464 +1,63 @@
 {
   "schema": "uste-native-packed-history-development-v1",
   "date": "2026-09-20",
-  "decision": "0193",
+  "decision": "0197",
   "qualification": "nonqualifying-development-profile",
-  "base_commit": "0f17918b2006f6035319ab84e10cea9e115605e9",
-  "dependency_locks_sha256": {
-    "Cargo.lock": "7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b",
-    "experiments/t20-bench/Cargo.lock": "4d348b4b13db7e0834d3cc998166d2eddf9e4fe4f96765a8ad7a172efbf21dd4"
-  },
-  "features": "Standalone manifest default features and its declared dependency features; release profile, no feature overrides. Lock hashes checked against the pinned base commit; later addition of these explicit hashes does not change the measurement.",
-  "source_and_binary_sha256": "cb7506e9ccc7992268edd9380d9673e84c15dd19ac63f64cdfc28f5a14f903e8  experiments/t20-bench/target/release/uste-t20-bench\n4db14f3ed28d5f39fc241ce079d82060cecfe7c72e7a4e87eb3b1c878ca711fb  experiments/t20-bench/src/linux_runner/packed/history.rs\na2e4b3a219007c37c5eb296020828b92fe7f20556a43bdcba1b4e01c35341388  experiments/t20-bench/src/linux_runner/packed/history/tests.rs\ne3e3da7b1d6170b3fda21fffd5e3e5b63efe471d84adcd5b4542922d6abc8237  experiments/t20-bench/src/main.rs\n6552cf8223958ffba569f2f3cb3073ce62ea65f35f94711426e96e26f4fd9e55  experiments/t20-bench/tests/packed_history.rs\n21d6d58e8dfa8eb5ab0ed92cb6c83cf9b8686c10caff93c7aa45255f03ff6826  experiments/t20-bench/tests/packed_history/prefix.rs\n7a03ad0b27c3ba9ec1790f772b986ff51d8a6142b8e366e74dd7bf6f0365917f  experiments/t20-bench/tests/packed_history/scale.rs\n",
-  "excluded_unverified_work": "Decision 0194 storage edits were written after this executable was built and are not linked.",
-  "invocation": "systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; /usr/bin/time -v timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_4096_record_eight_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/uste-d193-native-4096-fixed.log'",
+  "base_commit": "9b07d0f15f9d0021e69e6381cecfe11c11c31812",
+  "provenance": "9b07d0f15f9d0021e69e6381cecfe11c11c31812\nfc0e14d081c7b9a91f617d4ceaa7119e6ee4baa45b81e8f3a4d6ae3597f4ea8a  experiments/t20-bench/target/release/uste-t20-bench\n2c8249dab8f16b5d25cb2fb794258e0be8d709752905e30df9a1712a9d3d0433  experiments/t20-bench/src/linux_runner/packed.rs\n41524d5fd84f9c2e078c49649dbfe9f19738091ac2bd7e86b56d3a405c3e703f  experiments/t20-bench/src/linux_runner/packed/history.rs\n0e80f38044ec8c51f0f54885ab6cba40baf0a4d685971094544abf833f1abe36  experiments/t20-bench/src/linux_runner/packed/tests.rs\nbaa952c569cf91e4c5b090756fc35e69c337d4646f43abf75e41ec5bcbc1412f  experiments/t20-bench/tests/packed_history.rs\n151dbbe4422c4cd13a8bdb5a672882726b38d04c936a7ba46fdd26ecd73b6c8d  experiments/t20-bench/tests/packed_terminal.rs\n7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b  Cargo.lock\n4d348b4b13db7e0834d3cc998166d2eddf9e4fe4f96765a8ad7a172efbf21dd4  experiments/t20-bench/Cargo.lock\n5ea4bea8c7fcb0999ae9ebf7c587cb33b9ce824d8b2d38762ea1d9ff77ccbe54  experiments/t20-bench/Cargo.toml\n7.1.10-200.fc44.x86_64\nTARGET    FSTYPE SOURCE                OPTIONS\n/var/home btrfs  /dev/nvme1n1p3[/home] rw,relatime,seclabel,compress=zstd:1,ssd,discard=async,space_cache=v2,subvolid=257,subvol=/home\n",
+  "features": "Standalone manifest defaults and declared dependency features, release profile, no overrides.",
+  "invocation": "systemd-run --user --scope --unit=uste-d197-native-history-4096.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; /usr/bin/time -v timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_4096_record_eight_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1 2>&1 | tee /tmp/uste-d197-native-4096.log; history_status=$?; systemctl --user show uste-d197-native-history-4096.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec | tee -a /tmp/uste-d197-native-4096.log; exit \"$history_status\"'",
+  "fixture": "experiments/t20-bench/target/packed-history-cli-1159451-1789889951482048000",
+  "final_certificates": "c7fc7584318b87b4606009c9804f5a1694e9279783a418c5a3c41a656aee6020  experiments/t20-bench/target/packed-history-cli-1159451-1789889951482048000/bm06-linux-packed-engine/CERTIFICATES\n3337122\n",
   "environment": {
-    "rust": "1.95.0 (59807616e 2026-04-14)",
-    "kernel": "7.1.10-200.fc44.x86_64",
-    "filesystem": "Btrfs zstd:1 /dev/nvme1n1p3[/home]",
-    "available_ram_gib": 28,
+    "available_ram_gib": 27,
     "free_swap_gib": 2,
-    "free_disk_gib": 990,
+    "free_disk_gib": 983,
     "cargo_jobs": 1,
-    "test_threads": 1
+    "test_threads": 1,
+    "rust": "1.95.0 (59807616e 2026-04-14)"
   },
   "result": {
     "passed": 1,
     "failed": 0,
-    "test_seconds": 824.73,
-    "wall_seconds": 824.79,
-    "peak_process_rss_kib": 348556,
-    "rusage_swaps": 0,
-    "sampled_cgroup_peak_bytes": 3222011904,
-    "max_observed_cgroup_swap_bytes": 19996672,
-    "final_lifetime_cgroup_peak_captured": false,
-    "observed_memory_events": {
-      "high": 131512,
-      "max": 0,
-      "oom": 0
-    }
+    "test_seconds": 780.74,
+    "wall_seconds": 780.8,
+    "process_peak_rss_kib": 349636,
+    "post_workload_scope_memory_peak_bytes": 3222011904,
+    "post_workload_scope_swap_peak_bytes": 0,
+    "memory_high_bytes": 3221225472,
+    "memory_max_bytes": 4294967296,
+    "memory_swap_max_bytes": 536870912,
+    "cpu_usage_ns": 744777213000
   },
-  "fixture": "experiments/t20-bench/target/packed-history-cli-1136222-1789886072155584131",
-  "final_certificates": {
-    "bytes": 3337122,
-    "sha256": "7c067648fbdab8e7e268f5d2e9265e72e2018758385df77f4da53546ca275b12"
+  "completion_log": "    Finished `release` profile [optimized] target(s) in 0.04s\n     Running tests/packed_history.rs (experiments/t20-bench/target/release/deps/packed_history-1dc109200a58c621)\n\nrunning 1 test\ntest scale::packed_history_native_4096_record_eight_batch_tail_sigkill_resumes ... retained_native_history_root=/var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/packed-history-cli-1159451-1789889951482048000\nok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 12 filtered out; finished in 780.74s\n\n\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 5400s env CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_4096_record_eight_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1\"\n\tUser time (seconds): 654.47\n\tSystem time (seconds): 90.16\n\tPercent of CPU this job got: 95%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 13:00.80\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 349636\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 11918954\n\tVoluntary context switches: 320543\n\tInvoluntary context switches: 88935\n\tSwaps: 0\n\tFile system inputs: 242531664\n\tFile system outputs: 17413408\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\nMemoryCurrent=3115130880\nMemoryPeak=3222011904\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=744777213000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+  "regression": {
+    "active_tests_passed": 118,
+    "ignored": 4,
+    "strict_clippy": "passed",
+    "log": "/tmp/uste-d197-native-suite-fixed.log",
+    "prior_core_tests": 705,
+    "prior_core_commit": "9b07d0f"
   },
   "initial_failure": {
-    "log": "/tmp/uste-d193-native-4096.log",
-    "fixture": "experiments/t20-bench/target/packed-history-cli-1132228-1789885187740006861",
-    "provenance": "0f17918b2006f6035319ab84e10cea9e115605e9\n7f660ae7973bdb70f352b1499b7e78e541b422d9d0ca33af5bbd84c468df5d2a  experiments/t20-bench/target/release/uste-t20-bench\ne8d7edb07aff8573ca04869f282ba7af97b8cfb3b695b0bdfcbbfe3a662b8e35  experiments/t20-bench/src/linux_runner/packed/history.rs\n2678de5f3967f24340621ce7f41919632f7064c1c972a8f7739e6e368e23c485  experiments/t20-bench/src/linux_runner/packed/history/tests.rs\ne3e3da7b1d6170b3fda21fffd5e3e5b63efe471d84adcd5b4542922d6abc8237  experiments/t20-bench/src/main.rs\n9670cf61a59a5dce7af24ad39fd39fc1ba7af6dc5e245b2139834c17ffe05cfc  experiments/t20-bench/tests/packed_history.rs\n21d6d58e8dfa8eb5ab0ed92cb6c83cf9b8686c10caff93c7aa45255f03ff6826  experiments/t20-bench/tests/packed_history/prefix.rs\n7a03ad0b27c3ba9ec1790f772b986ff51d8a6142b8e366e74dd7bf6f0365917f  experiments/t20-bench/tests/packed_history/scale.rs\n",
-    "cause": "Cold binding cursor omitted certificate-distance allowance; tail child exited before marker. Retained diagnostic open reproduced USTE_BM06_PACKED_BINDING.",
     "exit_code": 101,
-    "test_seconds": 333.95,
-    "checkpoint_revision": 793,
-    "verified_versions": 405504,
-    "sampled_cgroup_peak_bytes": 3222261760,
-    "observed_swap_bytes": 262144,
-    "disposition": "Preserved. Corrected checked profile-derived allowance and retained stderr; fresh full run passed."
+    "log": "/tmp/uste-d197-native-suite.log",
+    "cause": "Enlarged serde_json macro recursion limit; no tests ran.",
+    "repair": "Separate field insertion, no raised compiler recursion limit."
   },
-  "retained_open_after_fix": {
-    "adapter_io": {
-      "complete_authenticated_index_io": false,
-      "measurement_scope": "filesystem-adapter-calls",
-      "operations": {
-        "create_directory": {
-          "calls": 0,
-          "failures": 0
-        },
-        "create_new": {
-          "calls": 0,
-          "failures": 0
-        },
-        "metadata": {
-          "calls": 1372446,
-          "failures": 0
-        },
-        "open_directory": {
-          "calls": 2,
-          "failures": 0
-        },
-        "open_existing": {
-          "calls": 1366113,
-          "failures": 42
-        },
-        "read_at": {
-          "calls": 1391822,
-          "failures": 0
-        },
-        "remove_file": {
-          "calls": 0,
-          "failures": 0
-        },
-        "rename_no_replace": {
-          "calls": 0,
-          "failures": 0
-        },
-        "set_len": {
-          "calls": 0,
-          "failures": 0
-        },
-        "sync_all": {
-          "calls": 0,
-          "failures": 0
-        },
-        "sync_data": {
-          "calls": 2,
-          "failures": 0
-        },
-        "sync_directory": {
-          "calls": 0,
-          "failures": 0
-        },
-        "try_lock_exclusive": {
-          "calls": 2,
-          "failures": 0
-        },
-        "write_at": {
-          "calls": 0,
-          "failures": 0
-        }
-      },
-      "physical_device_io": false,
-      "read_requested_bytes": 41829240844,
-      "read_returned_bytes": 41829240844,
-      "write_requested_bytes": 0,
-      "write_returned_bytes": 0
-    },
-    "bounded_bootstrap_resume": false,
-    "checkpoint_tail_replay": false,
-    "complete_authenticated_io": false,
-    "construction_nonce_session": null,
-    "construction_target_revision": null,
-    "coordinator_admission_buffered": true,
-    "coordinator_admission_cache_bytes": 67108864,
-    "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-    "current_rss_kib": 83448,
-    "derived_terminal_pending": false,
-    "development_record_limit": 4096,
-    "elapsed_milliseconds": 76084,
-    "engine_benchmark": false,
-    "filesystem_profile": "linux-x86_64-btrfs",
-    "frontier": 793,
-    "full_memory_coordinator_metadata": false,
-    "full_memory_graph_state": false,
-    "graph_admission_cache_bytes": 67108864,
-    "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
-    "history_verified_through_revision": 793,
-    "ignored_uncommitted_journal_bytes": 0,
-    "incomplete_prefix_resume_implemented": true,
-    "kernel_filesystem_device_cache": "uncontrolled",
-    "origin_suffix_groups": null,
-    "phase": "open",
-    "phase_work": {
-      "complete_authenticated_io": false,
-      "measured_elapsed_microseconds": 76084068,
-      "measurement_scope": "sequential-command-phases-through-terminal-digest",
-      "physical_device_io": false,
-      "qualifying_recovery_latency": false,
-      "stages": {
-        "history_verification": {
-          "adapter_io": {
-            "complete_authenticated_index_io": false,
-            "measurement_scope": "filesystem-adapter-calls",
-            "operations": {
-              "create_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "create_new": {
-                "calls": 0,
-                "failures": 0
-              },
-              "metadata": {
-                "calls": 759798,
-                "failures": 0
-              },
-              "open_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "open_existing": {
-                "calls": 759798,
-                "failures": 0
-              },
-              "read_at": {
-                "calls": 759798,
-                "failures": 0
-              },
-              "remove_file": {
-                "calls": 0,
-                "failures": 0
-              },
-              "rename_no_replace": {
-                "calls": 0,
-                "failures": 0
-              },
-              "set_len": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_all": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_data": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "try_lock_exclusive": {
-                "calls": 0,
-                "failures": 0
-              },
-              "write_at": {
-                "calls": 0,
-                "failures": 0
-              }
-            },
-            "physical_device_io": false,
-            "read_requested_bytes": 15610049910,
-            "read_returned_bytes": 15610049910,
-            "write_requested_bytes": 0,
-            "write_returned_bytes": 0
-          },
-          "elapsed_microseconds": 25230072
-        },
-        "post_verification_tail_or_retry": {
-          "adapter_io": {
-            "complete_authenticated_index_io": false,
-            "measurement_scope": "filesystem-adapter-calls",
-            "operations": {
-              "create_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "create_new": {
-                "calls": 0,
-                "failures": 0
-              },
-              "metadata": {
-                "calls": 0,
-                "failures": 0
-              },
-              "open_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "open_existing": {
-                "calls": 0,
-                "failures": 0
-              },
-              "read_at": {
-                "calls": 0,
-                "failures": 0
-              },
-              "remove_file": {
-                "calls": 0,
-                "failures": 0
-              },
-              "rename_no_replace": {
-                "calls": 0,
-                "failures": 0
-              },
-              "set_len": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_all": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_data": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "try_lock_exclusive": {
-                "calls": 0,
-                "failures": 0
-              },
-              "write_at": {
-                "calls": 0,
-                "failures": 0
-              }
-            },
-            "physical_device_io": false,
-            "read_requested_bytes": 0,
-            "read_returned_bytes": 0,
-            "write_requested_bytes": 0,
-            "write_returned_bytes": 0
-          },
-          "elapsed_microseconds": 11
-        },
-        "setup_and_admission": {
-          "adapter_io": {
-            "complete_authenticated_index_io": false,
-            "measurement_scope": "filesystem-adapter-calls",
-            "operations": {
-              "create_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "create_new": {
-                "calls": 0,
-                "failures": 0
-              },
-              "metadata": {
-                "calls": 306325,
-                "failures": 0
-              },
-              "open_directory": {
-                "calls": 1,
-                "failures": 0
-              },
-              "open_existing": {
-                "calls": 303158,
-                "failures": 21
-              },
-              "read_at": {
-                "calls": 316410,
-                "failures": 0
-              },
-              "remove_file": {
-                "calls": 0,
-                "failures": 0
-              },
-              "rename_no_replace": {
-                "calls": 0,
-                "failures": 0
-              },
-              "set_len": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_all": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_data": {
-                "calls": 1,
-                "failures": 0
-              },
-              "sync_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "try_lock_exclusive": {
-                "calls": 1,
-                "failures": 0
-              },
-              "write_at": {
-                "calls": 0,
-                "failures": 0
-              }
-            },
-            "physical_device_io": false,
-            "read_requested_bytes": 13111251545,
-            "read_returned_bytes": 13111251545,
-            "write_requested_bytes": 0,
-            "write_returned_bytes": 0
-          },
-          "elapsed_microseconds": 26266562
-        },
-        "terminal_digest_admission": {
-          "adapter_io": {
-            "complete_authenticated_index_io": false,
-            "measurement_scope": "filesystem-adapter-calls",
-            "operations": {
-              "create_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "create_new": {
-                "calls": 0,
-                "failures": 0
-              },
-              "metadata": {
-                "calls": 306323,
-                "failures": 0
-              },
-              "open_directory": {
-                "calls": 1,
-                "failures": 0
-              },
-              "open_existing": {
-                "calls": 303157,
-                "failures": 21
-              },
-              "read_at": {
-                "calls": 315614,
-                "failures": 0
-              },
-              "remove_file": {
-                "calls": 0,
-                "failures": 0
-              },
-              "rename_no_replace": {
-                "calls": 0,
-                "failures": 0
-              },
-              "set_len": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_all": {
-                "calls": 0,
-                "failures": 0
-              },
-              "sync_data": {
-                "calls": 1,
-                "failures": 0
-              },
-              "sync_directory": {
-                "calls": 0,
-                "failures": 0
-              },
-              "try_lock_exclusive": {
-                "calls": 1,
-                "failures": 0
-              },
-              "write_at": {
-                "calls": 0,
-                "failures": 0
-              }
-            },
-            "physical_device_io": false,
-            "read_requested_bytes": 13107939389,
-            "read_returned_bytes": 13107939389,
-            "write_requested_bytes": 0,
-            "write_returned_bytes": 0
-          },
-          "elapsed_microseconds": 24587421
-        }
-      }
-    },
-    "process_peak_rss_kib": 345524,
-    "qualification": "nonqualifying-development-profile",
-    "qualifying_recovery_trials": 0,
-    "records": 4096,
-    "recovered_frontier": 793,
-    "repaired_certificate_tail_bytes": 0,
-    "resume_base_revision": null,
-    "resume_suffix_groups": null,
-    "schema": "bm06-linux-packed-development-v1",
-    "selected_base_revision": 793,
-    "storage_metadata_mode": "disk-certificate-and-blob-recovery",
-    "suffix_groups": 0,
-    "v1_state_digest": "a9d0967ebb60c0c3fd8c43dbbd6249ce481cc2b03898b8baa0a05c30d1c222e2",
-    "verified_history_versions": 405504
+  "comparison": {
+    "reference": "native-packed-history-4096-development.json",
+    "create_adapter_reads_before": 219650187522,
+    "create_adapter_reads_after": 169026198092,
+    "create_ms_before": 321264,
+    "create_ms_after": 273191,
+    "limits": "Two independent development runs; uncontrolled host/device caches and no qualifying resource reservation. Same logical digests, writes and construction nonces; not a general latency claim."
   },
   "limitations": [
-    "Not BM-01/BM-06 qualification or T-20 completion.",
-    "Logical payload 1677721600 bytes is not larger than reserved RAM; no reserved qualifying host.",
-    "Adapter counters are not physical-device or complete authenticated I/O.",
-    "Construction nonce counters do not implement writer rotation.",
-    "Phase command totals are not qualifying recovery latency."
+    "No qualifying BM-01/BM-06 campaign or larger-than-24-GiB qualification.",
+    "Adapter calls are not physical-device or complete authenticated I/O.",
+    "Construction nonce report excludes bootstrap/key adapter/other owners; no writer rotation.",
+    "T-20/T-19 remain open; M1 pinned evidence unchanged."
   ],
   "phases": [
     {
@@ -477,7 +76,7 @@
               "failures": 0
             },
             "metadata": {
-              "calls": 9944946,
+              "calls": 7480892,
               "failures": 0
             },
             "open_directory": {
@@ -485,11 +84,11 @@
               "failures": 0
             },
             "open_existing": {
-              "calls": 9937818,
+              "calls": 7473764,
               "failures": 48
             },
             "read_at": {
-              "calls": 9966707,
+              "calls": 7502653,
               "failures": 0
             },
             "remove_file": {
@@ -526,8 +125,8 @@
             }
           },
           "physical_device_io": false,
-          "read_requested_bytes": 219650187522,
-          "read_returned_bytes": 219650187522,
+          "read_requested_bytes": 169026198092,
+          "read_returned_bytes": 169026198092,
           "write_requested_bytes": 7583695347,
           "write_returned_bytes": 7583695347
         },
@@ -549,10 +148,10 @@
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": 67108864,
         "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-        "current_rss_kib": 29040,
+        "current_rss_kib": 40032,
         "derived_terminal_pending": false,
         "development_record_limit": 4096,
-        "elapsed_milliseconds": 321264,
+        "elapsed_milliseconds": 273191,
         "engine_benchmark": false,
         "filesystem_profile": "linux-x86_64-btrfs",
         "frontier": 793,
@@ -568,7 +167,7 @@
         "phase": "create",
         "phase_work": {
           "complete_authenticated_io": false,
-          "measured_elapsed_microseconds": 321264625,
+          "measured_elapsed_microseconds": 273190981,
           "measurement_scope": "sequential-command-phases-through-terminal-digest",
           "physical_device_io": false,
           "qualifying_recovery_latency": false,
@@ -641,7 +240,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26761772
+              "elapsed_microseconds": 27023094
             },
             "post_verification_tail_or_retry": {
               "adapter_io": {
@@ -711,7 +310,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 12
+              "elapsed_microseconds": 10
             },
             "setup_and_admission": {
               "adapter_io": {
@@ -727,7 +326,7 @@
                     "failures": 0
                   },
                   "metadata": {
-                    "calls": 8878825,
+                    "calls": 6414771,
                     "failures": 0
                   },
                   "open_directory": {
@@ -735,11 +334,11 @@
                     "failures": 0
                   },
                   "open_existing": {
-                    "calls": 8874863,
+                    "calls": 6410809,
                     "failures": 27
                   },
                   "read_at": {
-                    "calls": 8891295,
+                    "calls": 6427241,
                     "failures": 0
                   },
                   "remove_file": {
@@ -776,12 +375,12 @@
                   }
                 },
                 "physical_device_io": false,
-                "read_requested_bytes": 190932198223,
-                "read_returned_bytes": 190932198223,
+                "read_requested_bytes": 140308208793,
+                "read_returned_bytes": 140308208793,
                 "write_requested_bytes": 7583695347,
                 "write_returned_bytes": 7583695347
               },
-              "elapsed_microseconds": 267671772
+              "elapsed_microseconds": 218698102
             },
             "terminal_digest_admission": {
               "adapter_io": {
@@ -851,11 +450,11 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26831068
+              "elapsed_microseconds": 27469773
             }
           }
         },
-        "process_peak_rss_kib": 291712,
+        "process_peak_rss_kib": 303744,
         "qualification": "nonqualifying-development-profile",
         "qualifying_recovery_trials": 0,
         "records": 4096,
@@ -865,6 +464,8 @@
         "resume_suffix_groups": null,
         "schema": "bm06-linux-packed-development-v1",
         "selected_base_revision": 793,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
         "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "suffix_groups": 0,
         "v1_state_digest": "a9d0967ebb60c0c3fd8c43dbbd6249ce481cc2b03898b8baa0a05c30d1c222e2",
@@ -887,7 +488,7 @@
               "failures": 1
             },
             "metadata": {
-              "calls": 2552071,
+              "calls": 2525821,
               "failures": 0
             },
             "open_directory": {
@@ -895,11 +496,11 @@
               "failures": 0
             },
             "open_existing": {
-              "calls": 2542527,
+              "calls": 2516277,
               "failures": 99
             },
             "read_at": {
-              "calls": 2579513,
+              "calls": 2553263,
               "failures": 0
             },
             "remove_file": {
@@ -936,8 +537,8 @@
             }
           },
           "physical_device_io": false,
-          "read_requested_bytes": 73038354834,
-          "read_returned_bytes": 73038354834,
+          "read_requested_bytes": 72499048584,
+          "read_returned_bytes": 72499048584,
           "write_requested_bytes": 75009442,
           "write_returned_bytes": 75009442
         },
@@ -959,10 +560,10 @@
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": 67108864,
         "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-        "current_rss_kib": 88656,
+        "current_rss_kib": 88960,
         "derived_terminal_pending": false,
         "development_record_limit": 4096,
-        "elapsed_milliseconds": 140858,
+        "elapsed_milliseconds": 142885,
         "engine_benchmark": false,
         "filesystem_profile": "linux-x86_64-btrfs",
         "frontier": 801,
@@ -978,7 +579,7 @@
         "phase": "resume",
         "phase_work": {
           "complete_authenticated_io": false,
-          "measured_elapsed_microseconds": 140858543,
+          "measured_elapsed_microseconds": 142885651,
           "measurement_scope": "sequential-command-phases-through-terminal-digest",
           "physical_device_io": false,
           "qualifying_recovery_latency": false,
@@ -1051,7 +652,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26694029
+              "elapsed_microseconds": 27176237
             },
             "post_verification_tail_or_retry": {
               "adapter_io": {
@@ -1137,7 +738,7 @@
                     "failures": 1
                   },
                   "metadata": {
-                    "calls": 1474733,
+                    "calls": 1448483,
                     "failures": 0
                   },
                   "open_directory": {
@@ -1145,11 +746,11 @@
                     "failures": 0
                   },
                   "open_existing": {
-                    "calls": 1468387,
+                    "calls": 1442137,
                     "failures": 78
                   },
                   "read_at": {
-                    "calls": 1493533,
+                    "calls": 1467283,
                     "failures": 0
                   },
                   "remove_file": {
@@ -1186,12 +787,12 @@
                   }
                 },
                 "physical_device_io": false,
-                "read_requested_bytes": 44024193175,
-                "read_returned_bytes": 44024193175,
+                "read_requested_bytes": 43484886925,
+                "read_returned_bytes": 43484886925,
                 "write_requested_bytes": 75009442,
                 "write_returned_bytes": 75009442
               },
-              "elapsed_microseconds": 86629186
+              "elapsed_microseconds": 88018751
             },
             "terminal_digest_admission": {
               "adapter_io": {
@@ -1261,11 +862,11 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 27535311
+              "elapsed_microseconds": 27690646
             }
           }
         },
-        "process_peak_rss_kib": 348416,
+        "process_peak_rss_kib": 349636,
         "qualification": "nonqualifying-development-profile",
         "qualifying_recovery_trials": 0,
         "records": 4096,
@@ -1275,6 +876,8 @@
         "resume_suffix_groups": 1,
         "schema": "bm06-linux-packed-development-v1",
         "selected_base_revision": 801,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
         "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "suffix_groups": 0,
         "v1_state_digest": "3ae11269c519d7c2d95a195f156bb315fbffc19b4cf2963b595fd5b2141b072c",
@@ -1297,7 +900,7 @@
               "failures": 3
             },
             "metadata": {
-              "calls": 1471066,
+              "calls": 1444816,
               "failures": 0
             },
             "open_directory": {
@@ -1305,11 +908,11 @@
               "failures": 0
             },
             "open_existing": {
-              "calls": 1464666,
+              "calls": 1438416,
               "failures": 39
             },
             "read_at": {
-              "calls": 1489209,
+              "calls": 1462959,
               "failures": 0
             },
             "remove_file": {
@@ -1346,8 +949,8 @@
             }
           },
           "physical_device_io": false,
-          "read_requested_bytes": 43987048295,
-          "read_returned_bytes": 43987048295,
+          "read_requested_bytes": 43447742045,
+          "read_returned_bytes": 43447742045,
           "write_requested_bytes": 59675211,
           "write_returned_bytes": 59675211
         },
@@ -1359,10 +962,10 @@
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": 67108864,
         "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-        "current_rss_kib": 88756,
+        "current_rss_kib": 88760,
         "derived_terminal_pending": false,
         "development_record_limit": 4096,
-        "elapsed_milliseconds": 85008,
+        "elapsed_milliseconds": 84602,
         "engine_benchmark": false,
         "filesystem_profile": "linux-x86_64-btrfs",
         "frontier": 801,
@@ -1378,7 +981,7 @@
         "phase": "recover-checkpoint",
         "phase_work": {
           "complete_authenticated_io": false,
-          "measured_elapsed_microseconds": 85008489,
+          "measured_elapsed_microseconds": 84602866,
           "measurement_scope": "sequential-command-phases-through-terminal-digest",
           "physical_device_io": false,
           "qualifying_recovery_latency": false,
@@ -1451,7 +1054,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26617874
+              "elapsed_microseconds": 27049630
             },
             "post_verification_tail_or_retry": {
               "adapter_io": {
@@ -1521,7 +1124,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26769
+              "elapsed_microseconds": 27680
             },
             "setup_and_admission": {
               "adapter_io": {
@@ -1537,7 +1140,7 @@
                     "failures": 3
                   },
                   "metadata": {
-                    "calls": 393645,
+                    "calls": 367395,
                     "failures": 0
                   },
                   "open_directory": {
@@ -1545,11 +1148,11 @@
                     "failures": 0
                   },
                   "open_existing": {
-                    "calls": 390446,
+                    "calls": 364196,
                     "failures": 21
                   },
                   "read_at": {
-                    "calls": 403146,
+                    "calls": 376896,
                     "failures": 0
                   },
                   "remove_file": {
@@ -1586,12 +1189,12 @@
                   }
                 },
                 "physical_device_io": false,
-                "read_requested_bytes": 14971230505,
-                "read_returned_bytes": 14971230505,
+                "read_requested_bytes": 14431924255,
+                "read_returned_bytes": 14431924255,
                 "write_requested_bytes": 59675211,
                 "write_returned_bytes": 59675211
               },
-              "elapsed_microseconds": 30775526
+              "elapsed_microseconds": 29974681
             },
             "terminal_digest_admission": {
               "adapter_io": {
@@ -1661,11 +1264,11 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 27588319
+              "elapsed_microseconds": 27550873
             }
           }
         },
-        "process_peak_rss_kib": 348556,
+        "process_peak_rss_kib": 349012,
         "qualification": "nonqualifying-development-profile",
         "qualifying_recovery_trials": 0,
         "records": 4096,
@@ -1675,6 +1278,8 @@
         "resume_suffix_groups": null,
         "schema": "bm06-linux-packed-development-v1",
         "selected_base_revision": 793,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
         "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "suffix_groups": 8,
         "v1_state_digest": "3ae11269c519d7c2d95a195f156bb315fbffc19b4cf2963b595fd5b2141b072c",
@@ -1769,10 +1374,10 @@
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": 67108864,
         "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-        "current_rss_kib": 88100,
+        "current_rss_kib": 87884,
         "derived_terminal_pending": false,
         "development_record_limit": 4096,
-        "elapsed_milliseconds": 140059,
+        "elapsed_milliseconds": 141231,
         "engine_benchmark": false,
         "filesystem_profile": "linux-x86_64-btrfs",
         "frontier": 801,
@@ -1788,7 +1393,7 @@
         "phase": "resume",
         "phase_work": {
           "complete_authenticated_io": false,
-          "measured_elapsed_microseconds": 140058948,
+          "measured_elapsed_microseconds": 141230932,
           "measurement_scope": "sequential-command-phases-through-terminal-digest",
           "physical_device_io": false,
           "qualifying_recovery_latency": false,
@@ -1861,7 +1466,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26787762
+              "elapsed_microseconds": 27307739
             },
             "post_verification_tail_or_retry": {
               "adapter_io": {
@@ -1931,7 +1536,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 13
+              "elapsed_microseconds": 12
             },
             "setup_and_admission": {
               "adapter_io": {
@@ -2001,7 +1606,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 85668743
+              "elapsed_microseconds": 86161304
             },
             "terminal_digest_admission": {
               "adapter_io": {
@@ -2071,11 +1676,11 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 27602428
+              "elapsed_microseconds": 27761876
             }
           }
         },
-        "process_peak_rss_kib": 348012,
+        "process_peak_rss_kib": 348028,
         "qualification": "nonqualifying-development-profile",
         "qualifying_recovery_trials": 0,
         "records": 4096,
@@ -2085,6 +1690,8 @@
         "resume_suffix_groups": 0,
         "schema": "bm06-linux-packed-development-v1",
         "selected_base_revision": 801,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
         "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "suffix_groups": 0,
         "v1_state_digest": "3ae11269c519d7c2d95a195f156bb315fbffc19b4cf2963b595fd5b2141b072c",
@@ -2169,10 +1776,10 @@
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": 67108864,
         "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
-        "current_rss_kib": 88004,
+        "current_rss_kib": 87960,
         "derived_terminal_pending": false,
         "development_record_limit": 4096,
-        "elapsed_milliseconds": 82974,
+        "elapsed_milliseconds": 83479,
         "engine_benchmark": false,
         "filesystem_profile": "linux-x86_64-btrfs",
         "frontier": 801,
@@ -2188,7 +1795,7 @@
         "phase": "open",
         "phase_work": {
           "complete_authenticated_io": false,
-          "measured_elapsed_microseconds": 82974263,
+          "measured_elapsed_microseconds": 83479154,
           "measurement_scope": "sequential-command-phases-through-terminal-digest",
           "physical_device_io": false,
           "qualifying_recovery_latency": false,
@@ -2261,7 +1868,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 26669519
+              "elapsed_microseconds": 27306764
             },
             "post_verification_tail_or_retry": {
               "adapter_io": {
@@ -2331,7 +1938,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 14
+              "elapsed_microseconds": 12
             },
             "setup_and_admission": {
               "adapter_io": {
@@ -2401,7 +2008,7 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 28665408
+              "elapsed_microseconds": 28461390
             },
             "terminal_digest_admission": {
               "adapter_io": {
@@ -2471,11 +2078,11 @@
                 "write_requested_bytes": 0,
                 "write_returned_bytes": 0
               },
-              "elapsed_microseconds": 27639321
+              "elapsed_microseconds": 27710986
             }
           }
         },
-        "process_peak_rss_kib": 347852,
+        "process_peak_rss_kib": 347976,
         "qualification": "nonqualifying-development-profile",
         "qualifying_recovery_trials": 0,
         "records": 4096,
@@ -2485,6 +2092,8 @@
         "resume_suffix_groups": null,
         "schema": "bm06-linux-packed-development-v1",
         "selected_base_revision": 801,
+        "staging_cache_bytes": 67108864,
+        "staging_cache_scope": "fresh-per-private-tree-batch",
         "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "suffix_groups": 0,
         "v1_state_digest": "3ae11269c519d7c2d95a195f156bb315fbffc19b4cf2963b595fd5b2141b072c",

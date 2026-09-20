@@ -236,6 +236,13 @@ marker-exit diagnostics. Bootstrap binding now separately budgets the bounded ce
 through the declared profile frontier, in addition to the original small-policy-group allowance.
 The larger case does not change the qualifying profile, thresholds, reserved host or nonce cap.
 
+Decision 0197 selects a separate 64 MiB staging cache in native packed development commands.
+It is fresh for each private tree batch, including graph genesis/suffix/live publication and
+coordinator prefix/rebase work; model/default staging remains uncached. Reports declare
+`staging_cache_bytes` and `staging_cache_scope` separately from admission caches. Logical
+proof-work ceilings are unchanged. This selection is not a performance result: exact-version
+verification and measurements are recorded in PROGRESS and the corresponding evidence archive.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

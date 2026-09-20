@@ -1,5 +1,88 @@
 use super::*;
 use std::{collections::BTreeMap, fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
+
+#[test]
+fn native_staging_buffer_selection_preserves_model_defaults_and_work_limits() {
+    use crate::recovery_materialization::Bm06Profile;
+    for original in [
+        Limits::new(Bm01Profile::new(20).unwrap()).unwrap(),
+        Limits::new(Bm01Profile::new(100_000).unwrap()).unwrap(),
+        Limits::recovery(Bm06Profile::new(1).unwrap()).unwrap(),
+        Limits::recovery(Bm06Profile::new(4096).unwrap()).unwrap(),
+        Limits::recovery(Bm06Profile::new(100_000).unwrap()).unwrap(),
+    ] {
+        let selected = buffered_staging(original);
+        for (before, after) in [
+            (original.origin.genesis.stage, selected.origin.genesis.stage),
+            (original.origin.suffix.graph, selected.origin.suffix.graph),
+            (original.publication.stage, selected.publication.stage),
+        ] {
+            assert_eq!(before.staging_cache_bytes, None);
+            assert_eq!(after.staging_cache_bytes, Some(STAGING_CACHE_BYTES));
+            assert_eq!(
+                (
+                    before.maximum_batches,
+                    before.maximum_read_pages,
+                    before.maximum_written_pages,
+                    before.deltas_per_batch
+                ),
+                (
+                    after.maximum_batches,
+                    after.maximum_read_pages,
+                    after.maximum_written_pages,
+                    after.deltas_per_batch
+                )
+            );
+            assert_eq!(
+                (
+                    before.batch.maximum_read_pages,
+                    before.batch.maximum_read_bytes,
+                    before.batch.maximum_deltas,
+                    before.batch.pack.maximum_pages
+                ),
+                (
+                    after.batch.maximum_read_pages,
+                    after.batch.maximum_read_bytes,
+                    after.batch.maximum_deltas,
+                    after.batch.pack.maximum_pages
+                )
+            );
+            assert_eq!(
+                before.certificates.maximum_encoded_bytes(),
+                after.certificates.maximum_encoded_bytes()
+            );
+        }
+        let before = original.origin.suffix.metadata;
+        let after = selected.origin.suffix.metadata;
+        assert_eq!(before.staging.staging_cache_bytes, None);
+        assert_eq!(after.staging.staging_cache_bytes, Some(STAGING_CACHE_BYTES));
+        assert_eq!(
+            (
+                before.staging.maximum_references,
+                before.staging.maximum_owners,
+                before.maximum_groups,
+                before.maximum_encoded_bytes,
+                before.certificate_window
+            ),
+            (
+                after.staging.maximum_references,
+                after.staging.maximum_owners,
+                after.maximum_groups,
+                after.maximum_encoded_bytes,
+                after.certificate_window
+            )
+        );
+        assert_eq!(
+            before.staging.batch.maximum_read_pages,
+            after.staging.batch.maximum_read_pages
+        );
+        assert_eq!(
+            before.staging.batch.maximum_read_bytes,
+            after.staging.batch.maximum_read_bytes
+        );
+    }
+}
+
 struct Fixture {
     root: PathBuf,
     password: PathBuf,

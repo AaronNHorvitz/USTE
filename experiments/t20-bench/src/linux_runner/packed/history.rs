@@ -253,7 +253,8 @@ fn run_bounded_observed(
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
-    let limits = Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?;
+    let limits =
+        buffered_staging(Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?);
     if is_create {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
             .map_err(|_| error("USTE_BM06_KEY_CREATE"))?;
@@ -444,7 +445,7 @@ fn run_bounded_observed(
         ],
     )?;
     let (rss, peak) = process_rss()?;
-    Ok(serde_json::json!({
+    let mut report = serde_json::json!({
         "schema": "bm06-linux-packed-development-v1", "phase": phase, "engine_benchmark": false,
         "qualification": "nonqualifying-development-profile", "qualifying_recovery_trials": 0,
         "filesystem_profile": "linux-x86_64-btrfs", "storage_metadata_mode": "disk-certificate-and-blob-recovery",
@@ -469,5 +470,8 @@ fn run_bounded_observed(
         "repaired_certificate_tail_bytes": recovered.repaired_certificate_tail_bytes,
         "ignored_uncommitted_journal_bytes": recovered.ignored_uncommitted_journal_bytes,
         "adapter_io": fs.snapshot()?.json()?, "development_record_limit": MAX_RECORDS,
-    }).to_string())
+    });
+    report["staging_cache_bytes"] = serde_json::json!(STAGING_CACHE_BYTES);
+    report["staging_cache_scope"] = serde_json::json!(STAGING_CACHE_SCOPE);
+    Ok(report.to_string())
 }

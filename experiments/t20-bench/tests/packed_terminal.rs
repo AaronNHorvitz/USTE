@@ -234,6 +234,11 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
     let open = fixture.run("open");
     for report in [&create, &open] {
         assert_eq!(report["graph_admission_cache_bytes"], 64 * 1024 * 1024);
+        assert_eq!(report["staging_cache_bytes"], 64 * 1024 * 1024);
+        assert_eq!(
+            report["staging_cache_scope"],
+            "fresh-per-private-tree-batch"
+        );
         assert_eq!(
             report["graph_admission_cache_scope"],
             "fresh-per-canonical-family-then-fresh-semantic"

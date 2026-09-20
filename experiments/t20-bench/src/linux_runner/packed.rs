@@ -18,6 +18,16 @@ type Fs = ObservedFileSystem<LinuxFileSystem>;
 type Packed = engine::PackedEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;
 type Recovery = engine::RecoveryEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;
 const DATABASE: &str = "bm01-linux-packed-engine";
+const STAGING_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const STAGING_CACHE_SCOPE: &str = "fresh-per-private-tree-batch";
+
+fn buffered_staging(mut limits: Limits) -> Limits {
+    limits.origin.genesis.stage.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
+    limits.origin.suffix.graph.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
+    limits.origin.suffix.metadata.staging.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
+    limits.publication.stage.staging_cache_bytes = Some(STAGING_CACHE_BYTES);
+    limits
+}
 
 struct Session {
     filesystem: Fs,
@@ -187,7 +197,7 @@ fn prepare_observed(
     if !matches!(phase, "create" | "open" | "rebuild" | "resume") {
         return Err(error("USTE_BM01_PACKED_PHASE"));
     }
-    let limits = Limits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?;
+    let limits = buffered_staging(Limits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?);
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password_file)?);
@@ -342,6 +352,8 @@ fn prepare_observed(
         "filesystem_profile": "linux-x86_64-btrfs", "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
         "graph_admission_cache_bytes": engine::GRAPH_ADMISSION_CACHE_BYTES,
+        "staging_cache_bytes": STAGING_CACHE_BYTES,
+        "staging_cache_scope": STAGING_CACHE_SCOPE,
         "graph_admission_cache_scope": engine::GRAPH_ADMISSION_CACHE_SCOPE,
         "coordinator_admission_buffered": true,
         "coordinator_admission_cache_bytes": engine::COORDINATOR_ADMISSION_CACHE_BYTES,
