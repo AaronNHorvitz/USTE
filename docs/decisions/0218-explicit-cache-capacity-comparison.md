@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 
-Status: Implemented and locally verified; larger capacity comparison unmeasured.
+Status: Implemented and locally verified; 20,000-entity comparison complete, not qualified.
 
 D0216's same-binary development pair records a regression, not a speedup, for the 48/16 MiB
 split. Preserve that evidence and the 64 MiB page-only default. Add separately named correctness
@@ -29,3 +29,11 @@ strict Clippy and format/docs/task checks. Four configurations match the indepen
 fixture oracle; separate CLI runs confirm exact budgets/profiles, all outcomes, no query writes
 and unchanged certificate bytes. Cross-size/mode substitution and qualifying-size missing-path
 refusal pass. PROGRESS records exact commands, binary/source baseline and resource usage.
+
+The same-binary 20,000/200,000 pair passes every oracle case but the 128/128 MiB split takes
+516,707 ms versus 424,709 ms for 256 MiB pages (21.66% slower). Positive-cache evictions are
+zero; its 10,943,347 hits do not offset the increase from 4,934,320 to 8,267,327 page misses.
+Keep the existing 64 MiB page-only default; neither measurement qualifies latency or selects an
+optimum. Raw reports, exact commands and resource observations are in
+`docs/evidence/cache-capacity-native-comparison.json`. This same-size pair does not establish a
+same-binary causal comparison against the earlier 64 MiB binary.

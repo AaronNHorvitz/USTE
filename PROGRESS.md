@@ -4,12 +4,58 @@ Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
 ## Current work — explicit bounded capacity comparison (Decision 0218)
 
+D0218 is committed/pushed as `87221d7000b1f80dae21dcc369f340c7c2392321`. Its pinned release
+binary is `abd58cbd7a905bea6bc5372977fe79b690a72d8073a4a17358193c42c50e48cd`. Fresh preflight
+23 GiB available RAM / 2.1 GiB free swap / 952 GiB disk, clean tree and no competing workload.
+The retained source certificate and oracle-summary hashes match D0216; synthetic password
+metadata remains 0600 / one link / 80 bytes. No credential contents printed.
+The 256 MiB page-only control ran under `uste-d218-wide-pages.scope`, 3G/4G/512M limits,
+with a 1800-second TERM/10-second KILL command deadline. Artifacts:
+`experiments/t20-bench/target/native-wide20000.BogUKs/pages.{json,time,scope,stderr}`.
+Page-only control passed, exit zero: 384 cases (313 successful, 71 expected result limits),
+4,095,526 visits, 46,474,984 result bytes, unchanged output digest
+`0c978f102932e082ed1f1012e037a299658cb8d8ff26c5051438c67750b8ee42`.
+Query/setup 424,709/57,695 ms, wall 482.64s, user/system 456.32/24.32s, peak RSS 328,100 KiB.
+Page hits/misses/evictions 559,139,532 / 4,934,320 / 1,797,695; adapter-read/authenticated
+encoded bytes 101,375,604,400; final page accounting 268,422,144 of 268,435,456 bytes.
+Scope peak 682,262,528 bytes, zero swap, CPU 480,779,535,000 ns. Source/executable hashes unchanged.
+This is not a same-binary capacity comparison against the older 64 MiB baseline or a latency pass.
+
+The same-binary 128/128 MiB positive control completed under
+`uste-d218-wide-positive.scope`, same source/oracle, 1800s deadline and 3G/4G/512M limits.
+Fresh preflight: 24 GiB available RAM, 2.1 GiB free swap, no competing heavy workload.
+Exact invocation is the page command below with scope `uste-d218-wide-positive.scope`,
+artifact prefix `positive` instead of `pages`, and command `linux-packed-wide-lookup-query`.
+Started 2026-09-20 15:04:08 UTC, session 9489, invocation `22dcf1c35ffc4a92bc339a063d0808c6`.
+Exit zero; all 384 outcomes, visits/result bytes and both digests match the page-only control.
+Query/setup 516,707/57,437 ms; wall 574.36s, user/system 534.47/37.92s, peak RSS 265,668 KiB.
+Scope peak 325,406,720 bytes, zero swap, CPU 572,540,158,000 ns. Page hits/misses/evictions
+355,893,726 / 8,267,327 / 6,511,712; adapter-read/authenticated encoded bytes 169,852,233,215.
+Lookup hits/misses 10,943,347 / 14,323,455, zero evictions/bypasses; last residency 54,114 values /
+56,945,917 accounted bytes. Page accounting 134,206,464; included total 191,152,381 within
+268,435,456 bytes. Source/executable hashes remained unchanged; no compilation overlapped.
+**The positive partition regressed query time by 21.66%** despite no result-cache eviction.
+Keep the existing 64 MiB page-only default. Raw paired reports/time/scope/commands/provenance are
+in `docs/evidence/cache-capacity-native-comparison.json`. No qualifying latency or scale claim.
+Started 2026-09-20 14:54:10 UTC, session 50057, invocation `242a08f2e78a4754b596468e3650565d`.
+
+D0219 wide-profile supervised sampling source has been implemented during the measurement but
+remains **uncompiled/unverified**, excluded from the pinned executable. It adds distinct workers,
+schemas and parent profile/ledger validation, plus cross-size/mode refusal and both real CLI
+sampling tests while preserving all existing assertions. Formatting/diff checks pass; the pinned
+binary hash remains unchanged. Finish both D0218 measurements and commit their evidence separately
+before compiling/testing the D0219 increment. Do not include its unverified source in that commit.
+
+```sh
+systemd-run --user --scope --unit=uste-d218-wide-pages.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-wide20000.BogUKs/pages.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-wide20000.BogUKs/pages.json 2> experiments/t20-bench/target/native-wide20000.BogUKs/pages.stderr; measurement_status=$?; systemctl --user show uste-d218-wide-pages.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-wide20000.BogUKs/pages.scope; exit "$measurement_status"'
+```
+
 D0217 is committed/pushed as `18a0544`. D0218 adds separately named correctness-only
 256 MiB page and 128/128 MiB page/positive-cache comparisons, within storage's existing maximum.
 The 64 MiB defaults, sampling modes, source format, work limits and all benchmark targets remain
 unchanged. This is an independent capacity comparison, not a reinterpretation of D0216's regression.
 Native fixture, exact configuration/substitution and real CLI checks are extended to all four
-configurations. No wide-profile measurement or qualification has run.
+configurations. The development pair above is complete; no qualifying campaign has run.
 
 Verification passed in session 35330 / `uste-d218-native.scope`, invocation
 `a85dc5e17ce94b209ec257096c7573c8`; preflight 23 GiB available RAM / 2.1 GiB free swap, no competing
@@ -21,9 +67,9 @@ manifest 3/0.97s, recovery 8/79.05s, strict Clippy 1.95s. Scope peak **548,024,3
 zero swap, CPU 344,446,380,000 ns. Formatting and doc/task checks passed. No failures or test
 weakening. Binary SHA-256 `abd58cbd7a905bea6bc5372977fe79b690a72d8073a4a17358193c42c50e48cd`.
 Tested baseline is `18a0544` plus this reviewed increment; core remains D0215's verified source.
-Next commit/push the verified increment, then admit one same-binary 20,000-entity wide-profile control pair under
-fresh headroom, preserving source/binary hashes and exact commands/results. No qualifying run
-is authorized by a 4 GiB development cap.
+The verified implementation is committed/pushed as `87221d7`; the completed pair is recorded
+above. Next verify D0219 under fresh headroom and continue T-20 performance/accounting work.
+No qualifying run is admitted by a 4 GiB development cap.
 
 ## Latest verified increment — supervised positive-cache sampling
 
