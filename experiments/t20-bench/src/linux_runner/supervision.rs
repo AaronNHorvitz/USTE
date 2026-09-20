@@ -367,6 +367,17 @@ fn finalize_report(
         expect_bool(setup, "complete_fixture", true)?;
         expect_u64(
             setup,
+            "graph_admission_cache_bytes",
+            crate::engine::packed::GRAPH_ADMISSION_CACHE_BYTES as u64,
+        )?;
+        expect_string(
+            setup,
+            "graph_admission_cache_scope",
+            crate::engine::packed::GRAPH_ADMISSION_CACHE_SCOPE,
+        )?;
+        expect_bool(setup, "coordinator_admission_buffered", false)?;
+        expect_u64(
+            setup,
             "frontier",
             crate::engine::materialization_revision_count(profile),
         )?;
@@ -891,7 +902,10 @@ mod tests {
             "storage_metadata_mode": "disk-certificate-and-blob-recovery",
             "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
             "entities": 20, "relationships": 200, "frontier": 4, "warmup": {"queries": 96},
-            "setup": {"complete_fixture": true, "frontier": 4},
+            "setup": {"complete_fixture": true, "frontier": 4,
+                "graph_admission_cache_bytes": 64 * 1024 * 1024,
+                "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+                "coordinator_admission_buffered": false},
             "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12,
                 "vault_work": [{"cache": "uste-empty", "work": work.clone()},
                     {"cache": "uste-retained-after-identical-query", "work": work.clone()}]}],
@@ -928,6 +942,9 @@ mod tests {
             "/budget_evaluation",
             "/frontier",
             "/setup/complete_fixture",
+            "/setup/graph_admission_cache_bytes",
+            "/setup/graph_admission_cache_scope",
+            "/setup/coordinator_admission_buffered",
             "/setup/frontier",
             "/query_deadline_enforced",
             "/query_deadline_postchecked",
@@ -950,6 +967,7 @@ mod tests {
         }
         for pointer in [
             "/setup_vault_work/physical_device_io",
+            "/setup/coordinator_admission_buffered",
             "/warmup_vault_work/complete_authenticated_io",
             "/samples/0/vault_work/0/work/includes_key_unwrap",
             "/samples/0/vault_work/1/work/includes_other_vaults",

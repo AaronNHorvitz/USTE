@@ -2,7 +2,37 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — buffered cold graph admission (Decision 0179)
+## Latest verified increment — native buffered graph admission (Decision 0180)
+
+Implemented on pushed `0322067`: packed model/native BM-01 and BM-06 select fresh 64 MiB logical
+graph-admission caches, sequential canonical families then semantic validation. No retained
+admission pages warm consumer queries. Reports disclose budget/scope and unbuffered coordinator
+admission; supervisor rejects missing/mismatched fields or a false coordinator-buffering claim.
+Fixture, limits, digest domains, deadlines and qualification thresholds remain unchanged.
+
+Session 4514 / `run-p962353-i21971835.scope` exited 0: 104 active tests across seven executables
+plus empty doctests; two existing ignored campaigns. Library 80/128.14 s, legacy BM-01 process
+3/11.99 s, packed BM-06 CLI 5/51.99 s, packed BM-01 CLI 5/36.81 s, BM-06 manifest 3/1.08 s,
+legacy BM-06 process 8/76.10 s. Compile 1m06s, strict Clippy 3.19 s. Tests preserve exact oracle
+outcomes and digests, tail/prefix semantics, source certificates, real process-loss recovery and
+unchanged query cache/decrypt accounting. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d180-native-buffering-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 24 GiB available RAM/3.7 GiB free swap; sampled scope peak 636,878,848 bytes/zero swap.
+One job/thread and one heavy workload retained. Root/standalone format, diff, docs and task checks
+pass. Full core baseline remains 676 tests at `0322067`; no new full-core run is claimed here.
+Next remeasure the retained native 1,000-entity fixture with this exact committed binary, preserving
+Decision 0177's baseline artifacts. Then continue coordinator accounting and BM-06 multi-batch
+prefix/scale prerequisites. No T-20/T-19, larger-than-memory or benchmark qualification claim;
+M1 pinned handoff and full roadmap/release gates remain unchanged. This supersedes older next steps.
+
+## Prior verified increment — buffered cold graph admission (Decision 0179)
 
 Implemented on pushed `ec6ba8e`: namespace/target-bound maintenance exposes fresh canonical
 buffering; opt-in graph cold admission uses sequential fresh canonical caches and then a fresh

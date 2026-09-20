@@ -83,6 +83,16 @@ plaintext bytes; failed calls are separate. Retained cache hits do not imply new
 Earlier discarded owners, key unwrap and pre-vault decode refusals are not included. Terminal
 phase and single-pass query reports carry the same explicitly partial measurement boundary.
 
+Decision 0180 selects Decision 0179's fresh buffered graph admission for packed BM-01/BM-06
+development paths. Each canonical family is validated with a fresh 64 MiB logical cache budget;
+those caches are dropped sequentially, then semantic validation uses a separate fresh cache of
+that size. Neither cache survives admission or supplies the consumer's query cache. Reports
+declare `graph_admission_cache_bytes`, `graph_admission_cache_scope` and
+`coordinator_admission_buffered: false`. The primary/quota correspondence path remains uncached.
+Logical proof ceilings, complete semantic validation, fixture identities and oracle digests stay
+unchanged. Decision 0177's archived native 1,000-entity measurements predate this optimization;
+do not attribute their timings to the newer implementation.
+
 ## BM-06 materialization
 
 Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions

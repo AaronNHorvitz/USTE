@@ -9,8 +9,8 @@ use uste_graph::{
     PackedGraphAdmissionLimits, PackedGraphExpansionLimits, PackedGraphGenesisLimits,
     PackedGraphOriginRecoveryLimits, PackedGraphPreparationLimits, PackedGraphReadLimits,
     PackedGraphStageLimits, PackedGraphSuffixRecoveryLimits, PackedGraphWritePreparationLimits,
-    PackedGraphWritePublicationLimits, admit_packed_graph_base, recover_packed_graph_origin,
-    recover_packed_graph_suffix,
+    PackedGraphWritePublicationLimits, admit_packed_graph_base_buffered,
+    recover_packed_graph_origin, recover_packed_graph_suffix,
 };
 use uste_storage::{
     PageCache,
@@ -32,6 +32,11 @@ pub(crate) type PackedEngine<F, W, E, I> =
     PackedCommitCoordinator<GraphPackedLiveState, F, W, E, I>;
 type Recovery = RecoveryEngine<MemoryFileSystem, TestEnvelope, CounterEntropy, CounterEntropy>;
 type Packed = PackedEngine<MemoryFileSystem, TestEnvelope, CounterEntropy, CounterEntropy>;
+
+// Sequential operation-local caches, not retained by the coordinator or query reader.
+pub(crate) const GRAPH_ADMISSION_CACHE_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const GRAPH_ADMISSION_CACHE_SCOPE: &str =
+    "fresh-per-canonical-family-then-fresh-semantic";
 
 #[derive(Debug)]
 pub struct PackedDevelopmentVerification {
@@ -173,8 +178,14 @@ pub(crate) fn admit_at<
     let maintenance = recovery
         .packed_indexes_with_io(fs, &receipt, limits.origin.suffix.graph.certificates)
         .map_err(debug)?;
-    let (base, _) =
-        admit_packed_graph_base(&maintenance, fs, &graph_root, limits.graph).map_err(debug)?;
+    let (base, _, _) = admit_packed_graph_base_buffered(
+        &maintenance,
+        fs,
+        &graph_root,
+        limits.graph,
+        GRAPH_ADMISSION_CACHE_BYTES,
+    )
+    .map_err(debug)?;
     let c = counts;
     if base.families().map(|family| family.commitment.entries())
         != [1, c[0], c[1], c[2], c[3], c[4], c[5], c[6] + c[7]]

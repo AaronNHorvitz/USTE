@@ -145,6 +145,12 @@ fn complete(mut command: Command) -> Output {
 fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
     let fixture = Fixture::new();
     let checkpoint = fixture.run("create");
+    assert_eq!(checkpoint["graph_admission_cache_bytes"], 64 * 1024 * 1024);
+    assert_eq!(
+        checkpoint["graph_admission_cache_scope"],
+        "fresh-per-canonical-family-then-fresh-semantic"
+    );
+    assert_eq!(checkpoint["coordinator_admission_buffered"], false);
     assert_eq!(checkpoint["frontier"], 100);
     assert_eq!(checkpoint["verified_history_versions"], 198);
     assert_eq!(
