@@ -45,6 +45,7 @@ fn graph_admission_limits() -> PackedGraphAdmissionLimits {
 }
 fn suffix_limits() -> PackedGraphSuffixRecoveryLimits {
     PackedGraphSuffixRecoveryLimits {
+        proof_cache_bytes: None,
         maximum_revisions: 2,
         preparation: preparation_limits(),
         deltas: GraphStateDeltaLimits::new(1000, 16 * 1024 * 1024).unwrap(),
@@ -217,14 +218,19 @@ fn recover(
 
 #[test]
 fn packed_graph_suffix_recovery_cold_pairing_reference_and_continued_live_writes() {
-    buffered_suffix_reference(None);
+    buffered_suffix_reference(None, None);
 }
 #[test]
 fn packed_graph_buffered_staging_suffix_recovers_cold_pair_and_continues_writes() {
-    buffered_suffix_reference(Some(uste_storage::MIN_INDEX_CACHE_BYTES));
+    buffered_suffix_reference(Some(uste_storage::MIN_INDEX_CACHE_BYTES), None);
 }
-fn buffered_suffix_reference(cache: Option<usize>) {
+#[test]
+fn packed_graph_buffered_proof_suffix_reference_and_fresh_per_revision_counters() {
+    buffered_suffix_reference(None, Some(1024 * 1024));
+}
+fn buffered_suffix_reference(cache: Option<usize>, proof_cache: Option<usize>) {
     let mut selected_limits = suffix_limits();
+    selected_limits.proof_cache_bytes = proof_cache;
     selected_limits.graph.staging_cache_bytes = cache;
     selected_limits.metadata.staging.staging_cache_bytes = cache;
     for count in 0..=2 {
@@ -240,6 +246,22 @@ fn buffered_suffix_reference(cache: Option<usize>) {
             let report = report.unwrap();
             assert_eq!(report.journal.groups, u64::from(count));
             assert!(report.proof.pages > 0);
+            assert_eq!(
+                report.buffered_preparations,
+                if proof_cache.is_some() {
+                    u64::from(count)
+                } else {
+                    0
+                }
+            );
+            if let Some(budget) = proof_cache {
+                assert_eq!(
+                    report.preparation_cache_hits + report.preparation_cache_misses,
+                    report.proof.pages
+                );
+                assert!(report.preparation_cache_misses > 0);
+                assert!(report.peak_preparation_cache_accounted_bytes <= budget);
+            }
             assert!(report.graph.written_pages > 0);
             assert_eq!(
                 report.graph.buffered_batches,
@@ -317,6 +339,19 @@ fn no_intermediate_roots(input: &mut Input) {
 
 #[test]
 fn packed_graph_suffix_recovery_limits_and_foreign_owner_keep_old_triple() {
+    limits_and_foreign_owner_keep_old_triple(None);
+}
+
+#[test]
+fn packed_graph_buffered_proof_suffix_limits_and_foreign_owner_keep_old_triple() {
+    limits_and_foreign_owner_keep_old_triple(Some(1024 * 1024));
+}
+
+fn limits_and_foreign_owner_keep_old_triple(cache: Option<usize>) {
+    let suffix_limits = || PackedGraphSuffixRecoveryLimits {
+        proof_cache_bytes: cache,
+        ..suffix_limits()
+    };
     let (input, _, _) = fixture_suffix(2);
     let (fs, result) = recover(input, suffix_limits());
     let (live, report) = result.unwrap();
@@ -329,7 +364,7 @@ fn packed_graph_suffix_recovery_limits_and_foreign_owner_keep_old_triple() {
     let (_, result) = recover(input, exact);
     assert!(result.is_ok());
     drop(result);
-    for variant in 0..7 {
+    for variant in 0..if cache.is_some() { 9 } else { 7 } {
         let (mut input, _, digest) = fixture_suffix(2);
         let mut narrow = exact;
         match variant {
@@ -343,6 +378,8 @@ fn packed_graph_suffix_recovery_limits_and_foreign_owner_keep_old_triple() {
                     GraphDiskPreparationLimits::new(100, 1000, 100, 100, 1).unwrap()
             }
             6 => narrow.metadata.maximum_publication_attempts = 0,
+            7 => narrow.proof_cache_bytes = Some(0),
+            8 => narrow.proof_cache_bytes = Some(uste_storage::MAX_INDEX_CACHE_BYTES + 1),
             _ => unreachable!(),
         }
         input.fs.arm(FaultPlan::default()).unwrap();
@@ -371,6 +408,19 @@ fn packed_graph_suffix_recovery_limits_and_foreign_owner_keep_old_triple() {
 
 #[test]
 fn packed_graph_suffix_recovery_every_observed_fault_restarts_without_intermediate_roots() {
+    every_observed_fault_restarts_without_intermediate_roots(None);
+}
+
+#[test]
+fn packed_graph_buffered_proof_suffix_every_observed_fault_restarts_without_intermediate_roots() {
+    every_observed_fault_restarts_without_intermediate_roots(Some(1024 * 1024));
+}
+
+fn every_observed_fault_restarts_without_intermediate_roots(cache: Option<usize>) {
+    let suffix_limits = || PackedGraphSuffixRecoveryLimits {
+        proof_cache_bytes: cache,
+        ..suffix_limits()
+    };
     let (mut input, _, _) = fixture_suffix(2);
     input.fs.arm(FaultPlan::default()).unwrap();
     let (observed, result) = recover(input, suffix_limits());
@@ -429,11 +479,28 @@ fn packed_graph_suffix_recovery_every_observed_fault_restarts_without_intermedia
             }
         }
     }
-    assert_eq!(checked, 609);
+    if cache.is_some() {
+        assert!(checked > 0 && checked < 609);
+    } else {
+        assert_eq!(checked, 609);
+    }
 }
 
 #[test]
 fn packed_graph_suffix_recovery_late_ciphertext_corruption_never_installs_a_triple() {
+    late_ciphertext_corruption_never_installs_a_triple(None);
+}
+
+#[test]
+fn packed_graph_buffered_proof_suffix_late_ciphertext_corruption_never_installs_a_triple() {
+    late_ciphertext_corruption_never_installs_a_triple(Some(1024 * 1024));
+}
+
+fn late_ciphertext_corruption_never_installs_a_triple(cache: Option<usize>) {
+    let suffix_limits = || PackedGraphSuffixRecoveryLimits {
+        proof_cache_bytes: cache,
+        ..suffix_limits()
+    };
     use uste_storage::FileSystem;
     for variant in 0..4 {
         let (mut input, _, digest) = fixture_suffix(2);
@@ -509,6 +576,20 @@ fn packed_graph_suffix_recovery_late_ciphertext_corruption_never_installs_a_trip
 
 #[test]
 fn packed_graph_suffix_recovery_authenticated_collision_and_false_result_refuse_terminal_roots() {
+    authenticated_collision_and_false_result_refuse_terminal_roots(None);
+}
+
+#[test]
+fn packed_graph_buffered_proof_suffix_authenticated_collision_and_false_result_refuse_terminal_roots()
+ {
+    authenticated_collision_and_false_result_refuse_terminal_roots(Some(1024 * 1024));
+}
+
+fn authenticated_collision_and_false_result_refuse_terminal_roots(cache: Option<usize>) {
+    let suffix_limits = || PackedGraphSuffixRecoveryLimits {
+        proof_cache_bytes: cache,
+        ..suffix_limits()
+    };
     use sha2::{Digest, Sha256};
     use uste_storage::journal::{CommitInput, JournalStore};
     for variant in 0..3 {

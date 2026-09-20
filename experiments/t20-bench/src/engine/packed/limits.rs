@@ -152,6 +152,7 @@ impl Limits {
                     maximum_logical_bytes: 1024 * 1024,
                 },
                 suffix: PackedGraphSuffixRecoveryLimits {
+                    proof_cache_bytes: None,
                     maximum_revisions: legacy.groups - 1,
                     preparation: proof,
                     deltas: delta,
@@ -160,6 +161,7 @@ impl Limits {
                 },
             },
             preparation: PackedGraphWritePreparationLimits {
+                proof_cache_bytes: None,
                 proof,
                 delta,
                 certificates,

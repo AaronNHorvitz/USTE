@@ -15,6 +15,8 @@ use uste_txn::{
 
 #[derive(Clone, Copy)]
 pub struct PackedGraphSuffixRecoveryLimits {
+    /// Fresh per-revision preparation cache; separate from staging and retained proof budgets.
+    pub proof_cache_bytes: Option<usize>,
     pub maximum_revisions: u64,
     /// Per-revision bounds; aggregate work is additionally bounded by admitted revision count.
     pub preparation: PackedGraphPreparationLimits,
@@ -27,6 +29,11 @@ pub struct PackedGraphSuffixRecoveryReport {
     pub journal: JournalRangeReadReport,
     pub graph: PackedGraphStageReport,
     pub proof: PackedGraphReadReport,
+    pub buffered_preparations: u64,
+    pub preparation_cache_hits: u64,
+    pub preparation_cache_misses: u64,
+    pub preparation_cache_evictions: u64,
+    pub peak_preparation_cache_accounted_bytes: usize,
     pub metadata_read_pages: u64,
     pub metadata_read_bytes: u64,
     pub metadata_written_pages: u64,

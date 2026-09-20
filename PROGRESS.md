@@ -2,6 +2,37 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — writer and suffix proof integration (Decision 0199)
+
+Pushed `01020ef` contains the verified primitive. Optional `proof_cache_bytes` now selects it
+for authorized writer preparation and each suffix/origin revision, independently of staging.
+Existing constructors select `None`; suffix cache counters use checked aggregation. Twelve new
+integration tests cover authorization, content-free errors, retries/collisions/expiry, revocation,
+uncertainty, invalid budget refusal without writes, origin/suffix reference recovery, cache
+counter conservation and all observed suffix faults/corruption. Old 609 suffix fault cases remain.
+
+Corrected session 18349 / `run-p1168105-i22184021.scope` passed all twelve/37.47 s;
+compile 11.00 s and strict workspace Clippy 0.51 s. Initial test expectation/lint failures and
+their exact disposition are recorded below. Warning-denying workspace docs passed/2.71 s in
+session 70995. No default behavior, native admission or benchmark claim changed.
+
+Broader session 95827 / `run-p1168761-i22184056.scope` passed all 53 `packed_graph_` tests
+in 130.00 s, including old uncached and new buffered cases, followed by strict standalone Clippy
+compatibility/1.91 s. Compile reuse 0.04 s. Sampled peak 30,330,880 bytes/zero swap, not final peak.
+Log `/tmp/uste-d199-regression-compatibility.log`; preflight 27 GiB available RAM/2.0 GiB free
+swap, one job/thread under the same 3G/4G/512M bounds.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --all-features --locked --offline packed_graph_ -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d199-regression-compatibility.log'
+```
+
+Next explicitly select native proof buffering, run the full standalone
+suite and remeasure the unchanged 4,096-record fixture. Keep exact provenance and all qualification
+limits. T-20/T-19 remain open; M1 remains complete at its original pinned qualification.
+
 ## Latest verified primitive — fresh graph proof preparation (Decision 0198)
 
 Pushed `3acead5` preserves the native staging result below. Additive opt-in buffered graph
@@ -49,11 +80,11 @@ expectation, preserving zero-write/frontier and exact-retry assertions. Log
 `/tmp/uste-d199-domain-verification.log`; preflight 27 GiB available RAM/2.0 GiB swap. Same
 3G/4G/512M process bounds, one job/thread. Separate corrected session 18349 /
 `run-p1168105-i22184021.scope` runs the twelve integration tests and strict workspace Clippy,
-log `/tmp/uste-d199-domain-verification-fixed.log`. No result claimed before it finishes.
+log `/tmp/uste-d199-domain-verification-fixed.log`; its passing result is recorded above.
 
 The Decision 0198 primitive is independently verified by five focused and all 710 workspace
-tests. Commit only its five code/test paths plus Decision 0198 and this evidence. Decision 0199
-writer/recovery/test/constructor paths remain separate pending integration work.
+tests and committed/pushed as `01020ef`. Decision 0199 writer/recovery/test/constructor paths
+are separately verified as recorded above.
 
 ## Prior verified increment — native buffered staging measurement (Decision 0197)
 

@@ -4,6 +4,8 @@ use uste_txn::{AuthorizedPackedWriteState, AuthorizedTransactionState};
 
 #[derive(Clone, Copy)]
 pub struct PackedGraphWritePreparationLimits {
+    /// Fresh per-preparation cache; `None` preserves uncached proof reads.
+    pub proof_cache_bytes: Option<usize>,
     pub proof: PackedGraphPreparationLimits,
     pub delta: GraphStateDeltaLimits,
     pub certificates: CertificateAnchorReadLimits,
@@ -45,14 +47,30 @@ where
                 .current_base()
                 .ok_or(GraphDiskError::RootStateMismatch)?;
             let maintenance = borrow.indexes.packed_indexes(fs, limits.certificates)?;
-            let prepared = prepare_packed_graph_transaction(
-                &maintenance,
-                fs,
-                base,
-                crate::decode_transaction(request)?,
-                limits.proof,
-            )?
-            .0;
+            let transaction = crate::decode_transaction(request)?;
+            let prepared = match limits.proof_cache_bytes {
+                Some(bytes) => {
+                    prepare_packed_graph_transaction_buffered(
+                        &maintenance,
+                        fs,
+                        base,
+                        transaction,
+                        limits.proof,
+                        bytes,
+                    )?
+                    .0
+                }
+                None => {
+                    prepare_packed_graph_transaction(
+                        &maintenance,
+                        fs,
+                        base,
+                        transaction,
+                        limits.proof,
+                    )?
+                    .0
+                }
+            };
             prepare_packed_graph_delta(prepared, limits.delta)
         })()
         .map_err(crate::state_disk::authorized_write::content_free_error)

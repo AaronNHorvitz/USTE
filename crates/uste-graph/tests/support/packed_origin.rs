@@ -103,11 +103,33 @@ fn no_origin_roots(recovery: &Recovery, fs: &mut Fs, terminal: u64) {
 
 #[test]
 fn packed_graph_origin_reference_root_free_terminal_only_and_continued_writes() {
+    buffered_origin_reference(None);
+}
+
+#[test]
+fn packed_graph_buffered_proof_origin_reference_terminal_only_and_continued_writes() {
+    buffered_origin_reference(Some(1024 * 1024));
+}
+
+fn buffered_origin_reference(cache: Option<usize>) {
+    let mut selected = origin_limits();
+    selected.suffix.proof_cache_bytes = cache;
     for count in 0..=2 {
         let (mut fs, recovery, expected, digest) = origin_fixture(count);
         no_origin_roots(&recovery, &mut fs, u64::from(count) + 2);
-        let (mut live, report) = origin_recover(&mut fs, recovery, origin_limits()).unwrap();
+        let (mut live, report) = origin_recover(&mut fs, recovery, selected).unwrap();
         assert_eq!(report.suffix.journal.groups, u64::from(count));
+        assert_eq!(
+            report.suffix.buffered_preparations,
+            if cache.is_some() { u64::from(count) } else { 0 }
+        );
+        if let Some(budget) = cache {
+            assert_eq!(
+                report.suffix.preparation_cache_hits + report.suffix.preparation_cache_misses,
+                report.suffix.proof.pages
+            );
+            assert!(report.suffix.peak_preparation_cache_accounted_bytes <= budget);
+        }
         assert_eq!(live.overlay_counts(), (0, 0));
         assert_eq!(live.state().unwrap().revision().get(), u64::from(count) + 1);
         for (tx, outcome) in &expected {

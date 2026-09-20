@@ -70,13 +70,37 @@ where
         let prepared = {
             let maintenance =
                 recovery.packed_indexes_with_io(fs, &transaction, limits.graph.certificates)?;
-            prepare_packed_graph_transaction(
-                &maintenance,
-                fs,
-                &base,
-                crate::decode_transaction(transaction.canonical_request())?,
-                limits.preparation,
-            )?
+            let request = crate::decode_transaction(transaction.canonical_request())?;
+            match limits.proof_cache_bytes {
+                Some(bytes) => {
+                    let (prepared, proof, work, cache) = prepare_packed_graph_transaction_buffered(
+                        &maintenance,
+                        fs,
+                        &base,
+                        request,
+                        limits.preparation,
+                        bytes,
+                    )?;
+                    report.buffered_preparations = checked_sum(report.buffered_preparations, 1)?;
+                    report.preparation_cache_hits =
+                        checked_sum(report.preparation_cache_hits, cache.hits)?;
+                    report.preparation_cache_misses =
+                        checked_sum(report.preparation_cache_misses, cache.misses)?;
+                    report.preparation_cache_evictions =
+                        checked_sum(report.preparation_cache_evictions, cache.evictions)?;
+                    report.peak_preparation_cache_accounted_bytes = report
+                        .peak_preparation_cache_accounted_bytes
+                        .max(cache.accounted_bytes);
+                    (prepared, proof, work)
+                }
+                None => prepare_packed_graph_transaction(
+                    &maintenance,
+                    fs,
+                    &base,
+                    request,
+                    limits.preparation,
+                )?,
+            }
         };
         let proof = prepared.2;
         report.proof.point_lookups = checked_sum(report.proof.point_lookups, proof.point_lookups)?;

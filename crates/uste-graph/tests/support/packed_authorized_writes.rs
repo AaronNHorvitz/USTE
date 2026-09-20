@@ -28,6 +28,7 @@ impl uste_txn::Cancellation for Cancel {
 }
 fn preparation(bytes: u64) -> PackedGraphWritePreparationLimits {
     PackedGraphWritePreparationLimits {
+        proof_cache_bytes: None,
         proof: PackedGraphPreparationLimits {
             proof: GraphDiskPreparationLimits::new(100, 1000, 100, 100, bytes).unwrap(),
             ..preparation_limits()
@@ -52,6 +53,64 @@ fn request(revision: u8, bytes: &[u8]) -> AuthorizedTransactionRequest<'_> {
         canonical_request: bytes,
         blob_inventory: None,
     }
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_invalid_cache_preserves_frontier_and_exact_retry() {
+    let (mut fs, mut live, mut kernel, admin, _) = setup();
+    let bytes = encode_transaction(&cases()[0]).unwrap();
+    for budget in [
+        0,
+        uste_storage::MIN_INDEX_CACHE_BYTES - 1,
+        uste_storage::MAX_INDEX_CACHE_BYTES + 1,
+    ] {
+        fs.arm(FaultPlan::default()).unwrap();
+        let mut selected = preparation(4 * 1024 * 1024);
+        selected.proof_cache_bytes = Some(budget);
+        let mut writer =
+            AuthorizedPackedWriter::new(&mut live, &mut kernel, selected, publication(10000))
+                .unwrap();
+        assert_eq!(
+            writer.commit(
+                &mut fs,
+                &admin,
+                request(5, &bytes),
+                &mut clock(5),
+                &NeverCancel
+            ),
+            Err(AuthorizedDiskWriteError::Preparation(
+                TransactionError::Storage(uste_storage::journal::StorageError::ResourceLimit)
+            ))
+        );
+        drop(writer);
+        assert_eq!(live.state().unwrap().revision().get(), 4);
+        assert_eq!(fs.operation_count(FsOp::WriteAt), 0);
+        assert_eq!(fs.operation_count(FsOp::CreateNew), 0);
+    }
+    let mut selected = preparation(4 * 1024 * 1024);
+    selected.proof_cache_bytes = Some(uste_storage::MIN_INDEX_CACHE_BYTES);
+    let mut writer =
+        AuthorizedPackedWriter::new(&mut live, &mut kernel, selected, publication(10000)).unwrap();
+    let outcome = writer
+        .commit(
+            &mut fs,
+            &admin,
+            request(5, &bytes),
+            &mut clock(5),
+            &NeverCancel,
+        )
+        .unwrap();
+    drop(writer);
+    let mut invalid = preparation(1);
+    invalid.proof_cache_bytes = Some(0);
+    let mut writer =
+        AuthorizedPackedWriter::new(&mut live, &mut kernel, invalid, publication(0)).unwrap();
+    assert_eq!(
+        writer
+            .commit(&mut fs, &admin, request(5, &bytes), &mut clock(6), &Cancel)
+            .unwrap(),
+        outcome
+    );
 }
 fn setup() -> (
     Fs,
@@ -103,6 +162,26 @@ fn setup() -> (
 
 #[test]
 fn authorized_packed_graph_denial_targets_quota_and_stale_policy_precede_clock_and_io() {
+    authorized_packed_graph_denial_targets_quota_and_stale_policy_precede_clock_and_io_selected(
+        None,
+    );
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_denial_targets_quota_and_stale_policy_precede_clock_and_io()
+ {
+    authorized_packed_graph_denial_targets_quota_and_stale_policy_precede_clock_and_io_selected(
+        Some(1024 * 1024),
+    );
+}
+
+fn authorized_packed_graph_denial_targets_quota_and_stale_policy_precede_clock_and_io_selected(
+    cache: Option<usize>,
+) {
+    let preparation = |bytes| PackedGraphWritePreparationLimits {
+        proof_cache_bytes: cache,
+        ..preparation(bytes)
+    };
     let (mut fs, mut live, mut kernel, admin, bob) = setup();
     let foreign_kernel = PolicyKernel::new();
     let foreign = foreign_kernel.authenticate(&mut Identity, &1).unwrap();
@@ -230,6 +309,26 @@ fn authorized_packed_graph_denial_targets_quota_and_stale_policy_precede_clock_a
 
 #[test]
 fn authorized_packed_graph_reference_retry_collision_expiry_cancellation_and_cold_reopen() {
+    authorized_packed_graph_reference_retry_collision_expiry_cancellation_and_cold_reopen_selected(
+        None,
+    );
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_reference_retry_collision_expiry_cancellation_and_cold_reopen()
+ {
+    authorized_packed_graph_reference_retry_collision_expiry_cancellation_and_cold_reopen_selected(
+        Some(1024 * 1024),
+    );
+}
+
+fn authorized_packed_graph_reference_retry_collision_expiry_cancellation_and_cold_reopen_selected(
+    cache: Option<usize>,
+) {
+    let preparation = |bytes| PackedGraphWritePreparationLimits {
+        proof_cache_bytes: cache,
+        ..preparation(bytes)
+    };
     let (mut fs, mut live, mut kernel, admin, _) = setup();
     let tx = cases()[0].clone();
     let bytes = encode_transaction(&tx).unwrap();
@@ -309,6 +408,19 @@ fn authorized_packed_graph_reference_retry_collision_expiry_cancellation_and_col
 
 #[test]
 fn authorized_packed_graph_hidden_dependency_error_is_content_free() {
+    authorized_packed_graph_hidden_dependency_error_is_content_free_selected(None);
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_hidden_dependency_error_is_content_free() {
+    authorized_packed_graph_hidden_dependency_error_is_content_free_selected(Some(1024 * 1024));
+}
+
+fn authorized_packed_graph_hidden_dependency_error_is_content_free_selected(cache: Option<usize>) {
+    let preparation = |bytes| PackedGraphWritePreparationLimits {
+        proof_cache_bytes: cache,
+        ..preparation(bytes)
+    };
     let (mut fs, mut live, mut kernel, _, bob) = setup();
     let bytes = encode_transaction(&GraphTransaction::new(
         scope(),
@@ -345,6 +457,26 @@ fn authorized_packed_graph_hidden_dependency_error_is_content_free() {
 
 #[test]
 fn authorized_packed_graph_certified_revocation_precedes_failed_repair_and_older_retry() {
+    authorized_packed_graph_certified_revocation_precedes_failed_repair_and_older_retry_selected(
+        None,
+    );
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_certified_revocation_precedes_failed_repair_and_older_retry()
+ {
+    authorized_packed_graph_certified_revocation_precedes_failed_repair_and_older_retry_selected(
+        Some(1024 * 1024),
+    );
+}
+
+fn authorized_packed_graph_certified_revocation_precedes_failed_repair_and_older_retry_selected(
+    cache: Option<usize>,
+) {
+    let preparation = |bytes| PackedGraphWritePreparationLimits {
+        proof_cache_bytes: cache,
+        ..preparation(bytes)
+    };
     let (mut fs, mut live, mut kernel, admin, bob) = setup();
     let old_bytes = encode_transaction(&cases()[0]).unwrap();
     let old = AuthorizedPackedWriter::new(
@@ -479,6 +611,26 @@ fn authorized_packed_graph_certified_revocation_precedes_failed_repair_and_older
 
 #[test]
 fn authorized_packed_graph_precommit_io_failure_and_uncertainty_preserve_outcome_boundary() {
+    authorized_packed_graph_precommit_io_failure_and_uncertainty_preserve_outcome_boundary_selected(
+        None,
+    );
+}
+
+#[test]
+fn authorized_packed_graph_buffered_proof_precommit_io_failure_and_uncertainty_preserve_outcome_boundary()
+ {
+    authorized_packed_graph_precommit_io_failure_and_uncertainty_preserve_outcome_boundary_selected(
+        Some(1024 * 1024),
+    );
+}
+
+fn authorized_packed_graph_precommit_io_failure_and_uncertainty_preserve_outcome_boundary_selected(
+    cache: Option<usize>,
+) {
+    let preparation = |bytes| PackedGraphWritePreparationLimits {
+        proof_cache_bytes: cache,
+        ..preparation(bytes)
+    };
     for uncertain in [false, true] {
         let (mut fs, mut live, mut kernel, admin, _) = setup();
         let bytes = encode_transaction(&cases()[0]).unwrap();
