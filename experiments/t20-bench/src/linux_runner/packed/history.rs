@@ -5,6 +5,7 @@ const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
 const MAX_RECORDS: u64 = 513;
 mod bootstrap;
 mod continuation;
+mod measurement;
 #[cfg(test)]
 mod tests;
 
@@ -356,10 +357,14 @@ fn run_bounded_observed(
     if is_checkpoint_recovery && suffix != profile.batches_per_version() {
         return Err(error("USTE_BM06_PACKED_CHECKPOINT_TAIL"));
     }
+    let admission_elapsed = started.elapsed();
+    let admission_io = fs.snapshot()?;
     let verified = engine::recovery::verify_prefix_history(
         &live, &mut fs, &kernel, &principal, profile, frontier,
     )
     .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
+    let verification_elapsed = started.elapsed();
+    let verification_io = fs.snapshot()?;
     if is_recovery {
         for sequence in profile.checkpoint_revision() + 1..=profile.frontier() {
             engine::commit_batch(
@@ -396,6 +401,8 @@ fn run_bounded_observed(
         }
     }
     drop(live);
+    let post_verification_elapsed = started.elapsed();
+    let post_verification_io = fs.snapshot()?;
     // A tail intentionally has no terminal triple and therefore no terminal digest claim.
     let digest = if is_tail {
         None
@@ -407,6 +414,22 @@ fn run_bounded_observed(
             .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?
             .1))
     };
+    let terminal_elapsed = started.elapsed();
+    let terminal_io = fs.snapshot()?;
+    let phase_work = measurement::report(
+        [
+            admission_elapsed,
+            verification_elapsed,
+            post_verification_elapsed,
+            terminal_elapsed,
+        ],
+        [
+            admission_io,
+            verification_io,
+            post_verification_io,
+            terminal_io,
+        ],
+    )?;
     let (rss, peak) = process_rss()?;
     Ok(serde_json::json!({
         "schema": "bm06-linux-packed-development-v1", "phase": phase, "engine_benchmark": false,
@@ -422,6 +445,7 @@ fn run_bounded_observed(
         "records": profile.records(), "frontier": if is_tail { profile.frontier() } else { frontier },
         "construction_target_revision": target,
         "construction_nonce_session": construction_nonce_session,
+        "phase_work": phase_work,
         "selected_base_revision": base.get(), "suffix_groups": suffix, "origin_suffix_groups": origin_groups,
         "checkpoint_tail_replay": is_checkpoint_recovery,
         "verified_history_versions": verified, "history_verified_through_revision": frontier, "v1_state_digest": digest,

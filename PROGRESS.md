@@ -2,7 +2,39 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — construction nonce headroom (Decision 0191)
+## Latest verified increment — packed history phase accounting (Decision 0192)
+
+Built and tested on pushed `509feab`: successful native history reports now partition monotonic
+time and adapter counters into setup/admission, final history verification, tail/exact-retry work
+and terminal-digest admission. Checked deltas reject counter/clock rewind; all stage byte and
+operation/failure counters sum to the final adapter snapshot. Setup includes construction and
+earlier prefix verification where requested. No stage is advertised as qualifying recovery latency,
+complete authenticated I/O or physical-device traffic. Existing command totals remain available.
+
+Session 13777 / `run-p1129572-i22104462.scope` passed the new phase-partition unit test and all
+nine active native history CLI cases/62.25 s; one opt-in scale case not selected here. Compile
+57.07 s, second invocation 0.02 s, strict standalone Clippy 1.66 s. The CLI checks conservation
+across create/open/tail/recover/checkpoint-replay/rebuild/resume and bounded construction prefixes.
+Source/certificate/digest assertions remain intact. Preflight 28 GiB available RAM/2.0 GiB free
+swap; sampled scope peak 377,761,792 bytes/zero swap, not final lifetime peak.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline phase_work_partitions -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d192-phases.log'
+```
+
+Format/diff/docs/task checks pass. Full core remains 687 at `c3b7047` plus Decision 0191's focused
+crypto/fault coverage; full standalone 113 at `ed0bdd6` plus subsequent focused coverage. Next
+exercise a resource-admitted larger native multi-batch development fixture with bounded process
+output and actual nonce/phase measurements; retain failures and require a real pass before
+recording an increased development ceiling. Complete accounting, exact-size construction and
+reserved-host qualification remain open. T-20/T-19, pinned M1, full roadmap and external release
+gates are unchanged. Supersedes older next-step text.
+
+## Prior verified increment — construction nonce headroom (Decision 0191)
 
 Built and tested on pushed `ed0bdd6`: privileged per-vault nonce diagnostics expose exact issued,
 limit and remaining counts without resetting or changing encryption. Lock/unlock retains counts;

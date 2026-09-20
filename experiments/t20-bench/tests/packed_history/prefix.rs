@@ -12,6 +12,7 @@ fn report(output: Output) -> serde_json::Value {
         String::from_utf8_lossy(&output.stderr)
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_phase_work(&report);
     let nonces = &report["construction_nonce_session"];
     assert_eq!(nonces["measurement_scope"], "construction-owner-only");
     for flag in [

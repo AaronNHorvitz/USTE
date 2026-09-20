@@ -15,6 +15,7 @@ fn packed_history_native_513_record_intermediate_tail_sigkill_resumes() {
             String::from_utf8_lossy(&output.stderr)
         );
         let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_phase_work(&report);
         println!("phase={phase} report={report}");
         assert_eq!(report["development_record_limit"], 513);
         assert_eq!(report["qualifying_recovery_trials"], 0);

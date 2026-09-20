@@ -210,6 +210,14 @@ These are cardinalities, not allocator bytes, successful-encryption totals or a 
 capacity guarantee. Lock/unlock cannot reset the registry; exhaustion still requires durable
 writer-incarnation rotation, which these commands do not implement.
 
+Decision 0192's `phase_work` partitions adapter counters and monotonic time into setup/admission,
+final history verification, tail-or-exact-retry work, and terminal-digest admission. All stage
+adapter counters sum to the command's `adapter_io`. Setup includes construction and earlier
+prefix verification when requested, not just recovery. The interval ends before RSS/report
+formatting. Adapter bytes still exclude credential/root setup, internal syscalls and handle drops;
+they are not physical-device I/O. Neither these phase times nor total `elapsed_milliseconds`
+constitute qualifying recovery latency. Older pinned reports are not retroactively split.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

@@ -65,7 +65,9 @@ impl Fixture {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        serde_json::from_slice(&output.stdout).unwrap()
+        let report = serde_json::from_slice(&output.stdout).unwrap();
+        assert_phase_work(&report);
+        report
     }
     fn kill_at(&self, phase: &str, pause: Option<u64>) -> u64 {
         self.kill_at_records(phase, pause, 2, Duration::from_secs(60))
@@ -125,6 +127,54 @@ impl Drop for Fixture {
     }
 }
 struct OwnedChild(Option<Child>);
+fn assert_phase_work(report: &serde_json::Value) {
+    let work = &report["phase_work"];
+    assert_eq!(
+        work["measurement_scope"],
+        "sequential-command-phases-through-terminal-digest"
+    );
+    for flag in [
+        "complete_authenticated_io",
+        "physical_device_io",
+        "qualifying_recovery_latency",
+    ] {
+        assert_eq!(work[flag], false);
+    }
+    let stages = work["stages"].as_object().unwrap();
+    assert_eq!(stages.len(), 4);
+    let total = &report["adapter_io"];
+    for field in [
+        "read_requested_bytes",
+        "read_returned_bytes",
+        "write_requested_bytes",
+        "write_returned_bytes",
+    ] {
+        let sum: u64 = stages
+            .values()
+            .map(|stage| stage["adapter_io"][field].as_u64().unwrap())
+            .sum();
+        assert_eq!(sum, total[field].as_u64().unwrap());
+    }
+    for (operation, counts) in total["operations"].as_object().unwrap() {
+        for field in ["calls", "failures"] {
+            let sum: u64 = stages
+                .values()
+                .map(|stage| {
+                    stage["adapter_io"]["operations"][operation][field]
+                        .as_u64()
+                        .unwrap()
+                })
+                .sum();
+            assert_eq!(sum, counts[field].as_u64().unwrap());
+        }
+    }
+    let sum: u64 = stages
+        .values()
+        .map(|stage| stage["elapsed_microseconds"].as_u64().unwrap())
+        .sum();
+    let elapsed = work["measured_elapsed_microseconds"].as_u64().unwrap();
+    assert!(sum <= elapsed && elapsed - sum < 4);
+}
 impl Drop for OwnedChild {
     fn drop(&mut self) {
         if let Some(child) = &mut self.0 {
