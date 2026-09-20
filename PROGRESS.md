@@ -2,7 +2,48 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — retain validated packed-record commitments (Decision 0207)
+## Latest measurement — retained-commitment native comparison (Decision 0208)
+
+Verified capability `184b54bc7f508e8668e6850febabb766ef1442c4` is committed and pushed;
+release binary SHA-256 `b35e6349961fc3885ff3a85745f0f67e0ce8082ccb2fbaefe884ae5fe158268d`.
+Root/standalone lockfiles, release features, retained store, oracle summary, 64 MiB caches
+and query budgets were unchanged from D0206. No build or competing workload ran during measurement.
+
+Session 30062 / `uste-d208-query.scope`, invocation `90b640edb34542bfb692c1c31484d6ef`,
+passed the independent correctness queries against
+`experiments/t20-bench/target/native-packed20000.ggoHSe`. Separate reports are retained in
+`experiments/t20-bench/target/native-read-reuse20000.02ohmt`. Fresh headroom 26 GiB available
+RAM/2.0 GiB free swap/952 GiB free disk; 3G/4G/512M group and unchanged 1,800-second timeout.
+Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d208-query.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-read-reuse20000.02ohmt/query.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-read-reuse20000.02ohmt/query.json 2> experiments/t20-bench/target/native-read-reuse20000.02ohmt/query.stderr; measurement_status=$?; systemctl --user show uste-d208-query.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-read-reuse20000.02ohmt/query.scope; exit "$measurement_status"'
+```
+
+Exit zero: all 384 outcomes, output/state/certificate hashes, visits/result bytes, cache
+counters, query/setup adapter I/O and owner/vault work match D0206 exactly. Query-only
+793,165 ms versus 870,407 ms (8.9% lower); setup 61,895 versus 69,958 ms. Total wall
+855.22 s/RSS 265,676 KiB, final scope peak 277,741,568 bytes/zero swap. The exact report is
+`docs/evidence/retained-commitment-native-comparison.json`. Host/device caches are uncontrolled;
+these are development measurements, not qualifying latency. D0206's sampling timeout remains
+incomplete; this modest improvement does not by itself prove a sample will finish. No sampling
+retry ran. T-20/T-19 remain open; M1's exact-version result remains separate.
+
+While D0208 ran, Decision 0209 prepared a source-only follow-up: reuse the already
+root-bound node chain instead of rehashing its complete path at the leaf, retaining the
+identical structural route and proof-input admission checks. The public full verifier is
+unchanged semantically and remains a test-only cross-check for successful packed traversals.
+Four new reference/admission regressions and the existing corruption/fault matrix await
+verification. These edits are NOT in D0208's binary. After its exit and fresh 26 GiB RAM/
+2.0 GiB swap/952 GiB disk admission with no competing process, storage verification started
+in session 56438 / `uste-d209-storage.scope` (invocation `ba19e4e35f1c4cc183871d66ffc6a69b`).
+Command: `CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true
+CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --lib --all-features
+--locked --offline -- --test-threads=1`, in the established 3G/4G/512M scope, output
+`/tmp/uste-d209-storage-verification.log`. Do not claim pending tests passed. Next finish
+focused verification, full workspace/native regression and commit/push the reviewed change.
+
+## Prior verified increment — retain validated packed-record commitments (Decision 0207)
 
 Pushed `b4a72b4` preserves D0206's exact correctness/cache-pressure evidence and sampling
 timeout. On that baseline, reuse the commitment computed during mandatory packed-node decode
@@ -34,7 +75,7 @@ Root/standalone formatting, documentation and 68-task dependency checks passed. 
 systemd-run --user --scope --unit=uste-d207-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d207-native-verification.log; verification_status=$?; systemctl --user show uste-d207-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
 ```
 
-Next commit/push the verified capability and admit a separately versioned
+The capability is now pushed as `184b54b`; D0208 above records a separately versioned
 read-only comparison on the retained fixture before deciding whether changed performance
 justifies another bounded sampling attempt. Do not relabel the D0206 timeout or raise its
 deadline/benchmark targets. T-20/T-19 and full qualification remain open.
@@ -5452,10 +5493,10 @@ remaining mixed workload have not passed.
 Current action: T-20 remains the priority. Decisions 0133–0205 have since implemented the
 packed copy-on-write, admission/domain integration, native construction/recovery and bounded
 cache work that the older handoff below proposed. Do not restart those capabilities. The
-current verified baseline is `18a45e4`; D0206's larger correctness pass and sampling timeout
-are archived at that exact binary. D0207's redundant commitment-computation removal passed
-726 workspace and 122 native tests; measure its separately pinned read-only behavior under the
-one-workload safeguards, then continue native scaling and remaining accounting/lifecycle
+current verified baseline is `184b54b`; D0206's larger correctness pass and sampling timeout
+are archived at its earlier `18a45e4` binary. D0207's redundant commitment-computation removal passed
+726 workspace and 122 native tests; D0208 measured its separately pinned read-only behavior.
+Verify D0209 under the one-workload safeguards, then continue native scaling and remaining accounting/lifecycle
 prerequisites for qualifying BM-01/BM-06. A 20,000-entity oracle match and an 8,192-entity BM-06
 development run do not satisfy the exact qualifying profiles or reserved-runner requirements.
 T-19 follows T-20; M1 remains pinned separately. The topmost sections carry current commands,
