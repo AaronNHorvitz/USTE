@@ -67,6 +67,8 @@ impl Fixture {
                 | "wide-lookup-query"
                 | "sample"
                 | "lookup-sample"
+                | "wide-sample"
+                | "wide-lookup-sample"
         ) {
             command.arg("--oracle-file").arg(&self.oracle);
         }
@@ -513,6 +515,8 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
         "wide-lookup-query",
         "sample",
         "lookup-sample",
+        "wide-sample",
+        "wide-lookup-sample",
     ] {
         let mut command = Command::new(EXECUTABLE);
         command.arg(format!("linux-packed-{phase}")).args([
@@ -531,6 +535,8 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
                 | "wide-lookup-query"
                 | "sample"
                 | "lookup-sample"
+                | "wide-sample"
+                | "wide-lookup-sample"
         ) {
             command.args(["--oracle-file", "absent-packed-oracle"]);
         }
@@ -547,15 +553,24 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
 
 #[test]
 fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
-    supervised_sampling(false);
+    supervised_sampling(false, false);
 }
 
 #[test]
 fn packed_cli_supervised_positive_sampling_preserves_pairs_oracle_and_cache_ledger() {
-    supervised_sampling(true);
+    supervised_sampling(true, false);
 }
 
-fn supervised_sampling(positive: bool) {
+#[test]
+fn packed_cli_supervised_wide_sampling_preserves_pairs_oracle_and_capacity() {
+    supervised_sampling(false, true);
+}
+#[test]
+fn packed_cli_supervised_wide_positive_sampling_preserves_complete_ledger() {
+    supervised_sampling(true, true);
+}
+
+fn supervised_sampling(positive: bool, wide: bool) {
     use uste_t20_bench::{Bm01Profile, OracleBundle, OracleExpectedOutcome};
     let fixture = Fixture::new();
     fixture.run("create");
@@ -566,15 +581,19 @@ fn supervised_sampling(positive: bool) {
     let output = complete(command);
     assert!(output.status.success());
     fs::write(&fixture.oracle, output.stdout).unwrap();
-    let report = fixture.run(if positive { "lookup-sample" } else { "sample" });
-    assert_eq!(
-        report["schema"],
-        if positive {
-            "bm01-linux-packed-lookup-sampling-v1"
-        } else {
-            "bm01-linux-packed-sampling-v1"
-        }
-    );
+    let (phase, schema) = match (positive, wide) {
+        (false, false) => ("sample", "bm01-linux-packed-sampling-v1"),
+        (true, false) => ("lookup-sample", "bm01-linux-packed-lookup-sampling-v1"),
+        (false, true) => ("wide-sample", "bm01-linux-packed-wide-sampling-v1"),
+        (true, true) => (
+            "wide-lookup-sample",
+            "bm01-linux-packed-wide-lookup-sampling-v1",
+        ),
+    };
+    let total = if wide { 256 } else { 64 } * 1024 * 1024;
+    let lookup = if wide { 128 } else { 16 } * 1024 * 1024;
+    let report = fixture.run(phase);
+    assert_eq!(report["schema"], schema);
     assert_eq!(report["query_deadline_enforced"], true);
     assert_eq!(report["query_deadline_postchecked"], true);
     assert_eq!(report["query_deadline_seconds"], 30);
@@ -609,10 +628,10 @@ fn supervised_sampling(positive: bool) {
     assert_eq!(sample["latency_groups"].as_array().unwrap().len(), 32);
     assert!(sample.get("cached_index_work").is_none());
     let config = &report["query_cache_configuration"];
-    assert_eq!(config["total_budget_bytes"], 64 * 1024 * 1024);
+    assert_eq!(config["total_budget_bytes"], total);
     if positive {
-        assert_eq!(config["page_budget_bytes"], 48 * 1024 * 1024);
-        assert_eq!(config["lookup_budget_bytes"], 16 * 1024 * 1024);
+        assert_eq!(config["page_budget_bytes"], total - lookup);
+        assert_eq!(config["lookup_budget_bytes"], lookup);
         assert!(config["lookup"]["hits"].as_u64().unwrap() > 0);
         for field in ["hits", "misses", "evictions", "oversized_bypasses"] {
             let sum = report["warmup_lookup_cache_work"]["work"][field]
@@ -632,7 +651,7 @@ fn supervised_sampling(positive: bool) {
             assert_eq!(state["work"]["logical_proof_work"], false);
         }
     } else {
-        assert_eq!(config["page_budget_bytes"], 64 * 1024 * 1024);
+        assert_eq!(config["page_budget_bytes"], total);
         assert!(config["lookup"].is_null());
         assert!(report["warmup_lookup_cache_work"]["work"].is_null());
         for state in sample["lookup_cache_work"].as_array().unwrap() {
@@ -641,7 +660,7 @@ fn supervised_sampling(positive: bool) {
     }
     let empty = &sample["cache_work"][0];
     let retained = &sample["cache_work"][1];
-    assert_eq!(empty["index_cache_budget_bytes"], 64 * 1024 * 1024);
+    assert_eq!(empty["index_cache_budget_bytes"], total);
     assert!(empty["index_cache_misses"].as_u64().unwrap() > 0);
     assert_eq!(retained["index_cache_misses"], 0);
     assert!(retained["index_cache_hits"].as_u64().unwrap() > 0);

@@ -22,14 +22,6 @@ pub(super) enum QueryCacheMode {
     Positive,
 }
 impl QueryCacheMode {
-    pub(super) fn reader<'a>(
-        self,
-        coordinator: &'a Packed,
-        policy: &'a PolicyKernel,
-        limits: PackedGraphReadLimits,
-    ) -> Result<Reader<'a>, LinuxRunnerError> {
-        self.reader_with_size(coordinator, policy, limits, false)
-    }
     pub(super) fn reader_with_size<'a>(
         self,
         coordinator: &'a Packed,
@@ -52,6 +44,7 @@ impl QueryCacheMode {
         }
         .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))
     }
+    #[cfg(test)]
     pub(super) fn report(
         self,
         report: PackedCacheReport,

@@ -164,3 +164,148 @@ fn page_only_supervisor_accepts_legacy_reports_but_refuses_positive_relabelling(
     assert!(finish(&r, SampleMode::Packed).is_ok());
     assert!(finish(&r, SampleMode::PackedLookup).is_err());
 }
+
+fn wide_report(positive: bool) -> Value {
+    let mut r = report();
+    let (total, lookup) = budgets(true);
+    r["schema"] = if positive {
+        "bm01-linux-packed-wide-lookup-sampling-v1"
+    } else {
+        "bm01-linux-packed-wide-sampling-v1"
+    }
+    .into();
+    let c = &mut r["query_cache_configuration"];
+    c["profile"] = if positive {
+        "packed-pages-positive-lookups-256m-v1"
+    } else {
+        "packed-pages-256m-v1"
+    }
+    .into();
+    c["total_budget_bytes"] = total.into();
+    c["page_budget_bytes"] = (if positive { total - lookup } else { total }).into();
+    c["lookup_budget_bytes"] = (if positive { lookup } else { 0 }).into();
+    if positive {
+        c["lookup"]["budget_bytes"] = lookup.into();
+    } else {
+        c["lookup"] = Value::Null;
+        c["page_accounted_bytes"] = 31744.into();
+    }
+    for pointer in [
+        "/warmup_lookup_cache_work/work",
+        "/samples/0/lookup_cache_work/0/work",
+        "/samples/0/lookup_cache_work/1/work",
+    ] {
+        let value = r.pointer_mut(pointer).unwrap();
+        if positive {
+            value["budget_bytes"] = lookup.into();
+        } else {
+            *value = Value::Null;
+        }
+    }
+    for page in r["samples"][0]["cache_work"].as_array_mut().unwrap() {
+        page["index_cache_budget_bytes"] = total.into();
+    }
+    r
+}
+
+#[test]
+fn wide_supervisor_binds_both_capacities_and_refuses_schema_relabelling() {
+    for (positive, mode) in [
+        (false, SampleMode::PackedWide),
+        (true, SampleMode::PackedWideLookup),
+    ] {
+        let r = wide_report(positive);
+        let finalized: Value = serde_json::from_str(&finish(&r, mode).unwrap()).unwrap();
+        assert_eq!(finalized["query_deadline_enforced"], true);
+        assert_eq!(finalized["budget_evaluation"], "not-performed");
+        for other in [
+            SampleMode::Legacy,
+            SampleMode::Disk,
+            SampleMode::Packed,
+            SampleMode::PackedLookup,
+        ] {
+            assert!(finish(&r, other).is_err());
+        }
+        assert!(
+            finish(
+                &r,
+                if positive {
+                    SampleMode::PackedWide
+                } else {
+                    SampleMode::PackedWideLookup
+                }
+            )
+            .is_err()
+        );
+        let mut downgraded = r.clone();
+        downgraded["schema"] = if positive {
+            "bm01-linux-packed-lookup-sampling-v1"
+        } else {
+            "bm01-linux-packed-sampling-v1"
+        }
+        .into();
+        assert!(
+            finish(
+                &downgraded,
+                if positive {
+                    SampleMode::PackedLookup
+                } else {
+                    SampleMode::Packed
+                }
+            )
+            .is_err()
+        );
+        for pointer in [
+            "/query_cache_configuration",
+            "/warmup_lookup_cache_work",
+            "/samples/0/lookup_cache_work",
+            "/samples/0/cache_work",
+            "/samples/0/cache_work/0/cache",
+            "/samples/0/cache_work/1/index_cache_budget_bytes",
+            "/samples/0/cache_work/1/index_cache_accounted_bytes",
+            "/samples/0/cache_work/1/index_cache_evictions",
+        ] {
+            let mut wrong = r.clone();
+            *wrong.pointer_mut(pointer).unwrap() = Value::Null;
+            assert!(finish(&wrong, mode).is_err(), "{pointer}");
+        }
+        let mut wrong = r.clone();
+        wrong["samples"][0]["cache_work"][0]["index_cache_budget_bytes"] = TOTAL.into();
+        assert!(finish(&wrong, mode).is_err());
+        let mut wrong = r.clone();
+        wrong["query_cache_configuration"]["total_accounted_bytes"] = 31743.into();
+        wrong["query_cache_configuration"]["page_accounted_bytes"] =
+            (if positive { 25599 } else { 31743 }).into();
+        assert!(finish(&wrong, mode).is_err());
+    }
+}
+
+#[test]
+fn wide_lookup_ledger_refuses_counter_overflow_old_budget_and_terminal_gauge_substitution() {
+    let r = wide_report(true);
+    for (pointer, value) in [
+        (
+            "/warmup_lookup_cache_work/work/hits",
+            serde_json::json!(u64::MAX),
+        ),
+        (
+            "/samples/0/lookup_cache_work/0/work/budget_bytes",
+            serde_json::json!(LOOKUP),
+        ),
+        (
+            "/samples/0/lookup_cache_work/1/work/resident_values",
+            serde_json::json!(1),
+        ),
+        (
+            "/samples/0/cache_work/1/index_cache_accounted_bytes",
+            serde_json::json!(budgets(true).0 + 1),
+        ),
+    ] {
+        let mut wrong = r.clone();
+        *wrong.pointer_mut(pointer).unwrap() = value;
+        assert!(
+            finish(&wrong, SampleMode::PackedWideLookup).is_err(),
+            "{pointer}"
+        );
+    }
+}

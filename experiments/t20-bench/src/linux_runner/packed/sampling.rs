@@ -24,7 +24,14 @@ pub fn sample_worker(
     bundle: &Path,
     profile: Bm01Profile,
 ) -> Result<(), LinuxRunnerError> {
-    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Pages)
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::Pages,
+        false,
+    )
 }
 
 pub fn sample_worker_with_lookup(
@@ -33,7 +40,38 @@ pub fn sample_worker_with_lookup(
     bundle: &Path,
     profile: Bm01Profile,
 ) -> Result<(), LinuxRunnerError> {
-    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Positive)
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::Positive,
+        false,
+    )
+}
+
+pub fn sample_worker_wide(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Pages, true)
+}
+pub fn sample_worker_wide_with_lookup(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::Positive,
+        true,
+    )
 }
 
 fn sample_worker_mode(
@@ -42,9 +80,10 @@ fn sample_worker_mode(
     bundle: &Path,
     profile: Bm01Profile,
     mode: QueryCacheMode,
+    wide: bool,
 ) -> Result<(), LinuxRunnerError> {
     let mut observer = ProtocolObserver::new();
-    match sample(root, password, bundle, profile, mode, &mut observer) {
+    match sample(root, password, bundle, profile, mode, wide, &mut observer) {
         Ok(report) => observer.report(&report),
         Err(error) => {
             let _ = observer.error(error.code());
@@ -58,19 +97,21 @@ fn sample(
     bundle: &Path,
     profile: Bm01Profile,
     mode: QueryCacheMode,
+    wide: bool,
     observer: &mut dyn QueryObserver,
 ) -> Result<String, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
     let bundle = read_oracle_bundle(bundle)?;
     validate_bundle(&bundle, profile)?;
     let mut session = prepare(root, password, profile, "open")?;
-    let reader = mode.reader(
+    let reader = mode.reader_with_size(
         &session.coordinator,
         &session.policy,
         session
             .limits
             .read()
             .map_err(|_| error("USTE_BM01_LIMITS"))?,
+        wide,
     )?;
     let setup = session.filesystem.snapshot()?;
     let setup_crypto = CryptoWork::from(
@@ -107,7 +148,12 @@ fn sample(
         samples.push(engine.sample(bundle.measured().expectations(), plan, ordinal, observer)?);
     }
     Ok(serde_json::json!({
-        "schema": match mode { QueryCacheMode::Pages => "bm01-linux-packed-sampling-v1", QueryCacheMode::Positive => "bm01-linux-packed-lookup-sampling-v1" }, "engine_benchmark": true,
+        "schema": match (mode, wide) {
+            (QueryCacheMode::Pages, false) => "bm01-linux-packed-sampling-v1",
+            (QueryCacheMode::Positive, false) => "bm01-linux-packed-lookup-sampling-v1",
+            (QueryCacheMode::Pages, true) => "bm01-linux-packed-wide-sampling-v1",
+            (QueryCacheMode::Positive, true) => "bm01-linux-packed-wide-lookup-sampling-v1",
+        }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",
         "result_size_profile": "bm01-result-v1", "oracle_adjacency_memory_resident": false,
@@ -118,7 +164,7 @@ fn sample(
         "setup_vault_work": setup_crypto.json(), "setup_vault_work_scope": "last-cold-open-owner-only",
         "warmup_vault_work": warmup_crypto.json(),
         "warmup_lookup_cache_work": warmup_lookup.json(CacheState::Empty)?,
-        "query_cache_configuration": mode.report(engine.report()?)?,
+        "query_cache_configuration": mode.report_with_size(engine.report()?, wide)?,
         "setup": session.report, "setup_adapter_io": setup.json()?, "warmup_adapter_io": warmup_io.json()?,
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,

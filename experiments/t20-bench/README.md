@@ -93,6 +93,12 @@ cache ceiling and have distinct report profiles. The 64 MiB defaults and samplin
 are unchanged. No performance benefit or qualification follows from selecting a larger cache;
 compare controls at the same declared capacity and retain the earlier 64 MiB regression evidence.
 
+Decision 0219's `linux-packed-wide-sample` and `linux-packed-wide-lookup-sample` use those same
+256 MiB configurations with the unchanged supervised sampling protocol and oracle bundle.
+Each has a distinct schema; parent validation requires its exact cache profile, included gauges
+and complete work ledger. They do not change the two 64 MiB sampling commands or constitute
+performance qualification. See PROGRESS.md for the current verification/measurement status.
+
 Decision 0174 adds supervised packed sampling over a completed fixture. Generate the two-section
 oracle bundle (not the single-section summary used by `linux-packed-query`):
 

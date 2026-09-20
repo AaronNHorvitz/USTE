@@ -2,7 +2,26 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Current work — explicit bounded capacity comparison (Decision 0218)
+## Current work — supervised capacity comparison (Decision 0219)
+
+D0218's paired measurement evidence is committed/pushed as `4a2e65d`. D0219 verification passed
+in session 45583 / `uste-d219-native.scope`, invocation
+`69bfb9a9efd34df1861e5c38d32d02c1`. Fresh preflight 23 GiB available RAM, 2.1 GiB free swap,
+952 GiB disk; both measurement processes exited and no competing build/benchmark exists.
+Exact invocation is the D0217 native release tests plus strict Clippy command below with scope/log
+prefix `d219`, unchanged one Cargo job, one test thread and 3G/4G/512M process-group limits.
+**136 active tests passed, five unchanged opt-in ignores**, exit zero. Release build 1m00s,
+library 101/138.22s, disk process 3/12.26s, packed history 11/63.39s, packed terminal 10/46.00s,
+manifest 3/0.97s, recovery 8/77.45s; strict Clippy 2.64s. Scope peak **550,936,576 bytes**,
+zero swap, CPU 351,359,424,000 ns. Formatting/doc/task checks passed without failures or weakened
+assertions. Tested baseline `4a2e65d` plus this reviewed increment; all four real CLI sampling modes
+pass their independent digest, populations, ledger and source-preservation checks. Next commit/push
+the verified increment, then measure the 256 MiB page-only/positive supervised development pair
+under fresh headroom and the unchanged deadline/protocol. No core or M1 source changed; T-20's
+performance/accounting and all qualifying campaigns remain open.
+Release executable SHA-256: `0492dcad397f37b7d3e5ac835842f883710e12f8d04119f9c4f291c202f4a8c7`.
+
+## Completed development measurement — explicit capacity comparison (Decision 0218)
 
 D0218 is committed/pushed as `87221d7000b1f80dae21dcc369f340c7c2392321`. Its pinned release
 binary is `abd58cbd7a905bea6bc5372977fe79b690a72d8073a4a17358193c42c50e48cd`. Fresh preflight
@@ -39,12 +58,12 @@ Keep the existing 64 MiB page-only default. Raw paired reports/time/scope/comman
 in `docs/evidence/cache-capacity-native-comparison.json`. No qualifying latency or scale claim.
 Started 2026-09-20 14:54:10 UTC, session 50057, invocation `242a08f2e78a4754b596468e3650565d`.
 
-D0219 wide-profile supervised sampling source has been implemented during the measurement but
-remains **uncompiled/unverified**, excluded from the pinned executable. It adds distinct workers,
+D0219 wide-profile supervised sampling source was implemented during the measurement but remained
+uncompiled/unverified and excluded from that pinned executable. It adds distinct workers,
 schemas and parent profile/ledger validation, plus cross-size/mode refusal and both real CLI
-sampling tests while preserving all existing assertions. Formatting/diff checks pass; the pinned
-binary hash remains unchanged. Finish both D0218 measurements and commit their evidence separately
-before compiling/testing the D0219 increment. Do not include its unverified source in that commit.
+sampling tests while preserving all existing assertions. The D0218 binary hash remained unchanged.
+Both D0218 measurements and their separate evidence commit preceded D0219 compilation and the
+successful verification recorded above; no unverified source was included in that evidence commit.
 
 ```sh
 systemd-run --user --scope --unit=uste-d218-wide-pages.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-wide20000.BogUKs/pages.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-wide20000.BogUKs/pages.json 2> experiments/t20-bench/target/native-wide20000.BogUKs/pages.stderr; measurement_status=$?; systemctl --user show uste-d218-wide-pages.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-wide20000.BogUKs/pages.scope; exit "$measurement_status"'
