@@ -1,0 +1,659 @@
+{
+  "schema": "uste-d216-positive-cache-development-comparison-v1",
+  "qualification": "nonqualifying-development-correctness",
+  "commit": "b3724d52a39e38e86c1a10da8634e4c2a4589331",
+  "binary_sha256": "f07886105f808cbfb95cee6d9727bf07de8b902b2edcc5e1c10824a6fc6e3d0e",
+  "interpretation": "Both modes preserve all 384 oracle outcomes. Positive partition is slower; page-only remains default. Single sequential pair, uncontrolled kernel cache; not latency qualification.",
+  "runs": {
+    "positive": {
+      "command": "systemd-run --user --scope --unit=uste-d216-positive-query.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-positive20000.LnIJt5/positive.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-lookup-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-positive20000.LnIJt5/positive.json 2> experiments/t20-bench/target/native-positive20000.LnIJt5/positive.stderr; measurement_status=$?; systemctl --user show uste-d216-positive-query.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-positive20000.LnIJt5/positive.scope; exit \"$measurement_status\"'",
+      "json": {
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+        "cache_accounted_bytes": 67093625,
+        "cache_budget_bytes": 67108864,
+        "cache_evictions": 22458006,
+        "cache_hits": 449865839,
+        "cache_misses": 23241607,
+        "complete_authenticated_io": false,
+        "current_rss_kib": 87260,
+        "engine_benchmark": false,
+        "entities": 20000,
+        "expected_result_limits": 71,
+        "expected_visit_limits": 0,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 44,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "logical_result_bytes": 46474984,
+        "oracle_adjacency_memory_resident": false,
+        "oracle_summary_digest": "2ecac977140bcac3c44a53e698a9fef9afcd055580128a1c5c34e3e0cc75e4fa",
+        "output_digest": "0c978f102932e082ed1f1012e037a299658cb8d8ff26c5051438c67750b8ee42",
+        "preemptive_deadline_enforced": false,
+        "process_peak_rss_kib": 265608,
+        "qualification": "nonqualifying-development-correctness",
+        "queries": 384,
+        "query_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 23241607,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 23241607,
+              "failures": 0
+            },
+            "read_at": {
+              "calls": 23241607,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 0,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 477498815815,
+          "read_returned_bytes": 477498815815,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "query_cache_configuration": {
+          "clear_drops": "all-enabled-uste-partitions",
+          "logical_accounting_not_rss": true,
+          "lookup": {
+            "accounted_bytes": 16776313,
+            "budget_bytes": 16777216,
+            "evictions": 16879255,
+            "hits": 5050971,
+            "misses": 20215831,
+            "oversized_bypasses": 0,
+            "resident_values": 16347
+          },
+          "lookup_budget_bytes": 16777216,
+          "page_accounted_bytes": 50317312,
+          "page_budget_bytes": 50331648,
+          "page_counter_scope": "packed-pages-only",
+          "profile": "packed-pages-positive-lookups-v1",
+          "total_accounted_bytes": 67093625,
+          "total_budget_bytes": 67108864
+        },
+        "query_milliseconds": 828920,
+        "query_vault_work": {
+          "authenticated_encoded_bytes": 477498815815,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 380790489088,
+          "successful_calls": 23241607
+        },
+        "relationships": 200000,
+        "schema": "bm01-linux-packed-query-v1",
+        "setup": {
+          "bounded_bootstrap_resume": false,
+          "complete_authenticated_io": false,
+          "complete_fixture": true,
+          "coordinator_admission_buffered": true,
+          "coordinator_admission_cache_bytes": 67108864,
+          "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+          "current_rss_kib": 87132,
+          "data_bearing_prefix_resume_implemented": true,
+          "development_entity_limit": 20000,
+          "elapsed_milliseconds": 54168,
+          "engine_benchmark": false,
+          "entities": 20000,
+          "filesystem_profile": "linux-x86_64-btrfs",
+          "frontier": 44,
+          "full_memory_coordinator_metadata": false,
+          "full_memory_graph_state": false,
+          "graph_admission_cache_bytes": 67108864,
+          "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+          "ignored_uncommitted_journal_bytes": 0,
+          "kernel_filesystem_device_cache": "uncontrolled",
+          "legacy_unbound_policy_resume_supported": false,
+          "origin_suffix_groups": null,
+          "owner_vault_encryption_work": {
+            "complete_authenticated_io": false,
+            "includes_failed_call_bytes": false,
+            "includes_failed_command_owners": false,
+            "includes_key_wrap": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "measures_durable_bytes": false,
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "accepted_plaintext_bytes": 0,
+                "failed_calls": 0,
+                "includes_failed_call_bytes": false,
+                "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+                "measures_durable_bytes": false,
+                "physical_device_io": false,
+                "produced_encoded_bytes": 0,
+                "successful_calls": 0
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "accepted_plaintext_bytes": 0,
+              "failed_calls": 0,
+              "includes_failed_call_bytes": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-encrypt-calls",
+              "measures_durable_bytes": false,
+              "physical_device_io": false,
+              "produced_encoded_bytes": 0,
+              "successful_calls": 0
+            }
+          },
+          "owner_vault_work": {
+            "complete_authenticated_io": false,
+            "includes_encryption_bytes": false,
+            "includes_key_unwrap": false,
+            "includes_pre_vault_decode_failures": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "authenticated_encoded_bytes": 21647762379,
+                "complete_authenticated_io": false,
+                "failed_calls": 0,
+                "includes_key_unwrap": false,
+                "includes_other_vaults": false,
+                "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                "physical_device_io": false,
+                "returned_plaintext_bytes": 17352294729,
+                "successful_calls": 1032459
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "authenticated_encoded_bytes": 21647762379,
+              "complete_authenticated_io": false,
+              "failed_calls": 0,
+              "includes_all_recorded_owners": true,
+              "includes_key_unwrap": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-decrypt-calls",
+              "physical_device_io": false,
+              "returned_plaintext_bytes": 17352294729,
+              "successful_calls": 1032459
+            }
+          },
+          "phase": "open",
+          "policy_only_prefix_resume_implemented": true,
+          "process_peak_rss_kib": 265608,
+          "proof_cache_bytes": 67108864,
+          "proof_cache_scope": "fresh-per-preparation",
+          "qualification": "nonqualifying-development-profile",
+          "recovered_frontier": 44,
+          "relationships": 200000,
+          "repaired_certificate_tail_bytes": 0,
+          "resume_base_revision": null,
+          "resume_suffix_groups": null,
+          "schema": "bm01-linux-packed-development-v1",
+          "setup_adapter_io": {
+            "complete_authenticated_index_io": false,
+            "measurement_scope": "filesystem-adapter-calls",
+            "operations": {
+              "create_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "create_new": {
+                "calls": 0,
+                "failures": 0
+              },
+              "metadata": {
+                "calls": 1032189,
+                "failures": 0
+              },
+              "open_directory": {
+                "calls": 1,
+                "failures": 0
+              },
+              "open_existing": {
+                "calls": 1032031,
+                "failures": 21
+              },
+              "read_at": {
+                "calls": 1032462,
+                "failures": 0
+              },
+              "remove_file": {
+                "calls": 0,
+                "failures": 0
+              },
+              "rename_no_replace": {
+                "calls": 0,
+                "failures": 0
+              },
+              "set_len": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_all": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_data": {
+                "calls": 1,
+                "failures": 0
+              },
+              "sync_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "try_lock_exclusive": {
+                "calls": 1,
+                "failures": 0
+              },
+              "write_at": {
+                "calls": 0,
+                "failures": 0
+              }
+            },
+            "physical_device_io": false,
+            "read_requested_bytes": 21647766637,
+            "read_returned_bytes": 21647766637,
+            "write_requested_bytes": 0,
+            "write_returned_bytes": 0
+          },
+          "staging_cache_bytes": 67108864,
+          "staging_cache_scope": "fresh-per-private-tree-batch",
+          "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+          "terminal_storage_open_encryption_work": {
+            "accepted_plaintext_bytes": 0,
+            "failed_calls": 0,
+            "includes_failed_call_bytes": false,
+            "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+            "measures_durable_bytes": false,
+            "physical_device_io": false,
+            "produced_encoded_bytes": 0,
+            "successful_calls": 0
+          },
+          "terminal_vault_work": {
+            "authenticated_encoded_bytes": 21647762379,
+            "complete_authenticated_io": false,
+            "failed_calls": 0,
+            "includes_key_unwrap": false,
+            "includes_other_vaults": false,
+            "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+            "physical_device_io": false,
+            "returned_plaintext_bytes": 17352294729,
+            "successful_calls": 1032459
+          },
+          "terminal_vault_work_scope": "last-cold-open-owner-only",
+          "v1_state_digest": "6880abb54859af231d877c8bbc1a9a665127a9953228c90e4a8278c048d1ecab"
+        },
+        "successful_queries": 313,
+        "uste_page_cache": "cleared-before-each-query",
+        "visits": 4095526
+      },
+      "time": "\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-lookup-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary\"\n\tUser time (seconds): 791.41\n\tSystem time (seconds): 89.58\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 14:43.25\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 265608\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 168119\n\tVoluntary context switches: 71\n\tInvoluntary context switches: 14194\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 16\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "scope": "MemoryCurrent=6569984\nMemoryPeak=278224896\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=881119938000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+      "stderr": ""
+    },
+    "pages": {
+      "command": "systemd-run --user --scope --unit=uste-d216-page-query.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-positive20000.LnIJt5/pages.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-positive20000.LnIJt5/pages.json 2> experiments/t20-bench/target/native-positive20000.LnIJt5/pages.stderr; measurement_status=$?; systemctl --user show uste-d216-page-query.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-positive20000.LnIJt5/pages.scope; exit \"$measurement_status\"'",
+      "json": {
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+        "cache_accounted_bytes": 67098624,
+        "cache_budget_bytes": 67108864,
+        "cache_evictions": 17781965,
+        "cache_hits": 545294528,
+        "cache_misses": 18779324,
+        "complete_authenticated_io": false,
+        "current_rss_kib": 88796,
+        "engine_benchmark": false,
+        "entities": 20000,
+        "expected_result_limits": 71,
+        "expected_visit_limits": 0,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 44,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "logical_result_bytes": 46474984,
+        "oracle_adjacency_memory_resident": false,
+        "oracle_summary_digest": "2ecac977140bcac3c44a53e698a9fef9afcd055580128a1c5c34e3e0cc75e4fa",
+        "output_digest": "0c978f102932e082ed1f1012e037a299658cb8d8ff26c5051438c67750b8ee42",
+        "preemptive_deadline_enforced": false,
+        "process_peak_rss_kib": 265092,
+        "qualification": "nonqualifying-development-correctness",
+        "queries": 384,
+        "query_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 18779324,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 18779324,
+              "failures": 0
+            },
+            "read_at": {
+              "calls": 18779324,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 0,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 385821211580,
+          "read_returned_bytes": 385821211580,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "query_cache_configuration": {
+          "clear_drops": "all-enabled-uste-partitions",
+          "logical_accounting_not_rss": true,
+          "lookup": null,
+          "lookup_budget_bytes": 0,
+          "page_accounted_bytes": 67098624,
+          "page_budget_bytes": 67108864,
+          "page_counter_scope": "packed-pages-only",
+          "profile": "packed-pages-v1",
+          "total_accounted_bytes": 67098624,
+          "total_budget_bytes": 67108864
+        },
+        "query_milliseconds": 721423,
+        "query_vault_work": {
+          "authenticated_encoded_bytes": 385821211580,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 307680444416,
+          "successful_calls": 18779324
+        },
+        "relationships": 200000,
+        "schema": "bm01-linux-packed-query-v1",
+        "setup": {
+          "bounded_bootstrap_resume": false,
+          "complete_authenticated_io": false,
+          "complete_fixture": true,
+          "coordinator_admission_buffered": true,
+          "coordinator_admission_cache_bytes": 67108864,
+          "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+          "current_rss_kib": 86944,
+          "data_bearing_prefix_resume_implemented": true,
+          "development_entity_limit": 20000,
+          "elapsed_milliseconds": 53709,
+          "engine_benchmark": false,
+          "entities": 20000,
+          "filesystem_profile": "linux-x86_64-btrfs",
+          "frontier": 44,
+          "full_memory_coordinator_metadata": false,
+          "full_memory_graph_state": false,
+          "graph_admission_cache_bytes": 67108864,
+          "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+          "ignored_uncommitted_journal_bytes": 0,
+          "kernel_filesystem_device_cache": "uncontrolled",
+          "legacy_unbound_policy_resume_supported": false,
+          "origin_suffix_groups": null,
+          "owner_vault_encryption_work": {
+            "complete_authenticated_io": false,
+            "includes_failed_call_bytes": false,
+            "includes_failed_command_owners": false,
+            "includes_key_wrap": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "measures_durable_bytes": false,
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "accepted_plaintext_bytes": 0,
+                "failed_calls": 0,
+                "includes_failed_call_bytes": false,
+                "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+                "measures_durable_bytes": false,
+                "physical_device_io": false,
+                "produced_encoded_bytes": 0,
+                "successful_calls": 0
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "accepted_plaintext_bytes": 0,
+              "failed_calls": 0,
+              "includes_failed_call_bytes": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-encrypt-calls",
+              "measures_durable_bytes": false,
+              "physical_device_io": false,
+              "produced_encoded_bytes": 0,
+              "successful_calls": 0
+            }
+          },
+          "owner_vault_work": {
+            "complete_authenticated_io": false,
+            "includes_encryption_bytes": false,
+            "includes_key_unwrap": false,
+            "includes_pre_vault_decode_failures": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "authenticated_encoded_bytes": 21647762379,
+                "complete_authenticated_io": false,
+                "failed_calls": 0,
+                "includes_key_unwrap": false,
+                "includes_other_vaults": false,
+                "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                "physical_device_io": false,
+                "returned_plaintext_bytes": 17352294729,
+                "successful_calls": 1032459
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "authenticated_encoded_bytes": 21647762379,
+              "complete_authenticated_io": false,
+              "failed_calls": 0,
+              "includes_all_recorded_owners": true,
+              "includes_key_unwrap": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-decrypt-calls",
+              "physical_device_io": false,
+              "returned_plaintext_bytes": 17352294729,
+              "successful_calls": 1032459
+            }
+          },
+          "phase": "open",
+          "policy_only_prefix_resume_implemented": true,
+          "process_peak_rss_kib": 265092,
+          "proof_cache_bytes": 67108864,
+          "proof_cache_scope": "fresh-per-preparation",
+          "qualification": "nonqualifying-development-profile",
+          "recovered_frontier": 44,
+          "relationships": 200000,
+          "repaired_certificate_tail_bytes": 0,
+          "resume_base_revision": null,
+          "resume_suffix_groups": null,
+          "schema": "bm01-linux-packed-development-v1",
+          "setup_adapter_io": {
+            "complete_authenticated_index_io": false,
+            "measurement_scope": "filesystem-adapter-calls",
+            "operations": {
+              "create_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "create_new": {
+                "calls": 0,
+                "failures": 0
+              },
+              "metadata": {
+                "calls": 1032189,
+                "failures": 0
+              },
+              "open_directory": {
+                "calls": 1,
+                "failures": 0
+              },
+              "open_existing": {
+                "calls": 1032031,
+                "failures": 21
+              },
+              "read_at": {
+                "calls": 1032462,
+                "failures": 0
+              },
+              "remove_file": {
+                "calls": 0,
+                "failures": 0
+              },
+              "rename_no_replace": {
+                "calls": 0,
+                "failures": 0
+              },
+              "set_len": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_all": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_data": {
+                "calls": 1,
+                "failures": 0
+              },
+              "sync_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "try_lock_exclusive": {
+                "calls": 1,
+                "failures": 0
+              },
+              "write_at": {
+                "calls": 0,
+                "failures": 0
+              }
+            },
+            "physical_device_io": false,
+            "read_requested_bytes": 21647766637,
+            "read_returned_bytes": 21647766637,
+            "write_requested_bytes": 0,
+            "write_returned_bytes": 0
+          },
+          "staging_cache_bytes": 67108864,
+          "staging_cache_scope": "fresh-per-private-tree-batch",
+          "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+          "terminal_storage_open_encryption_work": {
+            "accepted_plaintext_bytes": 0,
+            "failed_calls": 0,
+            "includes_failed_call_bytes": false,
+            "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+            "measures_durable_bytes": false,
+            "physical_device_io": false,
+            "produced_encoded_bytes": 0,
+            "successful_calls": 0
+          },
+          "terminal_vault_work": {
+            "authenticated_encoded_bytes": 21647762379,
+            "complete_authenticated_io": false,
+            "failed_calls": 0,
+            "includes_key_unwrap": false,
+            "includes_other_vaults": false,
+            "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+            "physical_device_io": false,
+            "returned_plaintext_bytes": 17352294729,
+            "successful_calls": 1032459
+          },
+          "terminal_vault_work_scope": "last-cold-open-owner-only",
+          "v1_state_digest": "6880abb54859af231d877c8bbc1a9a665127a9953228c90e4a8278c048d1ecab"
+        },
+        "successful_queries": 313,
+        "uste_page_cache": "cleared-before-each-query",
+        "visits": 4095526
+      },
+      "time": "\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary\"\n\tUser time (seconds): 697.31\n\tSystem time (seconds): 75.87\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 12:55.29\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 265092\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 168470\n\tVoluntary context switches: 9\n\tInvoluntary context switches: 24974\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 16\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "scope": "MemoryCurrent=8626176\nMemoryPeak=276922368\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=773307520000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+      "stderr": ""
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 
-Status: Implemented and locally verified; no larger comparison or timing qualification yet.
+Status: Implemented and locally verified; 20,000-entity development comparison complete, not qualified.
 
 After D0214/D0215 verification, provide a separate `linux-packed-lookup-query` development
 command using the same native source, cold admission, frozen BM-01 materializer and independent
@@ -27,3 +27,10 @@ Native release regression passes 124 active tests (five unchanged opt-in ignores
 Clippy. The same 20/200 fixture matches every oracle result in both modes without source-byte
 changes; separate-process dispatch, positive hits, exact budget reporting and admission refusal
 also pass. PROGRESS.md records exact commands, source baseline, binary hash and resource limits.
+
+The same-binary 20,000/200,000 comparison passes every oracle case in both modes but the
+16 MiB positive partition increases query time from 721,423 to 828,920 ms (14.90%). Page
+misses increase from 18,779,324 to 23,241,607 despite 5,050,971 positive hits. Keep page-only
+as the default. This single sequential pair with uncontrolled kernel caches is not a latency
+qualification or proof of a general performance optimum. Raw reports, commands and resource
+counters are retained in `docs/evidence/positive-cache-native-comparison.json`.

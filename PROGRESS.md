@@ -2,6 +2,59 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Current work — supervised positive-cache sampling
+
+The same-binary D0216 comparison completed successfully in both modes. Raw reports, exact
+commands, GNU time and scope counters are archived in
+`docs/evidence/positive-cache-native-comparison.json`. Page-only query/setup times were
+721,423/53,709 ms, wall 775.29s, peak RSS 265,092 KiB, group peak 276,922,368 bytes,
+zero swap. Both modes matched all 384 outcomes, digests, visits and result bytes. Positive
+caching took 828,920 ms: **14.90% slower** in this single sequential development comparison,
+with 23,241,607 versus 18,779,324 page misses. Keep page-only as default. Kernel/device caches
+were uncontrolled; neither run is qualifying or a five-sample latency campaign.
+D0217 source remains uncompiled/unverified and separate from this evidence commit. Next verify
+its arithmetic, supervisor protocol and real-process tests before committing that capability.
+
+D0216 is committed/pushed as `b3724d52a39e38e86c1a10da8634e4c2a4589331`. The clean-tree release
+binary remains `f07886105f808cbfb95cee6d9727bf07de8b902b2edcc5e1c10824a6fc6e3d0e`.
+Fresh preflight: 24 GiB available RAM, 2 GiB free swap, 952 GiB disk, no competing build or
+benchmark. Existing synthetic password metadata remains mode 0600, one link, 80 bytes; no
+credential content was printed. Retained 20,000-entity source certificate hash remains
+`b8fea4e223947316555069db1869b7ef57e121077e84ceff02a1930061f1e6cd`; oracle-summary file SHA-256
+remains `aa3e6939c372351d6dfff0a8eaae989411c4a10d34244f2298114da34194af2c`.
+
+Positive-cache correctness measurement started at 2026-09-20 14:00:27 UTC, session 57509 /
+`uste-d216-positive-query.scope`, invocation `5217e9a0d12b4c7da80ecd4f89eeea55`. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d216-positive-query.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-positive20000.LnIJt5/positive.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-lookup-query --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-summary > experiments/t20-bench/target/native-positive20000.LnIJt5/positive.json 2> experiments/t20-bench/target/native-positive20000.LnIJt5/positive.stderr; measurement_status=$?; systemctl --user show uste-d216-positive-query.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-positive20000.LnIJt5/positive.scope; exit "$measurement_status"'
+```
+
+Positive run passed, exit zero: all **384 cases (313 successful, 71 expected result limits,
+zero visit limits)**, output digest `0c978f102932e082ed1f1012e037a299658cb8d8ff26c5051438c67750b8ee42`,
+oracle digest `2ecac977140bcac3c44a53e698a9fef9afcd055580128a1c5c34e3e0cc75e4fa`, 4,095,526 visits
+and 46,474,984 result bytes. Query 828,920 ms, setup 54,168 ms, whole wall 883.25s;
+user/system 791.41/89.58s, peak RSS 265,608 KiB. Group peak 278,224,896 bytes, zero swap,
+CPU 881,119,938,000 ns. Page hits/misses/evictions 449,865,839 / 23,241,607 / 22,458,006;
+477,498,815,815 adapter-read/authenticated encoded bytes, zero query writes. Lookup hits/misses/
+evictions 5,050,971 / 20,215,831 / 16,879,255, zero oversized bypasses. Latest result residency
+16,347 values / 16,776,313 accounted bytes, pages 50,317,312, total 67,093,625 within 67,108,864.
+This is not an observed speedup. The completed same-binary control above confirms the regression
+for this development pair. Source certificate and executable hashes remained unchanged.
+
+Same-binary page-only control started at 2026-09-20 14:16:06 UTC, session 70577 /
+`uste-d216-page-query.scope`, invocation `c3813b31d2a748ed8774320cbb1bf328`, after fresh 24 GiB RAM,
+2 GiB free swap/952 GiB disk, unchanged binary/source hashes and no competing heavy workload.
+Exact invocation is the positive command above with scope `uste-d216-page-query.scope`, artifact
+prefix `pages` instead of `positive`, and command `linux-packed-query` instead of
+`linux-packed-lookup-query`; source/profile/oracle, 1800s timeout and all group limits are identical.
+No compilation or second heavy workload overlapped; control exited zero.
+This is not a qualifying 24 GiB reservation, five-sample campaign or latency-budget pass. Keep
+the pinned M1 handoff and full T-20/T-19/R2–R4 requirements. D0217 sampling source is now under
+implementation: checked result-cache accumulation, separate worker/schema and parent ledger
+validation, plus arithmetic/protocol/CLI tests. It remains unbuilt and excluded from this measured
+executable. Finish the paired measurement/evidence first, then verify that separate increment.
+
 ## Latest verified increment — native positive-cache comparison (Decision 0216)
 
 D0215 committed and pushed as `df9a96d`. D0216's separate `linux-packed-lookup-query` command
@@ -9,7 +62,7 @@ preserves the old page-only command and the complete 384-query oracle protocol. 
 64 MiB total budget split into 48 MiB pages and 16 MiB positive lookups, with explicit checked
 partition reporting. Native fixture and process tests compare both modes' outputs, limit
 outcomes and source preservation; sampling remains unchanged and page-only. No standalone
-large comparison or new latency campaign has run.
+qualifying comparison or new latency campaign has run; the development comparison is recorded above.
 
 Native release tests/strict lint passed in session 79994 / `uste-d216-native.scope`,
 invocation `7bd89ae0a6174609b90c1b77c837ec82`, after fresh 24 GiB RAM/2 GiB free swap/952 GiB disk
@@ -28,8 +81,8 @@ Both native 20/200 modes match all 384 oracle outputs and preserve authoritative
 the process test also verifies exact mode budgets and positive hits. Formatting and doc/task
 checks passed. Tested baseline is `df9a96d` plus this reviewed native increment.
 
-Next: commit/push D0216, then fresh host/fixture/binary admission for the bounded 20,000-entity
-positive-query oracle, followed by a same-binary page-only control if admitted. Preserve all
+D0216 committed/pushed as `b3724d5`; both bounded 20,000-entity query modes completed
+above. Preserve all
 384 cases, including expected limits; this is nonqualifying development work under a 4 GiB
 cap, not the reserved 24 GiB qualifying campaign. Then add separately supervised positive-cache
 sampling with checked per-state counters and unchanged deadlines/qualification boundaries. Core/M1 source
