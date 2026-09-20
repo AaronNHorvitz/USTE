@@ -151,7 +151,8 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
     assert_eq!(created["frontier"], 4);
     assert_eq!(created["engine_benchmark"], false);
     assert_eq!(created["data_bearing_prefix_resume_implemented"], true);
-    assert_eq!(created["policy_only_prefix_resume_implemented"], false);
+    assert_eq!(created["policy_only_prefix_resume_implemented"], true);
+    assert_eq!(created["legacy_unbound_policy_resume_supported"], false);
     let opened = fixture.run("open").unwrap();
     assert_eq!(opened["v1_state_digest"], created["v1_state_digest"]);
     let source = fixture.files(false);
@@ -366,7 +367,7 @@ fn packed_native_data_prefix_resume_and_missing_roots_fail_closed() {
         if frontier == 1 {
             assert_eq!(
                 fixture.run("resume").unwrap_err().code(),
-                "USTE_BM01_PACKED_RESUME_PREFIX"
+                "USTE_BM01_PACKED_BOOTSTRAP_PROFILE"
             );
             continue;
         }

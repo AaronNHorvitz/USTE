@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native packed data-prefix resume (Decision 0168)
+## Latest verified increment — packed bootstrap and process loss (Decision 0169)
+
+Implemented on pushed `d72db81` plus this increment: new packed policy identities bind the frozen
+fixture version and entity count. Explicit resume initializes verified empty stores or reconstructs
+only one bounded, correctly bound policy transaction (one outcome/zero owners/1 MiB replay).
+Legacy unbound policy-only prefixes still refuse; existing data-bearing fixtures remain supported.
+Actual child-process probes park after durable creation, policy acknowledgement or successful graph
+publication before metadata rebase. Only owned children are killed/reaped, including timeout cleanup.
+Recovery reports now preserve the first opener's repair counts through subsequent cold admission.
+
+Session 57394 / `run-p770048-i21748472.scope` exited 0: four packed CLI tests/50.53 s, compile
+23.20 s, strict Clippy/1.31 s. Five actual SIGKILL cases at revisions 0–4 each recover the exact
+20/200 reference digest, preserve the certified prefix, report a three-byte injected incomplete
+certificate-tail repair, avoid duplicate commits and pass all 384 oracle queries. Certified wrong
+profiles refuse without changing certificates. Future pause revisions refuse before I/O.
+
+Session 44178 / `run-p771160-i21732459.scope` exited 0: all 68 active library tests/101.30 s,
+two pre-existing ignored campaigns, compile 23.51 s, Clippy/0.05 s. This includes legacy-prefix,
+wrong-key/profile, committed corruption, explicit rebuild and v1/model regression. Preflight
+29–30 GiB available RAM/4.2–4.1 GiB free swap; one job/thread and 3G/4G/512M caps. No final cgroup
+peak was captured. Other process suites retain their full 83-test gate at `d72db81`, not a new run;
+core source remains unchanged with 658 tests at `6bb43a4`. Pending packed BM-06 work is excluded.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_terminal --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d169-library-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Next integrate packed BM-06 history and checkpoint/suffix/origin equivalence, then its native
+pipeline. Complete authenticated I/O, exact-scale construction and reserved-host BM-01/BM-06
+qualification remain open. These process controls do not emulate power loss. T-20/T-19 remain
+unchecked; pinned M1, full roadmap, lockfile and release gates are unchanged. This section
+supersedes earlier next steps.
+
+## Prior verified increment — native packed data-prefix resume (Decision 0168)
 
 Implemented on pushed `79c4c6d` plus this increment: explicit `linux-packed-resume` authenticates
 the data-bearing fixture marker before derived output/fresh append, selects the newest complete

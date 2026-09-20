@@ -43,12 +43,19 @@ rebuild authenticates the fixture binding before reconstructing derived roots fr
 Decision 0168 resume supports authenticated data-bearing prefixes: choose the newest complete
 same-revision graph/primary/quota triple, stream the certified suffix, then retry/continue the
 unchanged batches. Complete cache loss is not implicitly rebuilt. Legacy policy-only prefixes are
-not profile-bound and are refused; bootstrap recovery and actual process-loss controls remain open.
+not profile-bound and are refused. Decision 0169 newly binds policy retry/transaction identities to
+the frozen fixture version and entity count. Resume can initialize an empty store or recover that
+new policy-only prefix with at most one outcome, zero blob owners and 1 MiB replay. Larger prefixes
+never use the ordinary reducer. Data-bearing legacy fixtures remain supported.
 Open/query/rebuild still require a complete terminal fixture. Native tests verify 20 entities/200
 relationships, real close/open, selected-prefix suffix recovery, partial publication, all batch retries,
 384 oracle queries and authority preservation through rebuild. The unchanged 20,000-entity native
-admission ceiling is not measured packed qualification. Bootstrap recovery/process-loss, packed
-BM-06 history, complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required.
+admission ceiling is not measured packed qualification. The explicit test-only
+`linux-packed-create-crash-probe ... --pause-after-revision N` parks after durable creation (0),
+policy acknowledgement (1), or graph publication before metadata rebase (data revisions). Use it
+only with an owning supervisor that terminates and reaps its child. The process regression exercises
+all five 20/200 boundaries, exact resume and all oracle queries; it does not emulate power loss.
+Packed BM-06 history, complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required.
 
 ## BM-06 materialization
 

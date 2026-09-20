@@ -114,6 +114,7 @@ fn run() -> Result<(), String> {
         "linux-create"
             | "linux-disk-create"
             | "linux-packed-create"
+            | "linux-packed-create-crash-probe"
             | "linux-packed-open"
             | "linux-packed-resume"
             | "linux-packed-rebuild"
@@ -266,6 +267,14 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-packed-create-crash-probe" => {
+                    uste_t20_bench::linux_runner::packed::create_crash_probe(
+                        &root,
+                        &password_file,
+                        profile,
+                        pause_after_revision.ok_or("--pause-after-revision is required")?,
+                    )
+                }
                 "linux-packed-create"
                 | "linux-packed-open"
                 | "linux-packed-rebuild"
@@ -380,7 +389,8 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check|packed-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying; resume requires a data-bearing prefix)\n\
+         uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
+         uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

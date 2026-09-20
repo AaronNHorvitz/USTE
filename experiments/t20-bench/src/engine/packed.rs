@@ -245,6 +245,35 @@ pub(crate) fn commit_batch<
     clock: &mut impl uste_storage::Clock,
     limits: Limits,
 ) -> Result<(uste_txn::TransactionOutcome, Vec<u8>), String> {
+    commit_batch_observed(
+        live,
+        fs,
+        kernel,
+        principal,
+        batch,
+        clock,
+        limits,
+        &mut |_| Ok(()),
+    )
+}
+
+// Fixture-only observation point: graph publication has succeeded, metadata rebase has not.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn commit_batch_observed<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    live: &mut PackedEngine<F, W, E, I>,
+    fs: &mut F,
+    kernel: &mut PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    batch: disk::DiskBatch,
+    clock: &mut impl uste_storage::Clock,
+    limits: Limits,
+    observer: &mut impl FnMut(u64) -> Result<(), String>,
+) -> Result<(uste_txn::TransactionOutcome, Vec<u8>), String> {
     let bytes =
         encode_transaction(&GraphTransaction::new(scope(), batch.operations)).map_err(debug)?;
     let mut writer =
@@ -268,6 +297,7 @@ pub(crate) fn commit_batch<
         return Err("packed write frontier mismatch".into());
     }
     drop(writer);
+    observer(outcome.revision.get())?;
     live.rebase_metadata(fs, limits.origin.suffix.metadata)
         .map_err(debug)?;
     Ok((outcome, bytes))

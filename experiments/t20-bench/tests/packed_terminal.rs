@@ -1,11 +1,12 @@
 #![cfg(all(target_os = "linux", target_arch = "x86_64"))]
-//! Separate-process terminal commands, not SIGKILL/resume qualification.
+//! Separate-process packed correctness and owned-child SIGKILL; no benchmark qualification.
 use std::{
     fs,
-    io::Write,
-    os::unix::fs::OpenOptionsExt,
+    io::{BufRead, BufReader, Write},
+    os::unix::{fs::OpenOptionsExt, process::ExitStatusExt},
     path::PathBuf,
-    process::{Command, Output, Stdio},
+    process::{Child, Command, Output, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -49,7 +50,7 @@ impl Fixture {
             oracle,
         }
     }
-    fn run(&self, phase: &str) -> serde_json::Value {
+    fn command(&self, phase: &str) -> Command {
         let mut command = Command::new(EXECUTABLE);
         command
             .arg(format!("linux-packed-{phase}"))
@@ -61,7 +62,10 @@ impl Fixture {
         if phase == "query" {
             command.arg("--oracle-file").arg(&self.oracle);
         }
-        let output = complete(command);
+        command
+    }
+    fn run(&self, phase: &str) -> serde_json::Value {
+        let output = complete(self.command(phase));
         assert!(
             output.status.success(),
             "{phase}: {}",
@@ -75,23 +79,135 @@ impl Drop for Fixture {
         fs::remove_dir_all(&self.root).unwrap();
     }
 }
+struct OwnedChild(Option<Child>);
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
 fn complete(mut command: Command) -> Output {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut owned = OwnedChild(Some(
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    ));
     let started = Instant::now();
     loop {
-        if child.try_wait().unwrap().is_some() {
-            return child.wait_with_output().unwrap();
+        if owned.0.as_mut().unwrap().try_wait().unwrap().is_some() {
+            return owned.0.take().unwrap().wait_with_output().unwrap();
         }
         if started.elapsed() > Duration::from_secs(90) {
-            child.kill().unwrap();
-            child.wait().unwrap();
             panic!("owned packed command deadline exceeded");
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn packed_cli_sigkill_bootstrap_and_unpaired_metadata_resume_exactly() {
+    let reference = Fixture::new();
+    let expected = reference.run("create");
+    for pause in 0..=4 {
+        let fixture = Fixture::new();
+        let mut child = OwnedChild(Some(
+            fixture
+                .command("create-crash-probe")
+                .args(["--pause-after-revision", &pause.to_string()])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = sender.send(result);
+        });
+        let line = receiver
+            .recv_timeout(Duration::from_secs(60))
+            .unwrap()
+            .unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(marker["schema"], "bm01-packed-durable-prefix-v1");
+        assert_eq!(marker["frontier"], pause);
+        child.0.as_mut().unwrap().kill().unwrap();
+        assert_eq!(child.0.as_mut().unwrap().wait().unwrap().signal(), Some(9));
+        child.0.take();
+        reader.join().unwrap();
+        let certificates = fixture.root.join("bm01-linux-packed-engine/CERTIFICATES");
+        let prefix = fs::read(&certificates).unwrap();
+        // An empty store has no prior profile to contradict. A certified policy/data prefix does.
+        if pause != 0 {
+            let mut wrong = fixture.command("resume");
+            wrong.args(["--entities", "21"]);
+            assert!(!complete(wrong).status.success());
+            assert!(
+                fs::read(&certificates).unwrap() == prefix,
+                "wrong profile changed authority"
+            );
+        }
+        // Deliberately incomplete certificate tail: reporting must retain the initial opener's
+        // repair count, not replace it with the later cold-admission report.
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&certificates)
+            .unwrap()
+            .write_all(&[0x71; 3])
+            .unwrap();
+        let resumed = fixture.run("resume");
+        assert_eq!(resumed["recovered_frontier"], pause);
+        assert_eq!(resumed["repaired_certificate_tail_bytes"], 3);
+        assert_eq!(resumed["bounded_bootstrap_resume"], pause <= 1);
+        assert_eq!(
+            resumed["resume_base_revision"],
+            if pause <= 1 { 1 } else { pause - 1 }
+        );
+        assert_eq!(resumed["resume_suffix_groups"], u64::from(pause >= 2));
+        assert_eq!(resumed["v1_state_digest"], expected["v1_state_digest"]);
+        let terminal = fs::read(&certificates).unwrap();
+        assert!(terminal.starts_with(&prefix), "certified prefix changed");
+        assert_eq!(
+            fixture.run("resume")["v1_state_digest"],
+            expected["v1_state_digest"]
+        );
+        assert!(
+            fs::read(&certificates).unwrap() == terminal,
+            "retry changed authority"
+        );
+        assert_eq!(fixture.run("query")["successful_queries"], 384);
+    }
+}
+
+#[test]
+fn packed_cli_probe_refuses_future_revision_before_io() {
+    for pause in [5, u64::MAX] {
+        let mut command = Command::new(EXECUTABLE);
+        command.args([
+            "linux-packed-create-crash-probe",
+            "--root",
+            "absent-packed-probe-root",
+            "--password-file",
+            "absent-packed-probe-password",
+            "--entities",
+            "20",
+            "--pause-after-revision",
+            &pause.to_string(),
+        ]);
+        let output = complete(command);
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("USTE_BM01_PACKED_PROBE_REVISION")
+        );
+        assert!(output.stdout.is_empty());
     }
 }
 #[test]

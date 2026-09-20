@@ -1,4 +1,4 @@
-//! Native packed phases. Resume requires an authenticated data-bearing fixture prefix.
+//! Native packed phases with bounded profile-bound bootstrap and paired-prefix recovery.
 use super::*;
 use crate::engine::{
     disk::{DiskBatch, visit_disk_batches},
@@ -7,6 +7,7 @@ use crate::engine::{
 use disk::io::ObservedFileSystem;
 use uste_graph::recover_packed_graph_origin;
 use uste_txn::{AuthenticatedIndexRecovery, AuthorizedPackedReader, CoordinatorRecoveryLimits};
+mod bootstrap;
 mod query;
 pub use query::query_correctness;
 type Fs = ObservedFileSystem<LinuxFileSystem>;
@@ -138,6 +139,46 @@ fn prepare(
     profile: Bm01Profile,
     phase: &str,
 ) -> Result<Session, LinuxRunnerError> {
+    prepare_observed(root, password_file, profile, phase, &mut |_| Ok(()))
+}
+
+/// Development control; the test supervisor must own and reap the parked process.
+pub fn create_crash_probe(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    pause: u64,
+) -> Result<String, LinuxRunnerError> {
+    disk::validate_native_profile(profile)?;
+    if pause > materialization_revision_count(profile) {
+        return Err(error("USTE_BM01_PACKED_PROBE_REVISION"));
+    }
+    prepare_observed(root, password_file, profile, "create", &mut |revision| {
+        if revision == pause {
+            use std::io::Write;
+            let mut output = std::io::stdout().lock();
+            writeln!(
+                output,
+                "{{\"schema\":\"bm01-packed-durable-prefix-v1\",\"frontier\":{revision}}}"
+            )
+            .and_then(|()| output.flush())
+            .map_err(|_| error("USTE_BM01_PACKED_PROBE_SIGNAL"))?;
+            loop {
+                std::thread::park();
+            }
+        }
+        Ok(())
+    })
+    .map(|session| session.report.to_string())
+}
+
+fn prepare_observed(
+    root: &Path,
+    password_file: &Path,
+    profile: Bm01Profile,
+    phase: &str,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<Session, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
     if !matches!(phase, "create" | "open" | "rebuild" | "resume") {
         return Err(error("USTE_BM01_PACKED_PHASE"));
@@ -159,10 +200,17 @@ fn prepare(
             GraphState::new(scope()),
         )
         .map_err(|_| error("USTE_BM01_DATABASE_CREATE"))?;
-        disk::install_policy(&mut raw, &mut fs)?;
+        observer(0)?;
+        bootstrap::install(&mut raw, &mut fs, profile)?;
+        observer(1)?;
         drop(raw);
     }
-    let (mut recovery, mut recovered) = open_recovery(&mut fs, &mut adapter, limits)?;
+    let (mut recovery, recovered) = open_recovery(&mut fs, &mut adapter, limits)?;
+    let recovered_frontier = recovered.frontier.map_or(0, |revision| revision.get());
+    let bootstrap_resume = phase == "resume" && recovered_frontier <= 1;
+    if bootstrap_resume {
+        recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
+    }
     let mut policy =
         kernel(benchmark_policy(scope()).map_err(|_| error("USTE_BM01_POLICY_PROFILE"))?)
             .map_err(|_| error("USTE_BM01_POLICY_PROFILE"))?;
@@ -172,9 +220,17 @@ fn prepare(
     let mut resume_base_revision = None;
     let mut resume_suffix_groups = None;
     if phase == "create" || phase == "resume" {
-        let mut live = if phase == "create" {
-            if recovered.frontier.map(|r| r.get()) != Some(1) {
+        let mut live = if phase == "create" || bootstrap_resume {
+            if recovery
+                .authenticated_frontier_anchor()
+                .map(|(revision, _)| revision.get())
+                != Some(1)
+            {
                 return Err(error("USTE_BM01_PACKED_BOOTSTRAP"));
+            }
+            if bootstrap_resume {
+                resume_base_revision = Some(1);
+                resume_suffix_groups = Some(0);
             }
             recover_packed_graph_origin(
                 recovery,
@@ -186,8 +242,6 @@ fn prepare(
             .map_err(|_| error("USTE_BM01_PACKED_BOOTSTRAP"))?
             .0
         } else {
-            // Legacy policy-only genesis does not bind dimensions. Refuse it before derived
-            // reconstruction or a fresh append; supporting it needs a versioned bootstrap ID.
             if !matches!(recovered.frontier.map(|r| r.get()), Some(value) if value >= 2 && value <= expected)
             {
                 return Err(error("USTE_BM01_PACKED_RESUME_PREFIX"));
@@ -201,7 +255,7 @@ fn prepare(
         };
         let mut clock = SystemClock::new();
         visit_disk_batches(profile, |sequence, operations| {
-            engine::commit_batch(
+            engine::commit_batch_observed(
                 &mut live,
                 &mut fs,
                 &mut policy,
@@ -214,14 +268,19 @@ fn prepare(
                 },
                 &mut clock,
                 limits,
+                &mut |revision| observer(revision).map_err(|error| error.code().to_string()),
             )?;
             Ok(())
         })
         .map_err(|_| error("USTE_BM01_PACKED_MATERIALIZE"))?;
         drop(live);
-        (recovery, recovered) = open_recovery(&mut fs, &mut adapter, limits)?;
+        recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
     }
-    if recovered.frontier.map(|r| r.get()) != Some(expected) {
+    if recovery
+        .authenticated_frontier_anchor()
+        .map(|(revision, _)| revision.get())
+        != Some(expected)
+    {
         return Err(error("USTE_BM01_FRONTIER_MISMATCH"));
     }
     if phase == "rebuild" {
@@ -267,7 +326,8 @@ fn prepare(
         "setup_adapter_io": session.filesystem.snapshot()?.json()?,
         "development_entity_limit": disk::MAX_NATIVE_DEVELOPMENT_ENTITIES,
         "data_bearing_prefix_resume_implemented": true,
-        "policy_only_prefix_resume_implemented": false,
+        "policy_only_prefix_resume_implemented": true, "legacy_unbound_policy_resume_supported": false,
+        "bounded_bootstrap_resume": bootstrap_resume, "recovered_frontier": recovered_frontier,
         "resume_base_revision": resume_base_revision, "resume_suffix_groups": resume_suffix_groups,
     });
     Ok(session)
