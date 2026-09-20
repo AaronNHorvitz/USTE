@@ -2,7 +2,60 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native buffered staging measurement (Decision 0197)
+## Latest verified primitive — fresh graph proof preparation (Decision 0198)
+
+Pushed `3acead5` preserves the native staging result below. Additive opt-in buffered graph
+preparation shares existing proof/reducer logic and keeps the original API uncached. Five new
+tests cover fresh residency/read reduction, all exact/minus-one proof limits, reducer successes
+and rejections, current/history/reverse corruption and owner/scope checks, and all observed
+read faults/crashes with recovery. The original 270 uncached fault cases remain unchanged.
+
+Initial command selected nonexistent `--test disk_state` (exit 101, no tests); corrected target
+`disk_index` then caught an unnecessary qualification exposed by the new shared cache import
+(exit 101, no tests). Corrected that qualification. Logs `/tmp/uste-d198-focused.log` and
+`/tmp/uste-d198-focused-fixed.log` preserve both failures. Final focused session 53721 /
+`run-p1162766-i22101992.scope` passed 5 tests/0.53 s, compile 19.97 s and strict graph Clippy
+2.03 s. Log `/tmp/uste-d198-focused-final.log`. Preflight 27 GiB available RAM, 2.0 GiB free
+swap, 976 GiB free disk; one Cargo job/test thread, 3 GiB high/4 GiB max/512 MiB swap.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --all-features --locked --offline packed_graph_buffered_preparation -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy -p uste-graph --all-targets --all-features --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d198-focused-final.log'
+```
+
+Full workspace session 96213 / `run-p1163449-i22144473.scope` ran the same complete
+test/Clippy/warning-denying-doc command recorded under Decision 0194, with log
+`/tmp/uste-d198-workspace-verification.log`. Its test executables finished compiling before
+the separate Decision 0199 domain edits were written. Those new writer/suffix options and twelve
+tests are not verified by this test invocation; subsequent Clippy/docs will see them. Keep
+their files out of the Decision 0198 commit until separately tested. The domain compatibility
+changes in `experiments/t20-bench/src/engine/packed/limits.rs` select `None`; no native selection
+or measurement is part of either pending domain increment. No scale admission, qualifying
+campaign, M1 or task-status changes.
+
+Its **710 tests across 47 executables passed**, zero failed/ignored: graph disk 108/439.96 s,
+replay checkpoint 50/104.59 s, storage 224/32.84 s and transaction coordinator 115/116.63 s;
+compile 1.67 s. Sampled scope peak 690,524,160 bytes/zero swap, not final lifetime peak.
+The following Clippy step failed on nine redundant `self::` qualifiers in the then-new Decision
+0199 test helpers (overall command exit 101; docs did not run). Removed those qualifiers;
+no behavioral/test expectation changes. Separate session 70995 / `run-p1167201-i22175928.scope`
+passed strict workspace Clippy/1.59 s and warning-denying docs/2.71 s. Its subsequent twelve
+Decision 0199 integration tests passed eleven and failed one/37.45 s (compile 20.27 s): the new
+invalid-cache test expected `Authorization(Transaction(Storage(ResourceLimit)))`, but existing
+writer semantics correctly return `Preparation(Storage(ResourceLimit))`. Corrected that exact
+expectation, preserving zero-write/frontier and exact-retry assertions. Log
+`/tmp/uste-d199-domain-verification.log`; preflight 27 GiB available RAM/2.0 GiB swap. Same
+3G/4G/512M process bounds, one job/thread. Separate corrected session 18349 /
+`run-p1168105-i22184021.scope` runs the twelve integration tests and strict workspace Clippy,
+log `/tmp/uste-d199-domain-verification-fixed.log`. No result claimed before it finishes.
+
+The Decision 0198 primitive is independently verified by five focused and all 710 workspace
+tests. Commit only its five code/test paths plus Decision 0198 and this evidence. Decision 0199
+writer/recovery/test/constructor paths remain separate pending integration work.
+
+## Prior verified increment — native buffered staging measurement (Decision 0197)
 
 Pushed `9b07d0f` is the verified 705-test core baseline. Native packed commands now opt into
 64 MiB per-private-batch staging, while model/default constructors remain uncached. New report

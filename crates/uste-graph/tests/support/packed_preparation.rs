@@ -1,9 +1,21 @@
 use super::*;
 #[path = "packed_staging.rs"]
 mod staging;
+use uste_graph::prepare_packed_graph_transaction_buffered;
 use uste_graph::{PackedGraphPreparationLimits, prepare_packed_graph_transaction};
 use uste_storage::packed_tree_lookup::TreeLookupLimits;
 use uste_txn::TransactionState;
+
+macro_rules! prepare {
+    ($buffered:expr, $($argument:expr),+ $(,)?) => {{
+        if $buffered {
+            prepare_packed_graph_transaction_buffered($($argument),+, 1024 * 1024)
+                .map(|(prepared, proof, work, _)| (prepared, proof, work))
+        } else {
+            prepare_packed_graph_transaction($($argument),+)
+        }
+    }};
+}
 
 fn preparation_limits() -> PackedGraphPreparationLimits {
     PackedGraphPreparationLimits {
@@ -18,6 +30,85 @@ fn preparation_limits() -> PackedGraphPreparationLimits {
         maximum_pages: 100000,
         maximum_encoded_bytes: 100000 * 20545,
         maximum_scan_candidates: 10000,
+    }
+}
+
+#[test]
+fn packed_graph_buffered_preparation_cache_is_fresh_bounded_and_reduces_reads() {
+    use uste_storage::{MAX_INDEX_CACHE_BYTES, MIN_INDEX_CACHE_BYTES};
+    let (memory, name, _) = fixture();
+    let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
+    let (mut recovery, source, transaction) = open(&mut fs, &name, 930_000);
+    let (base, _) =
+        bridge_graph_base_to_packed(&mut recovery, &mut fs, &source, &transaction, limits(2))
+            .unwrap();
+    let maintenance = recovery
+        .packed_indexes_with_io(&mut fs, &transaction, limits(2).certificates)
+        .unwrap();
+    fs.arm(FaultPlan::default()).unwrap();
+    let (expected, proof, work) = prepare_packed_graph_transaction(
+        &maintenance,
+        &mut fs,
+        &base,
+        complex_request(),
+        preparation_limits(),
+    )
+    .unwrap();
+    let uncached_reads = fs.operation_count(FsOp::ReadAt);
+    for budget in [MIN_INDEX_CACHE_BYTES, 1024 * 1024] {
+        let mut previous = None;
+        for _ in 0..2 {
+            fs.arm(FaultPlan::default()).unwrap();
+            let (actual, actual_proof, actual_work, cache) =
+                prepare_packed_graph_transaction_buffered(
+                    &maintenance,
+                    &mut fs,
+                    &base,
+                    complex_request(),
+                    preparation_limits(),
+                    budget,
+                )
+                .unwrap();
+            assert_eq!(actual.result_digest(), expected.result_digest());
+            assert_eq!(actual_proof, proof);
+            assert_eq!(actual_work, work);
+            assert_eq!(cache.hits + cache.misses, work.pages);
+            assert!(cache.misses > 0 && cache.accounted_bytes <= budget);
+            assert_eq!(fs.operation_count(FsOp::ReadAt), cache.misses);
+            assert_eq!(fs.operation_count(FsOp::WriteAt), 0);
+            if budget > MIN_INDEX_CACHE_BYTES {
+                assert!(cache.hits > 0);
+                assert!(cache.misses < uncached_reads);
+            } else {
+                assert!(cache.evictions > 0);
+            }
+            if let Some(prior) = previous {
+                assert_eq!(cache, prior);
+            }
+            previous = Some(cache);
+        }
+    }
+    for budget in [0, MIN_INDEX_CACHE_BYTES - 1, MAX_INDEX_CACHE_BYTES + 1] {
+        fs.arm(FaultPlan::default()).unwrap();
+        assert!(
+            prepare_packed_graph_transaction_buffered(
+                &maintenance,
+                &mut fs,
+                &base,
+                complex_request(),
+                preparation_limits(),
+                budget
+            )
+            .is_err()
+        );
+        for operation in [
+            FsOp::OpenExisting,
+            FsOp::Metadata,
+            FsOp::ReadAt,
+            FsOp::WriteAt,
+        ] {
+            assert_eq!(fs.operation_count(operation), 0);
+        }
     }
 }
 fn cases() -> Vec<GraphTransaction> {
@@ -176,6 +267,15 @@ fn complex_request() -> GraphTransaction {
 
 #[test]
 fn packed_graph_preparation_exact_limits_and_each_minus_one_refuse_partial_proofs() {
+    exact_limits_and_each_minus_one_refuse_partial_proofs(false);
+}
+
+#[test]
+fn packed_graph_buffered_preparation_exact_limits_and_each_minus_one_refuse_partial_proofs() {
+    exact_limits_and_each_minus_one_refuse_partial_proofs(true);
+}
+
+fn exact_limits_and_each_minus_one_refuse_partial_proofs(buffered: bool) {
     let (memory, name, _) = fixture();
     let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
     let (mut recovery, source, transaction) = open(&mut fs, &name, 930_000);
@@ -185,7 +285,8 @@ fn packed_graph_preparation_exact_limits_and_each_minus_one_refuse_partial_proof
     let maintenance = recovery
         .packed_indexes_with_io(&mut fs, &transaction, limits(2).certificates)
         .unwrap();
-    let (prepared, proof, work) = prepare_packed_graph_transaction(
+    let (prepared, proof, work) = prepare!(
+        buffered,
         &maintenance,
         &mut fs,
         &base,
@@ -211,9 +312,15 @@ fn packed_graph_preparation_exact_limits_and_each_minus_one_refuse_partial_proof
         maximum_scan_candidates: work.scan_candidates,
         ..preparation_limits()
     };
-    let (same, actual_proof, actual_work) =
-        prepare_packed_graph_transaction(&maintenance, &mut fs, &base, complex_request(), exact)
-            .unwrap();
+    let (same, actual_proof, actual_work) = prepare!(
+        buffered,
+        &maintenance,
+        &mut fs,
+        &base,
+        complex_request(),
+        exact
+    )
+    .unwrap();
     assert_eq!(same.result_digest(), prepared.result_digest());
     assert_eq!(actual_proof, proof);
     assert_eq!(actual_work, work);
@@ -279,7 +386,8 @@ fn packed_graph_preparation_exact_limits_and_each_minus_one_refuse_partial_proof
         }
         fs.arm(FaultPlan::default()).unwrap();
         assert!(
-            prepare_packed_graph_transaction(
+            prepare!(
+                buffered,
                 &maintenance,
                 &mut fs,
                 &base,
@@ -295,6 +403,15 @@ fn packed_graph_preparation_exact_limits_and_each_minus_one_refuse_partial_proof
 
 #[test]
 fn packed_graph_preparation_all_observed_read_faults_return_no_prepared_result() {
+    all_observed_read_faults_return_no_prepared_result(false);
+}
+
+#[test]
+fn packed_graph_buffered_preparation_all_observed_read_faults_return_no_prepared_result() {
+    all_observed_read_faults_return_no_prepared_result(true);
+}
+
+fn all_observed_read_faults_return_no_prepared_result(buffered: bool) {
     let (memory, name, _) = fixture();
     let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
     let (mut recovery, source, transaction) = open(&mut fs, &name, 930_000);
@@ -305,7 +422,8 @@ fn packed_graph_preparation_all_observed_read_faults_return_no_prepared_result()
         .packed_indexes_with_io(&mut fs, &transaction, limits(2).certificates)
         .unwrap();
     fs.arm(FaultPlan::default()).unwrap();
-    let expected = prepare_packed_graph_transaction(
+    let expected = prepare!(
+        buffered,
         &maintenance,
         &mut fs,
         &base,
@@ -351,7 +469,8 @@ fn packed_graph_preparation_all_observed_read_faults_return_no_prepared_result()
                 )
                 .unwrap();
                 assert!(
-                    prepare_packed_graph_transaction(
+                    prepare!(
+                        buffered,
                         &maintenance,
                         &mut fs,
                         &base,
@@ -378,7 +497,8 @@ fn packed_graph_preparation_all_observed_read_faults_return_no_prepared_result()
                     .packed_indexes_with_io(&mut fs, &transaction, limits(2).certificates)
                     .unwrap();
                 assert_eq!(
-                    prepare_packed_graph_transaction(
+                    prepare!(
+                        buffered,
                         &maintenance,
                         &mut fs,
                         &base,
@@ -394,11 +514,24 @@ fn packed_graph_preparation_all_observed_read_faults_return_no_prepared_result()
             }
         }
     }
-    assert_eq!(cases, 270);
+    if buffered {
+        assert!(cases > 0 && cases < 270);
+    } else {
+        assert_eq!(cases, 270);
+    }
 }
 
 #[test]
 fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_use() {
+    rechecks_current_history_reverse_and_owner_before_use(false);
+}
+
+#[test]
+fn packed_graph_buffered_preparation_rechecks_current_history_reverse_and_owner_before_use() {
+    rechecks_current_history_reverse_and_owner_before_use(true);
+}
+
+fn rechecks_current_history_reverse_and_owner_before_use(buffered: bool) {
     use uste_storage::FileSystem;
     let (memory, name, _) = fixture();
     let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
@@ -418,7 +551,8 @@ fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_us
         .unwrap();
     foreign_fs.arm(FaultPlan::default()).unwrap();
     assert!(
-        prepare_packed_graph_transaction(
+        prepare!(
+            buffered,
             &maintenance,
             &mut foreign_fs,
             &base,
@@ -442,8 +576,15 @@ fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_us
         }],
     );
     assert!(
-        prepare_packed_graph_transaction(&maintenance, &mut fs, &base, wrong, preparation_limits())
-            .is_err()
+        prepare!(
+            buffered,
+            &maintenance,
+            &mut fs,
+            &base,
+            wrong,
+            preparation_limits()
+        )
+        .is_err()
     );
     assert_eq!(fs.operation_count(FsOp::ReadAt), 0);
     for family in [2_u8, 3, 7] {
@@ -477,7 +618,8 @@ fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_us
         assert_eq!(fs.write_at(&file, offset, &byte).unwrap(), 1);
         fs.arm(FaultPlan::default()).unwrap();
         assert!(
-            prepare_packed_graph_transaction(
+            prepare!(
+                buffered,
                 &maintenance,
                 &mut fs,
                 &base,
@@ -490,7 +632,8 @@ fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_us
         byte[0] ^= 1;
         assert_eq!(fs.write_at(&file, offset, &byte).unwrap(), 1);
         assert!(
-            prepare_packed_graph_transaction(
+            prepare!(
+                buffered,
                 &maintenance,
                 &mut fs,
                 &base,
@@ -504,6 +647,15 @@ fn packed_graph_preparation_rechecks_current_history_reverse_and_owner_before_us
 
 #[test]
 fn packed_graph_preparation_matches_full_reducer_success_and_rejections() {
+    matches_full_reducer_success_and_rejections(false);
+}
+
+#[test]
+fn packed_graph_buffered_preparation_matches_full_reducer_success_and_rejections() {
+    matches_full_reducer_success_and_rejections(true);
+}
+
+fn matches_full_reducer_success_and_rejections(buffered: bool) {
     let (memory, name, _) = fixture();
     let mut fs = FaultFileSystem::new(memory, FaultPlan::default());
     let (mut recovery, source, transaction) = open(&mut fs, &name, 930_000);
@@ -528,7 +680,8 @@ fn packed_graph_preparation_matches_full_reducer_success_and_rejections() {
         let maintenance = recovery
             .packed_indexes_with_io(&mut fs, &transaction, limits(2).certificates)
             .unwrap();
-        let actual = prepare_packed_graph_transaction(
+        let actual = prepare!(
+            buffered,
             &maintenance,
             &mut fs,
             &base,

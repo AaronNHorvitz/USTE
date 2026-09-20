@@ -20,8 +20,9 @@ pub use state_disk::packed::{
     PackedGraphWritePreparationLimits, PackedGraphWritePublicationLimits, PackedPreparedGraph,
     admit_packed_graph_base, admit_packed_graph_base_buffered, bridge_graph_base_to_packed,
     packed_graph_v1_digest, prepare_packed_graph_delta, prepare_packed_graph_transaction,
-    publish_packed_graph_live_base, recover_packed_graph_origin, recover_packed_graph_suffix,
-    stage_packed_graph_delta, stage_packed_graph_genesis,
+    prepare_packed_graph_transaction_buffered, publish_packed_graph_live_base,
+    recover_packed_graph_origin, recover_packed_graph_suffix, stage_packed_graph_delta,
+    stage_packed_graph_genesis,
 };
 
 pub use codec::{

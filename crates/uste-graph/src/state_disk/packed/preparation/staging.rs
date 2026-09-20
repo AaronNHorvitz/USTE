@@ -81,7 +81,7 @@ pub struct PackedGraphStageReport {
 impl PackedGraphStageReport {
     pub(in crate::state_disk::packed) fn record_cache(
         &mut self,
-        cache: uste_storage::packed_page_cache::PackedCacheReport,
+        cache: PackedCacheReport,
     ) -> Result<(), GraphDiskError> {
         self.buffered_batches = checked_sum(self.buffered_batches, 1)?;
         self.cache_hits = checked_sum(self.cache_hits, cache.hits)?;

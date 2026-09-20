@@ -10,6 +10,7 @@ pub use staging::{
     prepare_packed_graph_delta, publish_packed_graph_live_base, recover_packed_graph_origin,
     recover_packed_graph_suffix, stage_packed_graph_delta,
 };
+use uste_storage::packed_page_cache::{PackedCacheReport, PackedPageCache};
 use uste_storage::packed_tree_lookup::{PackedLookupValue, TreeLookupLimits, TreeLookupReport};
 use uste_txn::PackedIndexMaintenance;
 
@@ -73,6 +74,7 @@ struct Reader<
     base: &'a PackedGraphBase,
     limits: PackedGraphPreparationLimits,
     report: PackedGraphReadReport,
+    cache: Option<&'a mut PackedPageCache>,
 }
 impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>
     Reader<'_, '_, F, W, E, I>
@@ -95,12 +97,14 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             .maximum_encoded_bytes
             .min(self.limits.maximum_encoded_bytes - self.report.encoded_bytes);
         limits.maximum_value_bytes = limits.maximum_value_bytes.min(maximum_value);
-        let result = self.maintenance.get(
-            self.fs,
-            &self.base.trees[usize::from(family - 1)],
-            key,
-            limits,
-        )?;
+        let tree = &self.base.trees[usize::from(family - 1)];
+        let result = match self.cache.as_deref_mut() {
+            Some(cache) => self
+                .maintenance
+                .as_reader()
+                .get_cached(self.fs, tree, key, limits, cache)?,
+            None => self.maintenance.get(self.fs, tree, key, limits)?,
+        };
         self.charge(result.report);
         Ok(result.value)
     }
@@ -138,7 +142,18 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             upper.as_deref(),
             limits,
         )?;
-        while let Some(entry) = self.maintenance.next(self.fs, &mut cursor)? {
+        loop {
+            let entry = match self.cache.as_deref_mut() {
+                Some(cache) => {
+                    self.maintenance
+                        .as_reader()
+                        .next_cached(self.fs, &mut cursor, cache)?
+                }
+                None => self.maintenance.next(self.fs, &mut cursor)?,
+            };
+            let Some(entry) = entry else {
+                break;
+            };
             if !entry.key().starts_with(prefix) {
                 return Err(GraphDiskError::IndexCorrupt);
             }
@@ -175,6 +190,61 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    prepare_with_cache(maintenance, fs, base, transaction, limits, None)
+}
+
+/// Trusted fresh per-preparation cache. All logical proof limits and reducer checks are unchanged.
+/// The cache is dropped before return; callers cannot supply warmth across requests or mutations.
+/// Invalid cache sizes fail before I/O. Cache accounting is not process RSS or physical I/O.
+pub fn prepare_packed_graph_transaction_buffered<F, W, E, I>(
+    maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    base: &PackedGraphBase,
+    transaction: GraphTransaction,
+    limits: PackedGraphPreparationLimits,
+    cache_bytes: usize,
+) -> Result<
+    (
+        PackedPreparedGraph,
+        GraphDiskPreparationReport,
+        PackedGraphReadReport,
+        PackedCacheReport,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    let mut cache = PackedPageCache::new(cache_bytes)?;
+    let (prepared, proof, work) =
+        prepare_with_cache(maintenance, fs, base, transaction, limits, Some(&mut cache))?;
+    Ok((prepared, proof, work, cache.report()?))
+}
+
+fn prepare_with_cache<F, W, E, I>(
+    maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    base: &PackedGraphBase,
+    transaction: GraphTransaction,
+    limits: PackedGraphPreparationLimits,
+    cache: Option<&mut PackedPageCache>,
+) -> Result<
+    (
+        PackedPreparedGraph,
+        GraphDiskPreparationReport,
+        PackedGraphReadReport,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     validate_disk_preparation_subset(&transaction)?;
     validate_request_limits(&transaction)?;
     if transaction.scope() != base.scope {
@@ -193,6 +263,7 @@ where
         base,
         limits,
         report: PackedGraphReadReport::default(),
+        cache,
     };
     let mut pending = transaction_required_ids(&transaction, &mut report, &proof_limits)?;
     charge_logical_bytes(&mut report, &proof_limits, b"graph-state-v1".len() + 80 + 1)?;
