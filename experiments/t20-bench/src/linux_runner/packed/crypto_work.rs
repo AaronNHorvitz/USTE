@@ -1,6 +1,12 @@
 //! Exact deltas for a single owning vault; not device traffic or whole-process accounting.
 use super::*;
-use uste_crypto::VaultDecryptReport;
+use uste_crypto::{VaultDecryptReport, VaultEncryptReport};
+mod encryption;
+use encryption::EncryptionWork;
+
+pub(super) fn encryption_report_json(report: VaultEncryptReport) -> serde_json::Value {
+    EncryptionWork::from(report).json()
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct CryptoWork([u64; 4]);
@@ -68,14 +74,16 @@ const OWNER_LABELS: [&str; 6] = [
 /// Fixed-size and checked; no handles, identities, request contents or retained event history.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct OwnerWork {
-    owners: [Option<CryptoWork>; OWNER_LABELS.len()],
+    owners: [Option<(CryptoWork, EncryptionWork)>; OWNER_LABELS.len()],
     total: CryptoWork,
+    encryption_total: EncryptionWork,
 }
 impl OwnerWork {
     pub(super) fn record(
         &mut self,
         stage: OwnerStage,
         report: VaultDecryptReport,
+        encryption: VaultEncryptReport,
     ) -> Result<(), LinuxRunnerError> {
         let slot = stage as usize;
         if self.owners[slot].is_some() {
@@ -84,15 +92,19 @@ impl OwnerWork {
         let work = CryptoWork::from(report);
         let mut total = self.total;
         total.accumulate(work)?;
-        self.owners[slot] = Some(work);
+        let encrypted = EncryptionWork::from(encryption);
+        let mut encryption_total = self.encryption_total;
+        encryption_total.0.accumulate(encrypted.0)?;
+        self.owners[slot] = Some((work, encrypted));
         self.total = total;
+        self.encryption_total = encryption_total;
         Ok(())
     }
 
     pub(super) fn json(self) -> serde_json::Value {
         let mut owners = serde_json::Map::new();
         for (label, work) in OWNER_LABELS.into_iter().zip(self.owners) {
-            if let Some(work) = work {
+            if let Some((work, _)) = work {
                 owners.insert(label.into(), work.json());
             }
         }
@@ -141,9 +153,13 @@ mod tests {
             OwnerStage::Terminal,
             OwnerStage::History,
         ] {
-            work.record(stage, unit).unwrap();
+            work.record(stage, unit, VaultEncryptReport::default())
+                .unwrap();
             let before = work;
-            assert!(work.record(stage, unit).is_err());
+            assert!(
+                work.record(stage, unit, VaultEncryptReport::default())
+                    .is_err()
+            );
             assert_eq!(work, before);
         }
         assert_eq!(work.total.0, [6, 12, 18, 24]);
@@ -165,7 +181,10 @@ mod tests {
             let mut work = OwnerWork::default();
             work.total.0[field] = u64::MAX;
             let before = work;
-            assert!(work.record(OwnerStage::Terminal, unit).is_err());
+            assert!(
+                work.record(OwnerStage::Terminal, unit, VaultEncryptReport::default())
+                    .is_err()
+            );
             assert_eq!(work, before);
         }
     }

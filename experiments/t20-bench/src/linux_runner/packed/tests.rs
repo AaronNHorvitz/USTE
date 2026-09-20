@@ -281,6 +281,58 @@ fn assert_owner_work(report: &serde_json::Value, phase: &str) {
     assert_eq!(work["includes_key_unwrap"], false);
     assert_eq!(work["includes_encryption_bytes"], false);
     assert_eq!(work["includes_pre_vault_decode_failures"], false);
+    let encrypted = &report["owner_vault_encryption_work"];
+    let encrypted_owners = encrypted["owners"].as_object().unwrap();
+    assert_eq!(
+        encrypted_owners.keys().collect::<Vec<_>>(),
+        owners.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(encrypted["owner_count"], expected.len());
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "produced_encoded_bytes",
+        "accepted_plaintext_bytes",
+    ] {
+        let sum = encrypted_owners
+            .values()
+            .map(|owner| owner[field].as_u64().unwrap())
+            .sum::<u64>();
+        assert_eq!(encrypted["total"][field], sum);
+        assert_eq!(
+            encrypted_owners["terminal"][field],
+            report["terminal_storage_open_encryption_work"][field],
+            "{phase}: {field}"
+        );
+    }
+    assert_eq!(
+        encrypted_owners["terminal"],
+        report["terminal_storage_open_encryption_work"]
+    );
+    if phase == "create" {
+        // Empty blob metadata has one META run page and one published root envelope.
+        assert_eq!(encrypted_owners["terminal"]["successful_calls"], 2);
+        assert_eq!(encrypted_owners["terminal"]["failed_calls"], 0);
+    }
+    if phase == "create" || phase == "rebuild" {
+        assert!(encrypted["total"]["successful_calls"].as_u64().unwrap() > 0);
+        assert!(
+            encrypted["total"]["produced_encoded_bytes"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+    for flag in [
+        "measures_durable_bytes",
+        "complete_authenticated_io",
+        "physical_device_io",
+        "includes_key_wrap",
+        "includes_failed_command_owners",
+        "includes_failed_call_bytes",
+    ] {
+        assert_eq!(encrypted[flag], false);
+    }
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -323,6 +375,15 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
     assert_eq!(created["legacy_unbound_policy_resume_supported"], false);
     let opened = fixture.run("open").unwrap();
     assert_eq!(opened["v1_state_digest"], created["v1_state_digest"]);
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "produced_encoded_bytes",
+        "accepted_plaintext_bytes",
+    ] {
+        assert_eq!(opened["terminal_storage_open_encryption_work"][field], 0);
+    }
+    assert_eq!(opened["setup_adapter_io"]["write_returned_bytes"], 0);
     let source = fixture.files(false);
     assert!(source.contains_key("CERTIFICATES"));
     assert!(source.contains_key("MANIFEST"));

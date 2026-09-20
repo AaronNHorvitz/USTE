@@ -268,6 +268,41 @@ fn packed_cli_sigkill_bootstrap_and_unpaired_metadata_resume_exactly() {
                     .unwrap()
         );
         assert_eq!(owners["complete_authenticated_io"], false);
+        let encrypted = &resumed["owner_vault_encryption_work"];
+        assert_eq!(encrypted["owner_count"], owners["owner_count"]);
+        let encrypted_owners = encrypted["owners"].as_object().unwrap();
+        assert_eq!(
+            encrypted_owners.keys().collect::<Vec<_>>(),
+            owners["owners"]
+                .as_object()
+                .unwrap()
+                .keys()
+                .collect::<Vec<_>>()
+        );
+        for field in [
+            "successful_calls",
+            "failed_calls",
+            "produced_encoded_bytes",
+            "accepted_plaintext_bytes",
+        ] {
+            assert_eq!(
+                encrypted["total"][field],
+                encrypted_owners
+                    .values()
+                    .map(|owner| owner[field].as_u64().unwrap())
+                    .sum::<u64>()
+            );
+            assert_eq!(
+                encrypted_owners["terminal"][field],
+                resumed["terminal_storage_open_encryption_work"][field]
+            );
+        }
+        assert_eq!(
+            encrypted_owners["terminal"],
+            resumed["terminal_storage_open_encryption_work"]
+        );
+        assert_eq!(encrypted["complete_authenticated_io"], false);
+        assert_eq!(encrypted["measures_durable_bytes"], false);
         assert_eq!(
             resumed["resume_base_revision"],
             if pause <= 1 { 1 } else { pause - 1 }

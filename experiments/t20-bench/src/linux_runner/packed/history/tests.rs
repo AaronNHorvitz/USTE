@@ -11,35 +11,58 @@ use std::{
 fn history_owner_reporting_failure_is_content_free_and_atomic() {
     let mut work = OwnerWork::default();
     let before = work.history_json();
+    let encrypted_before = work.encryption_json(true);
     assert_eq!(
         record_owner(
             &mut work,
             OwnerStage::History,
-            Err(uste_txn::TransactionError::OutcomeUnknown)
+            Err(uste_txn::TransactionError::OutcomeUnknown),
+            Ok(uste_crypto::VaultEncryptReport::default()),
         )
         .unwrap_err()
         .code(),
         "USTE_BM06_CRYPTO_COUNTER"
     );
     assert_eq!(work.history_json(), before);
+    assert_eq!(work.encryption_json(true), encrypted_before);
+    assert_eq!(
+        record_owner(
+            &mut work,
+            OwnerStage::History,
+            Ok(uste_crypto::VaultDecryptReport {
+                successful_calls: 1,
+                ..Default::default()
+            }),
+            Err(uste_txn::TransactionError::OutcomeUnknown),
+        )
+        .unwrap_err()
+        .code(),
+        "USTE_BM06_CRYPTO_COUNTER"
+    );
+    assert_eq!(work.history_json(), before);
+    assert_eq!(work.encryption_json(true), encrypted_before);
     record_owner(
         &mut work,
         OwnerStage::History,
         Ok(uste_crypto::VaultDecryptReport::default()),
+        Ok(uste_crypto::VaultEncryptReport::default()),
     )
     .unwrap();
     let before = work.history_json();
+    let encrypted_before = work.encryption_json(true);
     assert_eq!(
         record_owner(
             &mut work,
             OwnerStage::History,
-            Ok(uste_crypto::VaultDecryptReport::default())
+            Ok(uste_crypto::VaultDecryptReport::default()),
+            Ok(uste_crypto::VaultEncryptReport::default()),
         )
         .unwrap_err()
         .code(),
         "USTE_BM06_CRYPTO_COUNTER"
     );
     assert_eq!(work.history_json(), before);
+    assert_eq!(work.encryption_json(true), encrypted_before);
 }
 struct Fixture {
     root: PathBuf,
@@ -96,6 +119,37 @@ impl Fixture {
             assert_eq!(work["owner_count"], count);
             assert_eq!(work["owners"]["terminal"].is_null(), phase == "tail");
             assert_eq!(work["complete_authenticated_io"], false);
+            let encrypted = &report["owner_vault_encryption_work"];
+            assert_eq!(encrypted["owner_count"], count);
+            assert_eq!(encrypted["owners"]["terminal"].is_null(), phase == "tail");
+            assert_eq!(encrypted["complete_authenticated_io"], false);
+            assert_eq!(encrypted["measures_durable_bytes"], false);
+            let owners = encrypted["owners"].as_object().unwrap();
+            assert_eq!(
+                owners.keys().collect::<Vec<_>>(),
+                work["owners"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<Vec<_>>()
+            );
+            for field in [
+                "successful_calls",
+                "failed_calls",
+                "produced_encoded_bytes",
+                "accepted_plaintext_bytes",
+            ] {
+                assert_eq!(
+                    encrypted["total"][field],
+                    owners
+                        .values()
+                        .map(|owner| owner[field].as_u64().unwrap())
+                        .sum::<u64>()
+                );
+                if phase != "tail" {
+                    assert_eq!(owners["terminal"][field], 0);
+                }
+            }
             report
         })
     }

@@ -227,6 +227,8 @@ fn prepare_observed(
             OwnerStage::Bootstrap,
             raw.vault_decrypt_report()
                 .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+            raw.vault_encrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
         )?;
         drop(raw);
     }
@@ -309,6 +311,8 @@ fn prepare_observed(
             OwnerStage::Construction,
             live.vault_decrypt_report()
                 .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+            live.vault_encrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
         )?;
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
@@ -343,6 +347,8 @@ fn prepare_observed(
             OwnerStage::Rebuild,
             live.vault_decrypt_report()
                 .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+            live.vault_encrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
         )?;
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
@@ -354,6 +360,11 @@ fn prepare_observed(
             .map_err(|_| error("USTE_BM01_FRONTIER_MISMATCH"))?,
     )
     .map_err(|_| error("USTE_BM01_LIMITS"))?;
+    // Storage open may have rebuilt a missing/stale derived blob catalog. Preserve that
+    // encryption separately from the following read-only domain admission/binding checks.
+    let terminal_storage_open_encryption = recovery
+        .vault_encrypt_report()
+        .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?;
     let (live, digest) = engine::admit(&mut fs, recovery, selected)
         .map_err(|_| error("USTE_BM01_PACKED_ADMISSION"))?;
     let mut session = Session {
@@ -379,6 +390,10 @@ fn prepare_observed(
         session
             .coordinator
             .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+        session
+            .coordinator
+            .vault_encrypt_report()
             .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
     )?;
     session.report = serde_json::json!({
@@ -412,6 +427,9 @@ fn prepare_observed(
     session.report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
     session.report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
     session.report["owner_vault_work"] = owner_work.json();
+    session.report["owner_vault_encryption_work"] = owner_work.encryption_json(false);
+    session.report["terminal_storage_open_encryption_work"] =
+        crypto_work::encryption_report_json(terminal_storage_open_encryption);
     Ok(session)
 }
 

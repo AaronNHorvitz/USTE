@@ -260,6 +260,50 @@ fn assert_owner_work(report: &serde_json::Value) {
     ] {
         assert_eq!(work[flag], false);
     }
+    let encrypted = &report["owner_vault_encryption_work"];
+    let encrypted_owners = encrypted["owners"].as_object().unwrap();
+    assert_eq!(
+        encrypted_owners.keys().collect::<Vec<_>>(),
+        owners.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(encrypted["owner_count"], owners.len());
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "produced_encoded_bytes",
+        "accepted_plaintext_bytes",
+    ] {
+        assert_eq!(
+            encrypted["total"][field],
+            encrypted_owners
+                .values()
+                .map(|owner| owner[field].as_u64().unwrap())
+                .sum::<u64>()
+        );
+        if phase != "tail" {
+            assert_eq!(encrypted_owners["terminal"][field], 0);
+        }
+    }
+    if phase == "create" || phase == "create-prefix" {
+        assert!(encrypted["total"]["successful_calls"].as_u64().unwrap() > 0);
+    }
+    if !report["construction_nonce_session"].is_null() {
+        assert_eq!(
+            encrypted_owners["construction"]["successful_calls"],
+            report["construction_nonce_session"]["issued_nonces"]
+        );
+        assert_eq!(encrypted_owners["construction"]["failed_calls"], 0);
+    }
+    for flag in [
+        "measures_durable_bytes",
+        "complete_authenticated_io",
+        "physical_device_io",
+        "includes_key_wrap",
+        "includes_failed_command_owners",
+        "includes_failed_call_bytes",
+    ] {
+        assert_eq!(encrypted[flag], false);
+    }
 }
 impl Drop for OwnedChild {
     fn drop(&mut self) {

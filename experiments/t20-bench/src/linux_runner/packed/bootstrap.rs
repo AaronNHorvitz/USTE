@@ -98,6 +98,8 @@ pub(super) fn resume(
         OwnerStage::BootstrapResume,
         raw.vault_decrypt_report()
             .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+        raw.vault_encrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
     )?;
     drop(raw);
     open_recovery(fs, adapter, limits).map(|(recovery, _)| recovery)

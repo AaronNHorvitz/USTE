@@ -13,10 +13,12 @@ fn record_owner(
     work: &mut OwnerWork,
     stage: OwnerStage,
     report: Result<uste_crypto::VaultDecryptReport, uste_txn::TransactionError>,
+    encryption: Result<uste_crypto::VaultEncryptReport, uste_txn::TransactionError>,
 ) -> Result<(), LinuxRunnerError> {
     work.record(
         stage,
         report.map_err(|_| error("USTE_BM06_CRYPTO_COUNTER"))?,
+        encryption.map_err(|_| error("USTE_BM06_CRYPTO_COUNTER"))?,
     )
     .map_err(|_| error("USTE_BM06_CRYPTO_COUNTER"))
 }
@@ -287,6 +289,7 @@ fn run_bounded_observed(
             &mut owner_work,
             OwnerStage::Bootstrap,
             raw.vault_decrypt_report(),
+            raw.vault_encrypt_report(),
         )?;
         drop(raw);
     }
@@ -344,6 +347,7 @@ fn run_bounded_observed(
             &mut owner_work,
             OwnerStage::Construction,
             live.vault_decrypt_report(),
+            live.vault_encrypt_report(),
         )?;
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
@@ -381,6 +385,7 @@ fn run_bounded_observed(
             &mut owner_work,
             OwnerStage::Rebuild,
             live.vault_decrypt_report(),
+            live.vault_encrypt_report(),
         )?;
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
@@ -452,6 +457,7 @@ fn run_bounded_observed(
         &mut owner_work,
         OwnerStage::History,
         live.vault_decrypt_report(),
+        live.vault_encrypt_report(),
     )?;
     drop(live);
     let post_verification_elapsed = started.elapsed();
@@ -469,6 +475,7 @@ fn run_bounded_observed(
             &mut owner_work,
             OwnerStage::Terminal,
             terminal.vault_decrypt_report(),
+            terminal.vault_encrypt_report(),
         )?;
         drop(terminal);
         Some(hex(&digest))
@@ -521,5 +528,6 @@ fn run_bounded_observed(
     report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
     report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
     report["owner_vault_work"] = owner_work.history_json();
+    report["owner_vault_encryption_work"] = owner_work.encryption_json(true);
     Ok(report.to_string())
 }

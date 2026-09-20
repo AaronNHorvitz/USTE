@@ -2,6 +2,69 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — native encryption-owner ledger (Decision 0213)
+
+Core D0212 is committed/pushed as `946955d`. After fresh 25 GiB available RAM/2.0 GiB free
+swap/952 GiB disk and no competing workload, native release regression and strict lint started
+in session 8883 / `uste-d213-native.scope`, invocation `74769e0f7421417a806fd9d6b2c821a8`.
+One Cargo job/test thread and 3G/4G/512M group. This first attempt exited 101 before any tests:
+three existing history-owner unit-test calls omitted the new encryption-report argument.
+Final scope peak 356,261,888 bytes/zero swap, CPU 42,270,629,000 ns. Exact original command:
+
+```sh
+systemd-run --user --scope --unit=uste-d213-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d213-native-verification.log; verification_status=$?; systemctl --user show uste-d213-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Corrected those test call sites and added an encryption-getter failure case requiring both
+ledgers to remain unchanged, retaining the existing fixed-error/duplicate checks. No production
+behavior or prior assertion was loosened. After fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk and
+no competing workload, the repaired run started in session 41201 /
+`uste-d213-native-repaired.scope`, invocation `51ef35a11f9c4401950b7a7809680d2e`. Exact command
+is the original above with scope `uste-d213-native-repaired.scope` and log
+`/tmp/uste-d213-native-repaired-verification.log`. That run exited 101: release compile 24.36s;
+85 library tests passed, six failed, two unchanged ignores in 97.86s. Final scope peak
+371,347,456 bytes/zero swap, CPU 112,317,435,000 ns. No process suites or strict lint ran.
+
+All six failures were the new blanket zero-encryption assertion for BM-01 terminal owners.
+Read-only inspection identified existing `finish_disk_blob_recovery` catalog reconstruction:
+the first terminal storage open after construction encrypts one META run page and a root
+envelope, while later admission is read-only. Corrected the assumption by capturing
+`terminal_storage_open_encryption_work` before domain admission/binding and requiring exact
+four-counter equality afterward. Pin two successful terminal encryptions on creation and
+zero encryption/writes on an already-current subsequent open. Preserve all prior oracle,
+source, nonce, fault and limit assertions; no engine behavior/requirements changed.
+
+After fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk and no competing workload, focused terminal
+verification started in session 53056 / `uste-d213-terminal.scope`, invocation
+`690836c238f945af9a5181eb81caedb2`, same group limits/job/thread. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d213-terminal.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --locked --offline linux_runner::packed::tests::packed_native_ -- --test-threads=1 2>&1 | tee /tmp/uste-d213-terminal-verification.log; verification_status=$?; systemctl --user show uste-d213-terminal.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Focused verification passed all seven selected tests in 36.97s after 24.98s compile, with
+86 unrelated library tests filtered by the recorded selector. Final scope peak 363,020,288
+bytes/zero swap, CPU 60,091,786,000 ns. Both failed logs remain retained; no failure is recast
+as a pass. After fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk and no competing workload, the
+complete native suite/strict lint started in session 97181 / `uste-d213-native-final.scope`,
+invocation `66924a1f1fb446bdb633a9851186a20d`. Exact command is the original full native command
+above with scope `uste-d213-native-final.scope` and log
+`/tmp/uste-d213-native-final-verification.log`. **123 active tests passed, five unchanged opt-in
+ignores**, exit zero: release compile 30.47s, library 91/128.33s, legacy process 3/11.89s,
+packed history 11/59.54s, packed terminal 7/31.19s, manifest 3/0.91s, legacy recovery 8/72.58s.
+Strict native Clippy passed in 4.18s. Final scope peak 547,528,704 bytes/zero swap,
+CPU 290,484,977,000 ns. Release binary SHA-256
+`cd82b87ba8fb2bde82b9fd5dcc0fec037327712cc62e7bc6347d9170cf9b0259`.
+Formatting, documentation and task graph checks passed. No core source changed after D0212's
+736-test workspace verification; this standalone run verifies the additional integration.
+
+Next commit/push the reviewed integration and continue T-20 performance/accounting prerequisites.
+D0211's measured four-hop gap prevents a qualification claim. Investigate bounded reuse of
+fully authenticated positive point-lookup results: exact owner/session/root/physical/key binding,
+unchanged per-request authorization and proof-work admission, shared explicit memory accounting,
+zeroizing retention and cold/reference/fault equivalence are prerequisites before enabling it.
+No new cache capability is implemented or measured yet. No unchanged large run or target reduction.
+
 ## Latest verified core increment — vault encryption accounting (Decision 0212)
 
 D0211 completed below without a competing compiler. After confirming both sample processes
@@ -30,9 +93,9 @@ Exact command:
 systemd-run --user --scope --unit=uste-d212-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d212-workspace-verification.log; verification_status=$?; systemctl --user show uste-d212-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
 ```
 
-Next commit/push the reviewed core boundary, then verify and commit the separate native wiring.
+The reviewed core boundary is pushed as `946955d`; separate native verification passed above.
 D0213 includes paired atomic owner admission and per-owner encryption output totals across all
-native phase/process paths; its release tests and strict lint are still pending. D0211 is pushed
+native phase/process paths; its release tests and strict lint passed. D0211 is pushed
 as `21b2bda`; no large measurement will be rerun unchanged. T-20/T-19 remain incomplete.
 
 ## Completed development measurement — single-pass/cache comparison (Decision 0211)

@@ -101,6 +101,17 @@ still exclude key unwrap, encryption bytes, pre-vault decode failures, unsuccess
 physical-device I/O. Earlier pinned measurements are unchanged and complete authenticated-I/O
 qualification is still withheld.
 
+Decisions 0212/0213 add the separate `owner_vault_encryption_work` sibling to packed BM-01
+setup and BM-06 reports. It samples the same six possible owner lifetimes atomically with
+the unchanged decrypt ledger, reporting successful/failed completed encrypt calls, successful
+encoded-envelope output bytes and unpadded input bytes. These are not durable writes, nonce
+counts or physical-device traffic. Key wrapping, failed-call byte work and failed-command
+owners remain excluded; complete authenticated I/O remains false. A terminal owner's storage
+open may rebuild a stale/missing derived blob catalog and therefore encrypt. BM-01 records
+`terminal_storage_open_encryption_work` before read-only domain admission/binding; exact equality
+with the terminal owner's later report verifies that boundary. An already-current catalog
+requires no encryption. Construction/rebuild owners also include encryption before publication.
+
 Decision 0180 selects Decision 0179's fresh buffered graph admission for packed BM-01/BM-06
 development paths. Each canonical family is validated with a fresh 64 MiB logical cache budget;
 those caches are dropped sequentially, then semantic validation uses a separate fresh cache of

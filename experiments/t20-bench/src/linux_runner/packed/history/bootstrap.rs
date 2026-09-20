@@ -74,6 +74,7 @@ pub(super) fn resume(
         owner_work,
         OwnerStage::BootstrapResume,
         raw.vault_decrypt_report(),
+        raw.vault_encrypt_report(),
     )?;
     drop(raw);
     open(fs, adapter, limits).map(|(recovery, _)| recovery)
