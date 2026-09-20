@@ -57,6 +57,8 @@ pub fn prepare_packed_graph_delta(
 
 #[derive(Clone, Copy)]
 pub struct PackedGraphStageLimits {
+    /// Fresh per-batch cache, separately bounded from planner metadata; `None` is uncached.
+    pub staging_cache_bytes: Option<usize>,
     pub certificates: CertificateAnchorReadLimits,
     pub batch: TreeBatchLimits,
     pub deltas_per_batch: usize,
@@ -66,10 +68,41 @@ pub struct PackedGraphStageLimits {
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PackedGraphStageReport {
+    pub buffered_batches: u64,
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub cache_evictions: u64,
+    pub peak_cache_accounted_bytes: usize,
     pub batches: u64,
     pub read_pages: u64,
     pub written_pages: u64,
     pub peak_batch_deltas: usize,
+}
+impl PackedGraphStageReport {
+    pub(in crate::state_disk::packed) fn record_cache(
+        &mut self,
+        cache: uste_storage::packed_page_cache::PackedCacheReport,
+    ) -> Result<(), GraphDiskError> {
+        self.buffered_batches = checked_sum(self.buffered_batches, 1)?;
+        self.cache_hits = checked_sum(self.cache_hits, cache.hits)?;
+        self.cache_misses = checked_sum(self.cache_misses, cache.misses)?;
+        self.cache_evictions = checked_sum(self.cache_evictions, cache.evictions)?;
+        self.peak_cache_accounted_bytes =
+            self.peak_cache_accounted_bytes.max(cache.accounted_bytes);
+        Ok(())
+    }
+}
+
+impl PackedGraphStageLimits {
+    pub(in crate::state_disk::packed) fn validate_cache(self) -> Result<(), GraphDiskError> {
+        if self.staging_cache_bytes.is_some_and(|bytes| {
+            !(uste_storage::MIN_INDEX_CACHE_BYTES..=uste_storage::MAX_INDEX_CACHE_BYTES)
+                .contains(&bytes)
+        }) {
+            return Err(StorageError::ResourceLimit.into());
+        }
+        Ok(())
+    }
 }
 
 pub fn stage_packed_graph_delta<F, W, E, I>(
@@ -119,6 +152,7 @@ fn admit_stage(
     plan: &PackedGraphDelta,
     limits: PackedGraphStageLimits,
 ) -> Result<u64, GraphDiskError> {
+    limits.validate_cache()?;
     if limits.deltas_per_batch == 0
         || limits.deltas_per_batch > MAX_BATCH_DELTAS
         || limits.deltas_per_batch > limits.batch.maximum_deltas
@@ -189,14 +223,28 @@ where
                         .saturating_sub(report.written_pages),
                 );
             }
-            let staged = maintenance.stage(
-                fs,
-                GRAPH_PACKED_PROFILE_V1,
-                i as u8 + 1,
-                Some(&tree),
-                deltas,
-                batch,
-            )?;
+            let staged = if let Some(bytes) = limits.staging_cache_bytes {
+                let (staged, cache) = maintenance.stage_buffered(
+                    fs,
+                    GRAPH_PACKED_PROFILE_V1,
+                    i as u8 + 1,
+                    Some(&tree),
+                    deltas,
+                    batch,
+                    bytes,
+                )?;
+                report.record_cache(cache)?;
+                staged
+            } else {
+                maintenance.stage(
+                    fs,
+                    GRAPH_PACKED_PROFILE_V1,
+                    i as u8 + 1,
+                    Some(&tree),
+                    deltas,
+                    batch,
+                )?
+            };
             let work = staged.report();
             report.batches += 1;
             report.read_pages = checked_sum(report.read_pages, work.read_pages)?;

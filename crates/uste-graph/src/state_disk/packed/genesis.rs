@@ -38,6 +38,7 @@ where
         return Err(GraphDiskError::RootStateMismatch);
     }
     let stage = limits.stage;
+    stage.validate_cache()?;
     if stage.deltas_per_batch == 0
         || stage.deltas_per_batch > MAX_BATCH_DELTAS
         || stage.deltas_per_batch > stage.batch.maximum_deltas
@@ -123,14 +124,28 @@ where
                         .saturating_sub(report.stage.written_pages),
                 );
             }
-            let staged = maintenance.stage(
-                fs,
-                GRAPH_PACKED_PROFILE_V1,
-                family,
-                tree.as_ref(),
-                &deltas,
-                batch,
-            )?;
+            let staged = if let Some(bytes) = stage.staging_cache_bytes {
+                let (staged, cache) = maintenance.stage_buffered(
+                    fs,
+                    GRAPH_PACKED_PROFILE_V1,
+                    family,
+                    tree.as_ref(),
+                    &deltas,
+                    batch,
+                    bytes,
+                )?;
+                report.stage.record_cache(cache)?;
+                staged
+            } else {
+                maintenance.stage(
+                    fs,
+                    GRAPH_PACKED_PROFILE_V1,
+                    family,
+                    tree.as_ref(),
+                    &deltas,
+                    batch,
+                )?
+            };
             let work = staged.report();
             report.entries = checked_sum(report.entries, deltas.len() as u64)?;
             report.logical_bytes = checked_sum(report.logical_bytes, bytes)?;

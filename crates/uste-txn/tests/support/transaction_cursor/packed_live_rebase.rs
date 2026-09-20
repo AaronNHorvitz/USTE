@@ -66,9 +66,18 @@ fn append_pair(fs: &mut Fs, live: &mut Live, base: u8) -> (BlobInventory, [Trans
 
 #[test]
 fn packed_rebase_repeated_tiny_overlays_preserve_first_owners_and_cold_retries() {
+    buffered_rebase_reference(None);
+}
+#[test]
+fn packed_rebase_buffered_staging_preserves_first_owners_and_cold_retries() {
+    buffered_rebase_reference(Some(uste_storage::MIN_INDEX_CACHE_BYTES));
+}
+fn buffered_rebase_reference(cache: Option<usize>) {
+    let mut selected_limits = rebase_limits();
+    selected_limits.staging.staging_cache_bytes = cache;
     let (mut fs, name, mut live, _) = install(parts(3), 2, 1);
     assert!(
-        live.rebase_metadata(&mut fs, rebase_limits())
+        live.rebase_metadata(&mut fs, selected_limits)
             .unwrap()
             .is_none()
     );
@@ -77,7 +86,7 @@ fn packed_rebase_repeated_tiny_overlays_preserve_first_owners_and_cold_retries()
         let (inventory, outcomes) = append_pair(&mut fs, &mut live, base);
         assert_eq!(live.overlay_counts(), (2, 1));
         let report = live
-            .rebase_metadata(&mut fs, rebase_limits())
+            .rebase_metadata(&mut fs, selected_limits)
             .unwrap()
             .unwrap();
         assert_eq!(report.journal.groups, 2);

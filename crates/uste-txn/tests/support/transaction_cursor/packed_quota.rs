@@ -236,6 +236,17 @@ fn stage_first_three(
 
 #[test]
 fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
+    quota_staging_faults(None);
+}
+#[test]
+fn packed_quota_buffered_staging_every_fault_preserves_pair_and_rebuild() {
+    quota_staging_faults(Some(1024 * 1024));
+}
+fn quota_staging_faults(cache: Option<usize>) {
+    let selected_limits = PackedCoordinatorLimits {
+        staging_cache_bytes: cache,
+        ..limits()
+    };
     let (mut observed_fs, name) = fixture();
     let (mut observed, transactions) = transactions(&mut observed_fs, &name, 5);
     let (base, quota) = stage_first_three(&mut observed, &mut observed_fs, &transactions);
@@ -244,7 +255,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
         &mut observed_fs,
         Some(&base),
         &transactions[3],
-        limits(),
+        selected_limits,
     )
     .unwrap()
     .0;
@@ -255,7 +266,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
         Some(&quota),
         &next,
         &transactions[3],
-        limits(),
+        selected_limits,
     )
     .unwrap()
     .0;
@@ -286,7 +297,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                     &mut fs,
                     Some(&base),
                     &transactions[3],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap()
                 .0;
@@ -306,7 +317,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                         Some(&quota),
                         &next,
                         &transactions[3],
-                        limits()
+                        selected_limits
                     )
                     .is_err(),
                     "{operation:?}/{occurrence}/{action:?}"
@@ -315,7 +326,11 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                 if matches!(action, FaultAction::Error(_)) {
                     fs.arm(FaultPlan::default()).unwrap();
                     let maintenance = recovery
-                        .packed_indexes_with_io(&mut fs, &transactions[3], limits().certificates)
+                        .packed_indexes_with_io(
+                            &mut fs,
+                            &transactions[3],
+                            selected_limits.certificates,
+                        )
                         .unwrap();
                     let (usage, _) = quota
                         .usage(&maintenance, &mut fs, &base, principal(0), reads())
@@ -335,7 +350,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                     &mut fs,
                     Some(&base),
                     &transactions[3],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap()
                 .0;
@@ -345,7 +360,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                     Some(&quota),
                     &next,
                     &transactions[3],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap()
                 .0;
@@ -354,7 +369,7 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
                     expected.families().map(|f| f.commitment)
                 );
                 let maintenance = recovery
-                    .packed_indexes_with_io(&mut fs, &transactions[3], limits().certificates)
+                    .packed_indexes_with_io(&mut fs, &transactions[3], selected_limits.certificates)
                     .unwrap();
                 let (usage, _) = actual
                     .usage(&maintenance, &mut fs, &next, principal(0), reads())
@@ -366,7 +381,11 @@ fn packed_quota_all_observed_staging_faults_preserve_prior_pair_and_rebuild() {
             }
         }
     }
-    assert_eq!(cases, 351);
+    if cache.is_none() {
+        assert_eq!(cases, 351);
+    } else {
+        assert!(cases > 0 && cases <= 351);
+    }
 }
 
 #[test]

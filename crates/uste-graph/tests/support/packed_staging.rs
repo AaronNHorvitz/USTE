@@ -1,6 +1,8 @@
 use super::*;
 #[path = "packed_admission.rs"]
 mod admission;
+#[path = "packed_buffered_staging.rs"]
+mod buffered;
 #[path = "packed_live.rs"]
 mod live;
 use uste_graph::{
@@ -21,6 +23,7 @@ struct Input {
 }
 fn stage_limits(batch: usize) -> PackedGraphStageLimits {
     PackedGraphStageLimits {
+        staging_cache_bytes: None,
         certificates: limits(batch).certificates,
         batch: limits(batch).batch,
         deltas_per_batch: batch,
@@ -117,6 +120,17 @@ fn reopen_input(
 
 #[test]
 fn packed_graph_staging_every_observed_fault_preserves_old_base_and_restarts() {
+    staging_faults(None);
+}
+#[test]
+fn packed_graph_buffered_staging_every_observed_fault_preserves_old_base_and_restarts() {
+    staging_faults(Some(1024 * 1024));
+}
+fn staging_faults(cache: Option<usize>) {
+    let selected_limits = PackedGraphStageLimits {
+        staging_cache_bytes: cache,
+        ..stage_limits(2)
+    };
     let request = complex_request();
     let mut observed = input(&request);
     observed.fs.arm(FaultPlan::default()).unwrap();
@@ -126,7 +140,7 @@ fn packed_graph_staging_every_observed_fault_preserves_old_base_and_restarts() {
         &observed.base,
         &observed.target,
         &observed.plan,
-        stage_limits(2),
+        selected_limits,
     )
     .unwrap();
     let expected = expected.publication_claims().state_digest;
@@ -170,7 +184,7 @@ fn packed_graph_staging_every_observed_fault_preserves_old_base_and_restarts() {
                         &input.base,
                         &input.target,
                         &input.plan,
-                        stage_limits(2)
+                        selected_limits
                     )
                     .is_err(),
                     "{operation:?} {occurrence} {action:?}"
@@ -203,7 +217,7 @@ fn packed_graph_staging_every_observed_fault_preserves_old_base_and_restarts() {
                     &input.base,
                     &input.target,
                     &input.plan,
-                    stage_limits(2),
+                    selected_limits,
                 )
                 .unwrap();
                 assert_eq!(next.publication_claims().state_digest, expected);
@@ -237,11 +251,26 @@ fn packed_graph_staging_every_observed_fault_preserves_old_base_and_restarts() {
             }
         }
     }
-    assert_eq!(cases, 333);
+    if cache.is_none() {
+        assert_eq!(cases, 333);
+    } else {
+        assert!(cases > 0 && cases < 333);
+    }
 }
 
 #[test]
 fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
+    graph_staging_corruption(None);
+}
+#[test]
+fn packed_graph_buffered_staging_corruption_and_owner_refusal() {
+    graph_staging_corruption(Some(1024 * 1024));
+}
+fn graph_staging_corruption(cache: Option<usize>) {
+    let selected_limits = PackedGraphStageLimits {
+        staging_cache_bytes: cache,
+        ..stage_limits(2)
+    };
     use uste_storage::FileSystem;
     let request = complex_request();
     let mut input = input(&request);
@@ -318,7 +347,7 @@ fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
                 &input.base,
                 &input.target,
                 &input.plan,
-                stage_limits(2)
+                selected_limits
             )
             .is_err()
         );
@@ -330,7 +359,7 @@ fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
             &input.base,
             &input.target,
             &input.plan,
-            stage_limits(2),
+            selected_limits,
         )
         .unwrap();
         assert_eq!(
@@ -356,7 +385,7 @@ fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
             &input.base,
             &foreign.target,
             &input.plan,
-            stage_limits(2)
+            selected_limits
         )
         .is_err()
     );
@@ -368,7 +397,7 @@ fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
         &input.base,
         &input.target,
         &input.plan,
-        stage_limits(2),
+        selected_limits,
     )
     .unwrap();
     input.fs.arm(FaultPlan::default()).unwrap();
@@ -379,7 +408,7 @@ fn packed_graph_delta_exact_retention_and_staging_corruption_owner_refusal() {
             &next,
             &input.target,
             &input.plan,
-            stage_limits(2)
+            selected_limits
         )
         .is_err()
     );

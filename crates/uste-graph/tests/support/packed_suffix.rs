@@ -217,10 +217,20 @@ fn recover(
 
 #[test]
 fn packed_graph_suffix_recovery_cold_pairing_reference_and_continued_live_writes() {
+    buffered_suffix_reference(None);
+}
+#[test]
+fn packed_graph_buffered_staging_suffix_recovers_cold_pair_and_continues_writes() {
+    buffered_suffix_reference(Some(uste_storage::MIN_INDEX_CACHE_BYTES));
+}
+fn buffered_suffix_reference(cache: Option<usize>) {
+    let mut selected_limits = suffix_limits();
+    selected_limits.graph.staging_cache_bytes = cache;
+    selected_limits.metadata.staging.staging_cache_bytes = cache;
     for count in 0..=2 {
         let (mut input, expected, digest) = fixture_suffix(count);
         input.fs.arm(FaultPlan::default()).unwrap();
-        let (mut fs, recovered) = recover(input, suffix_limits());
+        let (mut fs, recovered) = recover(input, selected_limits);
         let (mut live, report) = recovered.unwrap();
         if count == 0 {
             assert!(report.is_none());
@@ -231,6 +241,20 @@ fn packed_graph_suffix_recovery_cold_pairing_reference_and_continued_live_writes
             assert_eq!(report.journal.groups, u64::from(count));
             assert!(report.proof.pages > 0);
             assert!(report.graph.written_pages > 0);
+            assert_eq!(
+                report.graph.buffered_batches,
+                if cache.is_some() {
+                    report.graph.batches
+                } else {
+                    0
+                }
+            );
+            if cache.is_some() {
+                assert_eq!(
+                    report.graph.cache_hits + report.graph.cache_misses,
+                    report.graph.read_pages
+                );
+            }
             assert!(report.metadata_written_pages > 0);
         }
         assert_eq!(live.overlay_counts(), (0, 0));
@@ -244,7 +268,7 @@ fn packed_graph_suffix_recovery_cold_pairing_reference_and_continued_live_writes
         drop(live);
         let input = reopen(fs, 3 + u64::from(count), 1_330_000);
         assert_eq!(input.base.source_v1_digest(), Some(&digest));
-        let (mut fs, recovered) = recover(input, suffix_limits());
+        let (mut fs, recovered) = recover(input, selected_limits);
         let (mut live, report) = recovered.unwrap();
         assert!(report.is_none());
         let tx = GraphTransaction::new(
@@ -260,8 +284,10 @@ fn packed_graph_suffix_recovery_cold_pairing_reference_and_continued_live_writes
             }],
         );
         let outcome = append(&mut fs, &mut live, 4 + count, &tx);
-        publish_packed_graph_live_base(&mut live, &mut fs, outcome, stage_limits(2), 8).unwrap();
-        live.rebase_metadata(&mut fs, rebase_limits()).unwrap();
+        publish_packed_graph_live_base(&mut live, &mut fs, outcome, selected_limits.graph, 8)
+            .unwrap();
+        live.rebase_metadata(&mut fs, selected_limits.metadata)
+            .unwrap();
         assert_eq!(retry(&mut fs, &mut live, 4 + count, &tx), outcome);
     }
 }

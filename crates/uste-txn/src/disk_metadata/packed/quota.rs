@@ -29,6 +29,7 @@ pub struct PackedQuotaPrefix {
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PackedQuotaReport {
+    pub staging_caches: [Option<uste_storage::packed_page_cache::PackedCacheReport>; 3],
     pub primary_lookup_pages: u64,
     pub primary_lookup_bytes: u64,
     pub principal_lookup: Option<TreeLookupReport>,
@@ -214,6 +215,7 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
+    validate_staging_cache(limits.staging_cache_bytes)?;
     let mut maintenance =
         transaction.packed_maintenance(scope, journal, fs, limits.certificates)?;
     let mut report = PackedQuotaReport::default();
@@ -320,14 +322,28 @@ where
     .into_iter()
     .enumerate()
     {
-        let stage = maintenance.stage(
-            fs,
-            COORDINATOR_PACKED_USAGE_PROFILE_V1,
-            index as u8 + 1,
-            before.map(|b| &b.trees[index]),
-            deltas,
-            limits.batch,
-        )?;
+        let stage = if let Some(bytes) = limits.staging_cache_bytes {
+            let (stage, cache) = maintenance.stage_buffered(
+                fs,
+                COORDINATOR_PACKED_USAGE_PROFILE_V1,
+                index as u8 + 1,
+                before.map(|b| &b.trees[index]),
+                deltas,
+                limits.batch,
+                bytes,
+            )?;
+            report.staging_caches[index] = Some(cache);
+            stage
+        } else {
+            maintenance.stage(
+                fs,
+                COORDINATOR_PACKED_USAGE_PROFILE_V1,
+                index as u8 + 1,
+                before.map(|b| &b.trees[index]),
+                deltas,
+                limits.batch,
+            )?
+        };
         report.batches[index] = stage.report();
         trees.push(stage.tree().clone());
     }

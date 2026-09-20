@@ -1,6 +1,8 @@
 use super::*;
 #[path = "packed_coordinator_admission.rs"]
 mod admission;
+#[path = "packed_buffered_metadata.rs"]
+mod buffered_metadata;
 #[path = "packed_quota.rs"]
 mod quota;
 use uste_txn::{
@@ -10,6 +12,7 @@ use uste_txn::{
 
 fn limits() -> PackedCoordinatorLimits {
     PackedCoordinatorLimits {
+        staging_cache_bytes: None,
         certificates: CertificateAnchorReadLimits::new(64, 64 * 4161).unwrap(),
         lookup: reads(),
         batch: batches(),
@@ -388,6 +391,17 @@ fn packed_prefix_rejects_authenticated_retry_and_transaction_collisions() {
 
 #[test]
 fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
+    prefix_staging_faults(None);
+}
+#[test]
+fn packed_prefix_buffered_staging_every_fault_preserves_metadata_and_restart() {
+    prefix_staging_faults(Some(1024 * 1024));
+}
+fn prefix_staging_faults(cache: Option<usize>) {
+    let selected_limits = PackedCoordinatorLimits {
+        staging_cache_bytes: cache,
+        ..limits()
+    };
     let (mut observed_fs, name, _, _) = populated(3);
     let (mut observed, transactions) = transactions(&mut observed_fs, &name, 3);
     let (base, _) = stage_packed_coordinator_prefix(
@@ -395,7 +409,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
         &mut observed_fs,
         None,
         &transactions[0],
-        limits(),
+        selected_limits,
     )
     .unwrap();
     observed_fs.arm(FaultPlan::default()).unwrap();
@@ -404,7 +418,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
         &mut observed_fs,
         Some(&base),
         &transactions[1],
-        limits(),
+        selected_limits,
     )
     .unwrap();
     let boundaries = [
@@ -433,7 +447,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                     &mut fs,
                     None,
                     &transactions[0],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap();
                 fs.arm(
@@ -451,7 +465,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                         &mut fs,
                         Some(&base),
                         &transactions[1],
-                        limits()
+                        selected_limits
                     )
                     .is_err(),
                     "{operation:?}/{occurrence}/{action:?}"
@@ -460,7 +474,11 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                 if matches!(action, FaultAction::Error(_)) {
                     fs.arm(FaultPlan::default()).unwrap();
                     let maintenance = recovery
-                        .packed_indexes_with_io(&mut fs, &transactions[1], limits().certificates)
+                        .packed_indexes_with_io(
+                            &mut fs,
+                            &transactions[1],
+                            selected_limits.certificates,
+                        )
                         .unwrap();
                     assert_eq!(
                         base.retry(
@@ -487,7 +505,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                             &mut fs,
                             COORDINATOR_PACKED_PROFILE_V1,
                             transactions[2].revision(),
-                            limits().certificates,
+                            selected_limits.certificates,
                             uste_storage::journal::PackedRootDiscoveryLimits::new(2, 8354).unwrap()
                         )
                         .unwrap()
@@ -499,7 +517,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                     &mut fs,
                     None,
                     &transactions[0],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap();
                 let (second, _) = stage_packed_coordinator_prefix(
@@ -507,7 +525,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                     &mut fs,
                     Some(&first),
                     &transactions[1],
-                    limits(),
+                    selected_limits,
                 )
                 .unwrap();
                 assert_eq!(
@@ -515,7 +533,7 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
                     expected.families().map(|f| f.commitment)
                 );
                 let maintenance = recovery
-                    .packed_indexes_with_io(&mut fs, &transactions[1], limits().certificates)
+                    .packed_indexes_with_io(&mut fs, &transactions[1], selected_limits.certificates)
                     .unwrap();
                 assert_eq!(
                     second
@@ -542,7 +560,11 @@ fn packed_prefix_every_staging_fault_preserves_prior_metadata_and_restart() {
             }
         }
     }
-    assert_eq!(cases, 123);
+    if cache.is_none() {
+        assert_eq!(cases, 123);
+    } else {
+        assert!(cases > 0 && cases <= 123);
+    }
 }
 
 #[test]

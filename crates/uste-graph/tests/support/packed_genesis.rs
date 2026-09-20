@@ -7,6 +7,7 @@ pub(super) fn genesis_limits(batch: usize) -> PackedGraphGenesisLimits {
     let old = limits(batch);
     PackedGraphGenesisLimits {
         stage: PackedGraphStageLimits {
+            staging_cache_bytes: None,
             certificates: old.certificates,
             batch: old.batch,
             deltas_per_batch: batch,
@@ -156,14 +157,31 @@ fn assert_no_roots(recovery: &Recovery, fs: &mut Fs) {
 
 #[test]
 fn packed_genesis_reference_partition_policy_and_empty_families_need_no_v1_roots() {
+    genesis_reference(None);
+}
+#[test]
+fn packed_genesis_buffered_reference_partition_policy_and_empty_families_need_no_v1_roots() {
+    genesis_reference(Some(uste_storage::MIN_INDEX_CACHE_BYTES));
+}
+fn genesis_reference(cache: Option<usize>) {
     for kind in 0..3 {
         let mut commitments = None;
         for batch in [1, 2, 512] {
             let (mut fs, mut recovery, genesis, expected) = genesis_fixture(kind);
             assert_no_roots(&recovery, &mut fs);
+            let mut selected_limits = genesis_limits(batch);
+            selected_limits.stage.staging_cache_bytes = cache;
             let (base, report) =
-                stage_packed_graph_genesis(&mut recovery, &mut fs, &genesis, genesis_limits(batch))
+                stage_packed_graph_genesis(&mut recovery, &mut fs, &genesis, selected_limits)
                     .unwrap();
+            assert_eq!(
+                report.stage.buffered_batches,
+                if cache.is_some() {
+                    report.stage.batches
+                } else {
+                    0
+                }
+            );
             assert_eq!(
                 base.anchor(),
                 (

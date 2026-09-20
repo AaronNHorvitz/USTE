@@ -106,6 +106,16 @@ where
             limits.metadata.staging,
         )?;
         report.graph.batches = checked_sum(report.graph.batches, graph.batches)?;
+        report.graph.buffered_batches =
+            checked_sum(report.graph.buffered_batches, graph.buffered_batches)?;
+        report.graph.cache_hits = checked_sum(report.graph.cache_hits, graph.cache_hits)?;
+        report.graph.cache_misses = checked_sum(report.graph.cache_misses, graph.cache_misses)?;
+        report.graph.cache_evictions =
+            checked_sum(report.graph.cache_evictions, graph.cache_evictions)?;
+        report.graph.peak_cache_accounted_bytes = report
+            .graph
+            .peak_cache_accounted_bytes
+            .max(graph.peak_cache_accounted_bytes);
         report.graph.read_pages = checked_sum(report.graph.read_pages, graph.read_pages)?;
         report.graph.written_pages = checked_sum(report.graph.written_pages, graph.written_pages)?;
         report.graph.peak_batch_deltas =

@@ -106,6 +106,7 @@ impl Limits {
             },
         };
         let stage = PackedGraphStageLimits {
+            staging_cache_bytes: None,
             certificates,
             batch,
             deltas_per_batch: 512,
@@ -124,6 +125,7 @@ impl Limits {
         let delta = GraphStateDeltaLimits::new(1_000_000, 64 * 1024 * 1024).map_err(debug)?;
         let metadata = PackedMetadataRebaseLimits {
             staging: PackedCoordinatorLimits {
+                staging_cache_bytes: None,
                 certificates,
                 lookup,
                 batch,

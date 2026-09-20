@@ -39,6 +39,8 @@ pub struct PackedCoordinatorPrefix {
 }
 #[derive(Clone, Copy)]
 pub struct PackedCoordinatorLimits {
+    /// Fresh per-family staging cache; `None` preserves uncached staging.
+    pub staging_cache_bytes: Option<usize>,
     pub certificates: CertificateAnchorReadLimits,
     pub lookup: TreeLookupLimits,
     pub batch: TreeBatchLimits,
@@ -47,6 +49,7 @@ pub struct PackedCoordinatorLimits {
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PackedCoordinatorReport {
+    pub staging_caches: [Option<uste_storage::packed_page_cache::PackedCacheReport>; 4],
     pub owner_lookup_pages: u64,
     pub owner_lookup_bytes: u64,
     pub new_owners: u64,
@@ -353,6 +356,7 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
+    validate_staging_cache(limits.staging_cache_bytes)?;
     let mut maintenance =
         transaction.packed_maintenance(scope, journal, fs, limits.certificates)?;
     let mut report = PackedCoordinatorReport::default();
@@ -434,14 +438,28 @@ where
         .try_reserve_exact(4)
         .map_err(|_| TransactionError::ResourceLimit)?;
     for (index, deltas) in deltas.iter().enumerate() {
-        let stage = maintenance.stage(
-            fs,
-            COORDINATOR_PACKED_PROFILE_V1,
-            index as u8 + 1,
-            base.map(|b| &b.trees[index]),
-            deltas,
-            limits.batch,
-        )?;
+        let stage = if let Some(bytes) = limits.staging_cache_bytes {
+            let (stage, cache) = maintenance.stage_buffered(
+                fs,
+                COORDINATOR_PACKED_PROFILE_V1,
+                index as u8 + 1,
+                base.map(|b| &b.trees[index]),
+                deltas,
+                limits.batch,
+                bytes,
+            )?;
+            report.staging_caches[index] = Some(cache);
+            stage
+        } else {
+            maintenance.stage(
+                fs,
+                COORDINATOR_PACKED_PROFILE_V1,
+                index as u8 + 1,
+                base.map(|b| &b.trees[index]),
+                deltas,
+                limits.batch,
+            )?
+        };
         report.batches[index] = stage.report();
         trees.push(stage.tree().clone());
     }
@@ -460,4 +478,14 @@ where
         return Err(TransactionError::IntegrityFailure);
     }
     Ok((prefix, report))
+}
+
+fn validate_staging_cache(bytes: Option<usize>) -> Result<(), TransactionError> {
+    if bytes.is_some_and(|bytes| {
+        !(uste_storage::MIN_INDEX_CACHE_BYTES..=uste_storage::MAX_INDEX_CACHE_BYTES)
+            .contains(&bytes)
+    }) {
+        return Err(TransactionError::ResourceLimit);
+    }
+    Ok(())
 }

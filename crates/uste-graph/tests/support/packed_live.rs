@@ -23,6 +23,7 @@ struct Parts {
 }
 fn metadata_limits() -> PackedCoordinatorLimits {
     PackedCoordinatorLimits {
+        staging_cache_bytes: None,
         certificates: limits(2).certificates,
         lookup: preparation_limits().lookup,
         batch: limits(2).batch,

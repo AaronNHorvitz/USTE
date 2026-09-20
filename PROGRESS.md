@@ -2,7 +2,48 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — buffered staging and scoped bridge (Decisions 0194–0195)
+## Latest verified increment — explicit domain staging buffers (Decision 0196)
+
+Pushed baseline `6b35b3b`. Optional per-batch budgets now flow through packed graph genesis,
+delta/live staging and coordinator primary/quota staging; all existing constructors explicitly
+select `None`. New buffered reference, proof-budget, corruption and every-observed-fault variants
+preserve the original uncached tests and their literal fault counts. No native cache selection
+or performance claim is included in this domain increment.
+
+Focused session 88371 / `run-p1149170-i22101447.scope` passed 11 graph/8.22 s and 15
+transaction/16.67 s buffered cases; compile 38.83 s, strict workspace Clippy 6.51 s.
+Preflight 28 GiB available RAM/2.0 GiB free swap; one job/thread, 3 GiB high/4 GiB maximum/
+512 MiB swap. Log `/tmp/uste-d196-focused.log`.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+{ CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph -p uste-txn --all-targets --all-features --locked --offline buffered -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d196-focused.log'
+```
+
+Next verify the separate native selection and measure the unchanged development fixture.
+T-20/T-19 remain open; these results imply neither M1 requalification nor benchmark qualification.
+
+Subsequent review added checked cache-counter aggregation in graph suffix reports and two
+end-to-end buffered suffix/live-rebase tests. Full workspace session 58732 /
+`run-p1151257-i22147655.scope` passed, log `/tmp/uste-d196-workspace-verification.log`.
+All **705 tests across 47 executables** passed, zero failed/ignored. Graph disk 103/437.63 s,
+replay checkpoint 50/104.81 s, storage unit 224/32.79 s, coordinator 115/116.37 s.
+Compile 29.85 s, strict workspace Clippy 2.61 s, warning-denying workspace docs 10.36 s.
+It used the same full-workspace test/Clippy/warning-denying-doc
+command as Decision 0194 below, with that new log path. Preflight 28 GiB available RAM/2.0 GiB
+free swap; sampled peak 1,581,711,360 bytes/zero swap, not final lifetime peak.
+
+Separate Decision 0197 experiment edits select 64 MiB per-private-batch staging in native packed
+paths and add report/configuration checks. They are uncompiled/unverified and not part of the
+workspace run. Keep them out of the Decision 0196 commit until separately verified. The
+`experiments/t20-bench/src/engine/packed/limits.rs` compatibility additions (`None`) belong to
+Decision 0196; the other pending experiment paths belong to Decision 0197. Next
+run the standalone suite, then only with a fresh resource check run the explicit 4,096-record
+measurement and preserve its source/binary hashes and retained synthetic database.
+
+## Prior verified increment — buffered staging and scoped bridge (Decisions 0194–0195)
 
 Pushed `3afb5ac` preserves the verified eight-batch development result below. Decision 0194
 adds fresh bounded packed-tree staging without changing proof charges or output publication.
@@ -32,8 +73,14 @@ Its later Clippy/doc steps included them. Separate session 53118 /
 `run-p1146075-i22124832.scope` passed three maintenance tests/0.01 s, compile 14.84 s, including
 both new tests and the original ordinary retry path. This verifies the bridge independently;
 do not describe the full workspace invocation as 695 tests. Command below also starts the
-full standalone regression run, which is **still active**; inspect that session before launching
-any competing build. Preflight 28 GiB available RAM/2.0 GiB free swap.
+full standalone regression run, which subsequently **passed**: 117 active tests, four explicitly
+ignored development cases (including the separately verified scale tests). Library 87/131.65 s,
+legacy process 3/11.85 s, packed history CLI 11/60.79 s, packed terminal 5/36.08 s,
+manifest 3/0.93 s, legacy history process 8/73.11 s; release compile 63 s. These executable
+tests used the `6b35b3b` implementation, built before Decision 0196's edits. Final standalone
+Clippy passed/3.34 s and saw the then-current Decision 0196 library/limit additions; it does
+not verify their behavior. Sampled scope peak 646,856,704 bytes/zero swap (not final peak).
+Preflight 28 GiB available RAM/2.0 GiB free swap.
 
 ```sh
 systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
@@ -43,7 +90,7 @@ CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Ca
 CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d195-bridge-and-native.log'
 ```
 
-Format/diff/docs/task checks pass. Next collect the active standalone result, then integrate
+Format/diff/docs/task checks pass. Next integrate
 optional bounded staging into graph/coordinator callers with unchanged proof-work limits,
 reference/fault/recovery tests and actual native measurements. Neither new API is itself native
 performance evidence; T-20/T-19 and all full-roadmap gates remain open. M1's pinned handoff is
