@@ -441,7 +441,7 @@ fn print_usage() {
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench bm06-packed-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 2; nonqualifying)\n\
+         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|recover-checkpoint|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\

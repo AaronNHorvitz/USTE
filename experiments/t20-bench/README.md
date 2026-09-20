@@ -129,12 +129,18 @@ cargo run --release --locked --offline -- bm06-packed-linux-open --root "$USTE_B
 cargo run --release --locked --offline -- bm06-packed-linux-resume --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-tail --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-recover --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-recover-checkpoint --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-rebuild --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 ```
 
 Create ends at checkpoint 100 with 198 verified versions; tail certifies frontier 101 but leaves
 derived publication pending, reports verification only through checkpoint 100 and claims no terminal
 digest. Recover streams the suffix, verifies all 200 versions and exact-retries the tail. Decision
+0184 adds `recover-checkpoint`: always select checkpoint 100 and replay the final generation,
+including when valid terminal roots exist. It reports `checkpoint_tail_replay: true`; missing or
+corrupt checkpoint material refuses rather than substituting newer roots. Ordinary `recover`
+continues to select the latest complete roots (zero suffix groups after terminal publication).
+Neither phase's elapsed time is recovery-only latency: both verify historical payloads. Decision
 0172 resume validates existing history and finishes incomplete construction at checkpoint 100;
 already certified frontier 101 stays 101. Only zero/one-revision prefixes use bounded ordinary
 bootstrap (one outcome/zero owners/1 MiB replay); certified policy identities must match exactly.

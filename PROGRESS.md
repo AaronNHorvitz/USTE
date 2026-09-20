@@ -2,7 +2,35 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — generation-wide packed tails (Decision 0183)
+## Latest verified increment — explicit native checkpoint recovery (Decision 0184)
+
+Implemented on pushed `bcdb8b7`: `bm06-packed-linux-recover-checkpoint` pins the profile
+checkpoint and checks the full generation's suffix group count, even when newer complete roots
+exist. Ordinary recovery retains latest-root/no-op behavior. Regression tests verify exact retry,
+history/digest equivalence, source preservation, pre-I/O admission and corrupt old manifests
+refusing explicit recovery while valid terminal roots still open. Both record caps remain two.
+
+Session 51117 / `run-p1036259-i22017659.scope` exited 0: seven native history tests/44.30 s,
+five separate-process history tests/53.44 s, three manifest tests/1.09 s; native compile 24.56 s,
+CLI compile 25.53 s, strict Clippy 1.50 s. Commands:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib linux_runner::packed::history --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d184-native.log &&
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --test recovery_manifest --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d184-cli.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 21 GiB available RAM/2.8 GiB free swap, no competing USTE workload. Sampled scope
+peak 362,213,376 bytes/zero swap (not final lifetime peak). Format/diff/docs/task checks pass.
+Full core remains 676 at `0322067`; last full harness 106 active at `15ab0bb`. No new full-suite,
+larger-than-memory or qualifying campaign claim. Next fix and exercise interrupted multi-batch
+tail continuation before increasing native scale; complete accounting, safe construction and
+reserved-host campaigns remain required. T-20/T-19, pinned M1, full roadmap and release gates
+are unchanged. This supersedes older next-step text.
+
+## Prior verified increment — generation-wide packed tails (Decision 0183)
 
 Implemented on pushed `15ab0bb`: model/native packed tail construction streams every batch of
 the selected update generation. Intermediate batches retain normal authorized publication/rebase;

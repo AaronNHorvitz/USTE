@@ -74,6 +74,51 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn packed_history_native_explicit_checkpoint_never_falls_forward() {
+    let fixture = Fixture::new();
+    fixture.run("create").unwrap();
+    let checkpoint_roots = fixture.files(true);
+    let prefix = fixture.files(false);
+    assert!(fixture.run("recover-checkpoint").is_err());
+    assert!(fixture.files(false) == prefix);
+    fixture.run("tail").unwrap();
+    let source = fixture.files(false);
+    let recovered = fixture.run("recover").unwrap();
+    let latest = fixture.run("recover").unwrap();
+    assert_eq!(latest["selected_base_revision"], 101);
+    assert_eq!(latest["suffix_groups"], 0);
+    assert_eq!(latest["checkpoint_tail_replay"], false);
+    let explicit = fixture.run("recover-checkpoint").unwrap();
+    assert_eq!(explicit["selected_base_revision"], 100);
+    assert_eq!(explicit["suffix_groups"], 1);
+    assert_eq!(explicit["checkpoint_tail_replay"], true);
+    assert_eq!(explicit["verified_history_versions"], 200);
+    assert_eq!(explicit["v1_state_digest"], recovered["v1_state_digest"]);
+    assert!(fixture.files(false) == source);
+    assert!(!checkpoint_roots.is_empty());
+    for (name, bytes) in &checkpoint_roots {
+        let mut damaged = bytes.clone();
+        damaged[0] ^= 1;
+        fs::write(fixture.root.join(HISTORY_DATABASE).join(name), damaged).unwrap();
+    }
+    // Terminal roots remain valid, but cannot substitute for the requested checkpoint.
+    assert_eq!(
+        fixture.run("open").unwrap()["v1_state_digest"],
+        recovered["v1_state_digest"]
+    );
+    assert!(fixture.run("recover-checkpoint").is_err());
+    assert!(fixture.files(false) == source);
+    for (name, bytes) in &checkpoint_roots {
+        fs::write(fixture.root.join(HISTORY_DATABASE).join(name), bytes).unwrap();
+    }
+    assert_eq!(
+        fixture.run("recover-checkpoint").unwrap()["suffix_groups"],
+        1
+    );
+    assert!(fixture.files(false) == source);
+}
+
+#[test]
 fn packed_history_native_phases_and_exact_tail_retry_preserve_authority() {
     let fixture = Fixture::new();
     let checkpoint = fixture.run("create").unwrap();
@@ -220,6 +265,7 @@ fn packed_history_native_admission_precedes_filesystem_access() {
             "open",
             "tail",
             "recover",
+            "recover-checkpoint",
             "rebuild",
             "resume",
             "tail-crash-probe",

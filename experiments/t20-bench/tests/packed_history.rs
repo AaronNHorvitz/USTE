@@ -168,6 +168,13 @@ fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
     assert_eq!(recovered["qualifying_recovery_trials"], 0);
     assert_eq!(recovered["complete_authenticated_io"], false);
     assert_eq!(recovered["incomplete_prefix_resume_implemented"], true);
+    let certificates = fs::read(fixture.certificates()).unwrap();
+    let explicit = fixture.run("recover-checkpoint");
+    assert_eq!(explicit["selected_base_revision"], 100);
+    assert_eq!(explicit["suffix_groups"], 1);
+    assert_eq!(explicit["checkpoint_tail_replay"], true);
+    assert_eq!(explicit["v1_state_digest"], recovered["v1_state_digest"]);
+    assert!(fs::read(fixture.certificates()).unwrap() == certificates);
     let rebuilt = fixture.run("rebuild");
     assert_eq!(rebuilt["origin_suffix_groups"], 100);
     assert_eq!(rebuilt["v1_state_digest"], recovered["v1_state_digest"]);
@@ -183,6 +190,7 @@ fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
         "open",
         "tail",
         "recover",
+        "recover-checkpoint",
         "rebuild",
         "resume",
         "tail-crash-probe",

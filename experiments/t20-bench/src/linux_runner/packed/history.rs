@@ -154,11 +154,20 @@ fn run_observed(
     }
     if !matches!(
         phase,
-        "create" | "open" | "tail" | "recover" | "rebuild" | "resume" | "tail-crash-probe"
+        "create"
+            | "open"
+            | "tail"
+            | "recover"
+            | "recover-checkpoint"
+            | "rebuild"
+            | "resume"
+            | "tail-crash-probe"
     ) {
         return Err(error("USTE_BM06_PACKED_PHASE"));
     }
     let is_tail = matches!(phase, "tail" | "tail-crash-probe");
+    let is_checkpoint_recovery = phase == "recover-checkpoint";
+    let is_recovery = phase == "recover" || is_checkpoint_recovery;
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
@@ -220,7 +229,7 @@ fn run_observed(
         .0
         .get();
     counts(profile, frontier)?;
-    if (phase == "recover" && frontier != profile.frontier())
+    if (is_recovery && frontier != profile.frontier())
         || (is_tail && frontier != profile.checkpoint_revision())
         || (phase != "rebuild"
             && frontier != profile.frontier()
@@ -245,7 +254,10 @@ fn run_observed(
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
     }
-    let base = if phase == "recover" {
+    let base = if is_checkpoint_recovery {
+        uste_types::CommitRevision::new(profile.checkpoint_revision())
+            .map_err(|_| error("USTE_BM06_PACKED_FRONTIER"))?
+    } else if is_recovery {
         engine::prefix::latest_revision(&mut fs, &recovery, limits)
             .map_err(|_| error("USTE_BM06_PACKED_PREFIX"))?
     } else {
@@ -259,11 +271,14 @@ fn run_observed(
         counts(profile, base.get())?,
     )
     .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
+    if is_checkpoint_recovery && suffix != profile.batches_per_version() {
+        return Err(error("USTE_BM06_PACKED_CHECKPOINT_TAIL"));
+    }
     let verified = engine::recovery::verify_prefix_history(
         &live, &mut fs, &kernel, &principal, profile, frontier,
     )
     .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
-    if phase == "recover" {
+    if is_recovery {
         for sequence in profile.checkpoint_revision() + 1..=profile.frontier() {
             engine::commit_batch(
                 &mut live,
@@ -321,6 +336,7 @@ fn run_observed(
         "complete_authenticated_io": false, "kernel_filesystem_device_cache": "uncontrolled",
         "records": profile.records(), "frontier": if is_tail { profile.frontier() } else { frontier },
         "selected_base_revision": base.get(), "suffix_groups": suffix, "origin_suffix_groups": origin_groups,
+        "checkpoint_tail_replay": is_checkpoint_recovery,
         "verified_history_versions": verified, "history_verified_through_revision": frontier, "v1_state_digest": digest,
         "derived_terminal_pending": is_tail, "incomplete_prefix_resume_implemented": true,
         "recovered_frontier": recovered_frontier, "bounded_bootstrap_resume": bootstrap_resume,
