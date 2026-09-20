@@ -2,7 +2,32 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — trusted owner diagnostics (Decision 0202)
+## Latest verified increment — native command owner accounting (Decision 0203)
+
+Pushed `ef70c0b` contains the verified owner diagnostics. Native BM-01 changes now record
+fixed disjoint owner lifetimes, reject duplicate slots/checked overflow, and publish exact
+per-owner and total completed-decrypt reports. Existing single-owner fields and incomplete-I/O
+qualification remain unchanged. Tests assert every command's slot set/sum and bootstrap
+process-loss paths. BM-06 aggregation remains the next independent implementation step.
+
+Session 48553 / `run-p1183481-i22185184.scope` passed the full standalone release suite and
+strict standalone Clippy. Log `/tmp/uste-d203-native-suite.log`; fresh preflight 26 GiB available
+RAM/2.0 GiB free swap/954 GiB disk, no competing heavy workload. One Cargo job/test thread and
+3G/4G/512M limits. All 119 active tests passed; five opt-in cases ignored. Library 89/130.33 s,
+legacy BM-01 process 3/11.96 s, native history 11/60.10 s, packed terminal 5/35.18 s, manifest
+3/0.92 s, legacy recovery 8/72.82 s. Compile 1m02s; strict Clippy 2.79 s. Sampled scope peak
+566,521,856 bytes/zero swap is not final lifetime peak. No failures or lowered requirements.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d203-native-suite.log'
+```
+
+Next T-20: corresponding BM-06 lifetime accounting, including the currently discarded terminal
+digest-admission owner and bootstrap resume. Then continue native BM-01 scale and safe larger
+history/lifecycle prerequisites before reserved-host campaigns. No new large-run measurement,
+complete authenticated-I/O or T-20/T-19 completion is claimed. M1 remains pinned unchanged.
+
+## Prior verified increment — trusted owner diagnostics (Decision 0202)
 
 Pushed `1d477d4` records the complete sixteen-batch development experiment below. Ordinary
 coordinator and authenticated recovery owners now expose their existing cumulative vault decrypt

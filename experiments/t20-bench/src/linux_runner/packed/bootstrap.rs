@@ -76,6 +76,7 @@ pub(super) fn resume(
     adapter: &mut PortableRecoveryAdapter,
     profile: Bm01Profile,
     limits: Limits,
+    owner_work: &mut OwnerWork,
 ) -> Result<Recovery, LinuxRunnerError> {
     if recovery
         .authenticated_frontier_anchor()
@@ -93,6 +94,11 @@ pub(super) fn resume(
         )
         .map_err(|_| error("USTE_BM01_PACKED_BOOTSTRAP_RECOVERY"))?;
     install(&mut raw, fs, profile)?;
+    owner_work.record(
+        OwnerStage::BootstrapResume,
+        raw.vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    )?;
     drop(raw);
     open_recovery(fs, adapter, limits).map(|(recovery, _)| recovery)
 }

@@ -4,6 +4,7 @@ use crate::engine::{
     disk::{DiskBatch, visit_disk_batches},
     packed::{self as engine, limits::Limits},
 };
+use crypto_work::{OwnerStage, OwnerWork};
 use disk::io::ObservedFileSystem;
 use uste_graph::recover_packed_graph_origin;
 use uste_txn::{AuthenticatedIndexRecovery, AuthorizedPackedReader, CoordinatorRecoveryLimits};
@@ -205,6 +206,7 @@ fn prepare_observed(
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password_file)?);
+    let mut owner_work = OwnerWork::default();
     if phase == "create" {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
             .map_err(|_| error("USTE_BM01_KEY_CREATE"))?;
@@ -221,13 +223,25 @@ fn prepare_observed(
         observer(0)?;
         bootstrap::install(&mut raw, &mut fs, profile)?;
         observer(1)?;
+        owner_work.record(
+            OwnerStage::Bootstrap,
+            raw.vault_decrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+        )?;
         drop(raw);
     }
     let (mut recovery, recovered) = open_recovery(&mut fs, &mut adapter, limits)?;
     let recovered_frontier = recovered.frontier.map_or(0, |revision| revision.get());
     let bootstrap_resume = phase == "resume" && recovered_frontier <= 1;
     if bootstrap_resume {
-        recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
+        recovery = bootstrap::resume(
+            recovery,
+            &mut fs,
+            &mut adapter,
+            profile,
+            limits,
+            &mut owner_work,
+        )?;
     }
     let mut policy =
         kernel(benchmark_policy(scope()).map_err(|_| error("USTE_BM01_POLICY_PROFILE"))?)
@@ -291,6 +305,11 @@ fn prepare_observed(
             Ok(())
         })
         .map_err(|_| error("USTE_BM01_PACKED_MATERIALIZE"))?;
+        owner_work.record(
+            OwnerStage::Construction,
+            live.vault_decrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+        )?;
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
     }
@@ -320,6 +339,11 @@ fn prepare_observed(
             return Err(error("USTE_BM01_PACKED_REBUILD"));
         }
         origin_groups = Some(report.suffix.journal.groups);
+        owner_work.record(
+            OwnerStage::Rebuild,
+            live.vault_decrypt_report()
+                .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+        )?;
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
     }
@@ -350,6 +374,13 @@ fn prepare_observed(
             .vault_decrypt_report()
             .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
     );
+    owner_work.record(
+        OwnerStage::Terminal,
+        session
+            .coordinator
+            .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    )?;
     session.report = serde_json::json!({
         "schema": "bm01-linux-packed-development-v1", "engine_benchmark": false,
         "qualification": "nonqualifying-development-profile", "phase": phase,
@@ -380,6 +411,7 @@ fn prepare_observed(
     });
     session.report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
     session.report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
+    session.report["owner_vault_work"] = owner_work.json();
     Ok(session)
 }
 

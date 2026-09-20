@@ -80,8 +80,17 @@ evaluation. The unchanged native
 Decision 0176 separates last-cold-open-vault setup totals, warm-up deltas and empty/retained query
 deltas. Successful envelope calls count header/padded ciphertext/tag bytes and returned unpadded
 plaintext bytes; failed calls are separate. Retained cache hits do not imply new decryption.
-Earlier discarded owners, key unwrap and pre-vault decode refusals are not included. Terminal
+Earlier discarded owners, key unwrap and pre-vault decode refusals are not included in those
+single-owner fields. Terminal
 phase and single-pass query reports carry the same explicitly partial measurement boundary.
+
+Decision 0203 adds `owner_vault_work` to successful packed BM-01 command reports (and the nested
+setup report in query/sampling). Fixed lifetime slots cover bootstrap, bootstrap resume,
+construction, rebuild and terminal admission; exact checked totals sum each present owner once.
+Consuming recovery-to-writer handoff is not another vault. Existing single-owner fields keep
+their scope. Key unwrap, encryption-byte work, pre-vault decode failures, unsuccessful commands
+and physical-device I/O remain excluded; `complete_authenticated_io` stays false. BM-06 owner
+aggregation is not supplied by this BM-01 change.
 
 Decision 0180 selects Decision 0179's fresh buffered graph admission for packed BM-01/BM-06
 development paths. Each canonical family is validated with a fresh 64 MiB logical cache budget;

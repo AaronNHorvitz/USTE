@@ -162,7 +162,11 @@ impl Fixture {
             Bm01Profile::new(20).unwrap(),
             phase,
         )
-        .map(|json| serde_json::from_str(&json).unwrap())
+        .map(|json| {
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert_owner_work(&report, phase);
+            report
+        })
     }
     fn prefix(&self, stop: u64) -> BTreeMap<String, Vec<u8>> {
         let profile = Bm01Profile::new(20).unwrap();
@@ -240,6 +244,43 @@ impl Fixture {
             })
             .collect()
     }
+}
+
+fn assert_owner_work(report: &serde_json::Value, phase: &str) {
+    let expected: &[&str] = match phase {
+        "create" => &["bootstrap", "construction", "terminal"],
+        "open" => &["terminal"],
+        "rebuild" => &["rebuild", "terminal"],
+        "resume" if report["bounded_bootstrap_resume"] == true => {
+            &["bootstrap_resume", "construction", "terminal"]
+        }
+        "resume" => &["construction", "terminal"],
+        _ => panic!("unexpected phase"),
+    };
+    let work = &report["owner_vault_work"];
+    let owners = work["owners"].as_object().unwrap();
+    assert_eq!(owners.len(), expected.len());
+    assert_eq!(work["owner_count"], expected.len());
+    for label in expected {
+        assert!(owners.contains_key(*label));
+    }
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "authenticated_encoded_bytes",
+        "returned_plaintext_bytes",
+    ] {
+        let sum = owners
+            .values()
+            .map(|owner| owner[field].as_u64().unwrap())
+            .sum::<u64>();
+        assert_eq!(work["total"][field], sum);
+    }
+    assert_eq!(owners["terminal"], report["terminal_vault_work"]);
+    assert_eq!(work["complete_authenticated_io"], false);
+    assert_eq!(work["includes_key_unwrap"], false);
+    assert_eq!(work["includes_encryption_bytes"], false);
+    assert_eq!(work["includes_pre_vault_decode_failures"], false);
 }
 impl Drop for Fixture {
     fn drop(&mut self) {

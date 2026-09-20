@@ -182,6 +182,18 @@ fn packed_cli_sigkill_bootstrap_and_unpaired_metadata_resume_exactly() {
         assert_eq!(resumed["recovered_frontier"], pause);
         assert_eq!(resumed["repaired_certificate_tail_bytes"], 3);
         assert_eq!(resumed["bounded_bootstrap_resume"], pause <= 1);
+        let owners = &resumed["owner_vault_work"];
+        assert_eq!(owners["owner_count"], if pause <= 1 { 3 } else { 2 });
+        assert_eq!(owners["owners"]["bootstrap_resume"].is_object(), pause <= 1);
+        assert!(owners["owners"]["bootstrap"].is_null());
+        assert_eq!(owners["owners"]["terminal"], resumed["terminal_vault_work"]);
+        assert!(
+            owners["total"]["successful_calls"].as_u64().unwrap()
+                > resumed["terminal_vault_work"]["successful_calls"]
+                    .as_u64()
+                    .unwrap()
+        );
+        assert_eq!(owners["complete_authenticated_io"], false);
         assert_eq!(
             resumed["resume_base_revision"],
             if pause <= 1 { 1 } else { pause - 1 }

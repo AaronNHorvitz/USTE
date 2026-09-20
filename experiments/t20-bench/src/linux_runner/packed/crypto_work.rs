@@ -44,9 +44,117 @@ impl CryptoWork {
         })
     }
 }
+
+/// Closed command-lifetime slots. A consuming handoff does not start another vault lifetime.
+#[derive(Clone, Copy)]
+pub(super) enum OwnerStage {
+    Bootstrap,
+    BootstrapResume,
+    Construction,
+    Rebuild,
+    Terminal,
+}
+const OWNER_LABELS: [&str; 5] = [
+    "bootstrap",
+    "bootstrap_resume",
+    "construction",
+    "rebuild",
+    "terminal",
+];
+
+/// Each completed owner is sampled once immediately before drop (or terminal session return).
+/// Fixed-size and checked; no handles, identities, request contents or retained event history.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct OwnerWork {
+    owners: [Option<CryptoWork>; 5],
+    total: CryptoWork,
+}
+impl OwnerWork {
+    pub(super) fn record(
+        &mut self,
+        stage: OwnerStage,
+        report: VaultDecryptReport,
+    ) -> Result<(), LinuxRunnerError> {
+        let slot = stage as usize;
+        if self.owners[slot].is_some() {
+            return Err(error("USTE_BM01_CRYPTO_OWNER"));
+        }
+        let work = CryptoWork::from(report);
+        let mut total = self.total;
+        total.accumulate(work)?;
+        self.owners[slot] = Some(work);
+        self.total = total;
+        Ok(())
+    }
+
+    pub(super) fn json(self) -> serde_json::Value {
+        let mut owners = serde_json::Map::new();
+        for (label, work) in OWNER_LABELS.into_iter().zip(self.owners) {
+            if let Some(work) = work {
+                owners.insert(label.into(), work.json());
+            }
+        }
+        let mut total = self.total.json();
+        total["measurement_scope"] =
+            serde_json::json!("explicit-command-owner-lifetimes-completed-decrypt-calls");
+        total
+            .as_object_mut()
+            .unwrap()
+            .remove("includes_other_vaults");
+        total["includes_all_recorded_owners"] = serde_json::json!(true);
+        serde_json::json!({
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "complete_authenticated_io": false, "physical_device_io": false,
+            "includes_key_unwrap": false, "includes_encryption_bytes": false,
+            "includes_pre_vault_decode_failures": false,
+            "owner_count": owners.len(), "owners": owners, "total": total,
+        })
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn owner_work_fixed_slots_sum_exactly_and_refuse_duplicate_or_overflow_atomically() {
+        let unit = VaultDecryptReport {
+            successful_calls: 1,
+            failed_calls: 2,
+            authenticated_encoded_bytes: 3,
+            returned_plaintext_bytes: 4,
+        };
+        let mut work = OwnerWork::default();
+        assert_eq!(work.json()["owner_count"], 0);
+        for stage in [
+            OwnerStage::Bootstrap,
+            OwnerStage::BootstrapResume,
+            OwnerStage::Construction,
+            OwnerStage::Rebuild,
+            OwnerStage::Terminal,
+        ] {
+            work.record(stage, unit).unwrap();
+            let before = work;
+            assert!(work.record(stage, unit).is_err());
+            assert_eq!(work, before);
+        }
+        assert_eq!(work.total.0, [5, 10, 15, 20]);
+        let json = work.json();
+        assert_eq!(json["owner_count"], 5);
+        for label in OWNER_LABELS {
+            assert_eq!(json["owners"][label]["successful_calls"], 1);
+        }
+        assert_eq!(json["total"]["successful_calls"], 5);
+        assert_eq!(json["complete_authenticated_io"], false);
+        assert_eq!(json["includes_key_unwrap"], false);
+        assert_eq!(json["includes_encryption_bytes"], false);
+        for field in 0..4 {
+            let mut work = OwnerWork::default();
+            work.total.0[field] = u64::MAX;
+            let before = work;
+            assert!(work.record(OwnerStage::Terminal, unit).is_err());
+            assert_eq!(work, before);
+        }
+    }
+
     #[test]
     fn vault_work_deltas_check_every_field_and_overflow_is_atomic() {
         let unit = CryptoWork::from(VaultDecryptReport {
