@@ -2,7 +2,44 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — authorized packed graph cache configuration (Decision 0163)
+## Latest verified increment — private packed graph genesis (Decision 0164)
+
+Implemented on pushed `a32693d` plus this increment: stage all eight packed graph families directly
+from an opaque authenticated first-transaction reconstruction, without requiring v1 roots. Borrow
+the genesis snapshot; preflight entry/byte/batch totals; retain one bounded batch and fixed family
+handles. Explicit aggregate read/write limits remain separate from per-batch limits. Receipt/owner
+binding precedes output. Staging publishes no root manifest and changes no journal authority;
+failed work can leave unreachable immutable scratch packs, not discoverable partial state.
+
+Four integration tests pass (session 95133 / `run-p736623-i21730652.scope`, 1.73 s), including 219
+observed staging I/O error/crash cases with restart, policy-only/record-bearing first transactions,
+a multi-page value, 1/2/512-entry partition equality, five exact/minus-one aggregate budgets,
+foreign owner/reopened-handle rejection, corruption refusal and independent cold semantic admission
+after explicit terminal publication. Workspace Clippy passed/3.38 s. Session 1056 /
+`run-p737353-i21738839.scope` passed 16 graph library tests/0.01 s, Clippy/0.05 s and graph docs/1.21 s.
+Both sessions exited 0 with one build job/test thread and the 3G/4G/512M cgroup limits below.
+Preflight 30 GiB available RAM/5.7 GiB free swap; no scope peak sample was retained for these short
+checks. This additive API does not change existing callers. Full workspace regression remains
+647 tests at `a32693d`; native regression remains 71 active tests at `35bc482`, not new runs here.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --locked --offline packed_genesis -- --test-threads=1 --nocapture &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --lib --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d164-library-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph --no-deps --locked --offline'
+```
+
+Format/diff/docs/task graph checks pass. Next implement explicit packed origin recovery: privately
+stage genesis graph/primary/quota, stream every suffix transaction with bounded certificate windows,
+then publish only the fully validated terminal triple. Ordinary open must not silently rebuild or
+roll back. Native integration and qualifying campaigns follow; T-20/T-19 and the full roadmap remain
+open. M1 interfaces/evidence and the lockfile are unchanged. This section supersedes earlier next steps.
+
+## Prior verified increment — authorized packed graph cache configuration (Decision 0163)
 
 Implemented on pushed `35bc482` plus this increment: trusted adapters can select a bounded packed
 cache for point, historical, adjacency and evidence-support queries. The existing constructor

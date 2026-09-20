@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_genesis.rs"]
+mod genesis;
 #[path = "packed_preparation.rs"]
 mod preparation;
 use uste_graph::{

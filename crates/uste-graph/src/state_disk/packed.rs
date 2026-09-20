@@ -1,5 +1,7 @@
 //! Separately typed packed graph cache; never a v1 root or consumer authorization capability.
 use super::*;
+mod genesis;
+pub use genesis::{PackedGraphGenesisLimits, PackedGraphGenesisReport, stage_packed_graph_genesis};
 mod admission;
 pub use admission::{
     PackedGraphAdmissionLimits, PackedGraphAdmissionReport, admit_packed_graph_base,
