@@ -2,6 +2,53 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — authorized positive-lookup cache (Decision 0215)
+
+D0214 committed and pushed as `c42f12b`. D0215 adds an explicit trusted reader constructor
+for an included lookup partition without changing existing constructors, consumer read types,
+policy checks or M1 interfaces. Seven existing graph-cache groups now run in both modes;
+the small-budget trace additionally requires observed result-cache eviction across its cases.
+Focused verification passed in session 73597 /
+`uste-d215-graph.scope`, invocation `7b7e602db6d546638a8b43d947571379`, after fresh 25 GiB RAM,
+2 GiB free swap/952 GiB disk and no competing heavy workload. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d215-graph.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-graph --test disk_index --all-features --locked --offline expansion::cache:: -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d215-graph-verification.log; verification_status=$?; systemctl --user show uste-d215-graph.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+All 15 selected tests passed (112 unrelated tests filtered), compile 18.29s, tests 98.35s;
+strict workspace Clippy passed in 5.14s. Scope peak 865,038,336 bytes, zero swap,
+CPU 121,974,536,000 ns. Added a further direct constructor/privileged-report/warm-hit test
+after the selected test binary was built. Its initial module path caused formatting to refuse;
+the explicit relative module path was corrected and formatting then passed. No runtime failure
+or requirement relaxation occurred.
+
+Full gate passed in session 86139 / `uste-d215-workspace.scope`, invocation
+`01faee2b15034370be5ab79a8b1199fd`, with fresh 24 GiB available RAM/2 GiB free swap/952 GiB disk
+and no competing heavy workload, same one-job/thread and 3G/4G/512M limits. It first ran
+`cargo test -p uste-graph --test disk_index --all-features --locked --offline configuration::
+-- --test-threads=1` with the same test profile: the additional constructor test passed in
+0.11s after 13.07s compile (127 unrelated cases filtered). It then runs D0214's exact full
+workspace test/Clippy/doc command below, with scope `uste-d215-workspace.scope` and combined
+log `/tmp/uste-d215-workspace-verification.log`. Workspace source is held fixed for that gate.
+
+Full workspace: **754 tests / 47 executables, zero failures/ignores** (the combined log also
+includes the one selected constructor test, giving 755 executions across 48 invocations).
+Workspace incremental compile 3.89s; graph disk 128/490.79s, checkpoint 50/112.85s,
+storage 241/31.91s, transaction coordinator 118/116.80s. Strict Clippy passed in 0.06s;
+warnings-denied docs passed in 11.58s. Final scope peak **2,293,981,184 bytes**, zero swap,
+CPU 789,422,760,000 ns. Formatting and documentation/task checks passed. Tested core baseline
+is `c42f12b` plus the reviewed D0215 constructor and eight new tests in this increment.
+
+Separate, unbuilt D0216 changes under `experiments/t20-bench` add a named native positive-cache
+correctness command, partition-validated reporting and reference/CLI tests. They are outside
+the current workspace verification, not enabled in sampling, not measured and not yet verified.
+They will be excluded from the D0215 commit and tested separately after this gate finishes.
+
+Next: commit/push only the verified D0215 integration, then verify
+the separate native comparison command before using it for a development observation.
+T-20/T-19 and qualification remain open; preserve the full accepted roadmap.
+
 ## Latest verified increment — bounded positive lookup cache (Decision 0214)
 
 Last committed and pushed baseline is `ce2a118` (D0213). D0214 adds an explicit opt-in
@@ -52,9 +99,9 @@ swap, CPU 888,472,862,000 ns. Formatting, documentation links and task graph che
 The implementation and test baseline is `ce2a118` plus the reviewed D0214 changes in this
 increment; no native benchmark or M1 consumer was switched to the new mode.
 
-Next: commit/push D0214, then integrate an explicitly configured authorized reader, verifying
-current permissions, hidden references, cancellation and aggregate work in both cache modes
-before selecting a native comparison configuration. T-20/T-19 remain incomplete;
+D0214 committed and pushed as `c42f12b`; authorized-reader integration continues above.
+Current permissions, hidden references, cancellation and aggregate work in both cache modes
+must pass before selecting a native comparison configuration. T-20/T-19 remain incomplete;
 the pinned M1 result and all qualifying benchmark targets/reservations remain unchanged.
 
 ## Latest verified increment — native encryption-owner ledger (Decision 0213)

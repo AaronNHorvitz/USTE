@@ -1,6 +1,34 @@
 use super::*;
+#[path = "packed_authorized_cache/configuration.rs"]
+mod configuration;
 
 const CACHE_BYTES: usize = 4 * 1024 * 1024;
+type CachedReader<'a> = AuthorizedPackedReader<
+    'a,
+    GraphPackedLiveState,
+    Fs,
+    TestEnvelope,
+    CounterEntropy,
+    CounterEntropy,
+>;
+
+fn cached_reader<'a>(
+    live: &'a Live,
+    kernel: &'a PolicyKernel,
+    limits: PackedGraphReadLimits,
+    bytes: usize,
+    positive: bool,
+) -> Result<CachedReader<'a>, AuthorizedError> {
+    if positive {
+        let lookup = bytes
+            .checked_sub(uste_storage::MIN_INDEX_CACHE_BYTES)
+            .ok_or(AuthorizedError::ResourceLimit)?
+            .min(64 * 1024);
+        AuthorizedPackedReader::new_with_lookup_cache_budget(live, kernel, limits, bytes, lookup)
+    } else {
+        AuthorizedPackedReader::new_with_cache_budget(live, kernel, limits, bytes)
+    }
+}
 
 fn setup_cached() -> (
     Fs,
@@ -98,12 +126,22 @@ fn queries() -> Vec<GraphReadRequest> {
 
 #[test]
 fn authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work() {
+    authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work_mode(false);
+}
+
+#[test]
+fn authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work_positive() {
+    authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work_mode(true);
+}
+
+fn authorized_packed_vault_work_is_exact_privileged_and_not_cache_proof_work_mode(positive: bool) {
     let (mut fs, live, kernel, admin, bob, _) = setup_cached();
-    let reader = AuthorizedPackedReader::new_with_cache_budget(
+    let reader = cached_reader(
         &live,
         &kernel,
         expansion_limits(ample()),
         CACHE_BYTES,
+        positive,
     )
     .unwrap();
     let before = live.vault_decrypt_report().unwrap();
@@ -231,6 +269,15 @@ fn authorized_packed_revocation_denies_reads_before_vault_work() {
 
 #[test]
 fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth() {
+    authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth_mode(false);
+}
+
+#[test]
+fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth_positive() {
+    authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth_mode(true);
+}
+
+fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth_mode(positive: bool) {
     let (mut fs, live, kernel, admin, _, _) = setup_cached();
     for historical in [false, true] {
         let request = if historical {
@@ -262,9 +309,7 @@ fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth() 
             exact.current.maximum_encoded_bytes = pages * 20545;
             exact.current.maximum_value_bytes = bytes;
         }
-        let reader =
-            AuthorizedPackedReader::new_with_cache_budget(&live, &kernel, exact, CACHE_BYTES)
-                .unwrap();
+        let reader = cached_reader(&live, &kernel, exact, CACHE_BYTES, positive).unwrap();
         for _ in 0..2 {
             assert_eq!(
                 reader
@@ -288,9 +333,7 @@ fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth() 
                     _ => narrow.current.maximum_value_bytes -= 1,
                 }
             }
-            let reader =
-                AuthorizedPackedReader::new_with_cache_budget(&live, &kernel, narrow, CACHE_BYTES)
-                    .unwrap();
+            let reader = cached_reader(&live, &kernel, narrow, CACHE_BYTES, positive).unwrap();
             let expected = AuthorizedPackedReader::new(&live, &kernel, narrow)
                 .unwrap()
                 .read(&mut fs, &admin, &request, &NeverCancel)
@@ -311,12 +354,29 @@ fn authorized_packed_cached_point_history_work_limits_do_not_depend_on_warmth() 
 
 #[test]
 fn authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_visibility() {
+    authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_visibility_mode(
+        false,
+    );
+}
+
+#[test]
+fn authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_visibility_positive()
+ {
+    authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_visibility_mode(
+        true,
+    );
+}
+
+fn authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_visibility_mode(
+    positive: bool,
+) {
     let (mut fs, live, kernel, admin, bob, snapshot) = setup_cached();
-    let reader = AuthorizedPackedReader::new_with_cache_budget(
+    let reader = cached_reader(
         &live,
         &kernel,
         expansion_limits(ample()),
         CACHE_BYTES,
+        positive,
     )
     .unwrap();
     let uncached = AuthorizedPackedReader::new(&live, &kernel, expansion_limits(ample())).unwrap();
@@ -327,7 +387,7 @@ fn authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_
         uste_storage::MAX_INDEX_CACHE_BYTES + 1,
     ] {
         assert!(matches!(
-            AuthorizedPackedReader::new_with_cache_budget(&live, &kernel, read_limits(), bad),
+            cached_reader(&live, &kernel, read_limits(), bad, positive),
             Err(AuthorizedError::ResourceLimit)
         ));
     }
@@ -434,17 +494,29 @@ fn authorized_packed_cached_reference_warmth_and_maintenance_are_independent_of_
 
 #[test]
 fn authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncached() {
+    authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncached_mode(false);
+}
+
+#[test]
+fn authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncached_positive() {
+    authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncached_mode(true);
+}
+
+fn authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncached_mode(
+    positive: bool,
+) {
     let (mut fs, live, kernel, admin, _, _) = setup_cached();
     let expected = AuthorizedPackedReader::new(&live, &kernel, expansion_limits(ample()))
         .unwrap()
         .read(&mut fs, &admin, &adjacent(), &NeverCancel)
         .unwrap();
     let exact = [89, 1_828_505, 10, 3326, 10];
-    let reader = AuthorizedPackedReader::new_with_cache_budget(
+    let reader = cached_reader(
         &live,
         &kernel,
         expansion_limits(exact),
         CACHE_BYTES,
+        positive,
     )
     .unwrap();
     for _ in 0..2 {
@@ -458,11 +530,12 @@ fn authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncac
     for dimension in 0..5 {
         let mut narrow = exact;
         narrow[dimension] -= 1;
-        let reader = AuthorizedPackedReader::new_with_cache_budget(
+        let reader = cached_reader(
             &live,
             &kernel,
             expansion_limits(narrow),
             CACHE_BYTES,
+            positive,
         )
         .unwrap();
         let uncached =
@@ -485,15 +558,21 @@ fn authorized_packed_cached_expansion_exact_work_and_narrower_limits_match_uncac
 
 #[test]
 fn authorized_packed_cached_small_budgets_preserve_results_under_eviction() {
+    authorized_packed_cached_small_budgets_preserve_results_under_eviction_mode(false);
+}
+
+#[test]
+fn authorized_packed_cached_small_budgets_preserve_results_under_eviction_positive() {
+    authorized_packed_cached_small_budgets_preserve_results_under_eviction_mode(true);
+}
+
+fn authorized_packed_cached_small_budgets_preserve_results_under_eviction_mode(positive: bool) {
     let (mut fs, live, kernel, admin, bob, snapshot) = setup_cached();
-    for budget in [uste_storage::MIN_INDEX_CACHE_BYTES, 64 * 1024] {
-        let reader = AuthorizedPackedReader::new_with_cache_budget(
-            &live,
-            &kernel,
-            expansion_limits(ample()),
-            budget,
-        )
-        .unwrap();
+    let mut lookup_evictions = 0;
+    let minimum = uste_storage::MIN_INDEX_CACHE_BYTES + if positive { 8192 } else { 0 };
+    for budget in [minimum, 64 * 1024] {
+        let reader =
+            cached_reader(&live, &kernel, expansion_limits(ample()), budget, positive).unwrap();
         for _ in 0..3 {
             for principal in [&admin, &bob] {
                 for request in queries() {
@@ -514,13 +593,33 @@ fn authorized_packed_cached_small_budgets_preserve_results_under_eviction() {
                 }
             }
         }
-        assert!(reader.cache_report(&admin).unwrap().unwrap().evictions > 0);
+        let report = reader.cache_report(&admin).unwrap().unwrap();
+        assert!(report.evictions > 0);
+        if positive {
+            lookup_evictions += report.lookup.unwrap().evictions;
+            assert_eq!(
+                report.page_budget_bytes + report.lookup.unwrap().budget_bytes,
+                budget
+            );
+        }
+    }
+    if positive {
+        assert!(lookup_evictions > 0);
     }
     assert_eq!(fs.operation_count(FsOp::WriteAt), 0);
 }
 
 #[test]
 fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate() {
+    authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate_mode(false);
+}
+
+#[test]
+fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate_positive() {
+    authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate_mode(true);
+}
+
+fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate_mode(positive: bool) {
     use uste_storage::FileSystem;
     for family in [2_u8, 3, 4, 5, 6] {
         let (mut fs, live, kernel, admin, _, _) = setup_cached();
@@ -536,11 +635,12 @@ fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate() {
             },
             _ => adjacent(),
         };
-        let reader = AuthorizedPackedReader::new_with_cache_budget(
+        let reader = cached_reader(
             &live,
             &kernel,
             expansion_limits(ample()),
             CACHE_BYTES,
+            positive,
         )
         .unwrap();
         let expected = reader
@@ -616,15 +716,25 @@ fn authorized_packed_cached_late_mutation_requires_clear_to_reauthenticate() {
 
 #[test]
 fn authorized_packed_cached_read_faults_return_no_output_and_recover_cold() {
+    authorized_packed_cached_read_faults_return_no_output_and_recover_cold_mode(false);
+}
+
+#[test]
+fn authorized_packed_cached_read_faults_return_no_output_and_recover_cold_positive() {
+    authorized_packed_cached_read_faults_return_no_output_and_recover_cold_mode(true);
+}
+
+fn authorized_packed_cached_read_faults_return_no_output_and_recover_cold_mode(positive: bool) {
     let operations = [FsOp::OpenExisting, FsOp::Metadata, FsOp::ReadAt];
     let mut cases = 0;
     for request in queries() {
         let (mut fs, live, kernel, admin, _, _) = setup_cached();
-        let reader = AuthorizedPackedReader::new_with_cache_budget(
+        let reader = cached_reader(
             &live,
             &kernel,
             expansion_limits(ample()),
             CACHE_BYTES,
+            positive,
         )
         .unwrap();
         let expected = reader
@@ -671,11 +781,12 @@ fn authorized_packed_cached_read_faults_return_no_output_and_recover_cold() {
                         .unwrap(),
                     )
                     .unwrap();
-                    let reader = AuthorizedPackedReader::new_with_cache_budget(
+                    let reader = cached_reader(
                         &live,
                         &kernel,
                         expansion_limits(ample()),
                         CACHE_BYTES,
+                        positive,
                     )
                     .unwrap();
                     assert!(
@@ -700,11 +811,12 @@ fn authorized_packed_cached_read_faults_return_no_output_and_recover_cold() {
                     let (mut fs, recovered) = recover(reopen(fs, 8, 2_050_000), suffix_limits());
                     let (live, _) = recovered.unwrap();
                     assert_eq!(
-                        AuthorizedPackedReader::new_with_cache_budget(
+                        cached_reader(
                             &live,
                             &kernel,
                             expansion_limits(ample()),
-                            CACHE_BYTES
+                            CACHE_BYTES,
+                            positive
                         )
                         .unwrap()
                         .read(&mut fs, &admin, &request, &NeverCancel)
