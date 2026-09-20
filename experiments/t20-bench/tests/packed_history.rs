@@ -2,10 +2,14 @@
 //! Real separate-process packed history phases, not a qualifying recovery campaign.
 use std::{
     fs,
-    io::Write,
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
+    io::{BufRead, BufReader, Write},
+    os::unix::{
+        fs::{DirBuilderExt, OpenOptionsExt},
+        process::ExitStatusExt,
+    },
     path::PathBuf,
     process::{Child, Command, Output, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -38,7 +42,7 @@ impl Fixture {
             .unwrap();
         Self { root, password }
     }
-    fn run(&self, phase: &str) -> serde_json::Value {
+    fn command(&self, phase: &str, records: u64) -> Command {
         let mut command = Command::new(EXE);
         command
             .arg(format!("bm06-packed-linux-{phase}"))
@@ -46,14 +50,63 @@ impl Fixture {
             .arg(&self.root)
             .arg("--password-file")
             .arg(&self.password)
-            .args(["--records", "2"]);
-        let output = complete(command);
+            .arg("--records")
+            .arg(records.to_string());
+        command
+    }
+    fn run(&self, phase: &str) -> serde_json::Value {
+        let output = complete(self.command(phase, 2));
         assert!(
             output.status.success(),
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
         serde_json::from_slice(&output.stdout).unwrap()
+    }
+    fn kill_at(&self, phase: &str, pause: Option<u64>) -> u64 {
+        let mut command = self.command(phase, 2);
+        if let Some(pause) = pause {
+            command.arg("--pause-after-revision").arg(pause.to_string());
+        }
+        let mut child = OwnedChild(Some(
+            command
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        ));
+        let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = sender.send(result);
+        });
+        let line = receiver
+            .recv_timeout(Duration::from_secs(60))
+            .unwrap()
+            .unwrap();
+        let marker: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(marker["schema"], "bm06-packed-durable-prefix-v1");
+        child.0.as_mut().unwrap().kill().unwrap();
+        assert_eq!(child.0.as_mut().unwrap().wait().unwrap().signal(), Some(9));
+        child.0.take();
+        reader.join().unwrap();
+        marker["frontier"].as_u64().unwrap()
+    }
+    fn certificates(&self) -> PathBuf {
+        self.root.join("bm06-linux-packed-engine/CERTIFICATES")
+    }
+    fn remove_roots(&self) {
+        let mut removed = 0;
+        for entry in fs::read_dir(self.root.join("bm06-linux-packed-engine")).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name().to_str().unwrap().starts_with("p-") {
+                fs::remove_file(entry.path()).unwrap();
+                removed += 1;
+            }
+        }
+        assert!(removed > 0);
     }
 }
 impl Drop for Fixture {
@@ -108,7 +161,7 @@ fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
     assert_eq!(recovered["engine_benchmark"], false);
     assert_eq!(recovered["qualifying_recovery_trials"], 0);
     assert_eq!(recovered["complete_authenticated_io"], false);
-    assert_eq!(recovered["incomplete_prefix_resume_implemented"], false);
+    assert_eq!(recovered["incomplete_prefix_resume_implemented"], true);
     let rebuilt = fixture.run("rebuild");
     assert_eq!(rebuilt["origin_suffix_groups"], 100);
     assert_eq!(rebuilt["v1_state_digest"], recovered["v1_state_digest"]);
@@ -119,7 +172,15 @@ fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
 }
 #[test]
 fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
-    for phase in ["create", "open", "tail", "recover", "rebuild"] {
+    for phase in [
+        "create",
+        "open",
+        "tail",
+        "recover",
+        "rebuild",
+        "resume",
+        "tail-crash-probe",
+    ] {
         for records in ["3", "100000"] {
             let mut command = Command::new(EXE);
             command.arg(format!("bm06-packed-linux-{phase}")).args([
@@ -139,5 +200,132 @@ fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
                     .contains("USTE_BM06_PACKED_DEVELOPMENT_LIMIT")
             );
         }
+    }
+}
+
+#[test]
+fn packed_history_cli_sigkill_prefixes_resume_exactly() {
+    let reference = Fixture::new();
+    let expected = reference.run("create")["v1_state_digest"].clone();
+    for pause in [0, 1, 2, 50, 99, 100] {
+        let fixture = Fixture::new();
+        assert_eq!(fixture.kill_at("create-crash-probe", Some(pause)), pause);
+        let prefix = fs::read(fixture.certificates()).unwrap();
+        if pause != 0 {
+            assert!(!complete(fixture.command("resume", 1)).status.success());
+            assert!(
+                fs::read(fixture.certificates()).unwrap() == prefix,
+                "wrong profile changed prefix"
+            );
+        }
+        if pause == 1 {
+            let rebuilt = fixture.run("rebuild");
+            assert_eq!(rebuilt["frontier"], 1);
+            assert_eq!(rebuilt["origin_suffix_groups"], 0);
+            assert_eq!(rebuilt["verified_history_versions"], 0);
+            assert!(
+                fs::read(fixture.certificates()).unwrap() == prefix,
+                "policy rebuild appended events"
+            );
+        }
+        fs::OpenOptions::new()
+            .append(true)
+            .open(fixture.certificates())
+            .unwrap()
+            .write_all(&[0x71; 3])
+            .unwrap();
+        let resumed = fixture.run("resume");
+        assert_eq!(resumed["recovered_frontier"], pause);
+        assert_eq!(resumed["repaired_certificate_tail_bytes"], 3);
+        assert_eq!(resumed["bounded_bootstrap_resume"], pause <= 1);
+        assert_eq!(
+            resumed["resume_base_revision"],
+            if pause <= 1 { 1 } else { pause - 1 }
+        );
+        assert_eq!(resumed["resume_suffix_groups"], u64::from(pause >= 2));
+        assert_eq!(resumed["frontier"], 100);
+        assert_eq!(resumed["verified_history_versions"], 198);
+        assert_eq!(resumed["v1_state_digest"], expected);
+        let terminal = fs::read(fixture.certificates()).unwrap();
+        assert!(terminal.starts_with(&prefix), "certified prefix changed");
+        assert_eq!(fixture.run("resume")["v1_state_digest"], expected);
+        assert!(
+            fs::read(fixture.certificates()).unwrap() == terminal,
+            "resume duplicated events"
+        );
+    }
+}
+
+#[test]
+fn packed_history_cli_sigkill_tail_and_partial_origin_preserve_frontiers() {
+    let fixture = Fixture::new();
+    assert_eq!(fixture.kill_at("create-crash-probe", Some(50)), 50);
+    let prefix = fs::read(fixture.certificates()).unwrap();
+    fixture.remove_roots();
+    assert!(!complete(fixture.command("resume", 2)).status.success());
+    assert!(!complete(fixture.command("rebuild", 1)).status.success());
+    assert!(
+        fs::read(fixture.certificates()).unwrap() == prefix,
+        "cache-loss refusal changed source"
+    );
+    let rebuilt = fixture.run("rebuild");
+    assert_eq!(rebuilt["frontier"], 50);
+    assert_eq!(rebuilt["origin_suffix_groups"], 49);
+    assert_eq!(rebuilt["verified_history_versions"], 98);
+    assert!(
+        fs::read(fixture.certificates()).unwrap() == prefix,
+        "partial rebuild appended events"
+    );
+    assert_eq!(fixture.run("resume")["frontier"], 100);
+    assert_eq!(fixture.kill_at("tail-crash-probe", None), 101);
+    let terminal = fs::read(fixture.certificates()).unwrap();
+    assert!(!complete(fixture.command("open", 2)).status.success());
+    let resumed = fixture.run("resume");
+    assert_eq!(resumed["recovered_frontier"], 101);
+    assert_eq!(resumed["resume_base_revision"], 100);
+    assert_eq!(resumed["resume_suffix_groups"], 1);
+    assert_eq!(resumed["frontier"], 101);
+    assert_eq!(resumed["verified_history_versions"], 200);
+    assert!(
+        fs::read(fixture.certificates()).unwrap() == terminal,
+        "tail retry duplicated events"
+    );
+    assert_eq!(
+        fixture.run("open")["v1_state_digest"],
+        resumed["v1_state_digest"]
+    );
+    assert_eq!(
+        fixture.run("resume")["v1_state_digest"],
+        resumed["v1_state_digest"]
+    );
+    assert!(
+        fs::read(fixture.certificates()).unwrap() == terminal,
+        "terminal resume changed source"
+    );
+}
+
+#[test]
+fn packed_history_cli_probe_refuses_future_frontiers_before_io() {
+    for pause in [101, u64::MAX] {
+        let mut command = Command::new(EXE);
+        command.args([
+            "bm06-packed-linux-create-crash-probe",
+            "--root",
+            "absent-packed-history-root",
+            "--password-file",
+            "absent-packed-history-password",
+            "--records",
+            "2",
+            "--pause-after-revision",
+            &pause.to_string(),
+        ]);
+        let output = complete(command);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .contains("USTE_BM06_PACKED_PROBE_REVISION")
+        );
     }
 }

@@ -1,9 +1,11 @@
 //! Native small BM-06 checkpoint/tail pipeline; no larger-than-memory qualification.
 use super::*;
-use crate::recovery_materialization::{Bm06Profile, VERSIONS};
+use crate::recovery_materialization::Bm06Profile;
 use uste_txn::AuthorizedPackedWriter;
 const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
 const MAX_RECORDS: u64 = 2;
+mod bootstrap;
+mod continuation;
 #[cfg(test)]
 mod tests;
 
@@ -110,12 +112,61 @@ pub fn run(
     profile: Bm06Profile,
     phase: &str,
 ) -> Result<String, LinuxRunnerError> {
+    run_observed(root, password, profile, phase, &mut |_| Ok(()))
+}
+
+fn park_after_marker(revision: u64) -> Result<(), LinuxRunnerError> {
+    use std::io::Write;
+    let mut output = std::io::stdout().lock();
+    writeln!(
+        output,
+        "{{\"schema\":\"bm06-packed-durable-prefix-v1\",\"frontier\":{revision}}}"
+    )
+    .and_then(|()| output.flush())
+    .map_err(|_| error("USTE_BM06_PACKED_PROBE_SIGNAL"))?;
+    loop {
+        std::thread::park();
+    }
+}
+
+/// Test-only owned-child control, including empty and policy-only bootstrap frontiers.
+pub fn create_crash_probe(
+    root: &Path,
+    password: &Path,
+    profile: Bm06Profile,
+    pause: u64,
+) -> Result<String, LinuxRunnerError> {
     if profile.records() > MAX_RECORDS {
         return Err(error("USTE_BM06_PACKED_DEVELOPMENT_LIMIT"));
     }
-    if !matches!(phase, "create" | "open" | "tail" | "recover" | "rebuild") {
+    if pause > profile.checkpoint_revision() {
+        return Err(error("USTE_BM06_PACKED_PROBE_REVISION"));
+    }
+    run_observed(root, password, profile, "create", &mut |revision| {
+        if revision == pause {
+            park_after_marker(revision)?;
+        }
+        Ok(())
+    })
+}
+
+fn run_observed(
+    root: &Path,
+    password: &Path,
+    profile: Bm06Profile,
+    phase: &str,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<String, LinuxRunnerError> {
+    if profile.records() > MAX_RECORDS {
+        return Err(error("USTE_BM06_PACKED_DEVELOPMENT_LIMIT"));
+    }
+    if !matches!(
+        phase,
+        "create" | "open" | "tail" | "recover" | "rebuild" | "resume" | "tail-crash-probe"
+    ) {
         return Err(error("USTE_BM06_PACKED_PHASE"));
     }
+    let is_tail = matches!(phase, "tail" | "tail-crash-probe");
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
@@ -133,50 +184,40 @@ pub fn run(
             GraphState::new(scope()),
         )
         .map_err(|_| error("USTE_BM06_PACKED_CREATE"))?;
-        raw.commit(
-            &mut fs,
-            TransactionRequest {
-                principal: PRINCIPAL,
-                idempotency_key: bootstrap_id(profile, IdempotencyKey::from_bytes),
-                transaction_id: bootstrap_id(profile, TransactionId::from_bytes),
-                canonical_request: &policy_bytes()?,
-                blob_inventory: None,
-            },
-            &mut SystemClock::new(),
-            &NeverCancel,
-        )
-        .map_err(|_| error("USTE_BM06_PACKED_BOOTSTRAP"))?;
+        observer(0)?;
+        bootstrap::install(&mut raw, &mut fs, profile)?;
+        observer(1)?;
         drop(raw);
     }
     let (mut recovery, recovered) = open(&mut fs, &mut adapter, limits)?;
+    let recovered_frontier = recovered.frontier.map_or(0, |revision| revision.get());
+    let bootstrap_resume = phase == "resume" && recovered_frontier <= 1;
+    if bootstrap_resume {
+        recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
+    }
     binding(&mut fs, &mut recovery, profile)?;
     let mut kernel =
         kernel(crate::engine::recovery::recovery_policy().map_err(|_| error("USTE_BM06_POLICY"))?)
             .map_err(|_| error("USTE_BM06_POLICY"))?;
     let principal = authenticate(&kernel)?;
-    if phase == "create" {
-        if recovered.frontier.map(|r| r.get()) != Some(1) {
+    let mut resume_base_revision = None;
+    let mut resume_suffix_groups = None;
+    if phase == "create" || phase == "resume" {
+        if phase == "create" && recovered_frontier != 1 {
             return Err(error("USTE_BM06_PACKED_FRONTIER"));
         }
-        let (mut live, _) = recover_packed_graph_origin(
+        let (live, base, groups) = continuation::complete(
             recovery,
             &mut fs,
-            retention()?,
-            CoordinatorRecoveryLimits::new(1, 0).map_err(|_| error("USTE_BM06_LIMITS"))?,
-            limits.origin,
-        )
-        .map_err(|_| error("USTE_BM06_PACKED_BOOTSTRAP"))?;
-        for sequence in 2..=profile.checkpoint_revision() {
-            engine::commit_batch(
-                &mut live,
-                &mut fs,
-                &mut kernel,
-                &principal,
-                batch(profile, sequence)?,
-                &mut SystemClock::new(),
-                limits,
-            )
-            .map_err(|_| error("USTE_BM06_PACKED_MATERIALIZE"))?;
+            profile,
+            limits,
+            &mut kernel,
+            &principal,
+            observer,
+        )?;
+        if phase == "resume" {
+            resume_base_revision = Some(base);
+            resume_suffix_groups = Some(groups);
         }
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
@@ -186,9 +227,12 @@ pub fn run(
         .ok_or_else(|| error("USTE_BM06_PACKED_FRONTIER"))?
         .0
         .get();
+    counts(profile, frontier)?;
     if (phase == "recover" && frontier != profile.frontier())
-        || (phase == "tail" && frontier != profile.checkpoint_revision())
-        || (frontier != profile.frontier() && frontier != profile.checkpoint_revision())
+        || (is_tail && frontier != profile.checkpoint_revision())
+        || (phase != "rebuild"
+            && frontier != profile.frontier()
+            && frontier != profile.checkpoint_revision())
     {
         return Err(error("USTE_BM06_PACKED_FRONTIER"));
     }
@@ -223,14 +267,13 @@ pub fn run(
         counts(profile, base.get())?,
     )
     .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
-    let versions = if frontier == profile.frontier() {
-        VERSIONS
+    let versions = frontier - 1; // Native cap guarantees one batch per generation.
+    let verified = if versions == 0 {
+        0
     } else {
-        VERSIONS - 1
-    };
-    let verified =
         engine::recovery::verify_history(&live, &mut fs, &kernel, &principal, profile, versions)
-            .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
+            .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?
+    };
     if phase == "recover" {
         engine::commit_batch(
             &mut live,
@@ -246,7 +289,7 @@ pub fn run(
             return Err(error("USTE_BM06_PACKED_RETRY"));
         }
     }
-    if phase == "tail" {
+    if is_tail {
         let request = batch(profile, profile.frontier())?;
         let bytes = encode_transaction(&GraphTransaction::new(scope(), request.operations))
             .map_err(|_| error("USTE_BM06_PACKED_BATCH"))?;
@@ -276,10 +319,13 @@ pub fn run(
             }) if outcome.revision.get() == profile.frontier() => (),
             _ => return Err(error("USTE_BM06_PACKED_EXPECTED_TAIL")),
         }
+        if phase == "tail-crash-probe" {
+            park_after_marker(profile.frontier())?;
+        }
     }
     drop(live);
     // A tail intentionally has no terminal triple and therefore no terminal digest claim.
-    let digest = if phase == "tail" {
+    let digest = if is_tail {
         None
     } else {
         let recovery = open(&mut fs, &mut adapter, limits)?.0;
@@ -296,10 +342,12 @@ pub fn run(
         "filesystem_profile": "linux-x86_64-btrfs", "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
         "complete_authenticated_io": false, "kernel_filesystem_device_cache": "uncontrolled",
-        "records": profile.records(), "frontier": if phase == "tail" { profile.frontier() } else { frontier },
+        "records": profile.records(), "frontier": if is_tail { profile.frontier() } else { frontier },
         "selected_base_revision": base.get(), "suffix_groups": suffix, "origin_suffix_groups": origin_groups,
         "verified_history_versions": verified, "history_verified_through_revision": frontier, "v1_state_digest": digest,
-        "derived_terminal_pending": phase == "tail", "incomplete_prefix_resume_implemented": false,
+        "derived_terminal_pending": is_tail, "incomplete_prefix_resume_implemented": true,
+        "recovered_frontier": recovered_frontier, "bounded_bootstrap_resume": bootstrap_resume,
+        "resume_base_revision": resume_base_revision, "resume_suffix_groups": resume_suffix_groups,
         "elapsed_milliseconds": started.elapsed().as_millis(), "current_rss_kib": rss, "process_peak_rss_kib": peak,
         "repaired_certificate_tail_bytes": recovered.repaired_certificate_tail_bytes,
         "ignored_uncommitted_journal_bytes": recovered.ignored_uncommitted_journal_bytes,

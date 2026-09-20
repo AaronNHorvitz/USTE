@@ -75,6 +75,7 @@ credential/Btrfs-root setup; no existing v1 or BM-01 database is replaced:
 ```sh
 cargo run --release --locked --offline -- bm06-packed-linux-create --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-open --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-resume --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-tail --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-recover --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
 cargo run --release --locked --offline -- bm06-packed-linux-rebuild --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
@@ -82,10 +83,18 @@ cargo run --release --locked --offline -- bm06-packed-linux-rebuild --root "$UST
 
 Create ends at checkpoint 100 with 198 verified versions; tail certifies frontier 101 but leaves
 derived publication pending, reports verification only through checkpoint 100 and claims no terminal
-digest. Recover streams the suffix, verifies all 200 versions and exact-retries the tail. Rebuild is
-explicit journal-origin reconstruction at either complete frontier. Ordinary open fails on missing
-or corrupt terminal roots; all-cache loss is not silently rebuilt. Incomplete construction resume
-and packed BM-06 owned-child process-loss controls remain unsupported in these initial native phases.
+digest. Recover streams the suffix, verifies all 200 versions and exact-retries the tail. Decision
+0172 resume validates existing history and finishes incomplete construction at checkpoint 100;
+already certified frontier 101 stays 101. Only zero/one-revision prefixes use bounded ordinary
+bootstrap (one outcome/zero owners/1 MiB replay); certified policy identities must match exactly.
+Rebuild explicitly reconstructs the actual authenticated prefix, including incomplete construction,
+without appending events. After all-cache loss, run rebuild before resume. Ordinary open still
+requires a complete checkpoint/terminal triple; resume never silently reconstructs missing bases.
+
+`bm06-packed-linux-create-crash-probe ... --pause-after-revision N` and
+`bm06-packed-linux-tail-crash-probe ...` are test-only parked-child controls. Run them only under an
+owning supervisor that terminates/reaps its child. Regression tests use real SIGKILL at bootstrap,
+incomplete graph/metadata publication and final certified-tail boundaries, not simulated power loss.
 The two-record cap is unchanged. None of these commands qualifies BM-06 or measures complete I/O.
 
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not

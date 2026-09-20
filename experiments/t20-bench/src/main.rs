@@ -63,13 +63,18 @@ fn run() -> Result<(), String> {
         if (phase == "create-crash-probe") != pause.is_some() {
             return Err("only BM-06 create-crash-probe requires --pause-after-revision".into());
         }
-        if packed_history && pause.is_some() {
-            return Err("packed BM-06 process probe is not implemented".into());
-        }
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let report = if packed_history {
-                uste_t20_bench::linux_runner::packed::history::run(&root, &password, profile, phase)
+                if let Some(pause) = pause {
+                    uste_t20_bench::linux_runner::packed::history::create_crash_probe(
+                        &root, &password, profile, pause,
+                    )
+                } else {
+                    uste_t20_bench::linux_runner::packed::history::run(
+                        &root, &password, profile, phase,
+                    )
+                }
             } else if let Some(pause) = pause {
                 uste_t20_bench::linux_runner::disk::recovery::create_crash_probe(
                     &root, &password, profile, pause,
@@ -418,7 +423,8 @@ fn print_usage() {
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench bm06-packed-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|rebuild> --root ROOT --password-file PASSWORD --records COUNT (at most 2; nonqualifying)\n\
+         uste-t20-bench bm06-packed-linux-<create|open|tail|recover|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 2; nonqualifying)\n\
+         uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \

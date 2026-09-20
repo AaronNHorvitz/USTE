@@ -2,7 +2,48 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native packed BM-06 terminal pipeline (Decision 0171)
+## Latest verified increment — packed BM-06 prefix/process recovery (Decision 0172)
+
+Implemented on pushed `33d7588` plus this increment: native packed BM-06 resume reconstructs only
+zero/one-revision bootstrap (one outcome/zero owners/1 MiB replay), rejects foreign principal/key/
+request and otherwise uses admitted packed triples with authenticated suffix streaming. It verifies
+existing history before fresh writes and exact-retries every original batch. Incomplete construction
+finishes at checkpoint 100; an already certified 101 stays 101. Explicit rebuild now reconstructs
+only the actual prefix, including policy-only and incomplete data-bearing prefixes, without appending
+events. Complete cache loss remains a resume refusal until explicit reconstruction.
+
+Construction/tail probes park after durable creation, policy acknowledgement, graph publication
+before metadata rebase, or the final certified-but-unpublished tail. Tests kill/reap only owned
+children. Focused session 22299 / `run-p805286-i21799970.scope` passed five CLI tests/51.54 s,
+compile 24.33 s and Clippy/0.13 s. Eight actual SIGKILL cases cover construction 0/1/2/50/99/100,
+partial cache-loss rebuild at 50 and final tail 101. Wrong certified dimensions, three-byte tail
+repair, exact frontier/history/digest preservation and no duplicate commits pass.
+
+Session 41548 / `run-p806174-i21765885.scope` exited 0: 77 active library tests/136.06 s with
+two pre-existing ignored campaigns, plus five CLI cases/52.35 s, including policy-only explicit
+reconstruction and foreign bootstrap refusals. Compile 25.54 s, Clippy 0.67 s; zero failures.
+Preflight 30 GiB available RAM/3.6 GiB free swap; sampled scope peak 373,899,264 bytes/zero swap.
+One job/thread and 3G/4G/512M caps retained; format/diff/docs/task graph checks pass.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --test packed_history --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d172-history-resume-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Other process suites retain their 96-test full gate at `33d7588`, not a new run. Core source remains
+unchanged with 658 tests at `6bb43a4`; pending BM-01 partial-rebuild helper work is excluded. Next
+close the corresponding explicit partial-cache rebuild gap in the packed BM-01 runner, then add
+packed sampling/complete I/O evidence and resource-safe scale work before qualifying campaigns.
+The native BM-06 two-record cap and all benchmark thresholds are unchanged. T-20/T-19 remain
+unchecked; pinned M1, full roadmap, lockfile and release gates remain unchanged. This section
+supersedes earlier next steps; process-loss correctness is not power-loss or performance qualification.
+
+## Prior verified increment — native packed BM-06 terminal pipeline (Decision 0171)
 
 Implemented on pushed `2819afd` plus this increment: separate native packed BM-06 commands create
 checkpoint 100, open, certify a pending tail at 101, recover and explicitly rebuild. Real credential

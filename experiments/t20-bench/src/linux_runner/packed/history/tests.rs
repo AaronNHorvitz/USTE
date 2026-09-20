@@ -177,7 +177,7 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
         .unwrap()
         .write_all(b"wrong synthetic password")
         .unwrap();
-    for phase in ["open", "tail", "recover", "rebuild"] {
+    for phase in ["open", "tail", "recover", "rebuild", "resume"] {
         assert!(
             run(
                 &fixture.root,
@@ -198,7 +198,7 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
     let mut bytes = fs::read(&path).unwrap();
     bytes[100 * 4161 + 137] ^= 1;
     fs::write(&path, &bytes).unwrap();
-    for phase in ["open", "tail", "recover", "rebuild"] {
+    for phase in ["open", "tail", "recover", "rebuild", "resume"] {
         assert!(fixture.run(phase).is_err());
         assert!(
             fs::read(&path).unwrap() == bytes,
@@ -215,7 +215,15 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
 fn packed_history_native_admission_precedes_filesystem_access() {
     let absent = Path::new("absent-packed-history-admission");
     for records in [3, 100000] {
-        for phase in ["create", "open", "tail", "recover", "rebuild"] {
+        for phase in [
+            "create",
+            "open",
+            "tail",
+            "recover",
+            "rebuild",
+            "resume",
+            "tail-crash-probe",
+        ] {
             assert_eq!(
                 run(absent, absent, Bm06Profile::new(records).unwrap(), phase)
                     .unwrap_err()
@@ -225,11 +233,75 @@ fn packed_history_native_admission_precedes_filesystem_access() {
         }
     }
     assert_eq!(
-        run(absent, absent, Bm06Profile::new(2).unwrap(), "resume")
+        run(absent, absent, Bm06Profile::new(2).unwrap(), "unexpected")
             .unwrap_err()
             .code(),
         "USTE_BM06_PACKED_PHASE"
     );
+}
+
+#[test]
+fn packed_history_native_bootstrap_rejects_foreign_principal_key_and_request() {
+    for variant in 0..3 {
+        let fixture = Fixture::new();
+        let profile = Bm06Profile::new(2).unwrap();
+        let mut fs = ObservedFileSystem::new(open_filesystem(&fixture.root).unwrap());
+        let mut adapter =
+            PortableRecoveryAdapter::new(credential::read_password(&fixture.password).unwrap());
+        let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy).unwrap();
+        let mut raw = CommitCoordinator::create(
+            &mut fs,
+            scope(),
+            retention().unwrap(),
+            EntryName::new(HISTORY_DATABASE).unwrap(),
+            vault,
+            OsEntropy,
+            GraphState::new(scope()),
+        )
+        .unwrap();
+        let request = if variant == 2 {
+            encode_transaction(&GraphTransaction::new(
+                scope(),
+                profile.batch(scope(), 2).unwrap(),
+            ))
+            .unwrap()
+        } else {
+            policy_bytes().unwrap()
+        };
+        raw.commit(
+            &mut fs,
+            TransactionRequest {
+                principal: if variant == 0 {
+                    uste_policy::PrincipalDigest::from_bytes([99; 32])
+                } else {
+                    PRINCIPAL
+                },
+                idempotency_key: if variant == 1 {
+                    IdempotencyKey::from_bytes([99; 16])
+                } else {
+                    bootstrap_id(profile, IdempotencyKey::from_bytes)
+                },
+                transaction_id: bootstrap_id(profile, TransactionId::from_bytes),
+                canonical_request: &request,
+                blob_inventory: None,
+            },
+            &mut SystemClock::new(),
+            &NeverCancel,
+        )
+        .unwrap();
+        drop(raw);
+        drop(fs);
+        let source = fixture.files(false);
+        assert!(fixture.run("resume").is_err());
+        assert!(
+            fixture.files(false) == source,
+            "rejected bootstrap changed source"
+        );
+        assert!(
+            fixture.files(true).is_empty(),
+            "rejected bootstrap published roots"
+        );
+    }
 }
 
 #[test]
