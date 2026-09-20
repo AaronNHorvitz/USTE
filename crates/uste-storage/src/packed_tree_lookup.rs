@@ -226,6 +226,19 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
     if expected.entries() == 0 {
         return Err(StorageError::IntegrityFailure);
     }
+    let identity = cache
+        .as_ref()
+        .filter(|cache| cache.has_lookup_cache())
+        .map(|_| crate::packed_page_cache::LookupIdentity::new(context, location, expected));
+    let mut cache = cache;
+    if let (Some(cache), Some(identity)) = (cache.as_deref_mut(), identity)
+        && let Some((bytes, report)) = cache.lookup_get(vault, identity, key, limits)?
+    {
+        return Ok(TreeLookupResult {
+            value: Some(PackedLookupValue(bytes)),
+            report,
+        });
+    }
     let mut reader = Reader {
         filesystem,
         directory,
@@ -329,6 +342,11 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
                     None => None,
                     Some(value) => Some(reader.value(value, first_chunk)?),
                 };
+                if let (Some(cache), Some(value), Some(identity)) =
+                    (reader.cache.as_deref_mut(), value.as_ref(), identity)
+                {
+                    cache.lookup_insert(vault, identity, key, value.as_slice(), reader.report)?;
+                }
                 return Ok(TreeLookupResult {
                     value,
                     report: reader.report,

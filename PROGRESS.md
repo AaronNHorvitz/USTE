@@ -2,6 +2,61 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — bounded positive lookup cache (Decision 0214)
+
+Last committed and pushed baseline is `ce2a118` (D0213). D0214 adds an explicit opt-in
+positive-result partition within the existing privileged packed-cache total budget. Default
+page-only behavior is preserved; no consumer or native campaign enables the new mode. Exact
+owner/session/root/key binding and original logical proof-work limits remain mandatory.
+Three new primitive reference/admission/overflow tests passed with one Cargo job/test thread,
+test opt-level 1 and debug/overflow checks enabled, under 3G MemoryHigh/4G MemoryMax/512M
+MemorySwapMax. Log `/tmp/uste-d214-lookup-verification.log`; compile 35.83s, tests 0.01s.
+The completed scope no longer exposes its peak; no peak is inferred.
+
+Added shared encrypted fixtures covering both modes: exact lookup/cursor work, all four
+limits, foreign owners, lock/unlock sessions, late corruption and every observed cold-read
+I/O fault followed by reopening. Added partition boundary checks. Storage library verification
+passed in session 69400 / `uste-d214-integration.scope`, invocation
+`2ce1a40cd0e44cc0be54a540387bb037`, after fresh 25 GiB available RAM/2 GiB free swap/952 GiB
+disk and no competing heavy workload. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d214-integration.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --lib --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d214-integration-verification.log; verification_status=$?; systemctl --user show uste-d214-integration.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+All 239 tests passed, zero failures/ignores, compile 26.97s and tests 31.41s. Measured scope
+peak 903,458,816 bytes, zero swap, CPU 58,689,230,000 ns. Two further encrypted tests verify
+real identity construction for every context/locator/commitment component, no decryption or
+page lookup on positive hits, non-retention of absent keys and clearing both partitions on lock.
+They passed in session 46592 / `uste-d214-positive.scope`, invocation
+`fe74c420e47c40a78f0895e5bda972da`: compile 18.29s, tests 0.00s, 239 other tests filtered.
+Same resource limits and fresh 25 GiB RAM/2 GiB free swap; peak 854,495,232 bytes, zero swap,
+CPU 29,949,608,000 ns. Exact selected test command is the storage command above with selector
+`positive_cache_` before `--`, followed by `CARGO_BUILD_JOBS=1 cargo clippy --workspace
+--all-targets --all-features --locked --offline -- -D warnings` (passed, 11.29s). Combined log
+`/tmp/uste-d214-positive-verification.log`.
+
+Full workspace verification started in session 29344 / `uste-d214-workspace.scope`, invocation
+`3167c5e1e13246e4b592f64caeb953b2`, after fresh 25 GiB RAM/2 GiB free swap/952 GiB disk and
+no competing heavy workload. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d214-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d214-workspace-verification.log; verification_status=$?; systemctl --user show uste-d214-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Full gate passed, exit zero: **746 tests across 47 executables, zero failures/ignores**;
+compile 1m54s, graph disk 120/489.53s, coordinator checkpoint 50/112.99s, storage 241/31.71s,
+transaction coordinator 118/116.86s. Strict workspace Clippy passed (0.05s incremental);
+warnings-denied documentation passed (14.52s). Final scope peak **3,221,487,616 bytes**, zero
+swap, CPU 888,472,862,000 ns. Formatting, documentation links and task graph checks passed.
+The implementation and test baseline is `ce2a118` plus the reviewed D0214 changes in this
+increment; no native benchmark or M1 consumer was switched to the new mode.
+
+Next: commit/push D0214, then integrate an explicitly configured authorized reader, verifying
+current permissions, hidden references, cancellation and aggregate work in both cache modes
+before selecting a native comparison configuration. T-20/T-19 remain incomplete;
+the pinned M1 result and all qualifying benchmark targets/reservations remain unchanged.
+
 ## Latest verified increment — native encryption-owner ledger (Decision 0213)
 
 Core D0212 is committed/pushed as `946955d`. After fresh 25 GiB available RAM/2.0 GiB free
@@ -58,11 +113,8 @@ CPU 290,484,977,000 ns. Release binary SHA-256
 Formatting, documentation and task graph checks passed. No core source changed after D0212's
 736-test workspace verification; this standalone run verifies the additional integration.
 
-Next commit/push the reviewed integration and continue T-20 performance/accounting prerequisites.
-D0211's measured four-hop gap prevents a qualification claim. Investigate bounded reuse of
-fully authenticated positive point-lookup results: exact owner/session/root/physical/key binding,
-unchanged per-request authorization and proof-work admission, shared explicit memory accounting,
-zeroizing retention and cold/reference/fault equivalence are prerequisites before enabling it.
+Committed and pushed as `ce2a118`. D0211's measured four-hop gap still prevents qualification;
+continued with the bounded positive-lookup implementation and evidence recorded above.
 No new cache capability is implemented or measured yet. No unchanged large run or target reduction.
 
 ## Latest verified core increment — vault encryption accounting (Decision 0212)

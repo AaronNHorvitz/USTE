@@ -8,6 +8,10 @@ use crate::{
 };
 use std::sync::Arc;
 use uste_crypto::{CryptoError, EntropySource, KeyVault, UnlockedKeySession};
+mod lookup;
+use crate::packed_tree_lookup::{TreeLookupLimits, TreeLookupReport};
+pub(crate) use lookup::Identity as LookupIdentity;
+pub use lookup::PackedLookupCacheReport;
 #[cfg(test)]
 mod tests;
 
@@ -17,12 +21,16 @@ const ENTRY_BYTES: usize = PAGE_BYTES + 1024;
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PackedCacheReport {
     pub budget_bytes: usize,
+    /// Page partition; equals the total in the unchanged page-only mode.
+    pub page_budget_bytes: usize,
     pub accounted_bytes: usize,
     pub resident_pages: usize,
     pub hits: u64,
     /// Cache misses, including failed page-load attempts; not physical I/O.
     pub misses: u64,
     pub evictions: u64,
+    /// Included in total accounted bytes, never add it a second time.
+    pub lookup: Option<PackedLookupCacheReport>,
 }
 /// Bounded resident plaintext with logical accounting, not an RSS or erasure guarantee.
 /// Private readers may retain a bounded page handle during proof validation after eviction.
@@ -30,6 +38,8 @@ pub struct PackedCacheReport {
 /// or explicit clear/drop, not synchronously by an independently owned vault.
 pub struct PackedPageCache {
     budget: usize,
+    page_budget: usize,
+    lookup: Option<lookup::LookupCache>,
     pages: CachePages<PackedPageContext, Arc<PackedPage>>,
     owner: Option<CertificateAnchorProof>,
     session: Option<UnlockedKeySession>,
@@ -60,6 +70,8 @@ impl PackedPageCache {
         }
         Ok(Self {
             budget,
+            page_budget: budget,
+            lookup: None,
             pages: CachePages::default(),
             owner: None,
             session: None,
@@ -69,27 +81,57 @@ impl PackedPageCache {
             overflowed: false,
         })
     }
+    /// Trusted opt-in partition of one total budget, not an additional unreported cache.
+    /// Positive results still require exact owner/session/root binding and normal authorization.
+    pub fn new_with_lookup_budget(total: usize, lookup_bytes: usize) -> Result<Self, StorageError> {
+        let mut cache = Self::new(total)?;
+        let page_budget = total
+            .checked_sub(lookup_bytes)
+            .ok_or(StorageError::ResourceLimit)?;
+        if page_budget < MIN_INDEX_CACHE_BYTES {
+            return Err(StorageError::ResourceLimit);
+        }
+        cache.lookup = Some(lookup::LookupCache::new(lookup_bytes)?);
+        cache.page_budget = page_budget;
+        Ok(cache)
+    }
+    pub(crate) fn has_lookup_cache(&self) -> bool {
+        self.lookup.is_some()
+    }
     /// Clear only this USTE cache and its binding, not host caches or cumulative counters.
     pub fn clear(&mut self) {
         self.pages = CachePages::default();
         self.owner = None;
         self.session = None;
+        if let Some(lookup) = &mut self.lookup {
+            lookup.clear();
+        }
     }
     pub fn report(&self) -> Result<PackedCacheReport, StorageError> {
         if self.overflowed {
             return Err(StorageError::ResourceLimit);
         }
+        let lookup = self
+            .lookup
+            .as_ref()
+            .map(lookup::LookupCache::report)
+            .transpose()?;
+        let page_bytes = if self.pages.is_empty() {
+            0
+        } else {
+            FIXED_BYTES + self.pages.len() * ENTRY_BYTES
+        };
         Ok(PackedCacheReport {
             budget_bytes: self.budget,
-            accounted_bytes: if self.pages.is_empty() {
-                0
-            } else {
-                FIXED_BYTES + self.pages.len() * ENTRY_BYTES
-            },
+            page_budget_bytes: self.page_budget,
+            accounted_bytes: page_bytes
+                .checked_add(lookup.map_or(0, |r| r.accounted_bytes))
+                .ok_or(StorageError::ResourceLimit)?,
             resident_pages: self.pages.len(),
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
+            lookup,
         })
     }
     pub(crate) fn bind(
@@ -166,12 +208,66 @@ impl PackedPageCache {
             ENCODED_PAGE_BYTES as u64,
         )?;
         let page = Arc::new(page);
-        let capacity = (self.budget - FIXED_BYTES) / ENTRY_BYTES;
+        let capacity = (self.page_budget - FIXED_BYTES) / ENTRY_BYTES;
         let (_, evicted) = self.pages.insert(context, Arc::clone(&page), capacity)?;
         if evicted {
             increment(&mut self.evictions, &mut self.overflowed);
         }
         Ok(page)
+    }
+    pub(crate) fn lookup_get<W, E: EntropySource>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        key: &[u8],
+        limits: TreeLookupLimits,
+    ) -> Result<Option<lookup::CachedLookup>, StorageError> {
+        if self.lookup.is_none() {
+            return Ok(None);
+        }
+        self.check_lookup_session(vault)?;
+        self.lookup
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .get(identity, key, limits)
+    }
+    pub(crate) fn lookup_insert<W, E: EntropySource>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        key: &[u8],
+        bytes: &[u8],
+        report: TreeLookupReport,
+    ) -> Result<(), StorageError> {
+        if self.lookup.is_none() {
+            return Ok(());
+        }
+        self.check_lookup_session(vault)?;
+        self.lookup
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .insert(identity, key, bytes, report)
+    }
+    fn check_lookup_session<W, E: EntropySource>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+    ) -> Result<(), StorageError> {
+        let session = match vault.unlocked_session() {
+            Ok(session) => session,
+            Err(error) => {
+                self.clear();
+                return Err(StorageError::Crypto(error));
+            }
+        };
+        if self.owner.is_none()
+            || !self
+                .session
+                .as_ref()
+                .is_some_and(|old| old.same_session(session))
+        {
+            return Err(StorageError::Crypto(CryptoError::InvalidContext));
+        }
+        Ok(())
     }
 }
 fn increment(counter: &mut u64, overflowed: &mut bool) {

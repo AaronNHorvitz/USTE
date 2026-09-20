@@ -1,12 +1,26 @@
 use super::*;
 use crate::packed_page_cache::PackedPageCache;
+mod positive;
 
 fn cache() -> PackedPageCache {
     PackedPageCache::new(256 * 1024).unwrap()
 }
 
+fn lookup_cache() -> PackedPageCache {
+    PackedPageCache::new_with_lookup_budget(256 * 1024, 64 * 1024).unwrap()
+}
+
 #[test]
 fn packed_cached_lookup_and_cursors_preserve_results_and_work_limits() {
+    lookup_and_cursors(cache);
+}
+
+#[test]
+fn packed_positive_cached_lookup_and_cursors_preserve_results_and_work_limits() {
+    lookup_and_cursors(lookup_cache);
+}
+
+fn lookup_and_cursors(cache: fn() -> PackedPageCache) {
     let mut f = Fixture::new(false);
     let staged = initial(&mut f);
     let tree = staged.tree();
@@ -41,17 +55,19 @@ fn packed_cached_lookup_and_cursors_preserve_results_and_work_limits() {
     exact.maximum_pages = reference.report.pages;
     exact.maximum_encoded_bytes = reference.report.encoded_bytes;
     exact.maximum_value_bytes = 20_000;
+    exact.maximum_path_branches = reference.report.path_branches;
     assert!(
         f.store
             .packed_tree_get_cached(&mut f.fs, tree, b"b", exact, &mut cache)
             .is_ok()
     );
-    for variant in 0..3 {
+    for variant in 0..4 {
         let mut narrow = exact;
         match variant {
             0 => narrow.maximum_pages -= 1,
             1 => narrow.maximum_encoded_bytes -= 1,
-            _ => narrow.maximum_value_bytes -= 1,
+            2 => narrow.maximum_value_bytes -= 1,
+            _ => narrow.maximum_path_branches -= 1,
         }
         assert!(
             f.store
@@ -106,6 +122,15 @@ fn packed_cached_lookup_and_cursors_preserve_results_and_work_limits() {
 
 #[test]
 fn packed_cached_owner_unlock_session_and_exhausted_cursor_never_bypass_keys() {
+    owner_and_session(cache);
+}
+
+#[test]
+fn packed_positive_cached_owner_unlock_session_never_bypass_keys() {
+    owner_and_session(lookup_cache);
+}
+
+fn owner_and_session(cache: fn() -> PackedPageCache) {
     let mut f = Fixture::new(false);
     let staged = initial(&mut f);
     let tree = staged.tree();
@@ -178,6 +203,15 @@ fn packed_cached_owner_unlock_session_and_exhausted_cursor_never_bypass_keys() {
 
 #[test]
 fn packed_cached_late_corruption_is_detected_after_clear_not_hidden_as_a_miss() {
+    late_corruption(cache);
+}
+
+#[test]
+fn packed_positive_cached_late_corruption_is_detected_after_clear() {
+    late_corruption(lookup_cache);
+}
+
+fn late_corruption(cache: fn() -> PackedPageCache) {
     let mut f = Fixture::new(false);
     let staged = initial(&mut f);
     let tree = staged.tree();
@@ -243,6 +277,15 @@ fn packed_cached_late_corruption_is_detected_after_clear_not_hidden_as_a_miss() 
 
 #[test]
 fn packed_cached_cold_faults_return_no_value_and_reopen_with_empty_cache() {
+    cold_faults(cache);
+}
+
+#[test]
+fn packed_positive_cached_cold_faults_never_retain_values_and_reopen() {
+    cold_faults(lookup_cache);
+}
+
+fn cold_faults(cache: fn() -> PackedPageCache) {
     let operations = [
         Operation::OpenExisting,
         Operation::Metadata,
@@ -283,6 +326,9 @@ fn packed_cached_cold_faults_return_no_value_and_reopen_with_empty_cache() {
                         .is_err()
                 );
                 assert_eq!(f.fs.pending_faults(), 0);
+                if let Some(report) = cache.report().unwrap().lookup {
+                    assert_eq!(report.resident_values, 0);
+                }
                 assert_eq!(f.fs.operation_count(Operation::WriteAt), 0);
                 let mut f = reopen(f);
                 let proof = f.proof(2).unwrap();
