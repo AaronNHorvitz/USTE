@@ -363,6 +363,12 @@ fn packed_native_limits_and_phase_refuse_before_io() {
             .code(),
         "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
     );
+    assert_eq!(
+        query_correctness_with_lookup(absent, absent, absent, Bm01Profile::qualifying())
+            .unwrap_err()
+            .code(),
+        "USTE_BM01_DISK_DEVELOPMENT_LIMIT"
+    );
 }
 #[test]
 fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
@@ -441,6 +447,39 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
     assert_eq!(output["complete_authenticated_io"], false);
     assert_eq!(output["query_adapter_io"]["write_returned_bytes"], 0);
     assert!(output["cache_hits"].as_u64().unwrap() > 0);
+    assert!(output["query_cache_configuration"]["lookup"].is_null());
+    let positive: serde_json::Value = serde_json::from_str(
+        &query_correctness_with_lookup(&fixture.root, &fixture.password, &oracle, profile).unwrap(),
+    )
+    .unwrap();
+    for field in [
+        "output_digest",
+        "queries",
+        "successful_queries",
+        "expected_visit_limits",
+        "expected_result_limits",
+        "visits",
+        "logical_result_bytes",
+        "oracle_summary_digest",
+    ] {
+        assert_eq!(positive[field], output[field], "{field}");
+    }
+    assert_eq!(positive["query_adapter_io"]["write_returned_bytes"], 0);
+    assert_eq!(
+        positive["query_cache_configuration"]["total_budget_bytes"],
+        64 * 1024 * 1024
+    );
+    assert_eq!(
+        positive["query_cache_configuration"]["lookup_budget_bytes"],
+        16 * 1024 * 1024
+    );
+    assert!(
+        positive["query_cache_configuration"]["lookup"]["hits"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(positive["complete_authenticated_io"], false);
     assert!(
         fixture.files(false) == source,
         "authoritative bytes changed"
@@ -454,6 +493,12 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
     .unwrap();
     assert_eq!(
         query_correctness(&fixture.root, &fixture.password, &oracle, profile)
+            .unwrap_err()
+            .code(),
+        "USTE_BM01_ORACLE_PROFILE"
+    );
+    assert_eq!(
+        query_correctness_with_lookup(&fixture.root, &fixture.password, &oracle, profile)
             .unwrap_err()
             .code(),
         "USTE_BM01_ORACLE_PROFILE"

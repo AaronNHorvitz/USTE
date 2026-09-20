@@ -1,4 +1,5 @@
 use super::crypto_work::CryptoWork;
+use super::query_cache::QueryCacheMode;
 use super::*;
 use crate::engine::execute_query_with;
 
@@ -8,20 +9,49 @@ pub fn query_correctness(
     oracle_file: &Path,
     profile: Bm01Profile,
 ) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Pages,
+    )
+}
+
+pub fn query_correctness_with_lookup(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Positive,
+    )
+}
+
+fn query_mode(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+    mode: QueryCacheMode,
+) -> Result<String, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
     let summary = read_oracle_summary(oracle_file)?;
     validate_measured_summary(&summary, profile)?;
     let mut session = prepare(root, password_file, profile, "open")?;
-    let reader = AuthorizedPackedReader::new_with_cache_budget(
+    let reader = mode.reader(
         &session.coordinator,
         &session.policy,
         session
             .limits
             .read()
             .map_err(|_| error("USTE_BM01_LIMITS"))?,
-        64 * 1024 * 1024,
-    )
-    .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))?;
+    )?;
     let setup = session.filesystem.snapshot()?;
     let setup_crypto = CryptoWork::from(
         session
@@ -122,6 +152,7 @@ pub fn query_correctness(
         "oracle_summary_digest": hex(&summary.digest()), "query_milliseconds": started.elapsed().as_millis(),
         "current_rss_kib": rss, "process_peak_rss_kib": peak,
         "cache_budget_bytes": cache.budget_bytes, "cache_accounted_bytes": cache.accounted_bytes,
+        "query_cache_configuration": mode.report(cache)?,
         "cache_hits": cache.hits, "cache_misses": cache.misses, "cache_evictions": cache.evictions,
         "uste_page_cache": "cleared-before-each-query", "kernel_filesystem_device_cache": "uncontrolled",
         "preemptive_deadline_enforced": false, "complete_authenticated_io": false,

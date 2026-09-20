@@ -189,6 +189,7 @@ fn run() -> Result<(), String> {
             | "linux-packed-resume"
             | "linux-packed-rebuild"
             | "linux-packed-query"
+            | "linux-packed-lookup-query"
             | "linux-packed-sample"
             | "linux-packed-sample-worker"
             | "linux-disk-resume"
@@ -380,6 +381,14 @@ fn run() -> Result<(), String> {
                     &oracle_file.ok_or("--oracle-file is required")?,
                     profile,
                 ),
+                "linux-packed-lookup-query" => {
+                    uste_t20_bench::linux_runner::packed::query_correctness_with_lookup(
+                        &root,
+                        &password_file,
+                        &oracle_file.ok_or("--oracle-file is required")?,
+                        profile,
+                    )
+                }
                 "linux-disk-sample" => {
                     let executable = env::current_exe()
                         .map_err(|_| "cannot resolve current benchmark executable")?;
@@ -483,6 +492,7 @@ fn print_usage() {
          uste-t20-bench bm06-packed-linux-tail-prefix-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-packed-linux-<create-prefix|resume-prefix> --root ROOT --password-file PASSWORD --records COUNT --through-revision REVISION (complete-generation construction step)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
+         uste-t20-bench linux-packed-lookup-query --root ROOT --password-file PASSWORD --entities COUNT --oracle-file ORACLE (nonqualifying; 48 MiB pages + 16 MiB positive lookups)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying development sampling)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \

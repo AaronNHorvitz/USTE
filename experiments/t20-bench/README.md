@@ -61,6 +61,22 @@ all five 20/200 boundaries, exact resume and all oracle queries; it does not emu
 Complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required. Native packed
 BM-06 development history and recovery are described below.
 
+Decision 0216 adds an explicit positive-lookup **correctness comparison**, preserving the
+page-only `linux-packed-query` and sampling commands. Against the same completed fixture and
+single-section oracle summary:
+
+```sh
+cargo run --release --locked --offline -- linux-packed-lookup-query --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20 --oracle-file /tmp/uste-packed-oracle.tsv
+```
+
+This configuration assigns 48 MiB to pages and 16 MiB to positive results within one 64 MiB
+query-cache budget. Both partitions clear before every oracle query. `query_cache_configuration`
+reports the selected profile, included accounting and separate lookup observations; existing
+`cache_hits/misses/evictions` remain page-only. No counter is physical I/O or a process-RSS
+guarantee. This command does not provide supervised timing or satisfy benchmark qualification.
+The 20,000-entity development ceiling and all qualifying targets remain unchanged. Its local
+verification status and exact tested baseline are recorded in PROGRESS.md.
+
 Decision 0174 adds supervised packed sampling over a completed fixture. Generate the two-section
 oracle bundle (not the single-section summary used by `linux-packed-query`):
 

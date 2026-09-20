@@ -2,6 +2,39 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified increment — native positive-cache comparison (Decision 0216)
+
+D0215 committed and pushed as `df9a96d`. D0216's separate `linux-packed-lookup-query` command
+preserves the old page-only command and the complete 384-query oracle protocol. It uses one
+64 MiB total budget split into 48 MiB pages and 16 MiB positive lookups, with explicit checked
+partition reporting. Native fixture and process tests compare both modes' outputs, limit
+outcomes and source preservation; sampling remains unchanged and page-only. No standalone
+large comparison or new latency campaign has run.
+
+Native release tests/strict lint passed in session 79994 / `uste-d216-native.scope`,
+invocation `7bd89ae0a6174609b90c1b77c837ec82`, after fresh 24 GiB RAM/2 GiB free swap/952 GiB disk
+and no competing workload. One Cargo job/thread, 3G/4G/512M process-group limits. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d216-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d216-native-verification.log; verification_status=$?; systemctl --user show uste-d216-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+**124 active tests passed, five unchanged opt-in ignores**, exit zero. Release compile 1m05s;
+library 92/129.26s, legacy process 3/11.87s, packed history 11/59.82s, packed terminal 7/32.29s,
+manifest 3/0.92s, legacy recovery 8/72.82s. Strict native Clippy passed in 3.98s. Scope peak
+**568,672,256 bytes**, zero swap, CPU 327,684,943,000 ns. Release executable SHA-256
+`f07886105f808cbfb95cee6d9727bf07de8b902b2edcc5e1c10824a6fc6e3d0e`.
+Both native 20/200 modes match all 384 oracle outputs and preserve authoritative bytes;
+the process test also verifies exact mode budgets and positive hits. Formatting and doc/task
+checks passed. Tested baseline is `df9a96d` plus this reviewed native increment.
+
+Next: commit/push D0216, then fresh host/fixture/binary admission for the bounded 20,000-entity
+positive-query oracle, followed by a same-binary page-only control if admitted. Preserve all
+384 cases, including expected limits; this is nonqualifying development work under a 4 GiB
+cap, not the reserved 24 GiB qualifying campaign. Then add separately supervised positive-cache
+sampling with checked per-state counters and unchanged deadlines/qualification boundaries. Core/M1 source
+is unchanged from D0215's 754-test baseline; T-20/T-19 and the full roadmap remain incomplete.
+
 ## Latest verified increment — authorized positive-lookup cache (Decision 0215)
 
 D0214 committed and pushed as `c42f12b`. D0215 adds an explicit trusted reader constructor
@@ -40,13 +73,12 @@ warnings-denied docs passed in 11.58s. Final scope peak **2,293,981,184 bytes**,
 CPU 789,422,760,000 ns. Formatting and documentation/task checks passed. Tested core baseline
 is `c42f12b` plus the reviewed D0215 constructor and eight new tests in this increment.
 
-Separate, unbuilt D0216 changes under `experiments/t20-bench` add a named native positive-cache
+Separate D0216 changes under `experiments/t20-bench` add a named native positive-cache
 correctness command, partition-validated reporting and reference/CLI tests. They are outside
-the current workspace verification, not enabled in sampling, not measured and not yet verified.
-They will be excluded from the D0215 commit and tested separately after this gate finishes.
+the D0215 workspace verification and are not enabled in sampling or qualified. They were
+excluded from the D0215 commit; their separate native verification is recorded above.
 
-Next: commit/push only the verified D0215 integration, then verify
-the separate native comparison command before using it for a development observation.
+D0215 committed and pushed as `df9a96d`; native comparison verification continues above.
 T-20/T-19 and qualification remain open; preserve the full accepted roadmap.
 
 ## Latest verified increment — bounded positive lookup cache (Decision 0214)

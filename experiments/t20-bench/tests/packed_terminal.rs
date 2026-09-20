@@ -59,7 +59,7 @@ impl Fixture {
             .arg("--password-file")
             .arg(&self.password)
             .args(["--entities", "20"]);
-        if matches!(phase, "query" | "sample") {
+        if matches!(phase, "query" | "lookup-query" | "sample") {
             command.arg("--oracle-file").arg(&self.oracle);
         }
         command
@@ -411,6 +411,31 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
         misses * 16384
     );
     assert_eq!(query["query_vault_work"]["failed_calls"], 0);
+    let positive = fixture.run("lookup-query");
+    for field in [
+        "output_digest",
+        "queries",
+        "visits",
+        "logical_result_bytes",
+        "successful_queries",
+        "expected_visit_limits",
+        "expected_result_limits",
+        "oracle_summary_digest",
+    ] {
+        assert_eq!(positive[field], query[field], "{field}");
+    }
+    let details = &positive["query_cache_configuration"];
+    assert_eq!(details["profile"], "packed-pages-positive-lookups-v1");
+    assert_eq!(details["total_budget_bytes"], 64 * 1024 * 1024);
+    assert_eq!(details["page_budget_bytes"], 48 * 1024 * 1024);
+    assert_eq!(details["lookup_budget_bytes"], 16 * 1024 * 1024);
+    assert!(details["lookup"]["hits"].as_u64().unwrap() > 0);
+    assert_eq!(positive["query_adapter_io"]["write_returned_bytes"], 0);
+    assert_eq!(
+        positive["query_vault_work"]["successful_calls"],
+        positive["cache_misses"]
+    );
+    assert!(query["query_cache_configuration"]["lookup"].is_null());
     let rebuild = fixture.run("rebuild");
     assert_eq!(rebuild["origin_suffix_groups"], 3);
     assert_eq!(rebuild["v1_state_digest"], create["v1_state_digest"]);
@@ -428,7 +453,15 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
 }
 #[test]
 fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
-    for phase in ["create", "open", "rebuild", "resume", "query", "sample"] {
+    for phase in [
+        "create",
+        "open",
+        "rebuild",
+        "resume",
+        "query",
+        "lookup-query",
+        "sample",
+    ] {
         let mut command = Command::new(EXECUTABLE);
         command.arg(format!("linux-packed-{phase}")).args([
             "--root",
@@ -438,7 +471,7 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
             "--entities",
             "100000",
         ]);
-        if matches!(phase, "query" | "sample") {
+        if matches!(phase, "query" | "lookup-query" | "sample") {
             command.args(["--oracle-file", "absent-packed-oracle"]);
         }
         let output = complete(command);
