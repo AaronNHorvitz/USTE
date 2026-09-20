@@ -39,17 +39,6 @@ impl Identity {
         debug_assert_eq!(offset, IDENTITY_BYTES);
         Self(bytes)
     }
-    fn key(self, key: &[u8]) -> Result<Zeroizing<Vec<u8>>, StorageError> {
-        if key.is_empty() || key.len() > MAX_KEY_BYTES {
-            return Err(StorageError::ResourceLimit);
-        }
-        // Most searches distinguish logical keys within one root. Avoid comparing the
-        // shared identity prefix on every ordered-map branch. The fixed-size suffix
-        // keeps this encoding injective even for variable-length/prefix-related keys.
-        let mut bytes = copy(key, IDENTITY_BYTES)?;
-        bytes.extend_from_slice(&self.0);
-        Ok(bytes)
-    }
 }
 
 /// Distinct result-cache observations; proof-work and physical-device bytes are not counted here.
@@ -64,27 +53,58 @@ pub struct PackedLookupCacheReport {
     pub oversized_bypasses: u64,
 }
 
+struct RetainedIdentity(Zeroizing<[u8; IDENTITY_BYTES]>);
+
 #[derive(Clone)]
-struct Key(Arc<Zeroizing<Vec<u8>>>);
-impl Borrow<[u8]> for Key {
-    fn borrow(&self) -> &[u8] {
-        self.0.as_slice()
+struct IdentityKey(Arc<RetainedIdentity>);
+impl Borrow<[u8; IDENTITY_BYTES]> for IdentityKey {
+    fn borrow(&self) -> &[u8; IDENTITY_BYTES] {
+        &self.0.0
     }
 }
-impl PartialEq for Key {
+impl PartialEq for IdentityKey {
     fn eq(&self, other: &Self) -> bool {
-        self.0.as_slice() == other.0.as_slice()
+        self.0.0 == other.0.0
     }
 }
-impl Eq for Key {}
-impl PartialOrd for Key {
+impl Eq for IdentityKey {}
+impl PartialOrd for IdentityKey {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl Ord for Key {
+impl Ord for IdentityKey {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.as_slice().cmp(other.0.as_slice())
+        self.0.0.cmp(&other.0.0)
+    }
+}
+
+struct EntryKey {
+    identity: IdentityKey,
+    bytes: Zeroizing<Vec<u8>>,
+}
+
+#[derive(Clone)]
+struct LogicalKey(Arc<EntryKey>);
+impl Borrow<[u8]> for LogicalKey {
+    fn borrow(&self) -> &[u8] {
+        self.0.bytes.as_slice()
+    }
+}
+impl PartialEq for LogicalKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.bytes.as_slice() == other.0.bytes.as_slice()
+    }
+}
+impl Eq for LogicalKey {}
+impl PartialOrd for LogicalKey {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for LogicalKey {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.bytes.as_slice().cmp(other.0.bytes.as_slice())
     }
 }
 struct Value {
@@ -97,8 +117,8 @@ pub(super) struct LookupCache {
     budget: usize,
     used: usize,
     clock: u128,
-    values: BTreeMap<Key, Value>,
-    order: BTreeMap<u128, Key>,
+    values: BTreeMap<IdentityKey, BTreeMap<LogicalKey, Value>>,
+    order: BTreeMap<u128, Arc<EntryKey>>,
     hits: u64,
     misses: u64,
     evictions: u64,
@@ -135,12 +155,12 @@ impl LookupCache {
         }
         Ok(PackedLookupCacheReport {
             budget_bytes: self.budget,
-            accounted_bytes: if self.values.is_empty() {
+            accounted_bytes: if self.order.is_empty() {
                 0
             } else {
                 FIXED + self.used
             },
-            resident_values: self.values.len(),
+            resident_values: self.order.len(),
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
@@ -153,8 +173,12 @@ impl LookupCache {
         key: &[u8],
         limits: TreeLookupLimits,
     ) -> Result<Option<CachedLookup>, StorageError> {
-        let encoded = identity.key(key)?;
-        let Some((stored, value)) = self.values.get_key_value(encoded.as_slice()) else {
+        validate_key(key)?;
+        let Some((stored, value)) = self
+            .values
+            .get(&identity.0)
+            .and_then(|values| values.get_key_value(key))
+        else {
             increment(&mut self.misses, &mut self.overflowed);
             return Ok(None);
         };
@@ -173,13 +197,18 @@ impl LookupCache {
         let output = copy(&value.bytes, 0)?;
         let work = value.work;
         let old = value.stamp;
-        let stored = stored.clone();
-        if self.order.remove(&old).as_ref() != Some(&stored) {
+        let stored = stored.0.clone();
+        let ordered = self
+            .order
+            .remove(&old)
+            .ok_or(StorageError::IntegrityFailure)?;
+        if !Arc::ptr_eq(&ordered, &stored) {
             return Err(StorageError::IntegrityFailure);
         }
         self.order.insert(next, stored.clone());
         self.values
-            .get_mut(&stored)
+            .get_mut(&identity.0)
+            .and_then(|values| values.get_mut(key))
             .ok_or(StorageError::IntegrityFailure)?
             .stamp = next;
         self.clock = next;
@@ -202,12 +231,17 @@ impl LookupCache {
         {
             return Err(StorageError::InvalidState);
         }
-        let encoded = identity.key(key)?;
-        if self.values.contains_key(encoded.as_slice()) {
+        validate_key(key)?;
+        if self
+            .values
+            .get(&identity.0)
+            .is_some_and(|values| values.contains_key(key))
+        {
             return Err(StorageError::InvalidState);
         }
         let estimated = ENTRY
-            .checked_add(encoded.capacity())
+            .checked_add(IDENTITY_BYTES)
+            .and_then(|n| n.checked_add(key.len()))
             .and_then(|n| n.checked_add(bytes.len()))
             .ok_or(StorageError::ResourceLimit)?;
         if estimated > self.budget - FIXED {
@@ -218,9 +252,11 @@ impl LookupCache {
             .clock
             .checked_add(1)
             .ok_or(StorageError::ResourceLimit)?;
+        let logical = copy(key, 0)?;
         let output = copy(bytes, 0)?;
         let charge = ENTRY
-            .checked_add(encoded.capacity())
+            .checked_add(IDENTITY_BYTES)
+            .and_then(|n| n.checked_add(logical.capacity()))
             .and_then(|n| n.checked_add(output.capacity()))
             .ok_or(StorageError::ResourceLimit)?;
         if charge > self.budget - FIXED {
@@ -232,11 +268,18 @@ impl LookupCache {
                 .order
                 .pop_first()
                 .ok_or(StorageError::IntegrityFailure)?;
-            let removed = self
+            let values = self
                 .values
-                .remove(&oldest)
+                .get_mut(&*oldest.identity.0.0)
                 .ok_or(StorageError::IntegrityFailure)?;
+            let removed = values
+                .remove(oldest.bytes.as_slice())
+                .ok_or(StorageError::IntegrityFailure)?;
+            let empty = values.is_empty();
             if stamp != removed.stamp {
+                return Err(StorageError::IntegrityFailure);
+            }
+            if empty && self.values.remove(&*oldest.identity.0.0).is_none() {
                 return Err(StorageError::IntegrityFailure);
             }
             self.used = self
@@ -245,10 +288,18 @@ impl LookupCache {
                 .ok_or(StorageError::IntegrityFailure)?;
             increment(&mut self.evictions, &mut self.overflowed);
         }
-        let key = Key(Arc::new(encoded));
+        let retained_identity = self
+            .values
+            .get_key_value(&identity.0)
+            .map(|(identity, _)| identity.clone())
+            .unwrap_or_else(|| IdentityKey(Arc::new(RetainedIdentity(Zeroizing::new(identity.0)))));
+        let key = Arc::new(EntryKey {
+            identity: retained_identity.clone(),
+            bytes: logical,
+        });
         self.order.insert(next, key.clone());
-        self.values.insert(
-            key,
+        self.values.entry(retained_identity).or_default().insert(
+            LogicalKey(key),
             Value {
                 bytes: output,
                 work,
@@ -260,6 +311,12 @@ impl LookupCache {
         self.clock = next;
         Ok(())
     }
+}
+fn validate_key(key: &[u8]) -> Result<(), StorageError> {
+    if key.is_empty() || key.len() > MAX_KEY_BYTES {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
 }
 fn copy(bytes: &[u8], extra: usize) -> Result<Zeroizing<Vec<u8>>, StorageError> {
     let mut output = Zeroizing::new(Vec::new());

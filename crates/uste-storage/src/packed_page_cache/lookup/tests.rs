@@ -17,21 +17,44 @@ fn limits() -> TreeLookupLimits {
     }
 }
 fn assert_invariants(cache: &LookupCache) {
-    assert_eq!(cache.values.len(), cache.order.len());
-    assert_eq!(cache.used, cache.values.values().map(|v| v.charge).sum());
-    for (key, value) in &cache.values {
-        assert!(cache.order.get(&value.stamp) == Some(key));
-        assert_eq!(
-            value.charge,
-            ENTRY + key.0.capacity() + value.bytes.capacity()
-        );
-        assert_eq!(Arc::strong_count(&key.0), 2);
+    assert_eq!(
+        cache.values.values().map(BTreeMap::len).sum::<usize>(),
+        cache.order.len()
+    );
+    assert_eq!(
+        cache.used,
+        cache
+            .values
+            .values()
+            .flat_map(|values| values.values())
+            .map(|value| value.charge)
+            .sum()
+    );
+    for (identity, values) in &cache.values {
+        assert!(!values.is_empty());
+        assert_eq!(Arc::strong_count(&identity.0), values.len() + 1);
+        for (key, value) in values {
+            assert_eq!(identity.0.0.as_slice(), key.0.identity.0.0.as_slice());
+            assert!(
+                cache
+                    .order
+                    .get(&value.stamp)
+                    .is_some_and(|ordered| Arc::ptr_eq(ordered, &key.0))
+            );
+            assert_eq!(
+                value.charge,
+                ENTRY + IDENTITY_BYTES + key.0.bytes.capacity() + value.bytes.capacity()
+            );
+            assert_eq!(Arc::strong_count(&key.0), 2);
+        }
     }
     assert!(cache.report().unwrap().accounted_bytes <= cache.budget);
     // Conservative logical allowance, not a claim about allocator/RSS behavior.
     assert!(
-        3 * size_of::<(Key, Value)>()
-            + 3 * size_of::<(u128, Key)>()
+        3 * size_of::<(LogicalKey, Value)>()
+            + 3 * size_of::<(u128, Arc<EntryKey>)>()
+            + size_of::<IdentityKey>()
+            + size_of::<EntryKey>()
             + size_of::<Zeroizing<Vec<u8>>>()
             + 2 * size_of::<usize>()
             <= ENTRY
@@ -40,8 +63,8 @@ fn assert_invariants(cache: &LookupCache) {
 }
 
 #[test]
-fn logical_first_cache_keys_preserve_every_identity_byte_and_variable_key_boundary() {
-    let keys = [
+fn structured_cache_keys_preserve_every_identity_byte_and_variable_key_boundary() {
+    let variable_keys = [
         vec![0],
         vec![0, 0],
         vec![0, 1],
@@ -51,59 +74,87 @@ fn logical_first_cache_keys_preserve_every_identity_byte_and_variable_key_bounda
         vec![0; MAX_KEY_BYTES - 1],
         vec![0; MAX_KEY_BYTES],
     ];
-    let mut encoded = std::collections::BTreeSet::new();
+    let mut cache = LookupCache::new(MAX_INDEX_CACHE_BYTES).unwrap();
     for variant in 0..=IDENTITY_BYTES {
         let mut identity = Identity([0; IDENTITY_BYTES]);
         if variant != 0 {
             identity.0[variant - 1] = 1;
         }
-        for key in &keys {
-            let value = identity.key(key).unwrap();
-            assert_eq!(value.len(), key.len() + IDENTITY_BYTES);
-            assert!(value.capacity() >= value.len());
-            assert_eq!(&value[..key.len()], key);
-            assert_eq!(&value[key.len()..], &identity.0);
-            // Equal encodings imply equal total lengths, logical keys and fixed suffixes.
-            assert!(encoded.insert(value.to_vec()));
-        }
+        cache
+            .insert(identity, &[0], &[variant as u8], work())
+            .unwrap();
     }
-    assert_eq!(encoded.len(), (IDENTITY_BYTES + 1) * keys.len());
-    assert!(Identity([0; IDENTITY_BYTES]).key(&[]).is_err());
+    for key in variable_keys.iter().skip(1) {
+        cache
+            .insert(Identity([0; IDENTITY_BYTES]), key, &[key[0]], work())
+            .unwrap();
+    }
+    for variant in 0..=IDENTITY_BYTES {
+        let mut identity = Identity([0; IDENTITY_BYTES]);
+        if variant != 0 {
+            identity.0[variant - 1] = 1;
+        }
+        assert_eq!(
+            cache
+                .get(identity, &[0], limits())
+                .unwrap()
+                .unwrap()
+                .0
+                .as_slice(),
+            &[variant as u8]
+        );
+    }
+    for key in variable_keys.iter().skip(1) {
+        assert_eq!(
+            cache
+                .get(Identity([0; IDENTITY_BYTES]), key, limits())
+                .unwrap()
+                .unwrap()
+                .0
+                .as_slice(),
+            &[key[0]]
+        );
+    }
+    assert_eq!(
+        cache.report().unwrap().resident_values,
+        IDENTITY_BYTES + variable_keys.len()
+    );
     assert!(
-        Identity([0; IDENTITY_BYTES])
-            .key(&vec![0; MAX_KEY_BYTES + 1])
+        cache
+            .get(Identity([0; IDENTITY_BYTES]), &[], limits())
             .is_err()
     );
+    assert!(
+        cache
+            .get(
+                Identity([0; IDENTITY_BYTES]),
+                &vec![0; MAX_KEY_BYTES + 1],
+                limits()
+            )
+            .is_err()
+    );
+    assert_invariants(&cache);
 }
 
 #[test]
-fn logical_first_cache_keys_reach_distinct_record_bytes_before_shared_root_identity() {
+fn structured_cache_keys_order_logical_bytes_inside_one_shared_zeroizing_identity() {
     let identity = Identity([7; IDENTITY_BYTES]);
-    let base = [0; 16];
-    let encoded = identity.key(&base).unwrap();
-    for changed in 0..base.len() {
-        let mut other = base;
-        other[changed] = 1;
-        let compared = identity.key(&other).unwrap();
-        let prefix = encoded
-            .iter()
-            .zip(compared.iter())
-            .take_while(|(a, b)| a == b)
-            .count();
-        assert_eq!(prefix, changed);
-        assert_eq!(encoded.cmp(&compared), base.cmp(&other));
-        assert_eq!(&encoded[base.len()..], &compared[base.len()..]);
-        // This pins representation, not elapsed time or a benchmark improvement claim.
-        let old = [&identity.0[..], &base[..]].concat();
-        let old_other = [&identity.0[..], &other[..]].concat();
-        assert_eq!(
-            old.iter()
-                .zip(&old_other)
-                .take_while(|(a, b)| a == b)
-                .count(),
-            IDENTITY_BYTES + changed
-        );
+    let mut cache = LookupCache::new(2 * MINIMUM).unwrap();
+    let mut expected = Vec::new();
+    for byte in (0..8).rev() {
+        let key = [byte, 255 - byte];
+        expected.push(key.to_vec());
+        cache.insert(identity, &key, &key, work()).unwrap();
     }
+    expected.sort();
+    let (retained, values) = cache.values.get_key_value(&identity.0).unwrap();
+    let actual: Vec<_> = values
+        .keys()
+        .map(|key| key.0.bytes.as_slice().to_vec())
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(Arc::strong_count(&retained.0), values.len() + 1);
+    assert_invariants(&cache);
 }
 
 #[test]
@@ -151,11 +202,7 @@ fn positive_lookup_cache_matches_independent_variable_byte_lru() {
         assert_eq!(cache.report().unwrap().hits, hits);
         assert_eq!(cache.report().unwrap().misses, misses);
         assert_eq!(cache.report().unwrap().evictions, evictions);
-        let actual: Vec<_> = cache
-            .order
-            .values()
-            .map(|key| key.0[0]) // Logical key precedes the complete fixed-size identity.
-            .collect();
+        let actual: Vec<_> = cache.order.values().map(|key| key.bytes[0]).collect();
         assert_eq!(
             actual,
             reference.iter().map(|(key, _)| *key).collect::<Vec<_>>()

@@ -2,6 +2,29 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — allocation-free positive-cache probes (Decision 0222)
+
+D0221 evidence is committed/pushed as `d725ef4`. D0222 source now replaces the flat allocated
+identity/key probe with a complete retained-identity map containing borrowed logical-key maps.
+Hits and misses no longer allocate/copy a composite key; successful hits retain the required
+fallible zeroizing result copy. One shared zeroizing identity and logical key feed exact global LRU.
+Conservative per-entry accounting, all bytes of identity, work limits, counters, eviction,
+authorization/session behavior, formats and APIs remain unchanged.
+
+The first compile exposed and corrected an array/slice borrowed-key type mismatch before tests.
+The first focused run then passed four tests and correctly evicted three entries from a new
+inspection fixture; its expectation was fixed by giving that test enough admitted capacity, not by
+changing cache behavior. The corrected focused 5-test filter and strict `uste-storage` Clippy pass.
+The 10,000-step independent LRU and exact accounting remain green. The full workspace gate passed
+**761 tests**, strict Clippy and warnings-denied docs. The native release gate passed **136 active
+tests with five unchanged opt-in ignores** and strict Clippy. Both ran with one Cargo job/thread
+inside the enclosing scope and inherited 4 GiB per-process limit. The shared scope peaked at
+5,370,458,112 bytes, briefly crossing its 5 GiB soft watermark (`high=3624`) but recorded zero
+swap, maximum-limit or OOM events; this is not process RSS. Logs:
+`/tmp/uste-d222-workspace-verification.log` and `/tmp/uste-d222-native-verification.log`.
+Next run formatting/doc/task checks, commit/push this verified increment, then measure it with the
+unchanged supervised development protocol. No performance or T-20 completion claim yet.
+
 ## Latest development observation — logical-first cache sampling (Decision 0221)
 
 D0220's verified implementation is committed/pushed as `0c16a45`. Its release executable SHA-256
