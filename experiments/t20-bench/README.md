@@ -102,6 +102,14 @@ create, then 512 updates against the reference reducer, cold admission and exact
 not run 100 generations or qualify larger native construction; multi-batch native tail handling
 and safe scale qualification remain separate prerequisites.
 
+Decision 0183 shares generation-wide packed tail construction: ordinary publication/rebase for
+intermediate batches, the existing deliberate publication refusal only for the final certified
+batch. Recovery exact-retries every tail batch. A test-only 513-record/two-generation fixture
+forces recovery from its earlier checkpoint despite a newer intermediate root, verifies both
+suffix groups and all 1,026 payload versions. Native recovery still selects the latest complete
+triple; explicit whole-tail checkpoint selection and interrupted multi-batch-tail continuation
+remain prerequisites before raising the unchanged two-record native cap.
+
 Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions
 through packed authorized writes, verifies certified-tail recovery from the checkpoint, checks every
 historical payload, then explicitly rebuilds from origin with zero overlays and checks all data-batch

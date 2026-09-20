@@ -2,7 +2,45 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — BM-06 partial-generation prefixes (Decision 0182)
+## Latest verified increment — generation-wide packed tails (Decision 0183)
+
+Implemented on pushed `15ab0bb`: model/native packed tail construction streams every batch of
+the selected update generation. Intermediate batches retain normal authorized publication/rebase;
+only the final batch deliberately leaves acknowledged publication pending. Generation/base/frontier
+and batch sequence checks precede their writes. Native recovery exact-retries every tail batch.
+Both full-history CLI caps remain two. The 513-record model proves two-group recovery from an
+explicit earlier checkpoint despite a newer intermediate root, all 1,026 payload versions, exact
+terminal retry, zero retry overlays and the cold reference v1 digest.
+
+Initial session 83225 passed three cases but failed the new two-batch case. Diagnostic session
+73025 identified `Authorization(Transaction(RetryableUnavailable))`: the test supplied a one-shot
+scripted clock to two fresh transactions. Fixed the fixture to supply exactly two observations;
+the final test checks they were consumed. No authorization or publication limit was relaxed.
+Session 67417 then passed all four model cases/2.50 s and Clippy/1.62 s (compile 25.94 s), sampled
+peak 366,714,880 bytes/zero swap. Added an explicit frontier-budget refusal before final verification.
+Final session 41941 / `run-p1022141-i21982224.scope` exited 0: four model cases/2.55 s,
+six native history cases/37.37 s, five separate-process history cases/53.13 s and three manifest
+cases/1.11 s. Compilation 25.81 s model and 26.02 s CLI; strict Clippy 0.65 s.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib packed_bm06 --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d183-model-final.log &&
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib linux_runner::packed::history --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d183-native-final.log &&
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --test recovery_manifest --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d183-cli-final.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 19 GiB available RAM/2.7 GiB free swap; sampled final scope peak 520,888,320 bytes/
+zero swap. One job/thread/workload; format/diff/docs/task checks pass. Full core remains 676 tests
+at `0322067`, last full harness 106 active at `15ab0bb`; this increment has focused verification,
+not a claimed new full-suite run. Next add explicit native checkpoint selection and interrupted
+multi-batch-tail continuation before increasing native scale. Native latest-root recovery does
+not yet guarantee replay of the entire qualifying tail. Complete accounting, safe construction
+and reserved-host campaigns remain open; M1, TASKS, T-19/full roadmap and release gates unchanged.
+This supersedes older next-step text.
+
+## Prior verified increment — BM-06 partial-generation prefixes (Decision 0182)
 
 Implemented on pushed `5adf5a9`: exact prefix counts and streaming historical verification no
 longer equate one revision with one generation. Native history verification/continuation uses

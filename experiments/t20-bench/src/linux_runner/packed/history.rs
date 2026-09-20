@@ -1,7 +1,6 @@
 //! Native small BM-06 checkpoint/tail pipeline; no larger-than-memory qualification.
 use super::*;
 use crate::recovery_materialization::Bm06Profile;
-use uste_txn::AuthorizedPackedWriter;
 const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
 const MAX_RECORDS: u64 = 2;
 mod bootstrap;
@@ -265,50 +264,35 @@ fn run_observed(
     )
     .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
     if phase == "recover" {
-        engine::commit_batch(
-            &mut live,
-            &mut fs,
-            &mut kernel,
-            &principal,
-            batch(profile, profile.frontier())?,
-            &mut SystemClock::new(),
-            limits,
-        )
-        .map_err(|_| error("USTE_BM06_PACKED_RETRY"))?;
+        for sequence in profile.checkpoint_revision() + 1..=profile.frontier() {
+            engine::commit_batch(
+                &mut live,
+                &mut fs,
+                &mut kernel,
+                &principal,
+                batch(profile, sequence)?,
+                &mut SystemClock::new(),
+                limits,
+            )
+            .map_err(|_| error("USTE_BM06_PACKED_RETRY"))?;
+        }
         if live.overlay_counts() != (0, 0) {
             return Err(error("USTE_BM06_PACKED_RETRY"));
         }
     }
     if is_tail {
-        let request = batch(profile, profile.frontier())?;
-        let bytes = encode_transaction(&GraphTransaction::new(scope(), request.operations))
-            .map_err(|_| error("USTE_BM06_PACKED_BATCH"))?;
-        let mut publication = limits.publication;
-        publication.stage.maximum_batches = 1;
-        let mut writer =
-            AuthorizedPackedWriter::new(&mut live, &mut kernel, limits.preparation, publication)
-                .map_err(|_| error("USTE_BM06_PACKED_WRITER"))?;
-        match writer.commit(
+        engine::recovery::certify_generation_tail(
+            &mut live,
             &mut fs,
+            &mut kernel,
             &principal,
-            AuthorizedTransactionRequest {
-                idempotency_key: request.idempotency_key,
-                transaction_id: request.transaction_id,
-                canonical_request: &bytes,
-                blob_inventory: None,
-            },
+            profile,
+            crate::recovery_materialization::VERSIONS - 1,
+            limits,
             &mut SystemClock::new(),
-            &NeverCancel,
-        ) {
-            Err(uste_txn::AuthorizedDiskWriteError::CommittedPublication {
-                outcome,
-                error:
-                    uste_txn::TransactionError::Storage(
-                        uste_storage::journal::StorageError::ResourceLimit,
-                    ),
-            }) if outcome.revision.get() == profile.frontier() => (),
-            _ => return Err(error("USTE_BM06_PACKED_EXPECTED_TAIL")),
-        }
+            &mut |sequence| batch(profile, sequence).map_err(|error| error.code().to_string()),
+        )
+        .map_err(|_| error("USTE_BM06_PACKED_EXPECTED_TAIL"))?;
         if phase == "tail-crash-probe" {
             park_after_marker(profile.frontier())?;
         }

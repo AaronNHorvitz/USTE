@@ -1,6 +1,8 @@
 //! Packed BM-06 development history equivalence, never a native recovery timing campaign.
 use super::*;
 use crate::recovery_materialization::{Bm06Profile, PAYLOAD_BYTES, VERSIONS};
+mod tail;
+pub(crate) use tail::certify_generation_tail;
 
 #[derive(Debug)]
 pub struct PackedRecoveryVerification {
@@ -189,39 +191,17 @@ pub fn verify(profile: Bm06Profile) -> Result<PackedRecoveryVerification, String
         )?;
     }
     let sequence = profile.frontier();
-    let encoded = encode_transaction(&GraphTransaction::new(
-        scope(),
-        profile.batch(scope(), sequence)?,
-    ))
-    .map_err(debug)?;
-    let mut publication = limits.publication;
-    publication.stage.maximum_batches = 1;
-    let mut writer =
-        AuthorizedPackedWriter::new(&mut live, &mut kernel, limits.preparation, publication)
-            .map_err(debug)?;
-    let outcome = match writer.commit(
+    let outcome = certify_generation_tail(
+        &mut live,
         &mut fs,
+        &mut kernel,
         &principal,
-        AuthorizedTransactionRequest {
-            idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
-            transaction_id: identity(sequence, TransactionId::from_bytes),
-            canonical_request: &encoded,
-            blob_inventory: None,
-        },
+        profile,
+        VERSIONS - 1,
+        limits,
         &mut clock(sequence),
-        &NeverCancel,
-    ) {
-        Err(uste_txn::AuthorizedDiskWriteError::CommittedPublication {
-            outcome,
-            error:
-                uste_txn::TransactionError::Storage(uste_storage::journal::StorageError::ResourceLimit),
-        }) => outcome,
-        _ => return Err("BM-06 expected certified packed publication refusal".into()),
-    };
-    if outcome.revision.get() != sequence {
-        return Err("BM-06 packed tail revision mismatch".into());
-    }
-    drop(writer);
+        &mut |sequence| batch(profile, sequence),
+    )?;
     drop(live);
     fs.restart().map_err(debug)?;
     let recovery = open(&mut fs, &name, limits, 83_000_000)?;
