@@ -2,7 +2,43 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — fresh buffered canonical admission (Decision 0178)
+## Latest verified increment — buffered cold graph admission (Decision 0179)
+
+Implemented on pushed `ec6ba8e`: namespace/target-bound maintenance exposes fresh canonical
+buffering; opt-in graph cold admission uses sequential fresh canonical caches and then a fresh
+semantic cache. No caller-supplied warm cache or graph-wide map. Complete canonical, history,
+relationship, policy, count and v1 digest validation remains shared with the uncached path.
+Separate fixed-size cache reports preserve identical logical proof counters and ceilings.
+Seven additional tests cover all existing cold-admission cases, 24 limit refusals, eight
+authenticated false graphs, later corruption, all actual read faults/restart, one-page/larger
+budgets and repeated fresh admissions. No writes occur during admission.
+
+Check session 96238 passed/2.69 s. Focused session 41919 failed compilation due to two unnecessary
+test type qualifications; corrected. Session 88642 then passed seven tests/2.07 s, compile
+21.03 s and workspace strict Clippy/8.50 s. No focused scope peak was captured.
+Final full session 32768 / `run-p950395-i21971194.scope` exited 0: **676 tests across 47
+executables, zero failed/ignored**. Graph disk-index 98/441.47 s, replay 50/107.69 s,
+storage library 219/32.96 s, transaction integration 97/99.48 s. Compile 45.71 s, strict Clippy
+2.23 s and warning-denied rustdoc 10.50 s. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d179-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+```
+
+Preflight 26 GiB available RAM/3.7 GiB free swap; sampled scope peak 2,592,628,736 bytes/zero swap.
+One job/thread, one heavy workload retained. Format/diff/docs/task checks pass; Cargo.lock SHA-256
+remains `7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`.
+Decision 0180's native harness wiring is prepared but not yet verified; excluded from this core
+commit. Next verify and commit that wiring, then remeasure the retained 1,000-entity fixture at
+an exact version. Coordinator buffering/accounting, scale construction and qualifying campaigns
+remain T-20 work. T-19/full roadmap, M1 pinned handoff and external release gates are unchanged.
+This supersedes older next-step text.
+
+## Prior verified increment — fresh buffered canonical admission (Decision 0178)
 
 Implemented on pushed `b3df3b8`: opt-in storage canonical admission creates, binds and destroys
 its own bounded cache. All canonical/value-hash validation and logical proof ceilings remain;

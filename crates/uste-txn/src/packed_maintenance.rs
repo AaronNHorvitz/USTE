@@ -110,6 +110,33 @@ where
             .admit_packed_tree(filesystem, root, family, limits)
             .map_err(TransactionError::Storage)
     }
+    /// Canonical admission with a fresh bounded cache, preserving namespace and target checks.
+    pub fn admit_buffered(
+        &self,
+        filesystem: &mut F,
+        root: &CertifiedPackedRoot,
+        family: u8,
+        limits: TreeValidationLimits,
+        cache_bytes: usize,
+    ) -> Result<
+        (
+            CanonicalPackedTree,
+            TreeValidationReport,
+            uste_storage::packed_page_cache::PackedCacheReport,
+        ),
+        TransactionError,
+    > {
+        let manifest = root.manifest();
+        self.check(TreeReadContext {
+            scope: manifest.context().scope,
+            profile: manifest.context().profile,
+            family,
+            revision: manifest.claims().revision,
+        })?;
+        self.journal
+            .admit_packed_tree_buffered(filesystem, root, family, limits, cache_bytes)
+            .map_err(TransactionError::Storage)
+    }
     /// Check scope, target ordering and live certificate ownership, without I/O or tree admission.
     pub fn validate_root_binding(
         &self,

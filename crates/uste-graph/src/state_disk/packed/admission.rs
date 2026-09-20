@@ -2,6 +2,7 @@
 use super::*;
 use uste_storage::{
     journal::CertifiedPackedRoot,
+    packed_page_cache::{PackedCacheReport, PackedPageCache},
     packed_tree_cursor::TreeCursorReport,
     packed_tree_lookup::TreeLookupLimits,
     packed_tree_validation::{TreeValidationLimits, TreeValidationReport},
@@ -21,11 +22,17 @@ pub struct PackedGraphAdmissionLimits {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PackedGraphAdmissionReport {
     pub canonical: [TreeValidationReport; 8],
-    /// Logical semantic counters plus actual packed scan/lookup pages, not legacy cache hits.
+    /// Semantic counters plus packed scan/lookup proof-work pages, including buffered hits.
     pub semantic: GraphDiskBaseAdmissionReport,
     pub scan_encoded_bytes: u64,
     pub scan_candidates: u64,
     pub lookup_encoded_bytes: u64,
+}
+/// Separate cache work; canonical and semantic proof-work reports remain comparable to uncached.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PackedGraphAdmissionCacheReport {
+    pub canonical: [PackedCacheReport; 8],
+    pub semantic: PackedCacheReport,
 }
 struct Reader<
     'a,
@@ -43,10 +50,21 @@ struct Reader<
     limits: PackedGraphAdmissionLimits,
     scan_remaining: TreeCursorLimits,
     report: PackedGraphAdmissionReport,
+    cache: Option<PackedPageCache>,
 }
 impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>
     Reader<'_, '_, F, W, E, I>
 {
+    fn next(
+        &mut self,
+        cursor: &mut ScopedPackedCursor,
+    ) -> Result<Option<uste_storage::packed_tree_cursor::PackedCursorEntry>, GraphDiskError> {
+        let reader = self.maintenance.as_reader();
+        Ok(match self.cache.as_mut() {
+            Some(cache) => reader.next_cached(self.fs, cursor, cache)?,
+            None => reader.next(self.fs, cursor)?,
+        })
+    }
     fn scan(&self, family: u8) -> Result<ScopedPackedCursor, GraphDiskError> {
         Ok(self.maintenance.cursor(
             &self.trees[usize::from(family - 1)],
@@ -117,9 +135,17 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
     fn current(&mut self, id: RecordRef) -> Result<Option<Record>, GraphDiskError> {
         charge_lookup_operation(&mut self.report.semantic, self.limits.semantic, true)?;
         let limits = self.lookup_limits()?;
-        let result =
-            self.maintenance
-                .get(self.fs, &self.trees[1], id.record().as_bytes(), limits)?;
+        let reader = self.maintenance.as_reader();
+        let result = match self.cache.as_mut() {
+            Some(cache) => reader.get_cached(
+                self.fs,
+                &self.trees[1],
+                id.record().as_bytes(),
+                limits,
+                cache,
+            )?,
+            None => reader.get(self.fs, &self.trees[1], id.record().as_bytes(), limits)?,
+        };
         let returned = result
             .value
             .as_ref()
@@ -163,7 +189,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
                     maximum_encoded_bytes: limits.maximum_encoded_bytes,
                 },
             )?;
-            let entry = self.maintenance.next(self.fs, &mut cursor)?;
+            let entry = self.next(&mut cursor)?;
             let TreeCursorReport {
                 pages,
                 encoded_bytes,
@@ -225,6 +251,54 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    admit_inner(maintenance, fs, root, limits, None).map(|(base, report, _)| (base, report))
+}
+
+/// Full cold admission with fresh bounded caches. No previously warmed pages are accepted.
+/// Canonical family caches are dropped sequentially before a fresh semantic cache is created.
+pub fn admit_packed_graph_base_buffered<F, W, E, I>(
+    maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    root: &CertifiedPackedRoot,
+    limits: PackedGraphAdmissionLimits,
+    cache_bytes: usize,
+) -> Result<
+    (
+        PackedGraphBase,
+        PackedGraphAdmissionReport,
+        PackedGraphAdmissionCacheReport,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_inner(maintenance, fs, root, limits, Some(cache_bytes))
+}
+
+fn admit_inner<F, W, E, I>(
+    maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    root: &CertifiedPackedRoot,
+    limits: PackedGraphAdmissionLimits,
+    cache_bytes: Option<usize>,
+) -> Result<
+    (
+        PackedGraphBase,
+        PackedGraphAdmissionReport,
+        PackedGraphAdmissionCacheReport,
+    ),
+    GraphDiskError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let manifest = root.manifest();
     let context = manifest.context();
     let claims = manifest.claims();
@@ -260,10 +334,18 @@ where
         return Err(GraphDiskError::Storage(StorageError::ResourceLimit));
     }
     let mut report = PackedGraphAdmissionReport::default();
+    let mut cache_report = PackedGraphAdmissionCacheReport::default();
     let mut remaining = limits.canonical;
     let mut trees = Vec::with_capacity(8);
     for family in 1..=8 {
-        let (tree, work) = maintenance.admit(fs, root, family, remaining)?;
+        let (tree, work) = if let Some(budget) = cache_bytes {
+            let (tree, work, cache) =
+                maintenance.admit_buffered(fs, root, family, remaining, budget)?;
+            cache_report.canonical[usize::from(family - 1)] = cache;
+            (tree, work)
+        } else {
+            maintenance.admit(fs, root, family, remaining)?
+        };
         remaining.maximum_nodes -= work.nodes;
         remaining.maximum_logical_bytes -= work.logical_bytes;
         remaining.maximum_pages -= work.pages;
@@ -289,12 +371,13 @@ where
         limits,
         scan_remaining,
         report,
+        cache: cache_bytes.map(PackedPageCache::new).transpose()?,
     };
     let mut cursor = reader.scan(FAMILY_METADATA)?;
-    let metadata = maintenance
-        .next(reader.fs, &mut cursor)?
+    let metadata = reader
+        .next(&mut cursor)?
         .ok_or(GraphDiskError::IndexCorrupt)?;
-    if metadata.key() != b"graph-state-v1" || maintenance.next(reader.fs, &mut cursor)?.is_some() {
+    if metadata.key() != b"graph-state-v1" || reader.next(&mut cursor)?.is_some() {
         return Err(GraphDiskError::IndexCorrupt);
     }
     reader.finish_scan(cursor, 1)?;
@@ -329,7 +412,7 @@ where
     let mut prior_policy_version = None;
     for family in FAMILY_CURRENT_RECORD..=FAMILY_POLICY {
         let mut cursor = reader.scan(family)?;
-        while let Some(entry) = maintenance.next(reader.fs, &mut cursor)? {
+        while let Some(entry) = reader.next(&mut cursor)? {
             validator
                 .observe(family, entry.key(), entry.value())
                 .map_err(GraphDiskError::Storage)?;
@@ -446,6 +529,9 @@ where
         return Err(GraphDiskError::IndexCorrupt);
     }
     let digest = validator.finish()?;
+    if let Some(cache) = &reader.cache {
+        cache_report.semantic = cache.report()?;
+    }
     let report = reader.report;
     Ok((
         PackedGraphBase {
@@ -458,5 +544,6 @@ where
             source_v1_digest: Some(digest),
         },
         report,
+        cache_report,
     ))
 }

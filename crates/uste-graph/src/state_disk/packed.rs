@@ -4,7 +4,8 @@ mod genesis;
 pub use genesis::{PackedGraphGenesisLimits, PackedGraphGenesisReport, stage_packed_graph_genesis};
 mod admission;
 pub use admission::{
-    PackedGraphAdmissionLimits, PackedGraphAdmissionReport, admit_packed_graph_base,
+    PackedGraphAdmissionCacheReport, PackedGraphAdmissionLimits, PackedGraphAdmissionReport,
+    admit_packed_graph_base, admit_packed_graph_base_buffered,
 };
 mod preparation;
 pub use preparation::{

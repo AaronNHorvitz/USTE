@@ -6,6 +6,76 @@ use uste_storage::{
     packed_tree_validation::TreeValidationLimits,
 };
 
+type Admission =
+    fn(
+        &uste_txn::PackedIndexMaintenance<'_, Fs, TestEnvelope, CounterEntropy, CounterEntropy>,
+        &mut Fs,
+        &CertifiedPackedRoot,
+        PackedGraphAdmissionLimits,
+    ) -> Result<(PackedGraphBase, uste_graph::PackedGraphAdmissionReport), GraphDiskError>;
+
+fn buffered_admit(
+    maintenance: &uste_txn::PackedIndexMaintenance<
+        '_,
+        Fs,
+        TestEnvelope,
+        CounterEntropy,
+        CounterEntropy,
+    >,
+    fs: &mut Fs,
+    root: &CertifiedPackedRoot,
+    limits: PackedGraphAdmissionLimits,
+) -> Result<(PackedGraphBase, uste_graph::PackedGraphAdmissionReport), GraphDiskError> {
+    uste_graph::admit_packed_graph_base_buffered(maintenance, fs, root, limits, 1024 * 1024)
+        .map(|(base, report, _)| (base, report))
+}
+
+#[test]
+fn buffered_graph_admission_work_is_bounded_fresh_and_proof_identical() {
+    let mut input = cold(None);
+    let maintenance = input
+        .recovery
+        .packed_indexes_with_io(&mut input.fs, &input.transaction, limits(2).certificates)
+        .unwrap();
+    let (expected, expected_report) =
+        admit_packed_graph_base(&maintenance, &mut input.fs, &input.root, cold_limits()).unwrap();
+    for budget in [uste_storage::MIN_INDEX_CACHE_BYTES, 1024 * 1024] {
+        let mut previous = None;
+        for _ in 0..2 {
+            input.fs.arm(FaultPlan::default()).unwrap();
+            let (base, report, cache) = uste_graph::admit_packed_graph_base_buffered(
+                &maintenance,
+                &mut input.fs,
+                &input.root,
+                cold_limits(),
+                budget,
+            )
+            .unwrap();
+            assert_eq!(base.source_v1_digest(), expected.source_v1_digest());
+            assert_eq!(base.anchor(), expected.anchor());
+            assert_eq!(report, expected_report);
+            let misses =
+                cache.canonical.iter().map(|c| c.misses).sum::<u64>() + cache.semantic.misses;
+            let hits = cache.canonical.iter().map(|c| c.hits).sum::<u64>() + cache.semantic.hits;
+            let proof_pages = report.canonical.iter().map(|c| c.pages).sum::<u64>()
+                + report.semantic.scan.pages_read
+                + report.semantic.lookup_page_visits;
+            assert_eq!(misses + hits, proof_pages);
+            assert_eq!(input.fs.operation_count(FsOp::ReadAt), misses);
+            assert!(hits > 0 && misses > 0);
+            for part in cache.canonical.iter().chain([&cache.semantic]) {
+                assert_eq!(part.budget_bytes, budget);
+                assert!(part.accounted_bytes <= budget);
+            }
+            if let Some(previous) = previous {
+                assert_eq!(cache, previous);
+            }
+            previous = Some(cache);
+            assert_eq!(input.fs.operation_count(FsOp::WriteAt), 0);
+        }
+    }
+}
+
 fn claim_digest(
     root: &CertifiedPackedRoot,
     families: &[uste_storage::packed_root_manifest::PackedRootFamily],
@@ -130,6 +200,20 @@ fn cold(request: Option<&GraphTransaction>) -> Cold {
 
 #[test]
 fn packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference() {
+    packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference_case(false);
+}
+#[test]
+fn buffered_packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference() {
+    packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference_case(true);
+}
+fn packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference_case(
+    buffered: bool,
+) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     let variants = cases();
     for request in [
         None,
@@ -173,6 +257,18 @@ fn packed_cold_graph_admission_reopens_all_families_and_matches_frozen_reference
 
 #[test]
 fn packed_cold_graph_admission_exact_and_independent_minus_one_limits() {
+    packed_cold_graph_admission_exact_and_independent_minus_one_limits_case(false);
+}
+#[test]
+fn buffered_packed_cold_graph_admission_exact_and_independent_minus_one_limits() {
+    packed_cold_graph_admission_exact_and_independent_minus_one_limits_case(true);
+}
+fn packed_cold_graph_admission_exact_and_independent_minus_one_limits_case(buffered: bool) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     let mut input = cold(None);
     let maintenance = input
         .recovery
@@ -262,6 +358,18 @@ fn packed_cold_graph_admission_exact_and_independent_minus_one_limits() {
 
 #[test]
 fn packed_cold_graph_admission_every_read_fault_restarts_without_writes() {
+    packed_cold_graph_admission_every_read_fault_restarts_without_writes_case(false);
+}
+#[test]
+fn buffered_packed_cold_graph_admission_every_read_fault_restarts_without_writes() {
+    packed_cold_graph_admission_every_read_fault_restarts_without_writes_case(true);
+}
+fn packed_cold_graph_admission_every_read_fault_restarts_without_writes_case(buffered: bool) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     let mut observed = cold(None);
     let maintenance = observed
         .recovery
@@ -344,11 +452,28 @@ fn packed_cold_graph_admission_every_read_fault_restarts_without_writes() {
             }
         }
     }
-    assert_eq!(checked, 1377);
+    if buffered {
+        assert_eq!(checked, counts.iter().map(|(_, n)| n * 3).sum::<u64>());
+        assert!(checked > 0 && checked < 1377);
+    } else {
+        assert_eq!(checked, 1377);
+    }
 }
 
 #[test]
 fn packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency() {
+    packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency_case(false);
+}
+#[test]
+fn buffered_packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency() {
+    packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency_case(true);
+}
+fn packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency_case(buffered: bool) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     for variant in 0..8 {
         let tx = cases()[20].clone();
         let mut input = cold(Some(&tx));
@@ -456,6 +581,25 @@ fn packed_cold_graph_admission_rejects_authenticated_semantic_inconsistency() {
 
 #[test]
 fn packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fail_closed() {
+    packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fail_closed_case(
+        false,
+    );
+}
+#[test]
+fn buffered_packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fail_closed()
+{
+    packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fail_closed_case(
+        true,
+    );
+}
+fn packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fail_closed_case(
+    buffered: bool,
+) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     let mut input = cold(None);
     let foreign = cold(None);
     let maintenance = input
@@ -495,6 +639,17 @@ fn packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fa
         );
         assert_eq!(input.fs.operation_count(FsOp::ReadAt), 0);
     }
+    let maintenance = input
+        .recovery
+        .packed_indexes_with_io(&mut input.fs, &input.transaction, limits(2).certificates)
+        .unwrap();
+    assert_eq!(
+        admit_packed_graph_base(&maintenance, &mut input.fs, &input.root, cold_limits())
+            .unwrap()
+            .0
+            .source_v1_digest(),
+        Some(&input.v1_digest)
+    );
     use uste_storage::FileSystem;
     let physical = input.root.manifest().families()[7]
         .root
@@ -550,6 +705,18 @@ fn packed_cold_graph_admission_foreign_owner_false_claims_and_late_corruption_fa
 
 #[test]
 fn packed_cold_graph_admission_explicit_empty_families_and_absent_policy() {
+    packed_cold_graph_admission_explicit_empty_families_and_absent_policy_case(false);
+}
+#[test]
+fn buffered_packed_cold_graph_admission_explicit_empty_families_and_absent_policy() {
+    packed_cold_graph_admission_explicit_empty_families_and_absent_policy_case(true);
+}
+fn packed_cold_graph_admission_explicit_empty_families_and_absent_policy_case(buffered: bool) {
+    let admit_packed_graph_base: Admission = if buffered {
+        buffered_admit
+    } else {
+        admit_packed_graph_base
+    };
     for policy_only in [false, true] {
         let mut memory = MemoryFileSystem::new(16 * 1024 * 1024);
         let name = EntryName::new("packed-graph-bridge").unwrap();
