@@ -76,6 +76,7 @@ struct Reader<
     fs: &'a mut F,
     base: &'a PackedGraphBase,
     budget: PackedGraphExpansionLimits,
+    cache: Option<&'a mut PackedPageCache>,
 }
 impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>
     ExpansionRead for Reader<'_, '_, F, W, E, I>
@@ -111,7 +112,14 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             },
         )?;
         let mut entries = Vec::new();
-        while let Some(entry) = self.index.next(self.fs, &mut cursor)? {
+        loop {
+            let entry = match self.cache.as_deref_mut() {
+                Some(cache) => self.index.next_cached(self.fs, &mut cursor, cache),
+                None => self.index.next(self.fs, &mut cursor),
+            }?;
+            let Some(entry) = entry else {
+                break;
+            };
             if entry.key().len() != 32
                 || !entry.key().starts_with(lower)
                 || (family == FAMILY_PROVENANCE && !entry.value().is_empty())
@@ -142,17 +150,20 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             .lookups
             .checked_sub(1)
             .ok_or(StorageError::ResourceLimit)?;
-        let result = self.index.get(
-            self.fs,
-            &self.base.trees[usize::from(FAMILY_CURRENT_RECORD - 1)],
-            id.record().as_bytes(),
-            TreeLookupLimits {
-                maximum_path_branches: 145,
-                maximum_pages: self.budget.pages.min(MAX_LOOKUP_PAGES),
-                maximum_encoded_bytes: self.budget.encoded_bytes.min(MAX_LOOKUP_ENCODED_BYTES),
-                maximum_value_bytes: self.budget.returned_bytes.min(MAX_INDEX_VALUE_BYTES as u64),
-            },
-        )?;
+        let limits = TreeLookupLimits {
+            maximum_path_branches: 145,
+            maximum_pages: self.budget.pages.min(MAX_LOOKUP_PAGES),
+            maximum_encoded_bytes: self.budget.encoded_bytes.min(MAX_LOOKUP_ENCODED_BYTES),
+            maximum_value_bytes: self.budget.returned_bytes.min(MAX_INDEX_VALUE_BYTES as u64),
+        };
+        let tree = &self.base.trees[usize::from(FAMILY_CURRENT_RECORD - 1)];
+        let key = id.record();
+        let result = match self.cache.as_deref_mut() {
+            Some(cache) => self
+                .index
+                .get_cached(self.fs, tree, key.as_bytes(), limits, cache),
+            None => self.index.get(self.fs, tree, key.as_bytes(), limits),
+        }?;
         let value = result.value.ok_or(GraphDiskError::IndexCorrupt)?;
         self.budget.charge(
             result.report.pages,
@@ -181,6 +192,7 @@ pub(super) fn read<
     base: &PackedGraphBase,
     request: &GraphReadRequest,
     budget: PackedGraphExpansionLimits,
+    cache: Option<&mut PackedPageCache>,
     authorize: &mut dyn FnMut(Action, Target) -> bool,
 ) -> Result<GraphReadOutput, GraphDiskError> {
     read_with(
@@ -189,6 +201,7 @@ pub(super) fn read<
             fs,
             base,
             budget,
+            cache,
         },
         request,
         authorize,

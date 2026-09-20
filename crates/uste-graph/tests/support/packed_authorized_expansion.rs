@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_authorized_cache.rs"]
+mod cache;
 use uste_graph::{AdjacencyDirection, GraphSnapshot, PackedGraphExpansionLimits};
 
 fn expansion_limits(values: [u64; 5]) -> PackedGraphReadLimits {

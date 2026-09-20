@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — owner/session-bound packed caching (Decision 0162)
+## Latest verified increment — authorized packed graph cache configuration (Decision 0163)
+
+Implemented on pushed `35bc482` plus this increment: trusted adapters can select a bounded packed
+cache for point, historical, adjacency and evidence-support queries. The existing constructor
+remains uncached. Every read still checks current policy/readiness, scope, typed permissions and
+cancellation; warm plaintext does not authorize hidden references. ManageSchema is required for
+cache diagnostics/clear, including disabled-cache diagnostics. Proof-work admission is unchanged
+by warmth. The trusted experimental packed-read implementation trait gains an optional cache;
+ordinary consumer request/output types, v1 APIs and pinned M1 interfaces are unchanged.
+
+Six new tests cover uncached/cold/warm full-replay equality, minimum (25,600-byte) and 64 KiB
+eviction, maintenance-only diagnostics, foreign/absent/denied callers, sticky warm cancellation,
+all exact/minus-one point/history and aggregate expansion budgets, late ciphertext mutations in
+five graph families, and 279 observed read-error/crash cases with cold recovery. Ordinary read
+errors also retry through the same partially warmed cache without returning partial results.
+Focused session 64856 / `run-p729130-i21719177.scope` passed the first five tests/52.57 s and
+Clippy/5.20 s; the added point/history limit test passed session 73842/0.12 s.
+
+Full gate session 88149 / `run-p731046-i21714978.scope` exited 0: 647 tests across 47 executables,
+zero failed/ignored (graph disk 78/416.30 s, transaction integration 97/98.24 s), Clippy 0.06 s,
+graph/transaction docs 2.70 s. Preflight 30 GiB available RAM/5.7 GiB free swap; sampled scope peak
+1,827,446,784 bytes/zero swap. Exact command:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d163-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-graph -p uste-txn --no-deps --locked --offline'
+```
+
+Format, diff, docs and task graph checks pass; lockfile digest is unchanged. Native regression
+remains pinned to `35bc482`; this optional packed facade is not yet wired into native fixtures,
+and no new native or qualifying campaign is claimed. Next implement private packed graph genesis
+staging (Decision 0164), then explicit terminal-only origin recovery and native integration.
+The unregistered genesis source/tests and Decision 0164 draft are excluded from this commit.
+T-20/T-19 and the preserved full roadmap/release gates remain open. M1 qualification and handoff
+are unchanged. This section supersedes earlier next steps.
+
+## Prior verified increment — owner/session-bound packed caching (Decision 0162)
 
 Implemented on pushed `983a5db` plus this increment: optional packed lookup and forward/reverse
 cursor caching binds every page to its complete physical context, exact journal owner and unlocked

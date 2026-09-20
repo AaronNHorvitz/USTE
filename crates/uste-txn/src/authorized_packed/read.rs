@@ -2,6 +2,8 @@
 use super::*;
 use crate::{ApplyError, AuthorizedReadError, Cancellation};
 use uste_policy::AuthorizationRequirements;
+use uste_storage::packed_page_cache::PackedPageCache;
+mod cache;
 
 pub trait AuthorizedPackedReadState<F, W, E, I>:
     PackedCoordinatorState + AuthorizedDiskPolicyState + Sized
@@ -24,6 +26,7 @@ where
         fs: &mut F,
         request: &Self::ReadRequest,
         limits: &Self::ReadLimits,
+        cache: Option<&mut PackedPageCache>,
         authorize_candidate: &mut dyn FnMut(Action, Target) -> bool,
     ) -> Result<Self::ReadOutput, Self::ReadError>;
 }
@@ -37,6 +40,7 @@ where
 {
     metadata: AuthorizedPackedMetadata<'a, S, F, W, E, I>,
     limits: S::ReadLimits,
+    cache: std::sync::Mutex<Option<PackedPageCache>>,
 }
 impl<'a, S, F, W, E, I> AuthorizedPackedReader<'a, S, F, W, E, I>
 where
@@ -46,6 +50,7 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    /// Compatibility constructor: uncached reads. Use the explicit budget constructor to cache.
     pub fn new(
         inner: &'a PackedCommitCoordinator<S, F, W, E, I>,
         policy: &'a PolicyKernel,
@@ -54,6 +59,7 @@ where
         Ok(Self {
             metadata: AuthorizedPackedMetadata::new(inner, policy)?,
             limits,
+            cache: std::sync::Mutex::new(None),
         })
     }
     pub fn read(
@@ -84,6 +90,10 @@ where
         if cancellation.is_cancelled() {
             return Err(cancelled());
         }
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| auth(AuthorizedError::IntegrityFailure))?;
         let mut observed_cancel = false;
         let mut authorize_candidate = |action: Action, target: Target| {
             observed_cancel |= cancellation.is_cancelled();
@@ -100,6 +110,7 @@ where
             fs,
             request,
             &self.limits,
+            cache.as_mut(),
             &mut authorize_candidate,
         );
         if observed_cancel || cancellation.is_cancelled() {
