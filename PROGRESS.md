@@ -2,7 +2,43 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native buffered graph admission (Decision 0180)
+## Latest verified increment — buffered native comparison (Decision 0181)
+
+Measured pushed `edc0845`, binary SHA-256
+`0a5b2fa572647ac0c1bb2ad8ada7814daf3a8a05d85383878c0c4d28f36c6579`, against the retained
+Decision 0177 fixture; all original artifacts preserved. Reports are archived in
+`docs/evidence/native-packed-buffered-1000-development.json`. Open/query/sample exited 0:
+wall 2.53/72.63/155.83 s, peak RSS 265,272/265,380/265,888 KiB, zero process swaps.
+Query cold setup is 2,389 ms versus 51,261 ms; last-owner decrypts 6,381 versus 2,378,825,
+authenticated encoded bytes 153,801,773 versus 48,895,663,753. This is not physical I/O.
+Query-only execution is 70,228 versus 69,953 ms; paired execution 135,278 versus 134,026 ms.
+No query throughput improvement is claimed. All 384 outcomes, 96 warm-ups and 768 timed
+executions pass, with identical state/query/paired digests and query cache/decrypt work.
+Certificate SHA-256 before/after remains
+`820626386caa307fae632e8270238c96db43333704ccfba48a5ed39576827c47`.
+
+Commands used the Decision 0177 scope/time/1800-second timeout template and the same root,
+credential, entity count and oracle files. Exact substitutions:
+`buffered-open` / `linux-packed-open` / no oracle argument;
+`buffered-query` / `linux-packed-query` / absolute artifact `oracle-summary`;
+`buffered-sample` / `linux-packed-sample` / absolute artifact `oracle-bundle`.
+Each output uses that phase's `.json` and `.time` file in
+`experiments/t20-bench/target/native-packed1000.QGIZQZ`. The unchanged prebuilt binary was
+invoked directly; no compilation is included. Open session 94771/scope
+`run-p978543-i21638521.scope`; query 2681/`run-p978826-i21957020.scope`; sample
+2749/`run-p981536-i21957137.scope`. Preflight 25 GiB available RAM/2.8 GiB free swap;
+sampled sampling-scope peak 277,987,328 bytes/zero swap; other scope peaks not captured.
+One workload at a time under 3G/4G/512M limits. Original and new report fields were compared
+exactly, separately respecting each digest domain. Host caches remain uncontrolled and query
+evictions zero. This does not qualify cache pressure, larger-than-memory or benchmark targets.
+
+Core remains 676 tests at `0322067`, harness 104 active at `edc0845`. New BM-06 prefix arithmetic
+and partial-history verification edits are uncompiled/unverified and excluded from this evidence
+commit and measurement binary. Next verify that bounded 513-record partial-generation work,
+then continue multi-batch tails, coordinator accounting and qualification prerequisites. M1,
+TASKS, the full roadmap and release gates remain unchanged. This supersedes older next steps.
+
+## Prior verified increment — native buffered graph admission (Decision 0180)
 
 Implemented on pushed `0322067`: packed model/native BM-01 and BM-06 select fresh 64 MiB logical
 graph-admission caches, sequential canonical families then semantic validation. No retained
