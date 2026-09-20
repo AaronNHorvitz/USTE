@@ -1,4 +1,6 @@
 use super::*;
+#[path = "journal_packed_trees/cache.rs"]
+mod cache;
 use crate::{
     ordered_commitment::{self, CommitmentContext, OrderedCommitment},
     packed_index_pack::ImmutablePack,

@@ -1,4 +1,5 @@
 use super::*;
+mod cache;
 use crate::{packed_tree_cursor::TreeCursorLimits, packed_tree_validation::TreeValidationLimits};
 
 fn batches() -> TreeBatchLimits {

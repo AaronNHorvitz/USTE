@@ -9,8 +9,8 @@ use std::{borrow::Borrow, collections::BTreeMap};
 mod sparse;
 use sparse::SparseDirectory;
 #[path = "index_cache.rs"]
-mod cache;
-use cache::CachePages;
+pub(crate) mod cache;
+type CachePages = cache::CachePages<CacheKey, CachedPage>;
 
 use sha2::{Digest, Sha256};
 use uste_crypto::{

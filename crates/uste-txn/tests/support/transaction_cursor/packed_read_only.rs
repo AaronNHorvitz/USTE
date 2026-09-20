@@ -1,4 +1,6 @@
 use super::*;
+#[path = "packed_read_only/cache.rs"]
+mod cache;
 use uste_storage::journal::CertifiedPackedTreeStage;
 
 fn fixture_reader() -> (Fs, Live, CertifiedPackedTreeStage) {

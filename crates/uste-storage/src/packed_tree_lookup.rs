@@ -8,12 +8,15 @@ use crate::{
         OrderedCommitment, ValueCommitment,
     },
     packed_index_pack::read_linked_record_page,
-    packed_index_page::{ENCODED_PAGE_BYTES, PackedPage},
+    packed_index_page::ENCODED_PAGE_BYTES,
+    packed_page_cache::PackedPageCache,
     packed_tree_record::{MAX_CHUNK_DATA, PackedLocator, TreeNode, ValueChunk},
 };
 use uste_crypto::{EntropySource, KeyVault};
 use uste_types::{CommitRevision, NamespaceRef};
 use zeroize::Zeroizing;
+mod read_page;
+use read_page::ReadPage;
 
 pub const MAX_LOOKUP_PAGES: u64 =
     logical::MAX_BRANCH_BITS as u64 + 1 + logical::MAX_VALUE_BYTES.div_ceil(MAX_CHUNK_DATA) as u64;
@@ -38,7 +41,9 @@ pub struct TreeLookupLimits {
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TreeLookupReport {
+    /// Successful page proof-work units, including cache hits; not physical I/O.
     pub pages: u64,
+    /// Encoded-byte proof-work units, including cache hits.
     pub encoded_bytes: u64,
     pub path_branches: u32,
     pub value_chunks: u32,
@@ -66,9 +71,10 @@ pub(crate) struct Reader<'a, F: FileSystem, W, E: EntropySource> {
     pub(crate) context: TreeReadContext,
     pub(crate) limits: TreeLookupLimits,
     pub(crate) report: TreeLookupReport,
+    pub(crate) cache: Option<&'a mut PackedPageCache>,
 }
 impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
-    pub(crate) fn page(&mut self, location: PackedLocator) -> Result<PackedPage, StorageError> {
+    pub(crate) fn page(&mut self, location: PackedLocator) -> Result<ReadPage, StorageError> {
         if self.report.pages >= self.limits.maximum_pages
             || ENCODED_PAGE_BYTES as u64
                 > self.limits.maximum_encoded_bytes - self.report.encoded_bytes
@@ -77,6 +83,18 @@ impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
         }
         let c = self.context;
         let physical = location.resolve(c.scope, c.profile, c.family, c.revision)?;
+        if let Some(cache) = self.cache.as_deref_mut() {
+            let page = cache.page(
+                self.filesystem,
+                self.directory,
+                self.vault,
+                physical,
+                location.slot(),
+            )?;
+            self.report.pages += 1;
+            self.report.encoded_bytes += ENCODED_PAGE_BYTES as u64;
+            return Ok(ReadPage::Cached(page));
+        }
         let (page, report) = read_linked_record_page(
             self.filesystem,
             self.directory,
@@ -87,7 +105,7 @@ impl<F: FileSystem, W, E: EntropySource> Reader<'_, F, W, E> {
         )?;
         self.report.pages += report.pages;
         self.report.encoded_bytes += report.encoded_bytes;
-        Ok(page)
+        Ok(ReadPage::Owned(page))
     }
 
     pub(crate) fn value(
@@ -141,6 +159,48 @@ pub fn lookup<F: FileSystem, W, E: EntropySource>(
     key: &[u8],
     limits: TreeLookupLimits,
 ) -> Result<TreeLookupResult, StorageError> {
+    lookup_inner(
+        filesystem, directory, vault, context, expected, root, key, limits, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn lookup_cached<F: FileSystem, W, E: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: TreeReadContext,
+    expected: OrderedCommitment,
+    root: Option<PackedLocator>,
+    key: &[u8],
+    limits: TreeLookupLimits,
+    cache: &mut PackedPageCache,
+) -> Result<TreeLookupResult, StorageError> {
+    lookup_inner(
+        filesystem,
+        directory,
+        vault,
+        context,
+        expected,
+        root,
+        key,
+        limits,
+        Some(cache),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn lookup_inner<F: FileSystem, W, E: EntropySource>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: TreeReadContext,
+    expected: OrderedCommitment,
+    root: Option<PackedLocator>,
+    key: &[u8],
+    limits: TreeLookupLimits,
+    cache: Option<&mut PackedPageCache>,
+) -> Result<TreeLookupResult, StorageError> {
     if key.is_empty() || context.family == 0 {
         return Err(StorageError::InvalidState);
     }
@@ -173,6 +233,7 @@ pub fn lookup<F: FileSystem, W, E: EntropySource>(
         context,
         limits,
         report: TreeLookupReport::default(),
+        cache,
     };
     let mut path: Vec<BranchProof> = Vec::new();
     path.try_reserve_exact(limits.maximum_path_branches as usize)

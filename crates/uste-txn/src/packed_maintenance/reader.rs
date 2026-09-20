@@ -1,5 +1,6 @@
 //! Trusted read access only: no cold admission, publication or caller authorization.
 use super::*;
+mod cache;
 
 pub struct PackedIndexReader<'a, F, W, E, I>
 where

@@ -139,11 +139,15 @@ impl EncryptedEnvelope {
     }
 }
 
+mod session;
+pub use session::UnlockedKeySession;
+
 /// Lockable master key plus one bounded in-memory writer nonce session.
 pub struct KeyVault<W, E> {
     database: DatabaseId,
     wrapped: W,
     key: Option<SecretKeyMaterial>,
+    session: Option<UnlockedKeySession>,
     entropy: E,
     used_nonces: BTreeSet<[u8; NONCE_BYTES]>,
     nonce_limit: usize,
@@ -165,6 +169,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             database,
             wrapped,
             key: Some(key),
+            session: Some(UnlockedKeySession::new()),
             entropy,
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
@@ -178,6 +183,7 @@ impl<W, E: EntropySource> KeyVault<W, E> {
             database,
             wrapped,
             key: None,
+            session: None,
             entropy,
             used_nonces: BTreeSet::new(),
             nonce_limit: MAX_NONCES_PER_WRITER_SESSION,
@@ -194,6 +200,13 @@ impl<W, E: EntropySource> KeyVault<W, E> {
     pub const fn is_locked(&self) -> bool {
         self.key.is_none()
     }
+    /// Process-local plaintext-cache binding; never key material or caller authorization.
+    pub fn unlocked_session(&self) -> Result<&UnlockedKeySession, CryptoError> {
+        if self.key.is_none() {
+            return Err(CryptoError::Locked);
+        }
+        self.session.as_ref().ok_or(CryptoError::Locked)
+    }
 
     /// Unlock with the trusted adapter. Failure leaves the vault locked.
     pub fn unlock<A>(&mut self, adapter: &mut A) -> Result<(), CryptoError>
@@ -205,12 +218,14 @@ impl<W, E: EntropySource> KeyVault<W, E> {
         }
         let key = adapter.unwrap(self.database, &self.wrapped)?;
         self.key = Some(key);
+        self.session = Some(UnlockedKeySession::new());
         Ok(())
     }
 
     /// Drop and best-effort zeroize the unlocked key. Repeated locking is harmless.
     pub fn lock(&mut self) {
         self.key = None;
+        self.session = None;
     }
 
     /// Encrypt and pad an object, consuming a fresh entropy-supplied nonce.
@@ -447,6 +462,7 @@ mod tests {
             database,
             wrapped: (),
             key: Some(SecretKeyMaterial::from_adapter_bytes([2; 32])),
+            session: Some(super::UnlockedKeySession::new()),
             entropy: NoEntropy,
             used_nonces: Default::default(),
             nonce_limit: 0,

@@ -7,6 +7,7 @@ use crate::{
         OrderedCommitment, ValueCommitment,
     },
     packed_index_page::ENCODED_PAGE_BYTES,
+    packed_page_cache::PackedPageCache,
     packed_tree_lookup::{
         PackedLookupValue, Reader, TreeLookupLimits, TreeLookupReport, TreeReadContext,
     },
@@ -35,8 +36,9 @@ pub struct TreeCursorReport {
     pub candidates: u64,
     pub returned_entries: u64,
     pub returned_bytes: u64,
-    /// Successfully authenticated page work; not attempted/failed adapter I/O or device traffic.
+    /// Successful page proof-work units, including cache hits; not physical I/O.
     pub pages: u64,
+    /// Encoded-byte proof-work units, including cache hits.
     pub encoded_bytes: u64,
     pub value_chunks: u64,
 }
@@ -202,6 +204,26 @@ impl PackedTreeCursor {
         directory: &F::Directory,
         vault: &KeyVault<W, E>,
     ) -> Result<Option<PackedCursorEntry>, StorageError> {
+        self.next_inner(filesystem, directory, vault, None)
+    }
+
+    pub(crate) fn next_cached<F: FileSystem, W, E: EntropySource>(
+        &mut self,
+        filesystem: &mut F,
+        directory: &F::Directory,
+        vault: &KeyVault<W, E>,
+        cache: &mut PackedPageCache,
+    ) -> Result<Option<PackedCursorEntry>, StorageError> {
+        self.next_inner(filesystem, directory, vault, Some(cache))
+    }
+
+    fn next_inner<F: FileSystem, W, E: EntropySource>(
+        &mut self,
+        filesystem: &mut F,
+        directory: &F::Directory,
+        vault: &KeyVault<W, E>,
+        cache: Option<&mut PackedPageCache>,
+    ) -> Result<Option<PackedCursorEntry>, StorageError> {
         if self.failed {
             return Err(StorageError::NeedsRecovery);
         }
@@ -221,6 +243,7 @@ impl PackedTreeCursor {
                 maximum_value_bytes: logical::MAX_VALUE_BYTES as u64,
             },
             report: TreeLookupReport::default(),
+            cache,
         };
         let result = self.step(&mut reader);
         self.report.pages += reader.report.pages;

@@ -77,6 +77,9 @@ impl fmt::Debug for CertificateAnchorProof {
 }
 
 impl CertificateAnchorProof {
+    pub(crate) fn same_owner_as(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.owner, &other.owner)
+    }
     pub fn anchor(&self) -> (CommitRevision, [u8; 32]) {
         self.anchor
     }

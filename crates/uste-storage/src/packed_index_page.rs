@@ -20,7 +20,7 @@ pub const MAX_RECORD_PAYLOAD: usize = PAGE_BYTES - DATA - 1;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub struct PackedPageContext {
     pub scope: NamespaceRef,
     pub epoch: KeyEpoch,

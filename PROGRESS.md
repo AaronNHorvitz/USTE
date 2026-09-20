@@ -2,7 +2,56 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — authorized packed graph expansion (Decision 0161)
+## Latest verified increment — owner/session-bound packed caching (Decision 0162)
+
+Implemented on pushed `983a5db` plus this increment: optional packed lookup and forward/reverse
+cursor caching binds every page to its complete physical context, exact journal owner and unlocked
+vault session. A different owner refuses until clear; key lock/unlock or replacement cannot serve
+old plaintext. Existing nonce tracking is never reset. Authenticated immutable pages use the same
+slot-addressed LRU policy as v1 through a private generic representation. Uncached APIs, cold
+canonical admission, persisted formats and M1 interfaces are unchanged. Cached proof-work admission
+charges the same page/encoded-byte units as uncached execution; cache counters are not physical I/O.
+Key locking invalidates access, not synchronous erasure of an independently owned cache. Clear/drop
+releases resident ownership; bounded transient reader handles and result buffers are separate work.
+
+Eleven new tests cover session lifecycle, all context fields, cold/warm equality, exact/narrower
+limits, owner/reopen isolation, locked empty/exhausted cursors, late corruption after clear,
+counter overflow, a 20,000-access independent LRU trace and scoped transaction wrappers. Storage
+fault matrices cover 27 cold lookup/reopen and 54 directional cursor error/crash cases. Focused
+storage session 87164 passed seven tests/1.15 s; session 92387 passed the two transaction cache
+tests/0.02 s and workspace Clippy/8.34 s. The crypto session test passed. An initial nested module
+path and Clippy `len_zero` finding were repaired; an initial transaction filter selected zero tests
+and was corrected to `packed_read_only_cached` before counting verification.
+
+Full gate session 20930 / `run-p720089-i21714531.scope` exited 0: 641 tests across 47 executables,
+zero failed/ignored (graph disk 72/357.67 s, transaction integration 97/98.62 s), Clippy 0.07 s and
+four-crate docs 5.96 s. Preflight 30 GiB available RAM/5.7 GiB free swap; sampled scope peak
+2,649,554,944 bytes/zero swap. Native session 48956 / `run-p726348-i21636326.scope` exited 0:
+71 active tests (58 unit/46.21 s, BM-01 process 3/12.03 s, BM-06 CLI 2/0.50 s, BM-06 process
+8/74.55 s), two pre-existing exact-oracle ignores unchanged, release build 52.43 s and Clippy
+3.42 s. Native preflight 29 GiB available/5.7 GiB swap/984 GiB disk; sampled peak 544,739,328
+bytes/zero swap. These remain bounded regression runs, not qualifying BM-01/BM-06 campaigns.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d162-workspace-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc -p uste-crypto -p uste-storage -p uste-graph -p uste-txn --no-deps --locked --offline'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d162-native-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Format, diff, docs and task graph checks pass; the lockfile digest remains
+`7ed2b533b3c801250a89e008b4ca26c48f16400e38224d8a63447c0393aaa97b`. Next integrate trusted
+graph cache configuration/maintenance diagnostics (Decision 0163), then packed native bootstrap,
+origin rebuild and qualification readiness. The unregistered graph-cache tests/facade extension
+and Decision 0163 draft are excluded from this commit. T-20/T-19 and full-roadmap/release gates
+remain open; M1's pinned qualification/handoff is preserved. This section supersedes earlier next steps.
+
+## Prior verified increment — authorized packed graph expansion (Decision 0161)
 
 Implemented on pushed `05b797e` plus this increment: optional adjacency/evidence-support queries
 share the existing v1 reader's pure validation, ordering, visibility and result-limit semantics.
