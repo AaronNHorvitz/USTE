@@ -1,0 +1,2107 @@
+{
+  "schema": "uste-d219-wide-cache-sampling-comparison-v1",
+  "qualification": "nonqualifying-development-sampling",
+  "commit": "5be671f94e0be203977e3c6be8ed657b85ca6adc",
+  "binary_sha256": "0492dcad397f37b7d3e5ac835842f883710e12f8d04119f9c4f291c202f4a8c7",
+  "source_certificate_sha256": "b8fea4e223947316555069db1869b7ef57e121077e84ceff02a1930061f1e6cd",
+  "oracle_bundle_file_sha256": "f667f4420fce69e773d55e4c8ace4ed16878f063f4afc11ce1e1c6a234e5797b",
+  "interpretation": "Both modes preserve all oracle outcomes and deadline protocol. Positive lookup retention improves observed warm latency in this single sequential development pair but worsens cold latency. Warm all-class success p99: pages 21.335581/2548.544974 ms at depth 1/4; positive 9.455773/1525.282292 ms. Four-hop target 250 ms remains unmet, and this is neither qualifying size nor five reserved-host samples. No default change or broad performance qualification.",
+  "runs": {
+    "pages": {
+      "command": "systemd-run --user --scope --unit=uste-d219-wide-pages-sample.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-sample --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-bundle > experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.json 2> experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.stderr; measurement_status=$?; systemctl --user show uste-d219-wide-pages-sample.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.scope; exit \"$measurement_status\"'",
+      "session": 37529,
+      "scope_invocation": "453f6f2ab94344e2a76e1b200b8f846f",
+      "json": {
+        "adapter_io_accounting": "filesystem-adapter-calls",
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+        "budget_evaluation": "not-performed",
+        "cache_pairing": "empty-then-retained-identical-query",
+        "complete_authenticated_io": false,
+        "development_entity_limit": 20000,
+        "engine_benchmark": true,
+        "entities": 20000,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 44,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "maximum_timed_executions_per_sample": 2000000,
+        "oracle_adjacency_memory_resident": false,
+        "oracle_bundle_digest": "a123313a59045e83e9df828b8e8bbdefb6320553500544c71816dd8bdc7ea52d",
+        "oracle_profile": "bm01-oracle-bundle-v1",
+        "qualification": "nonqualifying-development-sampling",
+        "query_cache_configuration": {
+          "clear_drops": "all-enabled-uste-partitions",
+          "logical_accounting_not_rss": true,
+          "lookup": null,
+          "lookup_budget_bytes": 0,
+          "page_accounted_bytes": 268422144,
+          "page_budget_bytes": 268435456,
+          "page_counter_scope": "packed-pages-only",
+          "profile": "packed-pages-256m-v1",
+          "total_accounted_bytes": 268422144,
+          "total_budget_bytes": 268435456
+        },
+        "query_deadline_enforced": true,
+        "query_deadline_postchecked": true,
+        "query_deadline_seconds": 30,
+        "relationships": 200000,
+        "result_size_profile": "bm01-result-v1",
+        "samples": [
+          {
+            "adapter_io": [
+              {
+                "cache": "uste-empty",
+                "work": {
+                  "complete_authenticated_index_io": false,
+                  "measurement_scope": "filesystem-adapter-calls",
+                  "operations": {
+                    "create_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "create_new": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "metadata": {
+                      "calls": 4934320,
+                      "failures": 0
+                    },
+                    "open_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "open_existing": {
+                      "calls": 4934320,
+                      "failures": 0
+                    },
+                    "read_at": {
+                      "calls": 4934320,
+                      "failures": 0
+                    },
+                    "remove_file": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "rename_no_replace": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "set_len": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_all": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_data": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "try_lock_exclusive": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "write_at": {
+                      "calls": 0,
+                      "failures": 0
+                    }
+                  },
+                  "physical_device_io": false,
+                  "read_requested_bytes": 101375604400,
+                  "read_returned_bytes": 101375604400,
+                  "write_requested_bytes": 0,
+                  "write_returned_bytes": 0
+                }
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": {
+                  "complete_authenticated_index_io": false,
+                  "measurement_scope": "filesystem-adapter-calls",
+                  "operations": {
+                    "create_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "create_new": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "metadata": {
+                      "calls": 2834383,
+                      "failures": 0
+                    },
+                    "open_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "open_existing": {
+                      "calls": 2834383,
+                      "failures": 0
+                    },
+                    "read_at": {
+                      "calls": 2834383,
+                      "failures": 0
+                    },
+                    "remove_file": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "rename_no_replace": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "set_len": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_all": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_data": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "try_lock_exclusive": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "write_at": {
+                      "calls": 0,
+                      "failures": 0
+                    }
+                  },
+                  "physical_device_io": false,
+                  "read_requested_bytes": 58232398735,
+                  "read_returned_bytes": 58232398735,
+                  "write_requested_bytes": 0,
+                  "write_returned_bytes": 0
+                }
+              }
+            ],
+            "cache_work": [
+              {
+                "cache": "uste-empty",
+                "index_cache_accounted_bytes": 268422144,
+                "index_cache_budget_bytes": 268435456,
+                "index_cache_evictions": 1797695,
+                "index_cache_hits": 559139532,
+                "index_cache_misses": 4934320,
+                "successful_logical_result_bytes": 46474984,
+                "successful_visits": 4095526
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "index_cache_accounted_bytes": 268422144,
+                "index_cache_budget_bytes": 268435456,
+                "index_cache_evictions": 2834383,
+                "index_cache_hits": 561239469,
+                "index_cache_misses": 2834383,
+                "successful_logical_result_bytes": 46474984,
+                "successful_visits": 4095526
+              }
+            ],
+            "current_rss_kib": 330964,
+            "elapsed_milliseconds": 784246,
+            "latency_groups": [
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 96,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2564666,
+                "p95_nanoseconds": 54778710,
+                "p99_nanoseconds": 55476668
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 96,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 48037379,
+                "p95_nanoseconds": 1092030053,
+                "p99_nanoseconds": 1141172322
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 64,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 190438882,
+                "p95_nanoseconds": 630857454,
+                "p99_nanoseconds": 786529048
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 57,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1443856741,
+                "p95_nanoseconds": 2532562376,
+                "p99_nanoseconds": 2698660916
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2180743,
+                "p95_nanoseconds": 2766698,
+                "p99_nanoseconds": 2917716
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 18581704,
+                "p95_nanoseconds": 62058169,
+                "p99_nanoseconds": 67857661
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 185414994,
+                "p95_nanoseconds": 503860906,
+                "p99_nanoseconds": 630857454
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 29,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1436979035,
+                "p95_nanoseconds": 2491942323,
+                "p99_nanoseconds": 2497201818
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 53695098,
+                "p95_nanoseconds": 55078103,
+                "p99_nanoseconds": 55476668
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 1067254996,
+                "p95_nanoseconds": 1125401187,
+                "p99_nanoseconds": 1141172322
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2378885,
+                "p95_nanoseconds": 3591646,
+                "p99_nanoseconds": 3956580
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 16702559,
+                "p95_nanoseconds": 64623662,
+                "p99_nanoseconds": 66201432
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 193659573,
+                "p95_nanoseconds": 672906977,
+                "p99_nanoseconds": 786529048
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 28,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1443856741,
+                "p95_nanoseconds": 2665167576,
+                "p99_nanoseconds": 2698660916
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3590925986,
+                "p95_nanoseconds": 3663256855,
+                "p99_nanoseconds": 3672942048
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 39,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3576351320,
+                "p95_nanoseconds": 3660944050,
+                "p99_nanoseconds": 3669879286
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 3,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2950648738,
+                "p95_nanoseconds": 3018135933,
+                "p99_nanoseconds": 3018135933
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3590925986,
+                "p95_nanoseconds": 3663256855,
+                "p99_nanoseconds": 3672942048
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3590011189,
+                "p95_nanoseconds": 3660944050,
+                "p99_nanoseconds": 3669879286
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 4,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2964651046,
+                "p95_nanoseconds": 2986828177,
+                "p99_nanoseconds": 2986828177
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 96,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 222981,
+                "p95_nanoseconds": 21168220,
+                "p99_nanoseconds": 21335581
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 96,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 12298858,
+                "p95_nanoseconds": 1019135054,
+                "p99_nanoseconds": 1058180898
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 64,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 88378548,
+                "p95_nanoseconds": 544639548,
+                "p99_nanoseconds": 701474637
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 57,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1305862655,
+                "p95_nanoseconds": 2318656870,
+                "p99_nanoseconds": 2548544974
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 178392,
+                "p95_nanoseconds": 241592,
+                "p99_nanoseconds": 289156
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 2506999,
+                "p95_nanoseconds": 22749843,
+                "p99_nanoseconds": 23840375
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 80001397,
+                "p95_nanoseconds": 253726768,
+                "p99_nanoseconds": 544639548
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 29,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1292319720,
+                "p95_nanoseconds": 2306930297,
+                "p99_nanoseconds": 2318656870
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 20813751,
+                "p95_nanoseconds": 21188549,
+                "p99_nanoseconds": 21335581
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 990298447,
+                "p95_nanoseconds": 1045431381,
+                "p99_nanoseconds": 1058180898
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 192484,
+                "p95_nanoseconds": 326750,
+                "p99_nanoseconds": 348258
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 2261326,
+                "p95_nanoseconds": 23316895,
+                "p99_nanoseconds": 23859354
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 93035194,
+                "p95_nanoseconds": 584777002,
+                "p99_nanoseconds": 701474637
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 28,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1305862655,
+                "p95_nanoseconds": 2440089152,
+                "p99_nanoseconds": 2548544974
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3430468264,
+                "p95_nanoseconds": 3493146421,
+                "p99_nanoseconds": 3505866833
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 39,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3394925543,
+                "p95_nanoseconds": 3472678125,
+                "p99_nanoseconds": 3475743251
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 3,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2824242083,
+                "p95_nanoseconds": 2839049119,
+                "p99_nanoseconds": 2839049119
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3430468264,
+                "p95_nanoseconds": 3493146421,
+                "p99_nanoseconds": 3505866833
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3407085957,
+                "p95_nanoseconds": 3472678125,
+                "p99_nanoseconds": 3475743251
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 4,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2868932766,
+                "p95_nanoseconds": 2877660697,
+                "p99_nanoseconds": 2877660697
+              }
+            ],
+            "lookup_cache_work": [
+              {
+                "cache": "uste-empty",
+                "work": null
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": null
+              }
+            ],
+            "minimum_duration_milliseconds": 0,
+            "output_digest": "aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584",
+            "process_peak_rss_kib": 330964,
+            "rounds": 1,
+            "sample": 1,
+            "timed_executions": 768,
+            "vault_work": [
+              {
+                "cache": "uste-empty",
+                "work": {
+                  "authenticated_encoded_bytes": 101375604400,
+                  "complete_authenticated_io": false,
+                  "failed_calls": 0,
+                  "includes_key_unwrap": false,
+                  "includes_other_vaults": false,
+                  "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                  "physical_device_io": false,
+                  "returned_plaintext_bytes": 80843898880,
+                  "successful_calls": 4934320
+                }
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": {
+                  "authenticated_encoded_bytes": 58232398735,
+                  "complete_authenticated_io": false,
+                  "failed_calls": 0,
+                  "includes_key_unwrap": false,
+                  "includes_other_vaults": false,
+                  "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                  "physical_device_io": false,
+                  "returned_plaintext_bytes": 46438531072,
+                  "successful_calls": 2834383
+                }
+              }
+            ]
+          }
+        ],
+        "schema": "bm01-linux-packed-wide-sampling-v1",
+        "setup": {
+          "bounded_bootstrap_resume": false,
+          "complete_authenticated_io": false,
+          "complete_fixture": true,
+          "coordinator_admission_buffered": true,
+          "coordinator_admission_cache_bytes": 67108864,
+          "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+          "current_rss_kib": 87368,
+          "data_bearing_prefix_resume_implemented": true,
+          "development_entity_limit": 20000,
+          "elapsed_milliseconds": 56218,
+          "engine_benchmark": false,
+          "entities": 20000,
+          "filesystem_profile": "linux-x86_64-btrfs",
+          "frontier": 44,
+          "full_memory_coordinator_metadata": false,
+          "full_memory_graph_state": false,
+          "graph_admission_cache_bytes": 67108864,
+          "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+          "ignored_uncommitted_journal_bytes": 0,
+          "kernel_filesystem_device_cache": "uncontrolled",
+          "legacy_unbound_policy_resume_supported": false,
+          "origin_suffix_groups": null,
+          "owner_vault_encryption_work": {
+            "complete_authenticated_io": false,
+            "includes_failed_call_bytes": false,
+            "includes_failed_command_owners": false,
+            "includes_key_wrap": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "measures_durable_bytes": false,
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "accepted_plaintext_bytes": 0,
+                "failed_calls": 0,
+                "includes_failed_call_bytes": false,
+                "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+                "measures_durable_bytes": false,
+                "physical_device_io": false,
+                "produced_encoded_bytes": 0,
+                "successful_calls": 0
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "accepted_plaintext_bytes": 0,
+              "failed_calls": 0,
+              "includes_failed_call_bytes": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-encrypt-calls",
+              "measures_durable_bytes": false,
+              "physical_device_io": false,
+              "produced_encoded_bytes": 0,
+              "successful_calls": 0
+            }
+          },
+          "owner_vault_work": {
+            "complete_authenticated_io": false,
+            "includes_encryption_bytes": false,
+            "includes_key_unwrap": false,
+            "includes_pre_vault_decode_failures": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "authenticated_encoded_bytes": 21647762379,
+                "complete_authenticated_io": false,
+                "failed_calls": 0,
+                "includes_key_unwrap": false,
+                "includes_other_vaults": false,
+                "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                "physical_device_io": false,
+                "returned_plaintext_bytes": 17352294729,
+                "successful_calls": 1032459
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "authenticated_encoded_bytes": 21647762379,
+              "complete_authenticated_io": false,
+              "failed_calls": 0,
+              "includes_all_recorded_owners": true,
+              "includes_key_unwrap": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-decrypt-calls",
+              "physical_device_io": false,
+              "returned_plaintext_bytes": 17352294729,
+              "successful_calls": 1032459
+            }
+          },
+          "phase": "open",
+          "policy_only_prefix_resume_implemented": true,
+          "process_peak_rss_kib": 265904,
+          "proof_cache_bytes": 67108864,
+          "proof_cache_scope": "fresh-per-preparation",
+          "qualification": "nonqualifying-development-profile",
+          "recovered_frontier": 44,
+          "relationships": 200000,
+          "repaired_certificate_tail_bytes": 0,
+          "resume_base_revision": null,
+          "resume_suffix_groups": null,
+          "schema": "bm01-linux-packed-development-v1",
+          "setup_adapter_io": {
+            "complete_authenticated_index_io": false,
+            "measurement_scope": "filesystem-adapter-calls",
+            "operations": {
+              "create_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "create_new": {
+                "calls": 0,
+                "failures": 0
+              },
+              "metadata": {
+                "calls": 1032189,
+                "failures": 0
+              },
+              "open_directory": {
+                "calls": 1,
+                "failures": 0
+              },
+              "open_existing": {
+                "calls": 1032031,
+                "failures": 21
+              },
+              "read_at": {
+                "calls": 1032462,
+                "failures": 0
+              },
+              "remove_file": {
+                "calls": 0,
+                "failures": 0
+              },
+              "rename_no_replace": {
+                "calls": 0,
+                "failures": 0
+              },
+              "set_len": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_all": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_data": {
+                "calls": 1,
+                "failures": 0
+              },
+              "sync_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "try_lock_exclusive": {
+                "calls": 1,
+                "failures": 0
+              },
+              "write_at": {
+                "calls": 0,
+                "failures": 0
+              }
+            },
+            "physical_device_io": false,
+            "read_requested_bytes": 21647766637,
+            "read_returned_bytes": 21647766637,
+            "write_requested_bytes": 0,
+            "write_returned_bytes": 0
+          },
+          "staging_cache_bytes": 67108864,
+          "staging_cache_scope": "fresh-per-private-tree-batch",
+          "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+          "terminal_storage_open_encryption_work": {
+            "accepted_plaintext_bytes": 0,
+            "failed_calls": 0,
+            "includes_failed_call_bytes": false,
+            "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+            "measures_durable_bytes": false,
+            "physical_device_io": false,
+            "produced_encoded_bytes": 0,
+            "successful_calls": 0
+          },
+          "terminal_vault_work": {
+            "authenticated_encoded_bytes": 21647762379,
+            "complete_authenticated_io": false,
+            "failed_calls": 0,
+            "includes_key_unwrap": false,
+            "includes_other_vaults": false,
+            "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+            "physical_device_io": false,
+            "returned_plaintext_bytes": 17352294729,
+            "successful_calls": 1032459
+          },
+          "terminal_vault_work_scope": "last-cold-open-owner-only",
+          "v1_state_digest": "6880abb54859af231d877c8bbc1a9a665127a9953228c90e4a8278c048d1ecab"
+        },
+        "setup_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 1032189,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 1,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 1032031,
+              "failures": 21
+            },
+            "read_at": {
+              "calls": 1032462,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 1,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 1,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 21647766637,
+          "read_returned_bytes": 21647766637,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "setup_vault_work": {
+          "authenticated_encoded_bytes": 21647762379,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 17352294729,
+          "successful_calls": 1032459
+        },
+        "setup_vault_work_scope": "last-cold-open-owner-only",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "warmup": {
+          "queries": 96,
+          "result_limits": 21,
+          "successes": 75,
+          "visit_limits": 0
+        },
+        "warmup_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 1251577,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 1251577,
+              "failures": 0
+            },
+            "read_at": {
+              "calls": 1251577,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 0,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 25713649465,
+          "read_returned_bytes": 25713649465,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "warmup_lookup_cache_work": {
+          "cache": "uste-empty",
+          "work": null
+        },
+        "warmup_vault_work": {
+          "authenticated_encoded_bytes": 25713649465,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 20505837568,
+          "successful_calls": 1251577
+        }
+      },
+      "time": "\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-sample --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-bundle\"\n\tUser time (seconds): 903.31\n\tSystem time (seconds): 41.00\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 15:46.99\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 328640\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 578980\n\tVoluntary context switches: 3137\n\tInvoluntary context switches: 21217\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 40\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "scope": "MemoryCurrent=10502144\nMemoryPeak=342745088\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=944441128000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+      "stderr": ""
+    },
+    "positive": {
+      "command": "systemd-run --user --scope --unit=uste-d219-wide-positive-sample.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-wide-sample20000.MENKX3/positive.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-lookup-sample --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-bundle > experiments/t20-bench/target/native-wide-sample20000.MENKX3/positive.json 2> experiments/t20-bench/target/native-wide-sample20000.MENKX3/positive.stderr; measurement_status=$?; systemctl --user show uste-d219-wide-positive-sample.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-wide-sample20000.MENKX3/positive.scope; exit \"$measurement_status\"'",
+      "session": 34773,
+      "scope_invocation": "35aef4ee87b6469682935ea8fb0fc992",
+      "json": {
+        "adapter_io_accounting": "filesystem-adapter-calls",
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+        "budget_evaluation": "not-performed",
+        "cache_pairing": "empty-then-retained-identical-query",
+        "complete_authenticated_io": false,
+        "development_entity_limit": 20000,
+        "engine_benchmark": true,
+        "entities": 20000,
+        "filesystem_profile": "linux-x86_64-btrfs",
+        "frontier": 44,
+        "full_memory_coordinator_metadata": false,
+        "full_memory_graph_state": false,
+        "kernel_filesystem_device_cache": "uncontrolled",
+        "maximum_timed_executions_per_sample": 2000000,
+        "oracle_adjacency_memory_resident": false,
+        "oracle_bundle_digest": "a123313a59045e83e9df828b8e8bbdefb6320553500544c71816dd8bdc7ea52d",
+        "oracle_profile": "bm01-oracle-bundle-v1",
+        "qualification": "nonqualifying-development-sampling",
+        "query_cache_configuration": {
+          "clear_drops": "all-enabled-uste-partitions",
+          "logical_accounting_not_rss": true,
+          "lookup": {
+            "accounted_bytes": 56945917,
+            "budget_bytes": 134217728,
+            "evictions": 0,
+            "hits": 39002722,
+            "misses": 17960242,
+            "oversized_bypasses": 0,
+            "resident_values": 54114
+          },
+          "lookup_budget_bytes": 134217728,
+          "page_accounted_bytes": 134206464,
+          "page_budget_bytes": 134217728,
+          "page_counter_scope": "packed-pages-only",
+          "profile": "packed-pages-positive-lookups-256m-v1",
+          "total_accounted_bytes": 191152381,
+          "total_budget_bytes": 268435456
+        },
+        "query_deadline_enforced": true,
+        "query_deadline_postchecked": true,
+        "query_deadline_seconds": 30,
+        "relationships": 200000,
+        "result_size_profile": "bm01-result-v1",
+        "samples": [
+          {
+            "adapter_io": [
+              {
+                "cache": "uste-empty",
+                "work": {
+                  "complete_authenticated_index_io": false,
+                  "measurement_scope": "filesystem-adapter-calls",
+                  "operations": {
+                    "create_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "create_new": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "metadata": {
+                      "calls": 8267327,
+                      "failures": 0
+                    },
+                    "open_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "open_existing": {
+                      "calls": 8267327,
+                      "failures": 0
+                    },
+                    "read_at": {
+                      "calls": 8267327,
+                      "failures": 0
+                    },
+                    "remove_file": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "rename_no_replace": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "set_len": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_all": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_data": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "try_lock_exclusive": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "write_at": {
+                      "calls": 0,
+                      "failures": 0
+                    }
+                  },
+                  "physical_device_io": false,
+                  "read_requested_bytes": 169852233215,
+                  "read_returned_bytes": 169852233215,
+                  "write_requested_bytes": 0,
+                  "write_returned_bytes": 0
+                }
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": {
+                  "complete_authenticated_index_io": false,
+                  "measurement_scope": "filesystem-adapter-calls",
+                  "operations": {
+                    "create_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "create_new": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "metadata": {
+                      "calls": 2394250,
+                      "failures": 0
+                    },
+                    "open_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "open_existing": {
+                      "calls": 2394250,
+                      "failures": 0
+                    },
+                    "read_at": {
+                      "calls": 2394250,
+                      "failures": 0
+                    },
+                    "remove_file": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "rename_no_replace": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "set_len": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_all": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_data": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "sync_directory": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "try_lock_exclusive": {
+                      "calls": 0,
+                      "failures": 0
+                    },
+                    "write_at": {
+                      "calls": 0,
+                      "failures": 0
+                    }
+                  },
+                  "physical_device_io": false,
+                  "read_requested_bytes": 49189866250,
+                  "read_returned_bytes": 49189866250,
+                  "write_requested_bytes": 0,
+                  "write_returned_bytes": 0
+                }
+              }
+            ],
+            "cache_work": [
+              {
+                "cache": "uste-empty",
+                "index_cache_accounted_bytes": 191152381,
+                "index_cache_budget_bytes": 268435456,
+                "index_cache_evictions": 6511712,
+                "index_cache_hits": 355893726,
+                "index_cache_misses": 8267327,
+                "successful_logical_result_bytes": 46474984,
+                "successful_visits": 4095526
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "index_cache_accounted_bytes": 191152381,
+                "index_cache_budget_bytes": 268435456,
+                "index_cache_evictions": 2394250,
+                "index_cache_hits": 60882416,
+                "index_cache_misses": 2394250,
+                "successful_logical_result_bytes": 46474984,
+                "successful_visits": 4095526
+              }
+            ],
+            "current_rss_kib": 261432,
+            "elapsed_milliseconds": 736625,
+            "latency_groups": [
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 96,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2580768,
+                "p95_nanoseconds": 56426321,
+                "p99_nanoseconds": 58646636
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 96,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 49360796,
+                "p95_nanoseconds": 1374763845,
+                "p99_nanoseconds": 1401154190
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 64,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 198163378,
+                "p95_nanoseconds": 754418673,
+                "p99_nanoseconds": 1032495496
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 57,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1900311434,
+                "p95_nanoseconds": 3408034880,
+                "p99_nanoseconds": 3707996259
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2149768,
+                "p95_nanoseconds": 2842381,
+                "p99_nanoseconds": 2982291
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 19450859,
+                "p95_nanoseconds": 64826683,
+                "p99_nanoseconds": 70676029
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 193950904,
+                "p95_nanoseconds": 586659393,
+                "p99_nanoseconds": 754418673
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 29,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1900311434,
+                "p95_nanoseconds": 3324847370,
+                "p99_nanoseconds": 3342236463
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 55444648,
+                "p95_nanoseconds": 56727573,
+                "p99_nanoseconds": 58646636
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 1335540901,
+                "p95_nanoseconds": 1400599206,
+                "p99_nanoseconds": 1401154190
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 2337678,
+                "p95_nanoseconds": 3536089,
+                "p99_nanoseconds": 3601801
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 16801793,
+                "p95_nanoseconds": 67564352,
+                "p99_nanoseconds": 67677151
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 202991214,
+                "p95_nanoseconds": 823887454,
+                "p99_nanoseconds": 1032495496
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 28,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 1856106171,
+                "p95_nanoseconds": 3629464162,
+                "p99_nanoseconds": 3707996259
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 4214620966,
+                "p95_nanoseconds": 4319745759,
+                "p99_nanoseconds": 4324696414
+              },
+              {
+                "cache": "uste-empty",
+                "class": "all",
+                "count": 39,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 4173178917,
+                "p95_nanoseconds": 4291712607,
+                "p99_nanoseconds": 4356677269
+              },
+              {
+                "cache": "uste-empty",
+                "class": "uniform",
+                "count": 3,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 4018404899,
+                "p95_nanoseconds": 4028213479,
+                "p99_nanoseconds": 4028213479
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 4214620966,
+                "p95_nanoseconds": 4319745759,
+                "p99_nanoseconds": 4324696414
+              },
+              {
+                "cache": "uste-empty",
+                "class": "hub",
+                "count": 32,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 4180738273,
+                "p95_nanoseconds": 4291712607,
+                "p99_nanoseconds": 4356677269
+              },
+              {
+                "cache": "uste-empty",
+                "class": "cycle",
+                "count": 4,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 3948005168,
+                "p95_nanoseconds": 4042355672,
+                "p99_nanoseconds": 4042355672
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 96,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 97782,
+                "p95_nanoseconds": 9198196,
+                "p99_nanoseconds": 9455773
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 96,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 5326902,
+                "p95_nanoseconds": 647739557,
+                "p99_nanoseconds": 675691962
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 64,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 39842400,
+                "p95_nanoseconds": 306422796,
+                "p99_nanoseconds": 444438316
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 57,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 793165715,
+                "p95_nanoseconds": 1479996881,
+                "p99_nanoseconds": 1525282292
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 83846,
+                "p95_nanoseconds": 107446,
+                "p99_nanoseconds": 130555
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 1146931,
+                "p95_nanoseconds": 9966170,
+                "p99_nanoseconds": 10555476
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 37059314,
+                "p95_nanoseconds": 223395549,
+                "p99_nanoseconds": 306422796
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 29,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 789658756,
+                "p95_nanoseconds": 1369962065,
+                "p99_nanoseconds": 1383955706
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 9056350,
+                "p95_nanoseconds": 9229569,
+                "p99_nanoseconds": 9455773
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 616166435,
+                "p95_nanoseconds": 663401682,
+                "p99_nanoseconds": 675691962
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 1,
+                "outcome": "success",
+                "p50_nanoseconds": 87526,
+                "p95_nanoseconds": 136163,
+                "p99_nanoseconds": 138969
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 2,
+                "outcome": "success",
+                "p50_nanoseconds": 971680,
+                "p95_nanoseconds": 10242726,
+                "p99_nanoseconds": 10578830
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 32,
+                "depth": 3,
+                "outcome": "success",
+                "p50_nanoseconds": 42117670,
+                "p95_nanoseconds": 328395152,
+                "p99_nanoseconds": 444438316
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 28,
+                "depth": 4,
+                "outcome": "success",
+                "p50_nanoseconds": 793165715,
+                "p95_nanoseconds": 1492688001,
+                "p99_nanoseconds": 1525282292
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2204775710,
+                "p95_nanoseconds": 2344172928,
+                "p99_nanoseconds": 2344620678
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "all",
+                "count": 39,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2159842909,
+                "p95_nanoseconds": 2298427796,
+                "p99_nanoseconds": 2340831372
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "uniform",
+                "count": 3,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 1650768873,
+                "p95_nanoseconds": 1699792963,
+                "p99_nanoseconds": 1699792963
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 3,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2204775710,
+                "p95_nanoseconds": 2344172928,
+                "p99_nanoseconds": 2344620678
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "hub",
+                "count": 32,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 2178000275,
+                "p95_nanoseconds": 2298427796,
+                "p99_nanoseconds": 2340831372
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "class": "cycle",
+                "count": 4,
+                "depth": 4,
+                "outcome": "result-limit",
+                "p50_nanoseconds": 1696853720,
+                "p95_nanoseconds": 1820813310,
+                "p99_nanoseconds": 1820813310
+              }
+            ],
+            "lookup_cache_work": [
+              {
+                "cache": "uste-empty",
+                "work": {
+                  "accounted_bytes": 56945917,
+                  "budget_bytes": 134217728,
+                  "evictions": 0,
+                  "hits": 10943347,
+                  "included_in_total_cache": true,
+                  "logical_proof_work": false,
+                  "measurement_scope": "positive-lookup-cache-observations",
+                  "misses": 14323455,
+                  "oversized_bypasses": 0,
+                  "physical_device_io": false,
+                  "resident_values": 54114
+                }
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": {
+                  "accounted_bytes": 56945917,
+                  "budget_bytes": 134217728,
+                  "evictions": 0,
+                  "hits": 25266802,
+                  "included_in_total_cache": true,
+                  "logical_proof_work": false,
+                  "measurement_scope": "positive-lookup-cache-observations",
+                  "misses": 0,
+                  "oversized_bypasses": 0,
+                  "physical_device_io": false,
+                  "resident_values": 54114
+                }
+              }
+            ],
+            "minimum_duration_milliseconds": 0,
+            "output_digest": "aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584",
+            "process_peak_rss_kib": 266484,
+            "rounds": 1,
+            "sample": 1,
+            "timed_executions": 768,
+            "vault_work": [
+              {
+                "cache": "uste-empty",
+                "work": {
+                  "authenticated_encoded_bytes": 169852233215,
+                  "complete_authenticated_io": false,
+                  "failed_calls": 0,
+                  "includes_key_unwrap": false,
+                  "includes_other_vaults": false,
+                  "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                  "physical_device_io": false,
+                  "returned_plaintext_bytes": 135451885568,
+                  "successful_calls": 8267327
+                }
+              },
+              {
+                "cache": "uste-retained-after-identical-query",
+                "work": {
+                  "authenticated_encoded_bytes": 49189866250,
+                  "complete_authenticated_io": false,
+                  "failed_calls": 0,
+                  "includes_key_unwrap": false,
+                  "includes_other_vaults": false,
+                  "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                  "physical_device_io": false,
+                  "returned_plaintext_bytes": 39227392000,
+                  "successful_calls": 2394250
+                }
+              }
+            ]
+          }
+        ],
+        "schema": "bm01-linux-packed-wide-lookup-sampling-v1",
+        "setup": {
+          "bounded_bootstrap_resume": false,
+          "complete_authenticated_io": false,
+          "complete_fixture": true,
+          "coordinator_admission_buffered": true,
+          "coordinator_admission_cache_bytes": 67108864,
+          "coordinator_admission_cache_scope": "fresh-per-canonical-family-then-fresh-correspondence",
+          "current_rss_kib": 87508,
+          "data_bearing_prefix_resume_implemented": true,
+          "development_entity_limit": 20000,
+          "elapsed_milliseconds": 56421,
+          "engine_benchmark": false,
+          "entities": 20000,
+          "filesystem_profile": "linux-x86_64-btrfs",
+          "frontier": 44,
+          "full_memory_coordinator_metadata": false,
+          "full_memory_graph_state": false,
+          "graph_admission_cache_bytes": 67108864,
+          "graph_admission_cache_scope": "fresh-per-canonical-family-then-fresh-semantic",
+          "ignored_uncommitted_journal_bytes": 0,
+          "kernel_filesystem_device_cache": "uncontrolled",
+          "legacy_unbound_policy_resume_supported": false,
+          "origin_suffix_groups": null,
+          "owner_vault_encryption_work": {
+            "complete_authenticated_io": false,
+            "includes_failed_call_bytes": false,
+            "includes_failed_command_owners": false,
+            "includes_key_wrap": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "measures_durable_bytes": false,
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "accepted_plaintext_bytes": 0,
+                "failed_calls": 0,
+                "includes_failed_call_bytes": false,
+                "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+                "measures_durable_bytes": false,
+                "physical_device_io": false,
+                "produced_encoded_bytes": 0,
+                "successful_calls": 0
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "accepted_plaintext_bytes": 0,
+              "failed_calls": 0,
+              "includes_failed_call_bytes": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-encrypt-calls",
+              "measures_durable_bytes": false,
+              "physical_device_io": false,
+              "produced_encoded_bytes": 0,
+              "successful_calls": 0
+            }
+          },
+          "owner_vault_work": {
+            "complete_authenticated_io": false,
+            "includes_encryption_bytes": false,
+            "includes_key_unwrap": false,
+            "includes_pre_vault_decode_failures": false,
+            "measurement_scope": "completed-bm01-command-through-terminal-admission",
+            "owner_count": 1,
+            "owners": {
+              "terminal": {
+                "authenticated_encoded_bytes": 21647762379,
+                "complete_authenticated_io": false,
+                "failed_calls": 0,
+                "includes_key_unwrap": false,
+                "includes_other_vaults": false,
+                "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+                "physical_device_io": false,
+                "returned_plaintext_bytes": 17352294729,
+                "successful_calls": 1032459
+              }
+            },
+            "physical_device_io": false,
+            "total": {
+              "authenticated_encoded_bytes": 21647762379,
+              "complete_authenticated_io": false,
+              "failed_calls": 0,
+              "includes_all_recorded_owners": true,
+              "includes_key_unwrap": false,
+              "measurement_scope": "explicit-command-owner-lifetimes-completed-decrypt-calls",
+              "physical_device_io": false,
+              "returned_plaintext_bytes": 17352294729,
+              "successful_calls": 1032459
+            }
+          },
+          "phase": "open",
+          "policy_only_prefix_resume_implemented": true,
+          "process_peak_rss_kib": 265852,
+          "proof_cache_bytes": 67108864,
+          "proof_cache_scope": "fresh-per-preparation",
+          "qualification": "nonqualifying-development-profile",
+          "recovered_frontier": 44,
+          "relationships": 200000,
+          "repaired_certificate_tail_bytes": 0,
+          "resume_base_revision": null,
+          "resume_suffix_groups": null,
+          "schema": "bm01-linux-packed-development-v1",
+          "setup_adapter_io": {
+            "complete_authenticated_index_io": false,
+            "measurement_scope": "filesystem-adapter-calls",
+            "operations": {
+              "create_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "create_new": {
+                "calls": 0,
+                "failures": 0
+              },
+              "metadata": {
+                "calls": 1032189,
+                "failures": 0
+              },
+              "open_directory": {
+                "calls": 1,
+                "failures": 0
+              },
+              "open_existing": {
+                "calls": 1032031,
+                "failures": 21
+              },
+              "read_at": {
+                "calls": 1032462,
+                "failures": 0
+              },
+              "remove_file": {
+                "calls": 0,
+                "failures": 0
+              },
+              "rename_no_replace": {
+                "calls": 0,
+                "failures": 0
+              },
+              "set_len": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_all": {
+                "calls": 0,
+                "failures": 0
+              },
+              "sync_data": {
+                "calls": 1,
+                "failures": 0
+              },
+              "sync_directory": {
+                "calls": 0,
+                "failures": 0
+              },
+              "try_lock_exclusive": {
+                "calls": 1,
+                "failures": 0
+              },
+              "write_at": {
+                "calls": 0,
+                "failures": 0
+              }
+            },
+            "physical_device_io": false,
+            "read_requested_bytes": 21647766637,
+            "read_returned_bytes": 21647766637,
+            "write_requested_bytes": 0,
+            "write_returned_bytes": 0
+          },
+          "staging_cache_bytes": 67108864,
+          "staging_cache_scope": "fresh-per-private-tree-batch",
+          "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+          "terminal_storage_open_encryption_work": {
+            "accepted_plaintext_bytes": 0,
+            "failed_calls": 0,
+            "includes_failed_call_bytes": false,
+            "measurement_scope": "single-owner-vault-completed-encrypt-calls",
+            "measures_durable_bytes": false,
+            "physical_device_io": false,
+            "produced_encoded_bytes": 0,
+            "successful_calls": 0
+          },
+          "terminal_vault_work": {
+            "authenticated_encoded_bytes": 21647762379,
+            "complete_authenticated_io": false,
+            "failed_calls": 0,
+            "includes_key_unwrap": false,
+            "includes_other_vaults": false,
+            "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+            "physical_device_io": false,
+            "returned_plaintext_bytes": 17352294729,
+            "successful_calls": 1032459
+          },
+          "terminal_vault_work_scope": "last-cold-open-owner-only",
+          "v1_state_digest": "6880abb54859af231d877c8bbc1a9a665127a9953228c90e4a8278c048d1ecab"
+        },
+        "setup_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 1032189,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 1,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 1032031,
+              "failures": 21
+            },
+            "read_at": {
+              "calls": 1032462,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 1,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 1,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 21647766637,
+          "read_returned_bytes": 21647766637,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "setup_vault_work": {
+          "authenticated_encoded_bytes": 21647762379,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 17352294729,
+          "successful_calls": 1032459
+        },
+        "setup_vault_work_scope": "last-cold-open-owner-only",
+        "storage_metadata_mode": "disk-certificate-and-blob-recovery",
+        "warmup": {
+          "queries": 96,
+          "result_limits": 21,
+          "successes": 75,
+          "visit_limits": 0
+        },
+        "warmup_adapter_io": {
+          "complete_authenticated_index_io": false,
+          "measurement_scope": "filesystem-adapter-calls",
+          "operations": {
+            "create_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "create_new": {
+              "calls": 0,
+              "failures": 0
+            },
+            "metadata": {
+              "calls": 2089554,
+              "failures": 0
+            },
+            "open_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "open_existing": {
+              "calls": 2089554,
+              "failures": 0
+            },
+            "read_at": {
+              "calls": 2089554,
+              "failures": 0
+            },
+            "remove_file": {
+              "calls": 0,
+              "failures": 0
+            },
+            "rename_no_replace": {
+              "calls": 0,
+              "failures": 0
+            },
+            "set_len": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_all": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_data": {
+              "calls": 0,
+              "failures": 0
+            },
+            "sync_directory": {
+              "calls": 0,
+              "failures": 0
+            },
+            "try_lock_exclusive": {
+              "calls": 0,
+              "failures": 0
+            },
+            "write_at": {
+              "calls": 0,
+              "failures": 0
+            }
+          },
+          "physical_device_io": false,
+          "read_requested_bytes": 42929886930,
+          "read_returned_bytes": 42929886930,
+          "write_requested_bytes": 0,
+          "write_returned_bytes": 0
+        },
+        "warmup_lookup_cache_work": {
+          "cache": "uste-empty",
+          "work": {
+            "accounted_bytes": 26781227,
+            "budget_bytes": 134217728,
+            "evictions": 0,
+            "hits": 2792573,
+            "included_in_total_cache": true,
+            "logical_proof_work": false,
+            "measurement_scope": "positive-lookup-cache-observations",
+            "misses": 3636787,
+            "oversized_bypasses": 0,
+            "physical_device_io": false,
+            "resident_values": 25958
+          }
+        },
+        "warmup_vault_work": {
+          "authenticated_encoded_bytes": 42929886930,
+          "complete_authenticated_io": false,
+          "failed_calls": 0,
+          "includes_key_unwrap": false,
+          "includes_other_vaults": false,
+          "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+          "physical_device_io": false,
+          "returned_plaintext_bytes": 34235252736,
+          "successful_calls": 2089554
+        }
+      },
+      "time": "\tCommand being timed: \"timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-lookup-sample --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-bundle\"\n\tUser time (seconds): 863.42\n\tSystem time (seconds): 56.30\n\tPercent of CPU this job got: 99%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 15:22.44\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 266484\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 297613\n\tVoluntary context switches: 3174\n\tInvoluntary context switches: 17904\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 40\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+      "scope": "MemoryCurrent=8368128\nMemoryPeak=278081536\nMemorySwapCurrent=0\nMemorySwapPeak=0\nCPUUsageNSec=919861188000\nMemoryHigh=3221225472\nMemoryMax=4294967296\nMemorySwapMax=536870912\n",
+      "stderr": ""
+    }
+  }
+}

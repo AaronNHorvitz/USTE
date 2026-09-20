@@ -2,7 +2,7 @@
 
 Date: 2026-09-20
 
-Status: Implemented and locally verified; no larger sampling measurement or qualification.
+Status: Implemented and locally verified; 20,000-entity sampling pair complete, not qualified.
 
 Extend D0218's explicit 256 MiB page-only and 128/128 MiB page/positive profiles to separately
 named supervised sampling commands. Preserve both 64 MiB commands and every D0046/D0047/D0174
@@ -29,3 +29,11 @@ the independent paired digest, populations, deadline claim and source bytes. New
 reject old-budget/schema substitution, missing configuration/work, overflow and final-gauge
 mismatch. Exact commands, tested source and memory limits are recorded in PROGRESS. D0216 and
 D0218's cold-query regressions remain evidence, not superseded passes or default recommendations.
+
+The same-binary 20,000/200,000 pair preserves all outcomes, the independent paired digest and
+deadline enforcement. Warm all-class successful one-hop/four-hop p99 is 21.335581/2548.544974 ms
+for pages and 9.455773/1525.282292 ms for positive retention. Positive retention improves this
+observed warm population while worsening cold latency; four-hop remains above the 250 ms target.
+Neither is qualifying size or five reserved-host samples. Keep defaults and all targets unchanged.
+`docs/evidence/cache-capacity-native-sampling.json` retains both complete reports, commands,
+resource counters, raw latency populations and limitations.

@@ -4,6 +4,64 @@ Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
 ## Current work — supervised capacity comparison (Decision 0219)
 
+D0219 is committed/pushed as `5be671f94e0be203977e3c6be8ed657b85ca6adc`. The pinned release
+binary remains `0492dcad397f37b7d3e5ac835842f883710e12f8d04119f9c4f291c202f4a8c7`.
+Fresh preflight: clean tree, no competing build/benchmark, 23 GiB available RAM, 2.1 GiB free
+swap, 952 GiB disk. Source certificate hash is unchanged; oracle-bundle file SHA-256 is
+`f667f4420fce69e773d55e4c8ace4ed16878f063f4afc11ce1e1c6a234e5797b`. Synthetic password remains
+0600 / one link / 80 bytes, no contents printed. The 256 MiB page-only supervised development
+sample completed under `uste-d219-wide-pages-sample.scope`. Artifacts are in
+`experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.{json,time,scope,stderr}`.
+Page-only sample passed, exit zero: 96 warm-ups (75 success / 21 expected result limits), one
+complete 768-execution paired round, enforced deadline and unchanged digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`.
+Round 784,246 ms; whole wall 946.99s, user/system 903.31/41.00s, peak RSS 328,640 KiB.
+Scope peak 342,745,088 bytes, zero swap, CPU 944,441,128,000 ns. Empty/retained misses
+4,934,320 / 2,834,383; successful visits/result bytes per state 4,095,526 / 46,474,984.
+Retained all-class successful p99 by depth: **21.335581 / 1058.180898 / 701.474637 /
+2548.544974 ms**. Both accepted one-hop 20 ms and four-hop 250 ms targets remain unmet even
+at this development size; do not relabel correctness success as a latency pass.
+Source certificate and executable hashes remained unchanged.
+
+The same-binary 128/128 MiB sampler completed under `uste-d219-wide-positive-sample.scope`
+after fresh 23 GiB RAM / 2.1 GiB free swap and no competing workload. Exact invocation is the page
+command below with scope `uste-d219-wide-positive-sample.scope`, artifact prefix `positive` instead
+of `pages`, and command `linux-packed-wide-lookup-sample`; all source/bundle/deadline/group limits
+are identical. Both are nonqualifying development samples, not reserved-host five-sample campaigns.
+Positive sample passed, exit zero: identical 96 warm-ups, 768 measured executions, 40 latency
+groups and paired output digest, with parent deadline enforcement. Round 736,625 ms; wall 922.44s,
+user/system 863.42/56.30s; peak RSS 266,484 KiB, group peak 278,081,536 bytes, zero swap,
+CPU 919,861,188,000 ns. Empty/retained page misses 8,267,327 / 2,394,250; lookup hits
+10,943,347 / 25,266,802 and misses 14,323,455 / zero; no lookup evictions or bypasses.
+Retained all-class successful p99 by depth: **9.455773 / 675.691962 / 444.438316 / 1525.282292 ms**.
+Warm latency improved in this pair, but four-hop still exceeds the unchanged 250 ms target.
+Cold one-hop/four-hop p99 is 58.646636/3707.996259 ms (pages 55.476668/2698.660916 ms).
+Source/executable hashes remained unchanged; no compilation overlapped either measurement.
+All raw reports, commands, populations and resource counters are archived in
+`docs/evidence/cache-capacity-native-sampling.json`. Keep the default and qualification gates.
+Archive assembly initially assumed the 20/200 smoke's 32 latency groups; these larger reports
+correctly contain 40 because expected-limit populations are separate. Validation checks identical
+unique group keys/counts and all 384 cases per cache state. No product test or population was weakened.
+Next commit/push this evidence alone, then verify D0220's pending core change under fresh headroom.
+Page command:
+Positive sample started 2026-09-20 15:42:13 UTC, session 34773, invocation
+`35aef4ee87b6469682935ea8fb0fc992`.
+
+Started 2026-09-20 15:25:28 UTC, session 37529, invocation `453f6f2ab94344e2a76e1b200b8f846f`.
+D0220's private logical-first cache-key ordering and two layout/injectivity regression tests
+are now implemented in source only, **uncompiled/unverified**, excluded from the pinned D0219
+binary (hash rechecked unchanged). It preserves all identity bytes, requested allocation size,
+exact LRU/accounting and authorization/work limits; the existing 10,000-access reference test
+only changes its private key-byte extraction offset. No performance improvement is claimed.
+Finish both D0219 sampling measurements and commit their evidence separately before any core
+or native build. Then run focused/full workspace, Clippy/docs and native regression gates for
+D0220, repairing failures without weakening existing assertions. Do not stage unverified core
+source in the measurement-evidence commit.
+
+```sh
+systemd-run --user --scope --unit=uste-d219-wide-pages-sample.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-wide-sample --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 --oracle-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe/oracle-bundle > experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.json 2> experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.stderr; measurement_status=$?; systemctl --user show uste-d219-wide-pages-sample.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-wide-sample20000.MENKX3/pages.scope; exit "$measurement_status"'
+```
+
 D0218's paired measurement evidence is committed/pushed as `4a2e65d`. D0219 verification passed
 in session 45583 / `uste-d219-native.scope`, invocation
 `69bfb9a9efd34df1861e5c38d32d02c1`. Fresh preflight 23 GiB available RAM, 2.1 GiB free swap,
