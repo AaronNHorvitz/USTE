@@ -14,7 +14,10 @@ pub mod history;
 mod query;
 mod query_cache;
 mod sampling;
-pub use query::{query_correctness, query_correctness_with_lookup};
+pub use query::{
+    query_correctness, query_correctness_wide, query_correctness_wide_with_lookup,
+    query_correctness_with_lookup,
+};
 pub use sampling::{sample_worker, sample_worker_with_lookup};
 type Fs = ObservedFileSystem<LinuxFileSystem>;
 type Packed = engine::PackedEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;

@@ -15,6 +15,7 @@ pub fn query_correctness(
         oracle_file,
         profile,
         QueryCacheMode::Pages,
+        false,
     )
 }
 
@@ -30,6 +31,39 @@ pub fn query_correctness_with_lookup(
         oracle_file,
         profile,
         QueryCacheMode::Positive,
+        false,
+    )
+}
+
+pub fn query_correctness_wide(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Pages,
+        true,
+    )
+}
+
+pub fn query_correctness_wide_with_lookup(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Positive,
+        true,
     )
 }
 
@@ -39,18 +73,20 @@ fn query_mode(
     oracle_file: &Path,
     profile: Bm01Profile,
     mode: QueryCacheMode,
+    wide: bool,
 ) -> Result<String, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
     let summary = read_oracle_summary(oracle_file)?;
     validate_measured_summary(&summary, profile)?;
     let mut session = prepare(root, password_file, profile, "open")?;
-    let reader = mode.reader(
+    let reader = mode.reader_with_size(
         &session.coordinator,
         &session.policy,
         session
             .limits
             .read()
             .map_err(|_| error("USTE_BM01_LIMITS"))?,
+        wide,
     )?;
     let setup = session.filesystem.snapshot()?;
     let setup_crypto = CryptoWork::from(
@@ -152,7 +188,7 @@ fn query_mode(
         "oracle_summary_digest": hex(&summary.digest()), "query_milliseconds": started.elapsed().as_millis(),
         "current_rss_kib": rss, "process_peak_rss_kib": peak,
         "cache_budget_bytes": cache.budget_bytes, "cache_accounted_bytes": cache.accounted_bytes,
-        "query_cache_configuration": mode.report(cache)?,
+        "query_cache_configuration": mode.report_with_size(cache, wide)?,
         "cache_hits": cache.hits, "cache_misses": cache.misses, "cache_evictions": cache.evictions,
         "uste_page_cache": "cleared-before-each-query", "kernel_filesystem_device_cache": "uncontrolled",
         "preemptive_deadline_enforced": false, "complete_authenticated_io": false,

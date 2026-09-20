@@ -59,7 +59,15 @@ impl Fixture {
             .arg("--password-file")
             .arg(&self.password)
             .args(["--entities", "20"]);
-        if matches!(phase, "query" | "lookup-query" | "sample" | "lookup-sample") {
+        if matches!(
+            phase,
+            "query"
+                | "lookup-query"
+                | "wide-query"
+                | "wide-lookup-query"
+                | "sample"
+                | "lookup-sample"
+        ) {
             command.arg("--oracle-file").arg(&self.oracle);
         }
         command
@@ -436,6 +444,47 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
         positive["cache_misses"]
     );
     assert!(query["query_cache_configuration"]["lookup"].is_null());
+    let certificate_path = fixture.root.join("bm01-linux-packed-engine/CERTIFICATES");
+    let source = fs::read(&certificate_path).unwrap();
+    for (phase, lookup_mib, name) in [
+        ("wide-query", 0, "packed-pages-256m-v1"),
+        (
+            "wide-lookup-query",
+            128,
+            "packed-pages-positive-lookups-256m-v1",
+        ),
+    ] {
+        let wide = fixture.run(phase);
+        for field in [
+            "output_digest",
+            "queries",
+            "visits",
+            "logical_result_bytes",
+            "successful_queries",
+            "expected_visit_limits",
+            "expected_result_limits",
+            "oracle_summary_digest",
+        ] {
+            assert_eq!(wide[field], query[field], "{phase}: {field}");
+        }
+        let c = &wide["query_cache_configuration"];
+        assert_eq!(c["profile"], name);
+        assert_eq!(c["total_budget_bytes"], 256 * 1024 * 1024);
+        assert_eq!(c["lookup_budget_bytes"], lookup_mib * 1024 * 1024);
+        assert_eq!(c["page_budget_bytes"], (256 - lookup_mib) * 1024 * 1024);
+        if lookup_mib == 0 {
+            assert!(c["lookup"].is_null());
+        } else {
+            assert!(c["lookup"]["hits"].as_u64().unwrap() > 0);
+        }
+        assert_eq!(wide["query_adapter_io"]["write_returned_bytes"], 0);
+        assert_eq!(
+            wide["query_vault_work"]["successful_calls"],
+            wide["cache_misses"]
+        );
+        assert_eq!(wide["complete_authenticated_io"], false);
+        assert_eq!(fs::read(&certificate_path).unwrap(), source);
+    }
     let rebuild = fixture.run("rebuild");
     assert_eq!(rebuild["origin_suffix_groups"], 3);
     assert_eq!(rebuild["v1_state_digest"], create["v1_state_digest"]);
@@ -460,6 +509,8 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
         "resume",
         "query",
         "lookup-query",
+        "wide-query",
+        "wide-lookup-query",
         "sample",
         "lookup-sample",
     ] {
@@ -472,7 +523,15 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
             "--entities",
             "100000",
         ]);
-        if matches!(phase, "query" | "lookup-query" | "sample" | "lookup-sample") {
+        if matches!(
+            phase,
+            "query"
+                | "lookup-query"
+                | "wide-query"
+                | "wide-lookup-query"
+                | "sample"
+                | "lookup-sample"
+        ) {
             command.args(["--oracle-file", "absent-packed-oracle"]);
         }
         let output = complete(command);

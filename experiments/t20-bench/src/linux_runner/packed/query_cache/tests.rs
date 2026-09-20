@@ -2,6 +2,45 @@ use super::*;
 use uste_storage::packed_page_cache::PackedPageCache;
 
 #[test]
+fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() {
+    assert_eq!(WIDE_TOTAL, uste_storage::MAX_INDEX_CACHE_BYTES);
+    for wide in [false, true] {
+        for mode in [QueryCacheMode::Pages, QueryCacheMode::Positive] {
+            let (total, lookup, name) = mode.configuration(wide);
+            let cache = if lookup == 0 {
+                PackedPageCache::new(total)
+            } else {
+                PackedPageCache::new_with_lookup_budget(total, lookup)
+            }
+            .unwrap();
+            let r = cache.report().unwrap();
+            let json = mode.report_with_size(r, wide).unwrap();
+            assert_eq!(json["profile"], name);
+            assert_eq!(json["total_budget_bytes"], total);
+            assert_eq!(json["page_budget_bytes"], total - lookup);
+            assert_eq!(json["lookup_budget_bytes"], lookup);
+            assert_eq!(json["total_accounted_bytes"], 0);
+            assert!(mode.report_with_size(r, !wide).is_err());
+            let other = if lookup == 0 {
+                QueryCacheMode::Positive
+            } else {
+                QueryCacheMode::Pages
+            };
+            assert!(other.report_with_size(r, wide).is_err());
+            for variant in 0..3 {
+                let mut wrong = r;
+                match variant {
+                    0 => wrong.budget_bytes += 1,
+                    1 => wrong.page_budget_bytes += 1,
+                    _ => wrong.accounted_bytes = total + 1,
+                }
+                assert!(mode.report_with_size(wrong, wide).is_err());
+            }
+        }
+    }
+}
+
+#[test]
 fn native_query_cache_configuration_is_exact_and_never_double_counts() {
     let pages = PackedPageCache::new(TOTAL).unwrap().report().unwrap();
     let plain = QueryCacheMode::Pages.report(pages).unwrap();

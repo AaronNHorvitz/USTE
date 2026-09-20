@@ -86,6 +86,13 @@ The parent reconciles warm-up and measured lookup counters with final totals. Pa
 remain unchanged in configuration and report absent lookup work. This is an optional comparison
 mode, not a recommendation or a demonstrated performance improvement; consult the pinned evidence.
 
+Decision 0218 adds explicit correctness-only capacity comparisons with the same query arguments:
+`linux-packed-wide-query` uses 256 MiB pages; `linux-packed-wide-lookup-query` splits one 256 MiB
+total into 128 MiB pages and 128 MiB positive lookups. These stay within the existing trusted
+cache ceiling and have distinct report profiles. The 64 MiB defaults and sampling configurations
+are unchanged. No performance benefit or qualification follows from selecting a larger cache;
+compare controls at the same declared capacity and retain the earlier 64 MiB regression evidence.
+
 Decision 0174 adds supervised packed sampling over a completed fixture. Generate the two-section
 oracle bundle (not the single-section summary used by `linux-packed-query`):
 

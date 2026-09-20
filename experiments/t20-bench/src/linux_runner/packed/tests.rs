@@ -480,6 +480,42 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
             > 0
     );
     assert_eq!(positive["complete_authenticated_io"], false);
+    for (query, lookup_mib) in [
+        (
+            query_correctness_wide
+                as fn(&Path, &Path, &Path, Bm01Profile) -> Result<String, LinuxRunnerError>,
+            0,
+        ),
+        (query_correctness_wide_with_lookup, 128),
+    ] {
+        let wide: serde_json::Value = serde_json::from_str(
+            &query(&fixture.root, &fixture.password, &oracle, profile).unwrap(),
+        )
+        .unwrap();
+        for field in [
+            "output_digest",
+            "queries",
+            "successful_queries",
+            "expected_visit_limits",
+            "expected_result_limits",
+            "visits",
+            "logical_result_bytes",
+            "oracle_summary_digest",
+        ] {
+            assert_eq!(wide[field], output[field], "{field}");
+        }
+        let c = &wide["query_cache_configuration"];
+        assert_eq!(c["total_budget_bytes"], 256 * 1024 * 1024);
+        assert_eq!(c["lookup_budget_bytes"], lookup_mib * 1024 * 1024);
+        assert_eq!(c["page_budget_bytes"], (256 - lookup_mib) * 1024 * 1024);
+        if lookup_mib == 0 {
+            assert!(c["lookup"].is_null());
+        } else {
+            assert!(c["lookup"]["hits"].as_u64().unwrap() > 0);
+        }
+        assert_eq!(wide["query_adapter_io"]["write_returned_bytes"], 0);
+        assert!(fixture.files(false) == source, "wide query changed source");
+    }
     assert!(
         fixture.files(false) == source,
         "authoritative bytes changed"
@@ -503,6 +539,14 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
             .code(),
         "USTE_BM01_ORACLE_PROFILE"
     );
+    for query in [query_correctness_wide, query_correctness_wide_with_lookup] {
+        assert_eq!(
+            query(&fixture.root, &fixture.password, &oracle, profile)
+                .unwrap_err()
+                .code(),
+            "USTE_BM01_ORACLE_PROFILE"
+        );
+    }
 }
 #[test]
 fn packed_native_cache_loss_requires_explicit_rebuild_and_preserves_source() {

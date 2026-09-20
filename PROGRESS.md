@@ -2,7 +2,30 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Current work — supervised positive-cache sampling
+## Current work — explicit bounded capacity comparison (Decision 0218)
+
+D0217 is committed/pushed as `18a0544`. D0218 adds separately named correctness-only
+256 MiB page and 128/128 MiB page/positive-cache comparisons, within storage's existing maximum.
+The 64 MiB defaults, sampling modes, source format, work limits and all benchmark targets remain
+unchanged. This is an independent capacity comparison, not a reinterpretation of D0216's regression.
+Native fixture, exact configuration/substitution and real CLI checks are extended to all four
+configurations. No wide-profile measurement or qualification has run.
+
+Verification passed in session 35330 / `uste-d218-native.scope`, invocation
+`a85dc5e17ce94b209ec257096c7573c8`; preflight 23 GiB available RAM / 2.1 GiB free swap, no competing
+build or benchmark. Exact command is D0217's native release test/strict-Clippy command below with
+scope/log prefix `d218` instead of `d217`, same one job/thread and 3G/4G/512M limits.
+**132 active tests passed, five unchanged opt-in ignores**, exit zero; release compile 59.78s,
+library 99/137.22s, disk process 3/12.19s, packed history 11/63.42s, packed terminal 8/39.45s,
+manifest 3/0.97s, recovery 8/79.05s, strict Clippy 1.95s. Scope peak **548,024,320 bytes**,
+zero swap, CPU 344,446,380,000 ns. Formatting and doc/task checks passed. No failures or test
+weakening. Binary SHA-256 `abd58cbd7a905bea6bc5372977fe79b690a72d8073a4a17358193c42c50e48cd`.
+Tested baseline is `18a0544` plus this reviewed increment; core remains D0215's verified source.
+Next commit/push the verified increment, then admit one same-binary 20,000-entity wide-profile control pair under
+fresh headroom, preserving source/binary hashes and exact commands/results. No qualifying run
+is authorized by a 4 GiB development cap.
+
+## Latest verified increment — supervised positive-cache sampling
 
 D0216 measurement evidence is committed/pushed as `f79f902`. D0217 now passes **131 active
 native release tests, five unchanged opt-in ignores**, strict native Clippy, formatting and
