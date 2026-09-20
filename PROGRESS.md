@@ -2,7 +2,30 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native history owner accounting (Decision 0204)
+## Latest verified increment — bounded packed process output (Decision 0205)
+
+Pushed `2245a0a` records verified BM-06 owner accounting. The separately reviewed BM-01 process
+test supervisor now drains stdout and stderr concurrently with 256 KiB + one sentinel byte per
+stream. Normal 90-second deadline, owned-child kill/reap, exact source assertions and nonzero
+exit diagnostics remain intact. New tests cover empty/large/exact-bound output, either overflow
+stream, nonzero exit output and the expected deadline panic/cleanup. No production code or
+benchmark limit changed.
+
+Verified in the corrected Decision 0204 invocation below: all seven packed process tests passed
+in 35.22 s, strict standalone Clippy passed in 1.66 s. This file was compiled in session 82243,
+not the earlier session 87818. Tested runtime is the Decision 0204 source, now `2245a0a`, with
+this harness patch; core diagnostics remain at `ef70c0b`. Exact commands, initial report-helper
+failure, corrected results and resource limits are retained below. No additional large run was
+performed for this harness change.
+
+Next T-20: fresh host/binary/fixture admission, then a bounded native BM-01 development run at
+the existing 20,000-entity ceiling. Generate independent oracle inputs, measure encrypted
+create/open/query/sampling as safely permitted, retain artifacts and report actual cache pressure
+and owner work. The ceiling is not measured capacity and cannot substitute for the frozen
+100,000-entity/1,000,000-relationship qualification or BM-06's larger-than-memory campaign.
+T-20/T-19/full roadmap and external release gates remain open; M1 remains pinned unchanged.
+
+## Prior verified increment — native history owner accounting (Decision 0204)
 
 Pushed `2b939e6` contains verified BM-01 lifetime accounting. The verified BM-06 integration
 records bootstrap/resume, construction/rebuild, history validation and fresh terminal digest

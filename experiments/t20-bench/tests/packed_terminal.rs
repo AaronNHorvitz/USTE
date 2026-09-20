@@ -2,7 +2,7 @@
 //! Separate-process packed correctness and owned-child SIGKILL; no benchmark qualification.
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::{fs::OpenOptionsExt, process::ExitStatusExt},
     path::PathBuf,
     process::{Child, Command, Output, Stdio},
@@ -88,7 +88,19 @@ impl Drop for OwnedChild {
         }
     }
 }
-fn complete(mut command: Command) -> Output {
+fn complete(command: Command) -> Output {
+    complete_with_deadline(command, Duration::from_secs(90))
+}
+const MAX_CHILD_OUTPUT: usize = 256 * 1024;
+fn drain_output(input: impl Read) -> Vec<u8> {
+    let mut output = Vec::new();
+    input
+        .take(MAX_CHILD_OUTPUT as u64 + 1)
+        .read_to_end(&mut output)
+        .unwrap();
+    output
+}
+fn complete_with_deadline(mut command: Command, deadline: Duration) -> Output {
     let mut owned = OwnedChild(Some(
         command
             .stdout(Stdio::piped())
@@ -96,16 +108,78 @@ fn complete(mut command: Command) -> Output {
             .spawn()
             .unwrap(),
     ));
+    let stdout = owned.0.as_mut().unwrap().stdout.take().unwrap();
+    let stderr = owned.0.as_mut().unwrap().stderr.take().unwrap();
+    let stdout = thread::spawn(move || drain_output(stdout));
+    let stderr = thread::spawn(move || drain_output(stderr));
     let started = Instant::now();
-    loop {
-        if owned.0.as_mut().unwrap().try_wait().unwrap().is_some() {
-            return owned.0.take().unwrap().wait_with_output().unwrap();
-        }
-        if started.elapsed() > Duration::from_secs(90) {
-            panic!("owned packed command deadline exceeded");
-        }
+    while owned.0.as_mut().unwrap().try_wait().unwrap().is_none() {
+        assert!(
+            started.elapsed() < deadline,
+            "owned packed command deadline exceeded"
+        );
         thread::sleep(Duration::from_millis(10));
     }
+    let status = owned.0.take().unwrap().wait().unwrap();
+    let stdout = stdout.join().unwrap();
+    let stderr = stderr.join().unwrap();
+    assert!(
+        stdout.len() <= MAX_CHILD_OUTPUT && stderr.len() <= MAX_CHILD_OUTPUT,
+        "owned packed command output exceeds bound"
+    );
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
+#[test]
+fn packed_cli_output_drains_both_pipes_preserves_failure_and_refuses_overflow() {
+    for bytes in [0, 131072, MAX_CHILD_OUTPUT] {
+        let mut command = Command::new("sh");
+        command.args([
+            "-c",
+            &format!("printf '%{bytes}s' ''; printf '%{bytes}s' '' >&2"),
+        ]);
+        let output = complete(command);
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), bytes);
+        assert_eq!(output.stderr.len(), bytes);
+    }
+    for redirect in ["", " >&2"] {
+        assert!(
+            std::panic::catch_unwind(|| {
+                let mut command = Command::new("sh");
+                command.args(["-c", &format!("printf '%262145s' ''{redirect}")]);
+                complete(command);
+            })
+            .is_err()
+        );
+    }
+    let mut command = Command::new("sh");
+    command.args(["-c", "printf out; printf err >&2; exit 7"]);
+    let output = complete(command);
+    assert_eq!(output.status.code(), Some(7));
+    assert_eq!(output.stdout, b"out");
+    assert_eq!(output.stderr, b"err");
+}
+
+#[test]
+fn packed_cli_output_deadline_kills_and_reaps_the_owned_child() {
+    let failure = std::panic::catch_unwind(|| {
+        let mut command = Command::new("sh");
+        command.args(["-c", "while :; do :; done"]);
+        complete_with_deadline(command, Duration::from_millis(50));
+    })
+    .unwrap_err();
+    assert_eq!(
+        failure
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| failure.downcast_ref::<String>().map(String::as_str)),
+        Some("owned packed command deadline exceeded")
+    );
 }
 
 #[test]
