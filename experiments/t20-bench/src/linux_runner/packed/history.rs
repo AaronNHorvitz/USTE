@@ -2,7 +2,7 @@
 use super::*;
 use crate::recovery_materialization::Bm06Profile;
 const HISTORY_DATABASE: &str = "bm06-linux-packed-engine";
-const MAX_RECORDS: u64 = 513;
+const MAX_RECORDS: u64 = 4096;
 mod bootstrap;
 mod continuation;
 mod measurement;
@@ -62,10 +62,11 @@ fn binding(
     fs: &mut Fs,
     recovery: &mut Recovery,
     profile: Bm06Profile,
+    limits: Limits,
 ) -> Result<(), LinuxRunnerError> {
     let first = uste_types::CommitRevision::FIRST;
     let mut cursor = recovery
-        .open_transaction_cursor(first, first, 1, 1_048_576)
+        .open_transaction_cursor(first, first, 1, binding_budget(limits)?)
         .map_err(|_| error("USTE_BM06_PACKED_BINDING"))?;
     let transaction = recovery
         .next_recovered_transaction(fs, &mut cursor)
@@ -88,6 +89,18 @@ fn binding(
         return Err(error("USTE_BM06_PACKED_BINDING"));
     }
     Ok(())
+}
+fn binding_budget(limits: Limits) -> Result<u64, LinuxRunnerError> {
+    // The small policy group still authenticates its certificate through the current frontier.
+    // Charge that bounded distance separately from the policy group's original 1 MiB allowance.
+    limits
+        .origin
+        .suffix
+        .graph
+        .certificates
+        .maximum_encoded_bytes()
+        .checked_add(1_048_576)
+        .ok_or_else(|| error("USTE_BM06_LIMITS"))
 }
 // Native admission stays separately capped; prefix arithmetic also supports partial generations.
 fn counts(profile: Bm06Profile, revision: u64) -> Result<[u64; 8], LinuxRunnerError> {
@@ -265,7 +278,7 @@ fn run_bounded_observed(
     if bootstrap_resume {
         recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
     }
-    binding(&mut fs, &mut recovery, profile)?;
+    binding(&mut fs, &mut recovery, profile, limits)?;
     let mut kernel =
         kernel(crate::engine::recovery::recovery_policy().map_err(|_| error("USTE_BM06_POLICY"))?)
             .map_err(|_| error("USTE_BM06_POLICY"))?;

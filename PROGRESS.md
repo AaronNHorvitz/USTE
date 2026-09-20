@@ -2,7 +2,63 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed history phase accounting (Decision 0192)
+## Latest verified increment — eight-batch native development (Decision 0193)
+
+Pushed baseline `0f17918`; uncommitted experiment raises only packed native admission to 4,096
+records and retains the 513-record case. The supervisor now concurrently drains both output pipes
+with a 256 KiB per-pipe content limit. Default CLI session 11566 passed ten tests/62.12 s, with
+both scale cases explicitly ignored; compile 26.45 s, strict Clippy 1.50 s, sampled scope peak
+347,852,800 bytes/zero swap. This does **not** verify the larger ceiling.
+
+Explicit larger run session 66471 / `run-p1132051-i22100377.scope` failed after checkpoint creation, using one
+job/test thread and 3 GiB high/4 GiB maximum/512 MiB swap bounds, 1,800-second child and
+5,400-second overall deadlines. Preflight 27 GiB available RAM/2.0 GiB free swap/997 GiB disk,
+no competing Cargo workload. Log `/tmp/uste-d193-native-4096.log`; retained synthetic root
+`experiments/t20-bench/target/packed-history-cli-1132228-1789885187740006861`.
+Binary SHA-256 `7f660ae7973bdb70f352b1499b7e78e541b422d9d0ca33af5bbd84c468df5d2a`.
+Creation verified 405,504 versions at revision 793 in 323.925 s, using 288,912 construction-owner
+nonces, peak process RSS 292,312 KiB. The next tail probe exited before its marker; the supervisor
+lost stderr and instead reported EOF while parsing an empty marker. Total 333.95 s, exit 101;
+source certificate length remains 3,303,834 bytes. Last sampled scope peak 3,222,261,760 bytes,
+swap 262,144 bytes; earlier memory.events had zero max/OOM events and active high-limit reclaim.
+Do not relaunch unchanged construction. The marker helper is being repaired to retain bounded
+stderr on premature exit. Retained checkpoint diagnostic open is session 79978, log
+`/tmp/uste-d193-retained-open.log`. Preserve this source store; no larger-ceiling verification,
+qualification or task completion is implied.
+
+The retained diagnostic open failed at `USTE_BM06_PACKED_BINDING` in 9.71 s. Binding's fixed
+1 MiB cursor budget omitted the distance from revision one through the current certificate
+frontier (>3 MiB here). Corrected it to add the profile-derived certificate-proof allowance,
+with checked arithmetic, while retaining the original small-policy-group allowance and exact
+identity checks. Session 26690 passed the new bound arithmetic test and ten CLI cases/60.24 s;
+compile 53.47/0.02 s, strict Clippy 1.51 s, sampled peak 386,785,280 bytes/zero swap.
+Session 73276 passed the new early-marker-exit diagnostic test, then the corrected retained open
+in 76.08 s/peak RSS 345,524 KiB. Digest remains
+`a9d0967ebb60c0c3fd8c43dbbd6249ce481cc2b03898b8baa0a05c30d1c222e2`; certificate SHA-256 remains
+`40702c770d9abbeb467119406f8ae6345417efb223fa1b0307636f4133c1406c`, with zero adapter writes.
+Corrected binary SHA-256 `cb7506e9ccc7992268edd9380d9673e84c15dd19ac63f64cdfc28f5a14f903e8`.
+The full corrected fresh-fixture run is session 6582 / `run-p1136052-i22104799.scope`;
+log `/tmp/uste-d193-native-4096-fixed.log`, retained root
+`experiments/t20-bench/target/packed-history-cli-1136222-1789886072155584131`.
+The corrected run passed: one explicit test/824.73 s, total wall 824.79 s, peak process RSS
+348,556 KiB. Sampled scope peak 3,222,011,904 bytes; maximum observed swap 19,996,672 bytes
+(not final lifetime peak), zero observed max/OOM events. Creation, killed-tail resume, explicit
+eight-group checkpoint recovery, repeated resume and cold open all passed. Terminal revision
+801 contains all 409,600 versions with matching digest and unchanged source certificate prefixes.
+The first fixture remains intact. Exact source/binary hashes and all five phase reports are in
+`docs/evidence/native-packed-history-4096-development.json`, including the exact scoped command.
+This verifies the development ceiling only, not larger-than-memory or qualifying BM-06 behavior.
+
+Separate unverified Decision 0194 storage changes add fresh operation-local packed-tree staging
+buffers and focused tests. They were written after the corrected benchmark binary was built;
+they are not linked into that run and must not be included in the Decision 0193 commit/evidence.
+The scale workload has finished. Next verify and repair Decision 0194's buffered staging, then
+integrate only after reference/fault/corruption checks. Full core remains 687 at `c3b7047` plus
+subsequent focused coverage; full standalone remains 113 at `ed0bdd6` plus focused coverage.
+T-20/T-19, pinned M1 and external qualification/release gates remain unchanged. This next action
+supersedes historical next-step text below.
+
+## Prior verified increment — packed history phase accounting (Decision 0192)
 
 Built and tested on pushed `509feab`: successful native history reports now partition monotonic
 time and adapter counters into setup/admission, final history verification, tail/exact-retry work

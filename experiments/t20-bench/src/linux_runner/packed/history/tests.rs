@@ -259,7 +259,7 @@ fn packed_history_native_wrong_profile_key_and_committed_corruption_fail_closed(
 #[test]
 fn packed_history_native_admission_precedes_filesystem_access() {
     let absent = Path::new("absent-packed-history-admission");
-    for records in [514, 100000] {
+    for records in [4097, 100000] {
         for phase in [
             "create",
             "open",
@@ -283,6 +283,24 @@ fn packed_history_native_admission_precedes_filesystem_access() {
             .unwrap_err()
             .code(),
         "USTE_BM06_PACKED_PHASE"
+    );
+}
+
+#[test]
+fn packed_history_binding_budget_covers_the_declared_certificate_distance() {
+    for records in [1, 2, 513, 4096, 100_000] {
+        let profile = Bm06Profile::new(records).unwrap();
+        let limits = Limits::recovery(profile).unwrap();
+        assert_eq!(
+            binding_budget(limits).unwrap(),
+            1_048_576 + profile.frontier() * 4161
+        );
+    }
+    let profile = Bm06Profile::new(4096).unwrap();
+    assert!(profile.checkpoint_revision() * 4161 > 1_048_576);
+    assert!(
+        binding_budget(Limits::recovery(profile).unwrap()).unwrap()
+            > profile.checkpoint_revision() * 4161
     );
 }
 

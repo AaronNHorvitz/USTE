@@ -108,7 +108,7 @@ fn bounded_prefix_invalid_targets_and_flags_fail_before_io() {
         ),
         (
             "create-prefix",
-            "514",
+            "4097",
             vec!["--through-revision", "1"],
             "DEVELOPMENT_LIMIT",
         ),

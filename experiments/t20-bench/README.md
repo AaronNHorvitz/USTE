@@ -165,7 +165,7 @@ owning supervisor that terminates/reaps its child. Regression tests use real SIG
 incomplete graph/metadata publication and final certified-tail boundaries, not simulated power loss.
 The two-record regression cases remain. None of these commands qualifies BM-06 or measures complete I/O.
 
-Decision 0189 admits at most **513 records on the packed native path only** (51,300 historical
+Decision 0189 established the **513-record packed native development case** (51,300 historical
 versions; checkpoint 199, terminal 201). The model and legacy native paths stay capped at two.
 `bm06-packed-linux-tail-prefix-crash-probe ... --pause-after-revision 200 --records 513` parks
 after intermediate graph publication before metadata rebase. Use only an owning supervisor;
@@ -217,6 +217,24 @@ prefix verification when requested, not just recovery. The interval ends before 
 formatting. Adapter bytes still exclude credential/root setup, internal syscalls and handle drops;
 they are not physical-device I/O. Neither these phase times nor total `elapsed_milliseconds`
 constitute qualifying recovery latency. Older pinned reports are not retroactively split.
+
+Decision 0193 experimentally raises only the packed native ceiling to **4,096 records**
+(409,600 retained versions; checkpoint 793, terminal 801, eight tail batches). The explicit
+case below constructs the checkpoint, kills its owned child after graph publication at 794,
+resumes through 801, replays all eight groups from 793 and compares repeated-resume/open digests.
+It retains the synthetic source store on success or failure. The original 513-record case remains
+available. Do not treat admission as verified capacity; PROGRESS records the actual run disposition.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline packed_history_native_4096_record_eight_batch_tail_sigkill_resumes -- --ignored --nocapture --test-threads=1'
+```
+
+Check RAM/swap/disk/workload prerequisites first; no competing heavy workload. The harness keeps
+the 1800-second child deadline, concurrently drains bounded stdout/stderr and reports premature
+marker-exit diagnostics. Bootstrap binding now separately budgets the bounded certificate distance
+through the declared profile frontier, in addition to the original small-policy-group allowance.
+The larger case does not change the qualifying profile, thresholds, reserved host or nonce cap.
 
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),

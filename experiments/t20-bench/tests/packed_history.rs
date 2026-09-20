@@ -2,7 +2,7 @@
 //! Real separate-process packed history phases, not a qualifying recovery campaign.
 use std::{
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::unix::{
         fs::{DirBuilderExt, OpenOptionsExt},
         process::ExitStatusExt,
@@ -91,19 +91,37 @@ impl Fixture {
                 .unwrap(),
         ));
         let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
+        let stderr = child.0.as_mut().unwrap().stderr.take().unwrap();
+        let stderr = thread::spawn(move || drain_output(stderr));
         let (sender, receiver) = mpsc::channel();
         let reader = thread::spawn(move || {
             let mut line = String::new();
-            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let result = BufReader::new(stdout.take(4097))
+                .read_line(&mut line)
+                .map(|_| line);
             let _ = sender.send(result);
         });
         let line = receiver.recv_timeout(deadline).unwrap().unwrap();
+        if line.is_empty() {
+            let status = child.0.take().unwrap().wait().unwrap();
+            let stderr = stderr.join().unwrap();
+            reader.join().unwrap();
+            panic!(
+                "owned marker missing: {status}; {}",
+                String::from_utf8_lossy(&stderr)
+            );
+        }
+        assert!(
+            line.len() <= 4096 && line.ends_with('\n'),
+            "owned marker framing exceeds bound"
+        );
         let marker: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(marker["schema"], "bm06-packed-durable-prefix-v1");
         child.0.as_mut().unwrap().kill().unwrap();
         assert_eq!(child.0.as_mut().unwrap().wait().unwrap().signal(), Some(9));
         child.0.take();
         reader.join().unwrap();
+        assert!(stderr.join().unwrap().len() <= MAX_CHILD_OUTPUT);
         marker["frontier"].as_u64().unwrap()
     }
     fn certificates(&self) -> PathBuf {
@@ -194,6 +212,10 @@ fn complete_with_deadline(mut command: Command, deadline: Duration) -> Output {
             .spawn()
             .unwrap(),
     ));
+    let stdout = child.0.as_mut().unwrap().stdout.take().unwrap();
+    let stderr = child.0.as_mut().unwrap().stderr.take().unwrap();
+    let stdout = thread::spawn(move || drain_output(stdout));
+    let stderr = thread::spawn(move || drain_output(stderr));
     let started = Instant::now();
     while child.0.as_mut().unwrap().try_wait().unwrap().is_none() {
         assert!(
@@ -202,7 +224,52 @@ fn complete_with_deadline(mut command: Command, deadline: Duration) -> Output {
         );
         thread::sleep(Duration::from_millis(10));
     }
-    child.0.take().unwrap().wait_with_output().unwrap()
+    let status = child.0.take().unwrap().wait().unwrap();
+    let stdout = stdout.join().unwrap();
+    let stderr = stderr.join().unwrap();
+    assert!(
+        stdout.len() <= MAX_CHILD_OUTPUT && stderr.len() <= MAX_CHILD_OUTPUT,
+        "owned child output exceeds bound"
+    );
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+const MAX_CHILD_OUTPUT: usize = 256 * 1024;
+fn drain_output(input: impl Read) -> Vec<u8> {
+    let mut output = Vec::new();
+    input
+        .take(MAX_CHILD_OUTPUT as u64 + 1)
+        .read_to_end(&mut output)
+        .unwrap();
+    output
+}
+#[test]
+fn packed_history_child_output_drains_both_pipes_and_refuses_overflow() {
+    let mut command = Command::new("sh");
+    command.args(["-c", "printf '%131072s' ''; printf '%131072s' '' >&2"]);
+    let output = complete(command);
+    assert!(output.status.success());
+    assert_eq!(output.stdout.len(), 131072);
+    assert_eq!(output.stderr.len(), 131072);
+    assert!(
+        std::panic::catch_unwind(|| {
+            let mut command = Command::new("sh");
+            command.args(["-c", "printf '%262145s' ''"]);
+            complete(command);
+        })
+        .is_err()
+    );
+}
+#[test]
+fn packed_history_probe_early_exit_retains_child_diagnostic() {
+    let fixture = Fixture::new();
+    let failure = std::panic::catch_unwind(|| fixture.kill_at("unsupported", None)).unwrap_err();
+    let diagnostic = failure.downcast_ref::<String>().unwrap();
+    assert!(diagnostic.contains("owned marker missing"));
+    assert!(diagnostic.contains("USTE_BM06_PACKED_PHASE"));
 }
 #[test]
 fn packed_history_cli_checkpoint_tail_recovery_and_origin_are_distinct() {
@@ -267,7 +334,7 @@ fn packed_history_cli_rejects_larger_profiles_before_missing_paths() {
         "resume",
         "tail-crash-probe",
     ] {
-        for records in ["514", "100000"] {
+        for records in ["4097", "100000"] {
             let mut command = Command::new(EXE);
             command.arg(format!("bm06-packed-linux-{phase}")).args([
                 "--root",
