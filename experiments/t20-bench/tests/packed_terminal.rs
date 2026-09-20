@@ -153,6 +153,23 @@ fn packed_cli_sigkill_bootstrap_and_unpaired_metadata_resume_exactly() {
                 "wrong profile changed authority"
             );
         }
+        if pause <= 1 {
+            let mut wrong = fixture.command("rebuild");
+            wrong.args(["--entities", "21"]);
+            assert!(!complete(wrong).status.success());
+            if pause == 0 {
+                assert!(!complete(fixture.command("rebuild")).status.success());
+            } else {
+                let rebuilt = fixture.run("rebuild");
+                assert_eq!(rebuilt["frontier"], 1);
+                assert_eq!(rebuilt["origin_suffix_groups"], 0);
+                assert_eq!(rebuilt["complete_fixture"], false);
+            }
+            assert!(
+                fs::read(&certificates).unwrap() == prefix,
+                "bootstrap rebuild changed authority"
+            );
+        }
         // Deliberately incomplete certificate tail: reporting must retain the initial opener's
         // repair count, not replace it with the later cold-admission report.
         fs::OpenOptions::new()

@@ -47,7 +47,10 @@ not profile-bound and are refused. Decision 0169 newly binds policy retry/transa
 the frozen fixture version and entity count. Resume can initialize an empty store or recover that
 new policy-only prefix with at most one outcome, zero blob owners and 1 MiB replay. Larger prefixes
 never use the ordinary reducer. Data-bearing legacy fixtures remain supported.
-Open/query/rebuild still require a complete terminal fixture. Native tests verify 20 entities/200
+Decision 0173 explicit rebuild restores any authenticated bound prefix without appending batches;
+reports include its actual frontier and `complete_fixture`. After partial-prefix cache loss, rebuild
+explicitly before resume. Empty stores and legacy unbound policy-only rebuilds refuse. Open/query
+still require a complete terminal fixture. Native tests verify 20 entities/200
 relationships, real close/open, selected-prefix suffix recovery, partial publication, all batch retries,
 384 oracle queries and authority preservation through rebuild. The unchanged 20,000-entity native
 admission ceiling is not measured packed qualification. The explicit test-only

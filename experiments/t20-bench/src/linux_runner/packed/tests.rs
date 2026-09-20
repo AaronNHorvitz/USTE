@@ -369,6 +369,15 @@ fn packed_native_data_prefix_resume_and_missing_roots_fail_closed() {
                 fixture.run("resume").unwrap_err().code(),
                 "USTE_BM01_PACKED_BOOTSTRAP_PROFILE"
             );
+            assert!(fixture.run("rebuild").is_err());
+            assert!(
+                fixture.files(false) == source,
+                "unbound policy rebuild changed source"
+            );
+            assert!(
+                fixture.files(true) == roots,
+                "unbound policy rebuild changed roots"
+            );
             continue;
         }
         // Complete cache loss must not silently turn resume into origin reconstruction.
@@ -405,5 +414,54 @@ fn packed_native_data_prefix_resume_and_missing_roots_fail_closed() {
             fixture.files(true) == final_roots,
             "completed resume republished roots"
         );
+    }
+}
+
+#[test]
+fn packed_native_partial_origin_rebuild_preserves_actual_frontier_before_resume() {
+    let reference = Fixture::new();
+    let terminal = reference.run("create").unwrap()["v1_state_digest"].clone();
+    for frontier in [2, 3] {
+        let fixture = Fixture::new();
+        fixture.prefix(frontier);
+        let source = fixture.files(false);
+        for name in fixture.files(true).keys() {
+            fs::remove_file(fixture.root.join(DATABASE).join(name)).unwrap();
+        }
+        assert!(fixture.run("resume").is_err());
+        assert!(
+            run(
+                &fixture.root,
+                &fixture.password,
+                Bm01Profile::new(21).unwrap(),
+                "rebuild"
+            )
+            .is_err()
+        );
+        assert!(
+            fixture.files(true).is_empty(),
+            "wrong profile published partial roots"
+        );
+        assert!(
+            fixture.files(false) == source,
+            "wrong profile changed partial authority"
+        );
+        let rebuilt = fixture.run("rebuild").unwrap();
+        assert_eq!(rebuilt["frontier"], frontier);
+        assert_eq!(rebuilt["origin_suffix_groups"], frontier - 1);
+        assert_eq!(rebuilt["complete_fixture"], false);
+        assert!(fixture.run("open").is_err());
+        let repeated = fixture.run("rebuild").unwrap();
+        assert_eq!(repeated["v1_state_digest"], rebuilt["v1_state_digest"]);
+        assert!(
+            fixture.files(false) == source,
+            "partial rebuild appended events"
+        );
+        let resumed = fixture.run("resume").unwrap();
+        assert_eq!(resumed["frontier"], 4);
+        assert_eq!(resumed["complete_fixture"], true);
+        assert_eq!(resumed["resume_base_revision"], frontier);
+        assert_eq!(resumed["resume_suffix_groups"], 0);
+        assert_eq!(resumed["v1_state_digest"], terminal);
     }
 }

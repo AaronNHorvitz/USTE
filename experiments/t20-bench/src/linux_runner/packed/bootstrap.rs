@@ -1,5 +1,14 @@
 //! Profile-bound packed bootstrap. No ordinary replay beyond one bounded policy transaction.
 use super::*;
+mod binding;
+
+pub(super) fn source_binding(
+    fs: &mut Fs,
+    recovery: &mut Recovery,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    binding::verify(fs, recovery, profile)
+}
 
 pub(super) fn identity<T>(profile: Bm01Profile, construct: impl FnOnce([u8; 16]) -> T) -> T {
     let mut bytes = [0; 16];

@@ -277,15 +277,20 @@ fn prepare_observed(
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
     }
-    if recovery
+    let frontier = recovery
         .authenticated_frontier_anchor()
-        .map(|(revision, _)| revision.get())
-        != Some(expected)
-    {
+        .ok_or_else(|| error("USTE_BM01_FRONTIER_MISMATCH"))?
+        .0
+        .get();
+    if frontier > expected || (phase != "rebuild" && frontier != expected) {
         return Err(error("USTE_BM01_FRONTIER_MISMATCH"));
     }
     if phase == "rebuild" {
-        source_binding(&mut fs, &mut recovery, profile, limits)?;
+        if frontier == 1 {
+            bootstrap::source_binding(&mut fs, &mut recovery, profile)?;
+        } else {
+            source_binding(&mut fs, &mut recovery, profile, limits)?;
+        }
         let (live, report) = recover_packed_graph_origin(
             recovery,
             &mut fs,
@@ -294,14 +299,21 @@ fn prepare_observed(
             limits.origin,
         )
         .map_err(|_| error("USTE_BM01_PACKED_REBUILD"))?;
-        if report.suffix.journal.groups != expected - 1 || live.overlay_counts() != (0, 0) {
+        if report.suffix.journal.groups != frontier - 1 || live.overlay_counts() != (0, 0) {
             return Err(error("USTE_BM01_PACKED_REBUILD"));
         }
         origin_groups = Some(report.suffix.journal.groups);
         drop(live);
         recovery = open_recovery(&mut fs, &mut adapter, limits)?.0;
     }
-    let (live, digest) = engine::admit(&mut fs, recovery, limits)
+    let mut selected = limits;
+    selected.counts = engine::prefix::counts(
+        profile,
+        uste_types::CommitRevision::new(frontier)
+            .map_err(|_| error("USTE_BM01_FRONTIER_MISMATCH"))?,
+    )
+    .map_err(|_| error("USTE_BM01_LIMITS"))?;
+    let (live, digest) = engine::admit(&mut fs, recovery, selected)
         .map_err(|_| error("USTE_BM01_PACKED_ADMISSION"))?;
     let mut session = Session {
         filesystem: fs,
@@ -311,14 +323,17 @@ fn prepare_observed(
         limits,
         report: serde_json::Value::Null,
     };
-    require_binding(&mut session, profile)?;
+    if frontier >= 2 {
+        require_binding(&mut session, profile)?;
+    }
     let (rss, peak) = process_rss()?;
     session.report = serde_json::json!({
         "schema": "bm01-linux-packed-development-v1", "engine_benchmark": false,
         "qualification": "nonqualifying-development-profile", "phase": phase,
         "filesystem_profile": "linux-x86_64-btrfs", "storage_metadata_mode": "disk-certificate-and-blob-recovery",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
-        "entities": profile.entities(), "relationships": profile.relationships(), "frontier": expected,
+        "entities": profile.entities(), "relationships": profile.relationships(), "frontier": frontier,
+        "complete_fixture": frontier == expected,
         "v1_state_digest": hex(&digest), "origin_suffix_groups": origin_groups,
         "elapsed_milliseconds": started.elapsed().as_millis(), "current_rss_kib": rss, "process_peak_rss_kib": peak,
         "repaired_certificate_tail_bytes": recovered.repaired_certificate_tail_bytes,

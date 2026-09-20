@@ -2,7 +2,38 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed BM-06 prefix/process recovery (Decision 0172)
+## Latest verified increment — packed BM-01 partial-origin rebuild (Decision 0173)
+
+Implemented on pushed `885ca5a` plus this increment: explicit BM-01 rebuild restores the actual
+authenticated prefix, cold-admits exact prefix counts and reports `complete_fixture`. It does not
+append batches. Data-bearing prefixes require the evidence marker; policy-only prefixes require the
+exact canonical policy and profile-bound first transaction through a fully finished bounded cursor.
+This binding is read-only, not an expiry-dependent retry. Empty and legacy unbound policy prefixes
+still refuse. Open/query still require complete materialization; resume retains its exact-retry rules.
+
+Tests remove every packed manifest at frontiers two and three, refuse ordinary resume/wrong-profile
+rebuild, prove repeated reconstruction preserves source bytes and prefix digest, then resume to the
+reference terminal state. The five-boundary BM-01 SIGKILL test now additionally checks empty-store
+refusal and policy-only reconstruction with zero source append. Session 59056 /
+`run-p811573-i21796517.scope` exited 0: 20 packed library cases/105.81 s, four packed CLI cases/
+52.61 s, compile 47.75 s, Clippy 1.40 s; zero failures. Preflight 30 GiB available RAM/3.6 GiB
+free swap; sampled scope peak 367,181,824 bytes/zero swap. One job/thread and 3G/4G/512M caps.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --test packed_terminal --locked --offline packed -- --test-threads=1 &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Format/diff/docs/task checks pass. Other library tests retain the 77-active/two-ignored gate at
+`885ca5a`; other process suites retain the 96-active full gate at `33d7588`. Core source remains
+unchanged with 658 tests at `6bb43a4`. Pending packed sampler work is excluded. Next implement
+supervised packed BM-01 sampling with the frozen plan/oracle, then complete I/O accounting and
+resource-safe scale prerequisites before qualifying campaigns. T-20/T-19 remain unchecked; pinned
+M1, full roadmap, lockfile and release gates remain unchanged. This section supersedes earlier
+next steps; no performance or larger-than-memory qualification follows from these tests.
+
+## Prior verified increment — packed BM-06 prefix/process recovery (Decision 0172)
 
 Implemented on pushed `33d7588` plus this increment: native packed BM-06 resume reconstructs only
 zero/one-revision bootstrap (one outcome/zero owners/1 MiB replay), rejects foreign principal/key/
