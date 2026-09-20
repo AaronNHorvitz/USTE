@@ -77,7 +77,10 @@ fn run() -> Result<(), String> {
         }
         return Ok(());
     }
-    if command == "bm06-manifest" || command == "bm06-disk-check" {
+    if matches!(
+        command.as_str(),
+        "bm06-manifest" | "bm06-disk-check" | "bm06-packed-check"
+    ) {
         let records = match arguments.next() {
             None => 100_000,
             Some(flag) if flag == "--records" => arguments
@@ -95,6 +98,22 @@ fn run() -> Result<(), String> {
         let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(records)?;
         if command == "bm06-manifest" {
             print!("{}", profile.manifest());
+        } else if command == "bm06-packed-check" {
+            let report = uste_t20_bench::engine::packed::recovery::verify(profile)?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema": "bm06-packed-development-v1", "engine_benchmark": false,
+                    "qualification": "nonqualifying-packed-development-equivalence",
+                    "filesystem_profile": "durable-memory-model", "complete_authenticated_io": false,
+                    "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
+                    "records": report.records, "verified_versions": report.verified_versions,
+                    "verified_payload_bytes": report.verified_payload_bytes,
+                    "base_revision": report.base_revision, "recovered_revision": report.recovered_revision,
+                    "origin_suffix_groups": report.origin_suffix_groups, "v1_state_digest": hex(&report.v1_state_digest),
+                    "qualifying_recovery_trials": 0,
+                })
+            );
         } else {
             let report = uste_t20_bench::engine::recovery::verify_disk_recovery(profile)?;
             println!(
@@ -389,6 +408,7 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check|packed-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
+         uste-t20-bench bm06-packed-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \

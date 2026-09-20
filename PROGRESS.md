@@ -2,7 +2,44 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed bootstrap and process loss (Decision 0169)
+## Latest verified increment — packed BM-06 history equivalence (Decision 0170)
+
+Implemented on pushed `269c7ba` plus this increment: `bm06-packed-check --records 1|2` constructs
+the unchanged 100-version/4096-byte event fixture with authorized packed writes and metadata rebase.
+It certifies the final batch while deliberately refusing derived publication with ResourceLimit,
+restarts from checkpoint 100 to frontier 101, exact-retries that outcome, cold-admits all families
+and verifies every historical payload/identity/version/revision. Explicit zero-overlay origin rebuild
+streams 100 groups with 64-certificate windows, verifies history again, exact-retries every data batch
+at the terminal clock and cold-compares the full v1 digest. No request/outcome map or v1 roots are used.
+
+Packed limit construction now accepts fixture shape without changing BM-01 values. BM-06 semantic
+history groups allow 100 versions/100 × 16 KiB; reverse-predecessor point reads stay bounded. Shape
+arithmetic is tested through 100,000 records without database allocation; actual verifier cap remains
+two records before key/filesystem allocation. The CLI explicitly reports memory-model storage,
+zero qualifying trials and incomplete authenticated I/O. Native packed BM-06 work is not included.
+
+Initial compilation found a nonexistent `PackedGraphBase::revision` accessor, corrected to its
+authenticated anchor. Focused session 72638 / `run-p776857-i21764388.scope` passed two tests/1.08 s,
+compile 23.77 s and Clippy/1.45 s. Full session 75663 / `run-p777918-i21740861.scope` exited 0:
+89 active tests across six executables, two pre-existing ignored campaigns, zero failures. Library
+71/101.83 s; BM-01 process 3/11.89 s; packed CLI 4/50.62 s; BM-06 CLI 3/1.11 s; BM-06 process
+8/73.95 s. Compile 52.29 s, Clippy 1.30 s. Preflight 28 GiB available RAM/4.0 GiB free swap;
+sampled scope peak 358,195,200 bytes/zero swap, not a final peak. One job/thread and 3G/4G/512M caps.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d170-packed-history-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Format/diff/docs/task graph checks pass. Core source is unchanged; its gate remains 658 tests at
+`6bb43a4`. Next connect native packed BM-06 checkpoint/tail/recovery/rebuild and failure controls.
+Complete authenticated I/O, exact-scale construction, host reservation and qualifying campaigns
+remain open. T-20/T-19 remain unchecked; pinned M1, full roadmap, lockfile and release prerequisites
+are unchanged. This section supersedes earlier next steps.
+
+## Prior verified increment — packed bootstrap and process loss (Decision 0169)
 
 Implemented on pushed `d72db81` plus this increment: new packed policy identities bind the frozen
 fixture version and entity count. Explicit resume initializes verified empty stores or reconstructs

@@ -2,6 +2,7 @@
 use super::*;
 pub(crate) mod limits;
 pub(crate) mod prefix;
+pub mod recovery;
 use limits::Limits;
 use uste_graph::{
     GRAPH_PACKED_PROFILE_V1, GraphPackedLiveState, GraphStateDeltaLimits,

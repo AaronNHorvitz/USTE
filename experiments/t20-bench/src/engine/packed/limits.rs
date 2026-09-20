@@ -21,6 +21,25 @@ impl Limits {
     pub fn new(profile: Bm01Profile) -> Result<Self, String> {
         let legacy = disk::DiskProfileLimits::new(profile)?;
         let counts = disk::fixture_state_counts(profile);
+        Self::from_shape(legacy, counts, 2, 64 * 1024, profile.relationships() * 64)
+    }
+    pub fn recovery(profile: crate::recovery_materialization::Bm06Profile) -> Result<Self, String> {
+        use crate::recovery_materialization::VERSIONS;
+        Self::from_shape(
+            disk::DiskProfileLimits::recovery(profile)?,
+            [profile.records(), profile.events(), 0, 0, 0, 0, 1, 1],
+            VERSIONS,
+            VERSIONS * 16 * 1024,
+            1,
+        )
+    }
+    fn from_shape(
+        legacy: disk::DiskProfileLimits,
+        counts: [u64; 8],
+        history_versions: u64,
+        history_bytes: u64,
+        reference_visits: u64,
+    ) -> Result<Self, String> {
         let entries = counts.into_iter().sum::<u64>() + 1;
         let all_entries = entries + 2 * legacy.groups + 4;
         // Keys are at most 48 bytes (retry principal/key); encoded Patricia paths fit 512.
@@ -59,9 +78,9 @@ impl Limits {
                     entries * 16 * 1024,
                 )
                 .map_err(debug)?,
-                2,
-                64 * 1024,
-                profile.relationships() * 64,
+                history_versions,
+                history_bytes,
+                reference_visits,
                 lookups,
                 lookups * 516,
                 lookups * 16 * 1024,
@@ -176,6 +195,24 @@ impl Limits {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packed_history_shape_keeps_frozen_versions_and_bounded_windows() {
+        use crate::recovery_materialization::Bm06Profile;
+        for records in [1, 2, 511, 512, 513, 100000] {
+            let profile = Bm06Profile::new(records).unwrap();
+            let limits = Limits::recovery(profile).unwrap();
+            assert_eq!(limits.counts, [records, profile.events(), 0, 0, 0, 0, 1, 1]);
+            assert_eq!(limits.legacy.groups, profile.frontier());
+            assert_eq!(
+                limits.origin.suffix.maximum_revisions,
+                profile.frontier() - 1
+            );
+            assert_eq!(limits.origin.suffix.metadata.certificate_window, 64);
+            assert_eq!(limits.origin.suffix.metadata.staging.maximum_owners, 0);
+            assert_eq!(limits.legacy.history_group_bytes, 100 * 16 * 1024);
+            assert_eq!(limits.read().unwrap().historical.maximum_candidates, 2);
+        }
+    }
     #[test]
     fn packed_profile_arithmetic_and_read_limits_preserve_the_accepted_range() {
         for entities in 2..=100_000 {

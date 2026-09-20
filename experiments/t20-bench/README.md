@@ -59,6 +59,16 @@ Packed BM-06 history, complete authenticated I/O and qualifying BM-01/BM-06 camp
 
 ## BM-06 materialization
 
+Decision 0170 adds `bm06-packed-check --records 2` (also accepts 1). It constructs all 100 versions
+through packed authorized writes, verifies certified-tail recovery from the checkpoint, checks every
+historical payload, then explicitly rebuilds from origin with zero overlays and checks all data-batch
+retries and the terminal v1 digest. It uses memory-model storage/entropy/credentials and refuses more
+than two records before allocation. This does not run native recovery trials or qualify BM-06.
+
+```text
+cargo run --release --locked --offline -- bm06-packed-check --records 2
+```
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`
