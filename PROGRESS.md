@@ -2,7 +2,46 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — single-pass packed lookup authentication (Decision 0209)
+## Latest verified increment — newest page-cache fast path (Decision 0210)
+
+Pushed `ef4c1a9` records the verified single-pass lookup; its release binary SHA-256 is
+`2fb5eb87c10f771a42d61e6d59a9e4b021fe2914becc718bc69cc79c20057338`.
+The next internal cache change compares the complete newest slot key before the ordered map.
+It adds no state/allocation, preserves all enclosing context/owner/session checks, and leaves
+clock, counters, exact LRU order and resource admission unchanged. Two new tests cover
+10,000 comparison-free newest hits, non-newest reorder/eviction, complete-key mismatch,
+empty/single-slot behavior and unchanged metadata capacity. Review corrected an immutable
+loop-variable borrow in the new assertion before compilation; no runtime behavior changed.
+
+Storage verification plus strict all-feature workspace Clippy/docs passed in session 20712 /
+`uste-d210-storage.scope`, invocation `6bbec15b3cab49df8964837307d7c04d`, after fresh 25 GiB
+RAM/2.0 GiB swap/952 GiB disk preflight and no competing workload. One job/thread,
+assertion/overflow-enabled opt-level 1 storage tests, 3G/4G/512M group. **231 storage tests
+passed** in 33.17s after 29.61s compile; strict Clippy 8.07s and warnings-denied docs 13.01s
+passed. Final scope peak 1,588,989,952 bytes/zero swap. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d210-storage.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --lib --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d210-storage-verification.log; verification_status=$?; systemctl --user show uste-d210-storage.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Native regression passed in session 13838 / `uste-d210-native.scope`, invocation
+`718a287764c2453d81521f5831509db1`, after fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk preflight
+and no competing workload. **122 active tests passed, five unchanged opt-in ignores**:
+release compile 1m05s, library 90/128.03s, legacy process 3/11.79s, packed history 11/59.70s,
+packed terminal 7/31.40s, manifest 3/0.91s, legacy recovery 8/72.90s. Strict native Clippy
+passed in 2.14s; final scope peak 568,975,360 bytes/zero swap. Same group limits and one
+job/thread. Formatting, documentation and task graph checks passed. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d210-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d210-native-verification.log; verification_status=$?; systemctl --user show uste-d210-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Next commit/push the reviewed capability and admit a read-only native comparison. The prior
+730-test full workspace result belongs to D0209 and excludes this later
+cache change. A subsequent native comparison must pin both increments, preserve D0206/D0208
+artifacts and keep qualifying targets/reservations unchanged. T-20/T-19 remain open.
+
+## Prior verified increment — single-pass packed lookup authentication (Decision 0209)
 
 Pushed baseline `b4a26f6` records D0208's complete read-only comparison. The follow-up uses the
 already root-bound per-node chain instead of rehashing it at the leaf. Identical structural
@@ -43,7 +82,7 @@ one job/thread. Root/standalone formatting, documentation and task graph checks 
 systemd-run --user --scope --unit=uste-d209-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d209-native-verification.log; verification_status=$?; systemctl --user show uste-d209-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
 ```
 
-Next commit/push the reviewed change, then check the cache's newest-slot fast path before a
+The change is pushed as `ef4c1a9`; D0210 checks the cache's newest-slot fast path before a
 separately pinned comparison. No sampling or qualification pass is claimed. Preserve D0206's
 timeout, D0208's exact older binary evidence,
 all retained fixtures and M1's separate pinned handoff. T-20 and T-19 remain open.

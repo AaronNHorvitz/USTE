@@ -3,6 +3,10 @@ use super::*;
 
 const NONE: usize = usize::MAX;
 
+#[cfg(test)]
+#[path = "index_cache_tests.rs"]
+mod tests;
+
 struct Slot<K, V> {
     key: K,
     page: V,
@@ -52,6 +56,15 @@ impl<K: Copy + Ord, V> CachePages<K, V> {
     }
 
     pub fn touch(&mut self, key: &K) -> Option<usize> {
+        // Repeated accesses to the newest immutable page need neither an
+        // ordered-map search nor an LRU link update. Compare the complete key.
+        if self
+            .slots
+            .get(self.newest)
+            .is_some_and(|slot| slot.key == *key)
+        {
+            return Some(self.newest);
+        }
         let index = *self.keys.get(key)?;
         if index != self.newest {
             self.unlink(index);
