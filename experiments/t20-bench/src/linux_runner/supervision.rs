@@ -337,7 +337,18 @@ fn finalize_report(
             "storage_metadata_mode",
             "disk-certificate-and-blob-recovery",
         )?;
-        expect_string(object, "authenticated_io_accounting", "not-measured")?;
+        expect_string(
+            object,
+            "authenticated_io_accounting",
+            "partial-single-owner-vault-decrypt",
+        )?;
+        expect_string(
+            object,
+            "setup_vault_work_scope",
+            "last-cold-open-owner-only",
+        )?;
+        expect_vault_work(object.get("setup_vault_work"))?;
+        expect_vault_work(object.get("warmup_vault_work"))?;
         expect_string(
             object,
             "qualification",
@@ -408,6 +419,25 @@ fn finalize_report(
             .as_object()
             .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
         let executions = value_u64(sample, "timed_executions")?;
+        if matches!(mode, SampleMode::Packed) {
+            let work = sample
+                .get("vault_work")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+            if work.len() != 2 {
+                return Err(LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"));
+            }
+            for (value, name) in work
+                .iter()
+                .zip(["uste-empty", "uste-retained-after-identical-query"])
+            {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+                expect_string(object, "cache", name)?;
+                expect_vault_work(object.get("work"))?;
+            }
+        }
         let rounds = value_u64(sample, "rounds")?;
         let minimum = if profile == Bm01Profile::qualifying() {
             60_000
@@ -442,6 +472,34 @@ fn finalize_report(
         finalized = finalized.replacen(old, "qualification-candidate-environment-unverified", 1);
     }
     Ok(finalized)
+}
+
+fn expect_vault_work(value: Option<&serde_json::Value>) -> Result<(), LinuxRunnerError> {
+    let object = value
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
+    expect_string(
+        object,
+        "measurement_scope",
+        "single-owner-vault-completed-decrypt-calls",
+    )?;
+    for field in [
+        "physical_device_io",
+        "complete_authenticated_io",
+        "includes_key_unwrap",
+        "includes_other_vaults",
+    ] {
+        expect_bool(object, field, false)?;
+    }
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "authenticated_encoded_bytes",
+        "returned_plaintext_bytes",
+    ] {
+        value_u64(object, field)?;
+    }
+    Ok(())
 }
 
 fn expect_disk_storage_report(
@@ -816,16 +874,27 @@ mod tests {
 
     #[test]
     fn supervisor_binds_packed_schema_and_never_upgrades_missing_io_or_qualification() {
+        let work = serde_json::json!({
+            "measurement_scope": "single-owner-vault-completed-decrypt-calls",
+            "physical_device_io": false, "complete_authenticated_io": false,
+            "includes_key_unwrap": false, "includes_other_vaults": false,
+            "successful_calls": 0, "failed_calls": 0,
+            "authenticated_encoded_bytes": 0, "returned_plaintext_bytes": 0,
+        });
         let report = serde_json::json!({
             "schema": "bm01-linux-packed-sampling-v1", "engine_benchmark": true,
             "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
             "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
-            "complete_authenticated_io": false, "authenticated_io_accounting": "not-measured",
+            "complete_authenticated_io": false, "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+            "setup_vault_work_scope": "last-cold-open-owner-only",
+            "setup_vault_work": work.clone(), "warmup_vault_work": work.clone(),
             "storage_metadata_mode": "disk-certificate-and-blob-recovery",
             "query_deadline_enforced": false, "query_deadline_postchecked": true, "query_deadline_seconds": 30,
             "entities": 20, "relationships": 200, "frontier": 4, "warmup": {"queries": 96},
             "setup": {"complete_fixture": true, "frontier": 4},
-            "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12}],
+            "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12,
+                "vault_work": [{"cache": "uste-empty", "work": work.clone()},
+                    {"cache": "uste-retained-after-identical-query", "work": work.clone()}]}],
         });
         let profile = Bm01Profile::new(20).unwrap();
         let finalized =
@@ -844,6 +913,16 @@ mod tests {
             "/full_memory_coordinator_metadata",
             "/complete_authenticated_io",
             "/authenticated_io_accounting",
+            "/setup_vault_work_scope",
+            "/setup_vault_work",
+            "/warmup_vault_work",
+            "/setup_vault_work/successful_calls",
+            "/warmup_vault_work/failed_calls",
+            "/samples/0/vault_work",
+            "/samples/0/vault_work/0/cache",
+            "/samples/0/vault_work/1/work",
+            "/samples/0/vault_work/1/work/authenticated_encoded_bytes",
+            "/samples/0/vault_work/1/work/returned_plaintext_bytes",
             "/storage_metadata_mode",
             "/qualification",
             "/budget_evaluation",
@@ -868,6 +947,27 @@ mod tests {
         }
         for mode in [super::SampleMode::Legacy, super::SampleMode::Disk] {
             assert!(finalize_report(&report.to_string(), profile, 864, mode).is_err());
+        }
+        for pointer in [
+            "/setup_vault_work/physical_device_io",
+            "/warmup_vault_work/complete_authenticated_io",
+            "/samples/0/vault_work/0/work/includes_key_unwrap",
+            "/samples/0/vault_work/1/work/includes_other_vaults",
+        ] {
+            let mut wrong = report.clone();
+            *wrong.pointer_mut(pointer).unwrap() = true.into();
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Packed)
+                    .is_err()
+            );
+        }
+        for label in ["not-measured", "complete", "physical-device"] {
+            let mut wrong = report.clone();
+            wrong["authenticated_io_accounting"] = label.into();
+            assert!(
+                finalize_report(&wrong.to_string(), profile, 864, super::SampleMode::Packed)
+                    .is_err()
+            );
         }
         assert!(
             finalize_report(&report.to_string(), profile, 863, super::SampleMode::Packed).is_err()

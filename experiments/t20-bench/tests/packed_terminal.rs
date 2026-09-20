@@ -232,6 +232,22 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
     let fixture = Fixture::new();
     let create = fixture.run("create");
     let open = fixture.run("open");
+    for report in [&create, &open] {
+        assert_eq!(
+            report["terminal_vault_work_scope"],
+            "last-cold-open-owner-only"
+        );
+        assert!(
+            report["terminal_vault_work"]["successful_calls"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+        assert_eq!(
+            report["terminal_vault_work"]["complete_authenticated_io"],
+            false
+        );
+    }
     let resumed = fixture.run("resume");
     assert_eq!(resumed["resume_base_revision"], 4);
     assert_eq!(resumed["resume_suffix_groups"], 0);
@@ -242,6 +258,17 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
     assert_eq!(query["successful_queries"], 384);
     assert_eq!(query["engine_benchmark"], false);
     assert_eq!(query["preemptive_deadline_enforced"], false);
+    let misses = query["cache_misses"].as_u64().unwrap();
+    assert_eq!(query["query_vault_work"]["successful_calls"], misses);
+    assert_eq!(
+        query["query_vault_work"]["authenticated_encoded_bytes"],
+        misses * 20545
+    );
+    assert_eq!(
+        query["query_vault_work"]["returned_plaintext_bytes"],
+        misses * 16384
+    );
+    assert_eq!(query["query_vault_work"]["failed_calls"], 0);
     let rebuild = fixture.run("rebuild");
     assert_eq!(rebuild["origin_suffix_groups"], 3);
     assert_eq!(rebuild["v1_state_digest"], create["v1_state_digest"]);
@@ -307,7 +334,21 @@ fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
     );
     assert_eq!(report["budget_evaluation"], "not-performed");
     assert_eq!(report["complete_authenticated_io"], false);
-    assert_eq!(report["authenticated_io_accounting"], "not-measured");
+    assert_eq!(
+        report["authenticated_io_accounting"],
+        "partial-single-owner-vault-decrypt"
+    );
+    assert_eq!(
+        report["setup_vault_work_scope"],
+        "last-cold-open-owner-only"
+    );
+    for field in ["setup_vault_work", "warmup_vault_work"] {
+        let work = &report[field];
+        assert!(work["successful_calls"].as_u64().unwrap() > 0);
+        assert_eq!(work["failed_calls"], 0);
+        assert_eq!(work["physical_device_io"], false);
+        assert_eq!(work["complete_authenticated_io"], false);
+    }
     assert_eq!(report["warmup"]["queries"], 96);
     assert_eq!(report["samples"].as_array().unwrap().len(), 1);
     let sample = &report["samples"][0];
@@ -331,6 +372,21 @@ fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
     assert_eq!(sample["adapter_io"][1]["work"]["read_returned_bytes"], 0);
     assert_eq!(sample["adapter_io"][0]["work"]["write_returned_bytes"], 0);
     assert_eq!(sample["adapter_io"][1]["work"]["write_returned_bytes"], 0);
+    let cold_crypto = &sample["vault_work"][0]["work"];
+    let warm_crypto = &sample["vault_work"][1]["work"];
+    let misses = empty["index_cache_misses"].as_u64().unwrap();
+    assert_eq!(cold_crypto["successful_calls"], misses);
+    assert_eq!(cold_crypto["failed_calls"], 0);
+    assert_eq!(cold_crypto["authenticated_encoded_bytes"], misses * 20545);
+    assert_eq!(cold_crypto["returned_plaintext_bytes"], misses * 16384);
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "authenticated_encoded_bytes",
+        "returned_plaintext_bytes",
+    ] {
+        assert_eq!(warm_crypto[field], 0);
+    }
     let bundle = OracleBundle::build(Bm01Profile::new(20).unwrap()).unwrap();
     let mut digest = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
     digest.update(&1_u64.to_be_bytes());

@@ -1,3 +1,4 @@
+use super::crypto_work::CryptoWork;
 use super::*;
 use crate::engine::execute_query_with;
 
@@ -22,6 +23,12 @@ pub fn query_correctness(
     )
     .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))?;
     let setup = session.filesystem.snapshot()?;
+    let setup_crypto = CryptoWork::from(
+        session
+            .coordinator
+            .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    );
     let started = Instant::now();
     let mut successes = 0_u64;
     let mut visit_limits = 0_u64;
@@ -98,6 +105,13 @@ pub fn query_correctness(
         .map_err(|_| error("USTE_BM01_PACKED_CACHE"))?
         .ok_or_else(|| error("USTE_BM01_PACKED_CACHE"))?;
     let (rss, peak) = process_rss()?;
+    let query_crypto = CryptoWork::from(
+        session
+            .coordinator
+            .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    )
+    .delta(setup_crypto)?;
     Ok(serde_json::json!({
         "schema": "bm01-linux-packed-query-v1", "engine_benchmark": false,
         "qualification": "nonqualifying-development-correctness", "filesystem_profile": "linux-x86_64-btrfs",
@@ -111,6 +125,8 @@ pub fn query_correctness(
         "cache_hits": cache.hits, "cache_misses": cache.misses, "cache_evictions": cache.evictions,
         "uste_page_cache": "cleared-before-each-query", "kernel_filesystem_device_cache": "uncontrolled",
         "preemptive_deadline_enforced": false, "complete_authenticated_io": false,
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt",
+        "query_vault_work": query_crypto.json(),
         "setup": session.report, "query_adapter_io": session.filesystem.snapshot()?.delta(setup)?.json()?,
     }).to_string())
 }

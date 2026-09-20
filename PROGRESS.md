@@ -2,7 +2,40 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — trusted per-vault authentication work (Decision 0175)
+## Latest verified increment — packed BM-01 vault-work reporting (Decision 0176)
+
+Implemented on pushed `e2ca489` plus this increment. The trusted native operator reports checked
+per-owner decrypt deltas for warm-up and empty/retained samples, alongside cache and adapter work.
+Terminal setup totals explicitly cover only the last cold-open owner; query-only work is separate.
+Consumers receive no vault-wide report API. Supervisor validation requires the counter shape and
+partial-accounting disclosures, rejecting fabricated physical-I/O/key-unwrap/other-owner claims.
+The unchanged oracle digest, query plan, cache size, deadlines, admission caps and thresholds remain.
+
+Full session 20025 / `run-p888943-i21877630.scope` exited 0: 104 active tests across seven
+executables, two existing ignored campaigns, zero failures. Library 80/153.70 s; legacy BM-01
+process 3/12.31 s; packed BM-06 CLI 5/53.92 s; packed BM-01 CLI 5/59.44 s; BM-06 manifest
+3/1.15 s; legacy BM-06 process 8/76.39 s. Compile 1m05s, strict Clippy 4.13 s. CLI tests prove
+small-fixture cache misses equal successful decrypts with exactly 20,545 encoded/16,384 plaintext
+bytes per packed page, retained queries add zero decrypts, setup/warm-up work is positive, and
+source certificates plus independent result digests remain unchanged. Every counter's rollback/
+overflow and parent report-field refusals pass.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d176-vault-reporting-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 28 GiB available RAM/3.7 GiB free swap; sampled scope peak 645,009,408 bytes/zero swap.
+One job/thread and 3G/4G/512M limits retained. Format/diff/docs/task checks pass. Core remains
+the 664-test baseline at `e2ca489`; M1/handoff, full roadmap, lockfile and release gates unchanged.
+Next run resource-capped native packed 1,000-entity development measurements against the independent
+oracle (fresh empty artifact root `experiments/t20-bench/target/native-packed1000.QGIZQZ` is prepared),
+then continue complete accounting and scale prerequisites. No qualifying campaign, complete I/O,
+larger-than-memory or T-20/T-19 completion is claimed. This supersedes older next-step text.
+
+## Prior verified increment — trusted per-vault authentication work (Decision 0175)
 
 Pushed baseline is `394512a` (supervised packed sampling). Decision 0175 adds fixed-size checked
 vault decrypt diagnostics on raw trusted maintenance handles only. Successful/failed calls,

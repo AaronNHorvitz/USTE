@@ -8,6 +8,7 @@ use disk::io::ObservedFileSystem;
 use uste_graph::recover_packed_graph_origin;
 use uste_txn::{AuthenticatedIndexRecovery, AuthorizedPackedReader, CoordinatorRecoveryLimits};
 mod bootstrap;
+mod crypto_work;
 pub mod history;
 mod query;
 mod sampling;
@@ -329,6 +330,12 @@ fn prepare_observed(
         require_binding(&mut session, profile)?;
     }
     let (rss, peak) = process_rss()?;
+    let terminal_vault_work = crypto_work::CryptoWork::from(
+        session
+            .coordinator
+            .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    );
     session.report = serde_json::json!({
         "schema": "bm01-linux-packed-development-v1", "engine_benchmark": false,
         "qualification": "nonqualifying-development-profile", "phase": phase,
@@ -342,6 +349,8 @@ fn prepare_observed(
         "ignored_uncommitted_journal_bytes": recovered.ignored_uncommitted_journal_bytes,
         "kernel_filesystem_device_cache": "uncontrolled", "complete_authenticated_io": false,
         "setup_adapter_io": session.filesystem.snapshot()?.json()?,
+        "terminal_vault_work": terminal_vault_work.json(),
+        "terminal_vault_work_scope": "last-cold-open-owner-only",
         "development_entity_limit": disk::MAX_NATIVE_DEVELOPMENT_ENTITIES,
         "data_bearing_prefix_resume_implemented": true,
         "policy_only_prefix_resume_implemented": true, "legacy_unbound_policy_resume_supported": false,

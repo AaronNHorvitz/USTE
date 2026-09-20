@@ -72,9 +72,16 @@ cargo run --release --locked --offline -- linux-packed-sample --root "$USTE_BENC
 The parent enforces the fixed 30-second query deadline and validates the worker's closed protocol.
 One worker cold-admits the complete triple, executes 96 warm-ups and one development round of 384
 empty/retained identical-query pairs with a 64 MiB packed cache. Reports separate successful and
-typed-limit latency populations, cache work and adapter I/O. They do not claim complete authenticated
-I/O, controlled host caches, performance qualification or budget evaluation. The unchanged native
+typed-limit latency populations, cache work, adapter I/O and per-owner vault decrypt work. They do
+not claim complete authenticated I/O, controlled host caches, performance qualification or budget
+evaluation. The unchanged native
 20,000-entity cap rejects qualifying dimensions before filesystem access; it is not measured capacity.
+
+Decision 0176 separates last-cold-open-vault setup totals, warm-up deltas and empty/retained query
+deltas. Successful envelope calls count header/padded ciphertext/tag bytes and returned unpadded
+plaintext bytes; failed calls are separate. Retained cache hits do not imply new decryption.
+Earlier discarded owners, key unwrap and pre-vault decode refusals are not included. Terminal
+phase and single-pass query reports carry the same explicitly partial measurement boundary.
 
 ## BM-06 materialization
 

@@ -1,4 +1,5 @@
 //! Packed native sampling with the frozen plan, oracle and owned-worker deadline protocol.
+use super::crypto_work::CryptoWork;
 use super::*;
 use crate::linux_runner::{
     disk::sampling::CacheWork,
@@ -58,8 +59,15 @@ fn sample(
     )
     .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))?;
     let setup = session.filesystem.snapshot()?;
+    let setup_crypto = CryptoWork::from(
+        session
+            .coordinator
+            .vault_decrypt_report()
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))?,
+    );
     let mut engine = Engine {
         reader,
+        coordinator: &session.coordinator,
         filesystem: &mut session.filesystem,
         principal: &session.principal,
         materializer: Materializer::new(profile),
@@ -75,6 +83,7 @@ fn sample(
         }] += 1;
     }
     let warmup_io = engine.filesystem.snapshot()?.delta(setup)?;
+    let warmup_crypto = engine.crypto_report()?.delta(setup_crypto)?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
@@ -88,7 +97,9 @@ fn sample(
         "cache_pairing": "empty-then-retained-identical-query", "kernel_filesystem_device_cache": "uncontrolled",
         "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
         "storage_metadata_mode": "disk-certificate-and-blob-recovery", "complete_authenticated_io": false,
-        "authenticated_io_accounting": "not-measured", "adapter_io_accounting": "filesystem-adapter-calls",
+        "authenticated_io_accounting": "partial-single-owner-vault-decrypt", "adapter_io_accounting": "filesystem-adapter-calls",
+        "setup_vault_work": setup_crypto.json(), "setup_vault_work_scope": "last-cold-open-owner-only",
+        "warmup_vault_work": warmup_crypto.json(),
         "setup": session.report, "setup_adapter_io": setup.json()?, "warmup_adapter_io": warmup_io.json()?,
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
@@ -101,11 +112,18 @@ fn sample(
 
 struct Engine<'a> {
     reader: Reader<'a>,
+    coordinator: &'a Packed,
     filesystem: &'a mut Fs,
     principal: &'a AuthenticatedPrincipal,
     materializer: Materializer,
 }
 impl Engine<'_> {
+    fn crypto_report(&self) -> Result<CryptoWork, LinuxRunnerError> {
+        self.coordinator
+            .vault_decrypt_report()
+            .map(CryptoWork::from)
+            .map_err(|_| error("USTE_BM01_CRYPTO_COUNTER"))
+    }
     fn clear(&self) -> Result<(), LinuxRunnerError> {
         self.reader
             .clear_cache(self.principal)
@@ -159,6 +177,7 @@ impl Engine<'_> {
         let mut executions = 0;
         let mut work = [CacheWork::default(); 2];
         let mut io_work = [disk::io::IoSnapshot::default(); 2];
+        let mut crypto_work = [CryptoWork::default(); 2];
         let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
         aggregate.update(&(ordinal as u64).to_be_bytes());
         loop {
@@ -170,10 +189,13 @@ impl Engine<'_> {
                     }
                     let before = self.report()?;
                     let before_io = self.filesystem.snapshot()?;
+                    let before_crypto = self.crypto_report()?;
                     let (outcome, elapsed) = self.execute(expected, observer)?;
                     work[cache.index()].add(outcome, before, self.report()?)?;
                     io_work[cache.index()]
                         .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
+                    crypto_work[cache.index()]
+                        .accumulate(self.crypto_report()?.delta(before_crypto)?)?;
                     executions += 1;
                     aggregate.update(&[
                         cache.code(),
@@ -216,6 +238,8 @@ impl Engine<'_> {
             "cache_work": [work[0].json(CacheState::Empty)?, work[1].json(CacheState::Retained)?],
             "adapter_io": [{"cache": CacheState::Empty.name(), "work": io_work[0].json()?},
                 {"cache": CacheState::Retained.name(), "work": io_work[1].json()?}], "latency_groups": latencies,
+            "vault_work": [{"cache": CacheState::Empty.name(), "work": crypto_work[0].json()},
+                {"cache": CacheState::Retained.name(), "work": crypto_work[1].json()}],
         }))
     }
 }

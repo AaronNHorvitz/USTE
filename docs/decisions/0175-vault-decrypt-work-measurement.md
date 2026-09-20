@@ -40,5 +40,5 @@ shared-owner observation, denied/foreign/absent reads, durable read revocation a
 five-family late ciphertext corruption. Full verification and resource evidence belong in PROGRESS.
 
 The corrected full workspace passes 664 tests with zero failures/ignored cases, all-features strict
-Clippy and warning-denying documentation. Benchmark wiring is a separate, subsequently verified
-increment; no complete I/O, scalability or performance claim follows from these counters.
+Clippy and warning-denying documentation. Benchmark wiring requires separate verification;
+no complete I/O, scalability or performance claim follows from these counters.
