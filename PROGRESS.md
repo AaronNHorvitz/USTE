@@ -2,7 +2,33 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — logical-first positive-cache keys (Decision 0220)
+## Latest development observation — logical-first cache sampling (Decision 0221)
+
+D0220's verified implementation is committed/pushed as `0c16a45`. Its release executable SHA-256
+is `ff6bb7411c10194eb56d468360b3845f6255cafd10b4815fb4db4730d831886b`. A single supervised
+wide positive-cache development sample completed against the unchanged retained 20,000/200,000
+fixture and oracle. It is cross-binary and post-restart, not causal, repeated or qualifying.
+
+The report matches D0219 after removing only timings/RSS: 96 warm-ups (75 success / 21 expected
+result limits), 768 measured executions, 40 identical populations, digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`, all successful work,
+cache counters, adapter I/O and vault work. The round took 707,800 ms versus 736,625 ms (-3.91%).
+Retained all-class successful p99 by depth is **8.923552 / 641.845829 / 382.309391 /
+1560.853940 ms**; four-hop worsened 2.33% and remains far above 250 ms. No target or T-20 gate
+passes. Keep the page-only default and all prior regression evidence.
+
+The process used 266,008 KiB peak RSS, 844.89 user / 45.50 system seconds and 894.23 seconds wall.
+It ran alone inside `uste-codex.scope` with the inherited 4 GiB virtual-address limit; zero swap,
+pressure or OOM events. The enclosing shared peak was 4,246,384,640 bytes and is not process RSS.
+Source certificate `b8fea4e223947316555069db1869b7ef57e121077e84ceff02a1930061f1e6cd`, oracle
+`f667f4420fce69e773d55e4c8ace4ed16878f063f4afc11ce1e1c6a234e5797b` and executable hashes
+were unchanged. Raw local artifacts are under
+`experiments/t20-bench/target/native-d220-positive.vOxBr8`; the complete report is archived in
+`docs/evidence/logical-first-positive-cache-sampling.json`. Next commit/push this evidence, then
+remove or explicitly measure avoidable positive-cache hit allocation/copy work before rerunning a
+capacity campaign. No source format, API, M1 handoff or qualification boundary changes.
+
+## Verified implementation — logical-first positive-cache keys (Decision 0220)
 
 D0219's completed sampling evidence is committed/pushed as `b6cb359`. D0220 is implemented and
 verified from the pushed WIP baseline `8cadf6b`: the private positive-cache encoding now compares
