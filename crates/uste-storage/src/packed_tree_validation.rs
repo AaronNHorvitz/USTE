@@ -222,12 +222,12 @@ pub(crate) fn validate_tree_buffered<F: FileSystem, W, E: EntropySource>(
             context.family,
             context.revision,
         )?;
-        let node = TreeNode::decode(
+        let (node, commitment) = TreeNode::decode_committed(
             physical,
             page.record(link.location.slot())
                 .ok_or(StorageError::IntegrityFailure)?,
         )?;
-        if node.commitment(physical)? != link.claimed {
+        if commitment != link.claimed {
             return Err(StorageError::IntegrityFailure);
         }
         reader.report.nodes += 1;

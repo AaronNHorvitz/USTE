@@ -247,12 +247,12 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
             context.family,
             context.revision,
         )?;
-        let node = TreeNode::decode(
+        let (node, commitment) = TreeNode::decode_committed(
             physical,
             page.record(location.slot())
                 .ok_or(StorageError::IntegrityFailure)?,
         )?;
-        if node.commitment(physical)? != claimed {
+        if commitment != claimed {
             return Err(StorageError::IntegrityFailure);
         }
         match node {

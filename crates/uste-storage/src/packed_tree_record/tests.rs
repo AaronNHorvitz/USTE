@@ -36,13 +36,25 @@ fn hex(value: &str) -> Vec<u8> {
         .collect()
 }
 fn node(payload: &[u8]) -> Result<TreeNode<'_>, StorageError> {
-    TreeNode::decode(
+    let decoded = TreeNode::decode(
         owner(),
         PackedRecord {
             kind: PackedRecordKind::TreeNode,
             payload,
         },
-    )
+    );
+    let retained = TreeNode::decode_committed(
+        owner(),
+        PackedRecord {
+            kind: PackedRecordKind::TreeNode,
+            payload,
+        },
+    );
+    assert_eq!(decoded.as_ref().err(), retained.as_ref().err());
+    if let Ok((node, commitment)) = retained {
+        assert_eq!(commitment, node.commitment(owner()).unwrap());
+    }
+    decoded
 }
 fn chunk(payload: &[u8]) -> Result<ValueChunk<'_>, StorageError> {
     ValueChunk::decode(
@@ -74,6 +86,48 @@ fn branch() -> TreeNode<'static> {
             },
             claimed: OrderedCommitment::claimed_nonempty(3, 9, [34; 32]).unwrap(),
         },
+    }
+}
+
+#[test]
+fn packed_tree_record_retained_commitment_matches_reference_under_byte_mutation_and_context() {
+    for original in [leaf(), branch()] {
+        let bytes = original.encode(owner()).unwrap();
+        for index in 0..bytes.len() {
+            for mask in [1, 128, 255] {
+                let mut changed = bytes.to_vec();
+                changed[index] ^= mask;
+                // Authentic records need not all be invalid after mutation. For every
+                // accepted record compare the retained hash with the reference hash.
+                let _ = node(&changed);
+            }
+        }
+        for context in [
+            owner(),
+            PackedPageContext {
+                family: 6,
+                ..owner()
+            },
+            PackedPageContext {
+                profile: [99; 32],
+                ..owner()
+            },
+        ] {
+            let (decoded, commitment) = TreeNode::decode_committed(
+                context,
+                PackedRecord {
+                    kind: PackedRecordKind::TreeNode,
+                    payload: &bytes,
+                },
+            )
+            .unwrap();
+            assert_eq!(commitment, original.commitment(context).unwrap());
+            assert_eq!(commitment, decoded.commitment(context).unwrap());
+            assert_eq!(
+                commitment == original.commitment(owner()).unwrap(),
+                context.family == owner().family && context.profile == owner().profile
+            );
+        }
     }
 }
 

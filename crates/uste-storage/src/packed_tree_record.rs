@@ -208,6 +208,16 @@ impl<'a> TreeNode<'a> {
         owner: PackedPageContext,
         record: PackedRecord<'a>,
     ) -> Result<Self, StorageError> {
+        Self::decode_committed(owner, record).map(|(node, _)| node)
+    }
+
+    /// Retain the commitment already computed by mandatory record validation.
+    /// This is not admission against a trusted root: the caller must compare the
+    /// returned commitment with its authenticated parent/root claim.
+    pub(crate) fn decode_committed(
+        owner: PackedPageContext,
+        record: PackedRecord<'a>,
+    ) -> Result<(Self, OrderedCommitment), StorageError> {
         if record.kind != PackedRecordKind::TreeNode || record.payload.len() > MAX_RECORD_PAYLOAD {
             return Err(StorageError::IntegrityFailure);
         }
@@ -238,8 +248,8 @@ impl<'a> TreeNode<'a> {
             _ => return Err(StorageError::IntegrityFailure),
         };
         input.finish()?;
-        node.commitment(owner)?;
-        Ok(node)
+        let commitment = node.commitment(owner)?;
+        Ok((node, commitment))
     }
 
     pub fn encode(self, owner: PackedPageContext) -> Result<Zeroizing<Vec<u8>>, StorageError> {

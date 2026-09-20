@@ -121,12 +121,12 @@ impl Plan<'_> {
                 };
                 self.report.read_pages += 1;
                 self.report.read_bytes += ENCODED_PAGE_BYTES as u64;
-                let node = TreeNode::decode(
+                let (node, commitment) = TreeNode::decode_committed(
                     physical,
                     page.record(location.slot())
                         .ok_or(StorageError::IntegrityFailure)?,
                 )?;
-                if node.commitment(physical)? != link.claimed {
+                if commitment != link.claimed {
                     return Err(StorageError::IntegrityFailure);
                 }
                 match node {

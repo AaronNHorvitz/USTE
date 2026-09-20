@@ -2,7 +2,44 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest measurement — native 20,000 entities; sampling incomplete (Decision 0206)
+## Latest verified increment — retain validated packed-record commitments (Decision 0207)
+
+Pushed `b4a72b4` preserves D0206's exact correctness/cache-pressure evidence and sampling
+timeout. On that baseline, reuse the commitment computed during mandatory packed-node decode
+for the immediately following root/parent comparison in point lookup, cursor traversal,
+full-tree validation and batch inspection. Public decode and all proof, routing, value, owner,
+authorization, I/O and resource checks remain unchanged. No format/API or M1 handoff change.
+
+Workspace session 97961 / `uste-d207-workspace.scope` exited zero: **726 passed, zero failed or
+ignored across 47 executables**. Build 1m09s; graph disk 120/440.96s, checkpoint recovery
+50/104.03s, storage 225/33.05s (including the new mutation/context commitment test), transaction
+coordinator 118/117.31s. Strict all-feature Clippy 7.31s and warnings-denied docs 11.92s passed.
+Final scope peak 3,221,450,752 bytes, zero swap; one build job/thread, assertion/overflow-enabled
+test opt-level 1. Preflight 26 GiB RAM/2.0 GiB swap/952 GiB disk. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d207-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d207-workspace-verification.log; verification_status=$?; systemctl --user show uste-d207-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Native regression passed in session 8066 / `uste-d207-native.scope`, invocation
+`25763b646af14d639714d8503b4e3d49`, after fresh 25 GiB RAM/2.0 GiB swap/952 GiB disk preflight
+and no competing workload. Release build 1m05s; **122 active tests passed, five existing opt-in
+cases ignored**: library 90/128.94s, legacy process 3/11.85s, packed history 11/60.03s,
+packed terminal 7/33.06s, manifest 3/0.93s, legacy recovery 8/72.92s. Strict native Clippy
+passed in 2.13s. Final scope peak 596,852,736 bytes/zero swap. Release binary SHA-256
+`b35e6349961fc3885ff3a85745f0f67e0ce8082ccb2fbaefe884ae5fe158268d`.
+Root/standalone formatting, documentation and 68-task dependency checks passed. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d207-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d207-native-verification.log; verification_status=$?; systemctl --user show uste-d207-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Next commit/push the verified capability and admit a separately versioned
+read-only comparison on the retained fixture before deciding whether changed performance
+justifies another bounded sampling attempt. Do not relabel the D0206 timeout or raise its
+deadline/benchmark targets. T-20/T-19 and full qualification remain open.
+
+## Prior measurement — native 20,000 entities; sampling incomplete (Decision 0206)
 
 Pushed/clean baseline `18a45e41d754b914b735fe413c15b09fb6d3b812`; release binary SHA-256
 `0f7a7ee6c5172d59b3998fc5e1d2a4d48b74eda39f246d5c72f8c163801315ce`. Root/standalone lock hashes
@@ -71,13 +108,13 @@ All raw reports, commands and provenance are in
 Qualification remains withheld and T-20/T-19 remain open; M1's pinned result is unchanged.
 
 Decision 0207's record-commitment reuse change is excluded from the pinned D0206 binary.
-Its full workspace verification is now running in session 97961 / `uste-d207-workspace.scope`
+Its full workspace verification subsequently passed in session 97961 / `uste-d207-workspace.scope`
 (invocation `972604c7dada401dbe79265343b6a3ff`), after fresh 26 GiB RAM/2.0 GiB swap/952 GiB
 disk preflight and confirmation that sampling left no competing worker. One Cargo job/test
 thread, test opt-level 1 with debug assertions/overflow checks, 3G/4G/512M scope. The pipeline
 is workspace/all-target/all-feature locked offline tests, strict workspace Clippy and
-warnings-denied no-deps docs; output `/tmp/uste-d207-workspace-verification.log`. Do not claim
-these pending tests passed. Next finish verification and commit/push the reviewed capability.
+warnings-denied no-deps docs; output `/tmp/uste-d207-workspace-verification.log`. The current
+verification totals and next action are recorded in the D0207 section above.
 
 ```sh
 systemd-run --user --scope --unit=uste-d206-create.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '/usr/bin/time -v -o experiments/t20-bench/target/native-packed20000.ggoHSe/create.time timeout --signal=TERM --kill-after=10s 1800s experiments/t20-bench/target/release/uste-t20-bench linux-packed-create --root /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-packed20000.ggoHSe --password-file /var/home/aaronnhorvitz/dev/01_repos/USTE/experiments/t20-bench/target/native-pressure20000.ya99oO/password --entities 20000 > experiments/t20-bench/target/native-packed20000.ggoHSe/create.json 2> experiments/t20-bench/target/native-packed20000.ggoHSe/create.stderr; measurement_status=$?; systemctl --user show uste-d206-create.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryCurrent -p MemoryPeak -p MemorySwapCurrent -p MemorySwapPeak -p CPUUsageNSec > experiments/t20-bench/target/native-packed20000.ggoHSe/create.scope; exit "$measurement_status"'
@@ -5416,9 +5453,9 @@ Current action: T-20 remains the priority. Decisions 0133–0205 have since impl
 packed copy-on-write, admission/domain integration, native construction/recovery and bounded
 cache work that the older handoff below proposed. Do not restart those capabilities. The
 current verified baseline is `18a45e4`; D0206's larger correctness pass and sampling timeout
-are archived at that exact binary and D0207's redundant commitment-computation removal awaits verification.
-Verify the source change under the established
-one-workload safeguards, then continue measured native scaling and remaining accounting/lifecycle
+are archived at that exact binary. D0207's redundant commitment-computation removal passed
+726 workspace and 122 native tests; measure its separately pinned read-only behavior under the
+one-workload safeguards, then continue native scaling and remaining accounting/lifecycle
 prerequisites for qualifying BM-01/BM-06. A 20,000-entity oracle match and an 8,192-entity BM-06
 development run do not satisfy the exact qualifying profiles or reserved-runner requirements.
 T-19 follows T-20; M1 remains pinned separately. The topmost sections carry current commands,

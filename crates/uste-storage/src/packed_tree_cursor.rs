@@ -276,12 +276,12 @@ impl PackedTreeCursor {
             let physical = link
                 .location
                 .resolve(c.scope, c.profile, c.family, c.revision)?;
-            let node = TreeNode::decode(
+            let (node, commitment) = TreeNode::decode_committed(
                 physical,
                 page.record(link.location.slot())
                     .ok_or(StorageError::IntegrityFailure)?,
             )?;
-            if node.commitment(physical)? != link.claimed {
+            if commitment != link.claimed {
                 return Err(StorageError::IntegrityFailure);
             }
             match node {
