@@ -30,19 +30,24 @@ Decision 0167 adds native Linux/Btrfs terminal phases in the separate
 root (the same credential/root requirements as the native v1 runner):
 
 ```sh
-cargo run --release --locked --offline -- oracle-summary --entities 20 > /tmp/uste-packed-oracle.json
+cargo run --release --locked --offline -- oracle-summary --entities 20 > /tmp/uste-packed-oracle.tsv
 cargo run --release --locked --offline -- linux-packed-create --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20
 cargo run --release --locked --offline -- linux-packed-open --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20
-cargo run --release --locked --offline -- linux-packed-query --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20 --oracle-file /tmp/uste-packed-oracle.json
+cargo run --release --locked --offline -- linux-packed-resume --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20
+cargo run --release --locked --offline -- linux-packed-query --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20 --oracle-file /tmp/uste-packed-oracle.tsv
 cargo run --release --locked --offline -- linux-packed-rebuild --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --entities 20
 ```
 
 Create refuses replacement; open fails closed on absent/corrupt terminal derived roots. Explicit
 rebuild authenticates the fixture binding before reconstructing derived roots from the journal.
-All phases currently require a complete terminal fixture; incomplete-prefix resume is not yet
-implemented. Native tests verify 20 entities/200 relationships, real close/open, all batch retries,
+Decision 0168 resume supports authenticated data-bearing prefixes: choose the newest complete
+same-revision graph/primary/quota triple, stream the certified suffix, then retry/continue the
+unchanged batches. Complete cache loss is not implicitly rebuilt. Legacy policy-only prefixes are
+not profile-bound and are refused; bootstrap recovery and actual process-loss controls remain open.
+Open/query/rebuild still require a complete terminal fixture. Native tests verify 20 entities/200
+relationships, real close/open, selected-prefix suffix recovery, partial publication, all batch retries,
 384 oracle queries and authority preservation through rebuild. The unchanged 20,000-entity native
-admission ceiling is not measured packed qualification. Prefix recovery/process-loss, packed
+admission ceiling is not measured packed qualification. Bootstrap recovery/process-loss, packed
 BM-06 history, complete authenticated I/O and qualifying BM-01/BM-06 campaigns remain required.
 
 ## BM-06 materialization

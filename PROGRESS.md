@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native packed terminal pipeline (Decision 0167)
+## Latest verified increment — native packed data-prefix resume (Decision 0168)
+
+Implemented on pushed `79c4c6d` plus this increment: explicit `linux-packed-resume` authenticates
+the data-bearing fixture marker before derived output/fresh append, selects the newest complete
+same-revision packed triple with bounded discovery, independently admits it, streams any certified
+suffix, then exact-retries/continues the unchanged batches. A replayed base digest is never reported
+as the terminal digest; final cold admission provides that digest. Missing all caches is a refusal,
+not implicit origin rebuild. Legacy empty/policy-only resume remains deliberately unsupported.
+
+New tests compare arithmetic counts to every fixture batch at eight boundary profiles through
+100,000 entities (fixture generation only), recover all four selected prefixes to the same native
+20/200 terminal digest, resume incomplete prefixes with older complete/newer unpaired manifests,
+refuse wrong profiles/cache loss/committed corruption, and preserve exact terminal retries. The
+existing CLI test also exercises no-op resume; the qualifying-size pre-I/O cap remains unchanged.
+Focused session 86399 / `run-p764399-i21551002.scope` passed 10 tests/56.76 s and Clippy/1.38 s
+(compile 24.08 s); the subsequent stronger unpaired-manifest test is included in the full run.
+
+Full session 28280 / `run-p765164-i21763465.scope` exited 0: 83 active tests across six executables,
+two pre-existing ignored campaigns, zero failures. Library 68/99.92 s, BM-01 process 3/11.96 s,
+packed CLI 2/11.76 s, BM-06 CLI 2/0.51 s, BM-06 process 8/74.03 s; compile 48.83 s and
+Clippy 0.06 s. Preflight 30 GiB available RAM/4.3 GiB free swap; sampled scope peak 546,213,888
+bytes/zero swap. One job/thread, 3G/4G/512M caps; format/diff/docs/task graph checks pass. Core source
+is unchanged and the 658-test gate remains `6bb43a4`. Pending profile-bound bootstrap code is
+excluded from this increment.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d168-prefix-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Next bind new bootstrap retry/transaction identities to fixture dimensions, retain refusal of legacy
+unbound policy-only prefixes, and test actual owned-child interruption before bootstrap and before
+metadata rebase. Then integrate packed BM-06 history. Complete authenticated I/O, exact-scale
+construction and reserved-host qualification remain open; T-20/T-19 remain unchecked. Pinned M1,
+full spatial/lifecycle roadmap, lockfile and release prerequisites remain unchanged. This section
+supersedes earlier next steps.
+
+## Prior verified increment — native packed terminal pipeline (Decision 0167)
 
 Implemented on pushed `f8bc0cf` plus this increment: separate native packed create/open/rebuild/query
 commands use real Linux/Btrfs storage, OS entropy, guarded credentials and the shared packed engine.

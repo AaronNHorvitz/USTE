@@ -1,4 +1,4 @@
-//! Native terminal packed phases. No implicit origin rebuild or prefix-resume claim.
+//! Native packed phases. Resume requires an authenticated data-bearing fixture prefix.
 use super::*;
 use crate::engine::{
     disk::{DiskBatch, visit_disk_batches},
@@ -139,7 +139,7 @@ fn prepare(
     phase: &str,
 ) -> Result<Session, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
-    if !matches!(phase, "create" | "open" | "rebuild") {
+    if !matches!(phase, "create" | "open" | "rebuild" | "resume") {
         return Err(error("USTE_BM01_PACKED_PHASE"));
     }
     let limits = Limits::new(profile).map_err(|_| error("USTE_BM01_LIMITS"))?;
@@ -169,18 +169,36 @@ fn prepare(
     let principal = authenticate(&policy)?;
     let expected = materialization_revision_count(profile);
     let mut origin_groups = None;
-    if phase == "create" {
-        if recovered.frontier.map(|r| r.get()) != Some(1) {
-            return Err(error("USTE_BM01_PACKED_BOOTSTRAP"));
-        }
-        let (mut live, _) = recover_packed_graph_origin(
-            recovery,
-            &mut fs,
-            retention()?,
-            CoordinatorRecoveryLimits::new(1, 0).map_err(|_| error("USTE_BM01_LIMITS"))?,
-            limits.origin,
-        )
-        .map_err(|_| error("USTE_BM01_PACKED_BOOTSTRAP"))?;
+    let mut resume_base_revision = None;
+    let mut resume_suffix_groups = None;
+    if phase == "create" || phase == "resume" {
+        let mut live = if phase == "create" {
+            if recovered.frontier.map(|r| r.get()) != Some(1) {
+                return Err(error("USTE_BM01_PACKED_BOOTSTRAP"));
+            }
+            recover_packed_graph_origin(
+                recovery,
+                &mut fs,
+                retention()?,
+                CoordinatorRecoveryLimits::new(1, 0).map_err(|_| error("USTE_BM01_LIMITS"))?,
+                limits.origin,
+            )
+            .map_err(|_| error("USTE_BM01_PACKED_BOOTSTRAP"))?
+            .0
+        } else {
+            // Legacy policy-only genesis does not bind dimensions. Refuse it before derived
+            // reconstruction or a fresh append; supporting it needs a versioned bootstrap ID.
+            if !matches!(recovered.frontier.map(|r| r.get()), Some(value) if value >= 2 && value <= expected)
+            {
+                return Err(error("USTE_BM01_PACKED_RESUME_PREFIX"));
+            }
+            source_binding(&mut fs, &mut recovery, profile, limits)?;
+            let (live, base, groups) = engine::prefix::recover_latest(&mut fs, recovery, profile)
+                .map_err(|_| error("USTE_BM01_PACKED_PREFIX_ADMISSION"))?;
+            resume_base_revision = Some(base);
+            resume_suffix_groups = Some(groups);
+            live
+        };
         let mut clock = SystemClock::new();
         visit_disk_batches(profile, |sequence, operations| {
             engine::commit_batch(
@@ -248,7 +266,9 @@ fn prepare(
         "kernel_filesystem_device_cache": "uncontrolled", "complete_authenticated_io": false,
         "setup_adapter_io": session.filesystem.snapshot()?.json()?,
         "development_entity_limit": disk::MAX_NATIVE_DEVELOPMENT_ENTITIES,
-        "incomplete_prefix_resume_implemented": false,
+        "data_bearing_prefix_resume_implemented": true,
+        "policy_only_prefix_resume_implemented": false,
+        "resume_base_revision": resume_base_revision, "resume_suffix_groups": resume_suffix_groups,
     });
     Ok(session)
 }

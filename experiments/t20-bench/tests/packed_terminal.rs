@@ -99,6 +99,9 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
     let fixture = Fixture::new();
     let create = fixture.run("create");
     let open = fixture.run("open");
+    let resumed = fixture.run("resume");
+    assert_eq!(resumed["resume_base_revision"], 4);
+    assert_eq!(resumed["resume_suffix_groups"], 0);
     assert_eq!(create["frontier"], 4);
     assert_eq!(create["v1_state_digest"], open["v1_state_digest"]);
     let query = fixture.run("query");
@@ -123,7 +126,7 @@ fn packed_cli_terminal_phases_preserve_state_and_separate_oracle() {
 }
 #[test]
 fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
-    for phase in ["create", "open", "rebuild", "query"] {
+    for phase in ["create", "open", "rebuild", "resume", "query"] {
         let mut command = Command::new(EXECUTABLE);
         command.arg(format!("linux-packed-{phase}")).args([
             "--root",

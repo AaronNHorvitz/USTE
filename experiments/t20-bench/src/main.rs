@@ -115,6 +115,7 @@ fn run() -> Result<(), String> {
             | "linux-disk-create"
             | "linux-packed-create"
             | "linux-packed-open"
+            | "linux-packed-resume"
             | "linux-packed-rebuild"
             | "linux-packed-query"
             | "linux-disk-resume"
@@ -265,16 +266,17 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
-                "linux-packed-create" | "linux-packed-open" | "linux-packed-rebuild" => {
-                    uste_t20_bench::linux_runner::packed::run(
-                        &root,
-                        &password_file,
-                        profile,
-                        command
-                            .strip_prefix("linux-packed-")
-                            .ok_or("invalid packed command")?,
-                    )
-                }
+                "linux-packed-create"
+                | "linux-packed-open"
+                | "linux-packed-rebuild"
+                | "linux-packed-resume" => uste_t20_bench::linux_runner::packed::run(
+                    &root,
+                    &password_file,
+                    profile,
+                    command
+                        .strip_prefix("linux-packed-")
+                        .ok_or("invalid packed command")?,
+                ),
                 "linux-packed-query" => uste_t20_bench::linux_runner::packed::query_correctness(
                     &root,
                     &password_file,
@@ -378,7 +380,7 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check|packed-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
-         uste-t20-bench linux-packed-<create|open|rebuild|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (terminal development phases only)\n\
+         uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying; resume requires a data-bearing prefix)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

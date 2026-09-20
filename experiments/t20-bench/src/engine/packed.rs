@@ -1,6 +1,7 @@
 //! Opt-in packed engine/oracle equivalence; never a performance qualification campaign.
 use super::*;
 pub(crate) mod limits;
+pub(crate) mod prefix;
 use limits::Limits;
 use uste_graph::{
     GRAPH_PACKED_PROFILE_V1, GraphPackedLiveState, GraphStateDeltaLimits,
@@ -69,7 +70,22 @@ fn root<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entr
     profile: [u8; 32],
     limits: Limits,
 ) -> Result<CertifiedPackedRoot, String> {
-    recovery
+    optional_root(fs, recovery, revision, profile, limits)?
+        .ok_or("missing terminal packed root; origin rebuild must be explicit".into())
+}
+fn optional_root<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    fs: &mut F,
+    recovery: &RecoveryEngine<F, W, E, I>,
+    revision: uste_types::CommitRevision,
+    profile: [u8; 32],
+    limits: Limits,
+) -> Result<Option<CertifiedPackedRoot>, String> {
+    Ok(recovery
         .discover_packed_roots_at_revision(
             fs,
             profile,
@@ -80,8 +96,7 @@ fn root<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entr
         .map_err(debug)?
         .0
         .into_iter()
-        .max_by_key(|root| root.manifest().claims().generation)
-        .ok_or("missing terminal packed root; origin rebuild must be explicit".into())
+        .max_by_key(|root| root.manifest().claims().generation))
 }
 #[allow(clippy::type_complexity)]
 pub(crate) fn admit<
@@ -91,14 +106,32 @@ pub(crate) fn admit<
     I: EntropySource,
 >(
     fs: &mut F,
-    mut recovery: RecoveryEngine<F, W, E, I>,
+    recovery: RecoveryEngine<F, W, E, I>,
     limits: Limits,
 ) -> Result<(PackedEngine<F, W, E, I>, [u8; 32]), String> {
-    let revision = recovery
+    let (live, digest, groups) = admit_at(fs, recovery, limits, None, limits.counts)?;
+    if groups != 0 {
+        return Err("terminal open unexpectedly replayed history".into());
+    }
+    Ok((live, digest.ok_or("missing terminal reference digest")?))
+}
+
+// The digest belongs to the admitted base. Never expose it as the resulting state's digest
+// when a suffix was replayed; obtaining that digest requires a fresh terminal admission.
+#[allow(clippy::type_complexity)]
+fn admit_at<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>(
+    fs: &mut F,
+    mut recovery: RecoveryEngine<F, W, E, I>,
+    limits: Limits,
+    selected: Option<uste_types::CommitRevision>,
+    counts: [u64; 8],
+) -> Result<(PackedEngine<F, W, E, I>, Option<[u8; 32]>, u64), String> {
+    let frontier = recovery
         .authenticated_frontier_anchor()
         .ok_or("missing packed frontier")?
         .0;
-    if revision.get() > limits.legacy.groups {
+    let revision = selected.unwrap_or(frontier);
+    if frontier.get() > limits.legacy.groups || revision > frontier {
         return Err("packed frontier exceeds fixture bound".into());
     }
     let graph_root = root(fs, &recovery, revision, GRAPH_PACKED_PROFILE_V1, limits)?;
@@ -136,7 +169,7 @@ pub(crate) fn admit<
         .map_err(debug)?;
     let (base, _) =
         admit_packed_graph_base(&maintenance, fs, &graph_root, limits.graph).map_err(debug)?;
-    let c = limits.counts;
+    let c = counts;
     if base.families().map(|family| family.commitment.entries())
         != [1, c[0], c[1], c[2], c[3], c[4], c[5], c[6] + c[7]]
     {
@@ -192,10 +225,11 @@ pub(crate) fn admit<
         limits.origin.suffix,
     )
     .map_err(debug)?;
-    if suffix.is_some() || live.overlay_counts() != (0, 0) {
-        return Err("terminal open unexpectedly replayed history".into());
+    let groups = suffix.map_or(0, |report| report.journal.groups);
+    if groups != frontier.get() - revision.get() || live.overlay_counts() != (0, 0) {
+        return Err("packed prefix recovery frontier/overlay mismatch".into());
     }
-    Ok((live, digest))
+    Ok((live, (groups == 0).then_some(digest), groups))
 }
 pub(crate) fn commit_batch<
     F: OwnershipFileSystem,

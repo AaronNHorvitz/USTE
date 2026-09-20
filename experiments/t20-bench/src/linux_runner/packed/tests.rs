@@ -37,6 +37,60 @@ impl Fixture {
         )
         .map(|json| serde_json::from_str(&json).unwrap())
     }
+    fn prefix(&self, stop: u64) -> BTreeMap<String, Vec<u8>> {
+        let profile = Bm01Profile::new(20).unwrap();
+        let limits = Limits::new(profile).unwrap();
+        let mut fs = ObservedFileSystem::new(open_filesystem(&self.root).unwrap());
+        let mut adapter =
+            PortableRecoveryAdapter::new(credential::read_password(&self.password).unwrap());
+        let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy).unwrap();
+        let mut raw = CommitCoordinator::create(
+            &mut fs,
+            scope(),
+            retention().unwrap(),
+            EntryName::new(DATABASE).unwrap(),
+            vault,
+            OsEntropy,
+            GraphState::new(scope()),
+        )
+        .unwrap();
+        disk::install_policy(&mut raw, &mut fs).unwrap();
+        drop(raw);
+        let recovery = open_recovery(&mut fs, &mut adapter, limits).unwrap().0;
+        let (mut live, _) = recover_packed_graph_origin(
+            recovery,
+            &mut fs,
+            retention().unwrap(),
+            CoordinatorRecoveryLimits::new(1, 0).unwrap(),
+            limits.origin,
+        )
+        .unwrap();
+        let policy_roots = self.files(true);
+        assert_eq!(policy_roots.len(), 3);
+        let mut policy = kernel(benchmark_policy(scope()).unwrap()).unwrap();
+        let principal = authenticate(&policy).unwrap();
+        visit_disk_batches(profile, |sequence, operations| {
+            if sequence <= stop {
+                engine::commit_batch(
+                    &mut live,
+                    &mut fs,
+                    &mut policy,
+                    &principal,
+                    DiskBatch {
+                        sequence,
+                        operations,
+                        idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
+                        transaction_id: identity(sequence, TransactionId::from_bytes),
+                    },
+                    &mut SystemClock::new(),
+                    limits,
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        policy_roots
+    }
     fn files(&self, derived: bool) -> BTreeMap<String, Vec<u8>> {
         fs::read_dir(self.root.join(DATABASE))
             .unwrap()
@@ -69,7 +123,7 @@ impl Drop for Fixture {
 #[test]
 fn packed_native_limits_and_phase_refuse_before_io() {
     let absent = Path::new("absent-packed-admission-test");
-    for phase in ["create", "open", "rebuild"] {
+    for phase in ["create", "open", "rebuild", "resume"] {
         assert_eq!(
             run(absent, absent, Bm01Profile::qualifying(), phase)
                 .unwrap_err()
@@ -78,7 +132,7 @@ fn packed_native_limits_and_phase_refuse_before_io() {
         );
     }
     assert_eq!(
-        run(absent, absent, Bm01Profile::new(20).unwrap(), "resume")
+        run(absent, absent, Bm01Profile::new(20).unwrap(), "unexpected")
             .unwrap_err()
             .code(),
         "USTE_BM01_PACKED_PHASE"
@@ -96,7 +150,8 @@ fn packed_native_terminal_close_open_rebuild_and_separate_oracle() {
     let created = fixture.run("create").unwrap();
     assert_eq!(created["frontier"], 4);
     assert_eq!(created["engine_benchmark"], false);
-    assert_eq!(created["incomplete_prefix_resume_implemented"], false);
+    assert_eq!(created["data_bearing_prefix_resume_implemented"], true);
+    assert_eq!(created["policy_only_prefix_resume_implemented"], false);
     let opened = fixture.run("open").unwrap();
     assert_eq!(opened["v1_state_digest"], created["v1_state_digest"]);
     let source = fixture.files(false);
@@ -220,7 +275,7 @@ fn packed_native_wrong_key_profile_and_committed_corruption_fail_closed() {
         .unwrap()
         .write_all(b"different synthetic password")
         .unwrap();
-    for phase in ["open", "rebuild"] {
+    for phase in ["open", "rebuild", "resume"] {
         assert!(run(&fixture.root, &wrong, Bm01Profile::new(20).unwrap(), phase).is_err());
         assert!(
             run(
@@ -241,9 +296,113 @@ fn packed_native_wrong_key_profile_and_committed_corruption_fail_closed() {
     let mut bytes = fs::read(&path).unwrap();
     bytes[4 * 4161 + 137] ^= 1;
     fs::write(&path, &bytes).unwrap();
-    for phase in ["open", "rebuild"] {
+    for phase in ["open", "rebuild", "resume"] {
         assert!(fixture.run(phase).is_err());
         assert!(fs::read(&path).unwrap() == bytes, "committed bytes changed");
         assert!(fixture.files(true) == roots, "packed roots changed");
+    }
+}
+
+#[test]
+fn packed_native_explicit_prefixes_stream_to_same_terminal_state() {
+    let fixture = Fixture::new();
+    let created = fixture.run("create").unwrap();
+    let source = fixture.files(false);
+    let profile = Bm01Profile::new(20).unwrap();
+    let limits = Limits::new(profile).unwrap();
+    for base in 1..=4 {
+        let mut fs = ObservedFileSystem::new(open_filesystem(&fixture.root).unwrap());
+        let mut adapter =
+            PortableRecoveryAdapter::new(credential::read_password(&fixture.password).unwrap());
+        let recovery = open_recovery(&mut fs, &mut adapter, limits).unwrap().0;
+        let (live, digest, groups) = engine::prefix::recover(
+            &mut fs,
+            recovery,
+            profile,
+            uste_types::CommitRevision::new(base).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(groups, 4 - base);
+        assert_eq!(digest.is_some(), base == 4);
+        assert_eq!(live.state().unwrap().revision().get(), 4);
+        assert_eq!(live.overlay_counts(), (0, 0));
+        drop(live);
+        drop(fs);
+        assert_eq!(
+            fixture.run("open").unwrap()["v1_state_digest"],
+            created["v1_state_digest"]
+        );
+        assert!(
+            fixture.files(false) == source,
+            "prefix recovery changed authority"
+        );
+    }
+}
+
+#[test]
+fn packed_native_data_prefix_resume_and_missing_roots_fail_closed() {
+    let reference = Fixture::new();
+    let expected = reference.run("create").unwrap()["v1_state_digest"].clone();
+    for frontier in 1..=3 {
+        let fixture = Fixture::new();
+        let policy_roots = fixture.prefix(frontier);
+        let source = fixture.files(false);
+        let roots = fixture.files(true);
+        assert!(fixture.run("open").is_err());
+        assert!(
+            run(
+                &fixture.root,
+                &fixture.password,
+                Bm01Profile::new(21).unwrap(),
+                "resume"
+            )
+            .is_err()
+        );
+        assert!(
+            fixture.files(false) == source,
+            "wrong profile changed authority"
+        );
+        assert!(fixture.files(true) == roots, "wrong profile changed roots");
+        if frontier == 1 {
+            assert_eq!(
+                fixture.run("resume").unwrap_err().code(),
+                "USTE_BM01_PACKED_RESUME_PREFIX"
+            );
+            continue;
+        }
+        // Complete cache loss must not silently turn resume into origin reconstruction.
+        for name in roots.keys() {
+            fs::remove_file(fixture.root.join(DATABASE).join(name)).unwrap();
+        }
+        assert!(fixture.run("resume").is_err());
+        assert!(
+            fixture.files(false) == source,
+            "cache-loss refusal changed authority"
+        );
+        // Retain the policy triple and one newer unpaired manifest. Selection must use the
+        // complete older triple and stream the certified suffix before fresh materialization.
+        for (name, bytes) in &policy_roots {
+            fs::write(fixture.root.join(DATABASE).join(name), bytes).unwrap();
+        }
+        let (name, bytes) = roots
+            .iter()
+            .find(|(name, _)| !policy_roots.contains_key(*name))
+            .unwrap();
+        fs::write(fixture.root.join(DATABASE).join(name), bytes).unwrap();
+        let resumed = fixture.run("resume").unwrap();
+        assert_eq!(resumed["resume_base_revision"], 1);
+        assert_eq!(resumed["resume_suffix_groups"], frontier - 1);
+        assert_eq!(resumed["v1_state_digest"], expected);
+        let final_source = fixture.files(false);
+        let final_roots = fixture.files(true);
+        assert_eq!(fixture.run("resume").unwrap()["v1_state_digest"], expected);
+        assert!(
+            fixture.files(false) == final_source,
+            "completed resume changed authority"
+        );
+        assert!(
+            fixture.files(true) == final_roots,
+            "completed resume republished roots"
+        );
     }
 }
