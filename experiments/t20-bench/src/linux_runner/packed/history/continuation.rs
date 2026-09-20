@@ -40,27 +40,23 @@ pub(super) fn complete(
             counts(profile, base.get())?,
         )
         .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
-        engine::recovery::verify_prefix_history(&live, fs, kernel, principal, profile, frontier)
-            .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
         (live, base.get(), groups)
     };
-    let target = if frontier == profile.frontier() {
-        frontier
-    } else {
-        profile.checkpoint_revision()
-    };
-    for sequence in 2..=target {
-        engine::commit_batch_observed(
-            &mut live,
-            fs,
-            kernel,
-            principal,
-            batch(profile, sequence)?,
-            &mut SystemClock::new(),
-            limits,
-            &mut |revision| observer(revision).map_err(|error| error.code().to_string()),
-        )
-        .map_err(|_| error("USTE_BM06_PACKED_MATERIALIZE"))?;
-    }
+    let target = profile
+        .continuation_target(frontier)
+        .map_err(|_| error("USTE_BM06_PACKED_FRONTIER"))?;
+    engine::recovery::complete_generation_prefix(
+        &mut live,
+        fs,
+        kernel,
+        principal,
+        profile,
+        target,
+        limits,
+        &mut SystemClock::new(),
+        &mut |sequence| batch(profile, sequence).map_err(|error| error.code().to_string()),
+        &mut |revision| observer(revision).map_err(|error| error.code().to_string()),
+    )
+    .map_err(|_| error("USTE_BM06_PACKED_MATERIALIZE"))?;
     Ok((live, base, groups))
 }

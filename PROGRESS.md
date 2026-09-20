@@ -1,8 +1,47 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-19 · Branch: `codex/uste-implementation`
+Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — explicit native checkpoint recovery (Decision 0184)
+## Latest verified increment — multi-batch continuation (Decision 0185)
+
+Implemented on pushed `b7e664e`: native construction resume still ends at the checkpoint,
+but an already-started final generation now completes the full frontier. A shared streaming
+helper validates complete-generation targets/budgets, verifies existing history before appending,
+and preserves exact identities, authorization and per-batch publication/rebase. The 513-record
+model exercises partial-generation continuation and interruption before metadata rebase, cold
+suffix recovery, exact retries, all 1,026 payload versions and the independent reference digest.
+Both full-history caps remain two. Literal qualifying frontier arithmetic is not materialization.
+
+Initial session 23823 passed three model cases but failed continuation. Diagnostic session 42466
+identified a test-only one-shot clock assumption: authorized retries also sample the clock.
+Fixed to four observations per four attempts, without changing authorization/retention. One
+compile under `run-p1039895-i22017848.scope` caught a misspelled test ClockObservation field;
+corrected to `monotonic_ticks`. Session 73265 / `run-p1040189-i21994528.scope` passed four model
+cases/2.70 s, continuation arithmetic/0.00 s and strict Clippy/1.57 s (compile 25.55 s).
+Commands used `--lib packed_bm06` and `--lib bm06_continuation` with the settings below.
+
+Full session 72489 / `run-p1040776-i21994548.scope` exited 0: **109 active tests**, two existing
+ignored campaigns, seven executables plus empty doctests. Library 85/139.85 s, legacy BM-01
+process 3/12.24 s, packed BM-06 CLI 5/53.27 s, packed BM-01 CLI 5/37.06 s, manifest 3/1.09 s,
+legacy BM-06 process 8/75.01 s. Compile 30.32 s; final strict Clippy 3.32 s.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d185-full-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 20 GiB available RAM/2.8 GiB free swap; sampled full scope peak 384,872,448 bytes/
+zero swap, not final lifetime peak. Full test executables were built before pending coordinator
+buffering core edits; those edits are excluded from this increment and not covered by this run.
+Focused strict Clippy also passed before those edits; the final Clippy included the pending API.
+Format/diff/docs/task checks pass. Full core remains 676 at `0322067`. Next implement and verify
+fresh bounded coordinator-admission buffering, then safe larger native construction/accounting
+before reserved-host campaigns. T-20/T-19, pinned M1, full roadmap and release gates remain open
+or complete exactly as recorded in TASKS; no qualification claim. This supersedes older next steps.
+
+## Prior verified increment — explicit native checkpoint recovery (Decision 0184)
 
 Implemented on pushed `bcdb8b7`: `bm06-packed-linux-recover-checkpoint` pins the profile
 checkpoint and checks the full generation's suffix group count, even when newer complete roots

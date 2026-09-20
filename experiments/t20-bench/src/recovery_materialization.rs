@@ -41,6 +41,15 @@ impl Bm06Profile {
     pub fn checkpoint_revision(self) -> u64 {
         1 + (VERSIONS - 1) * self.batches_per_version()
     }
+    /// Construction stops at the checkpoint; an already-started final generation finishes.
+    pub fn continuation_target(self, frontier: u64) -> Result<u64, &'static str> {
+        self.prefix_state_counts(frontier)?;
+        Ok(if frontier <= self.checkpoint_revision() {
+            self.checkpoint_revision()
+        } else {
+            self.frontier()
+        })
+    }
     pub fn history_payload_bytes(self) -> u64 {
         self.events() * PAYLOAD_BYTES as u64
     }
@@ -200,6 +209,32 @@ mod tests {
             DatabaseId::from_bytes([6; 16]),
             NamespaceId::from_bytes([6; 16]),
         )
+    }
+
+    #[test]
+    fn bm06_continuation_never_rewinds_a_started_final_generation() {
+        for records in [1, 2, 511, 512, 513, 1025, 100_000] {
+            let profile = Bm06Profile::new(records).unwrap();
+            for frontier in 1..=profile.frontier() {
+                let target = profile.continuation_target(frontier).unwrap();
+                assert!(target >= frontier);
+                assert_eq!(
+                    target,
+                    if frontier <= profile.checkpoint_revision() {
+                        profile.checkpoint_revision()
+                    } else {
+                        profile.frontier()
+                    }
+                );
+            }
+            for frontier in [0, profile.frontier() + 1, u64::MAX] {
+                assert!(profile.continuation_target(frontier).is_err());
+            }
+        }
+        let qualifying = Bm06Profile::new(100_000).unwrap();
+        assert_eq!(qualifying.continuation_target(19_405), Ok(19_405));
+        assert_eq!(qualifying.continuation_target(19_406), Ok(19_601));
+        assert_eq!(qualifying.continuation_target(19_600), Ok(19_601));
     }
 
     #[test]

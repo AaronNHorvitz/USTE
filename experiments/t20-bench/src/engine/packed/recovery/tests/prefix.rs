@@ -290,4 +290,140 @@ fn exercise(tail: bool) {
             verify_prefix_history(&live, &mut fs, &kernel, &principal, profile, revision).is_err()
         );
     }
+    // Resume a cold-admitted partial second generation, not 100-generation materialization.
+    for target in [0, 1, 3, 4, 6, profile.frontier() + 1, u64::MAX] {
+        assert!(
+            complete_generation_prefix(
+                &mut live,
+                &mut fs,
+                &mut kernel,
+                &principal,
+                profile,
+                target,
+                limits,
+                &mut clock(5),
+                &mut |_| panic!("invalid target requested a batch"),
+                &mut |_| panic!("invalid target observed a commit"),
+            )
+            .is_err()
+        );
+    }
+    let mut narrow = limits;
+    narrow.legacy.groups = 4;
+    assert!(
+        complete_generation_prefix(
+            &mut live,
+            &mut fs,
+            &mut kernel,
+            &principal,
+            profile,
+            5,
+            narrow,
+            &mut clock(5),
+            &mut |_| panic!("over-budget target requested a batch"),
+            &mut |_| panic!("over-budget target observed a commit"),
+        )
+        .is_err()
+    );
+    assert!(
+        complete_generation_prefix(
+            &mut live,
+            &mut fs,
+            &mut kernel,
+            &principal,
+            profile,
+            5,
+            limits,
+            &mut clock(5),
+            &mut |sequence| {
+                let mut request = batch(profile, sequence)?;
+                request.sequence += 1;
+                Ok(request)
+            },
+            &mut |_| panic!("wrong sequence observed a commit"),
+        )
+        .is_err()
+    );
+    let bytes = encode_transaction(&GraphTransaction::new(
+        scope(),
+        profile.batch(scope(), 5).unwrap(),
+    ))
+    .unwrap();
+    let prepared = reference
+        .prepare(&bytes, None, uste_types::CommitRevision::new(5).unwrap())
+        .unwrap();
+    reference.publish(prepared);
+    let expected = GraphState::logical_state_digest(&reference.snapshot()).unwrap();
+    let mut observed = Vec::new();
+    let retry_clock = || {
+        ScriptedClock::new((2..=5).map(|_| {
+            Ok(ClockObservation {
+                wall_utc: UtcInstant::new(5, 0).unwrap(),
+                monotonic_ticks: 5,
+            })
+        }))
+    };
+    let mut continuation_clock = retry_clock();
+    let interrupted = complete_generation_prefix(
+        &mut live,
+        &mut fs,
+        &mut kernel,
+        &principal,
+        profile,
+        5,
+        limits,
+        &mut continuation_clock,
+        &mut |sequence| batch(profile, sequence),
+        &mut |revision| {
+            observed.push(revision);
+            if revision == 5 {
+                Err("test interruption before metadata rebase".into())
+            } else {
+                Ok(())
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(interrupted, "test interruption before metadata rebase");
+    assert_eq!(observed, [2, 3, 4, 5]);
+    assert!(uste_storage::Clock::observe(&mut continuation_clock).is_err());
+    drop(live);
+    let recovery = open(&mut fs, &name, limits, 90_000_000).unwrap();
+    let base = crate::engine::packed::prefix::latest_revision(&mut fs, &recovery, limits).unwrap();
+    assert_eq!(base.get(), 4);
+    let (mut resumed, digest, groups) = admit_at(
+        &mut fs,
+        recovery,
+        limits,
+        Some(base),
+        profile.prefix_state_counts(4).unwrap(),
+    )
+    .unwrap();
+    assert!(digest.is_none());
+    assert_eq!(groups, 1);
+    let mut retry_clock = retry_clock();
+    complete_generation_prefix(
+        &mut resumed,
+        &mut fs,
+        &mut kernel,
+        &principal,
+        profile,
+        5,
+        limits,
+        &mut retry_clock,
+        &mut |sequence| batch(profile, sequence),
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    assert!(uste_storage::Clock::observe(&mut retry_clock).is_err());
+    assert_eq!(resumed.overlay_counts(), (0, 0));
+    assert_eq!(
+        verify_prefix_history(&resumed, &mut fs, &kernel, &principal, profile, 5).unwrap(),
+        1026
+    );
+    drop(resumed);
+    let recovery = open(&mut fs, &name, limits, 91_000_000).unwrap();
+    let mut selected = limits;
+    selected.counts = profile.prefix_state_counts(5).unwrap();
+    assert_eq!(admit(&mut fs, recovery, selected).unwrap().1, expected);
 }

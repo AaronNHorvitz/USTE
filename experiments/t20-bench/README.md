@@ -143,6 +143,10 @@ continues to select the latest complete roots (zero suffix groups after terminal
 Neither phase's elapsed time is recovery-only latency: both verify historical payloads. Decision
 0172 resume validates existing history and finishes incomplete construction at checkpoint 100;
 already certified frontier 101 stays 101. Only zero/one-revision prefixes use bounded ordinary
+bootstrap. Decision 0185 generalizes continuation for multi-batch generations: a prefix strictly
+past the frozen checkpoint finishes the final generation, never targets the earlier checkpoint.
+The shared path is tested on a bounded 513-record partial model, including interruption before
+metadata rebase; this does not raise the full-history CLI caps. Zero/one-revision prefixes retain
 bootstrap (one outcome/zero owners/1 MiB replay); certified policy identities must match exactly.
 Rebuild explicitly reconstructs the actual authenticated prefix, including incomplete construction,
 without appending events. After all-cache loss, run rebuild before resume. Ordinary open still

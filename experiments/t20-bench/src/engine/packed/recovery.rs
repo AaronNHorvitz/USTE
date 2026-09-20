@@ -3,6 +3,8 @@ use super::*;
 use crate::recovery_materialization::{Bm06Profile, PAYLOAD_BYTES, VERSIONS};
 mod tail;
 pub(crate) use tail::certify_generation_tail;
+mod continuation;
+pub(crate) use continuation::complete_generation_prefix;
 
 #[derive(Debug)]
 pub struct PackedRecoveryVerification {
