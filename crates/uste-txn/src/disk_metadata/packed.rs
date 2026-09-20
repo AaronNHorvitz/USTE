@@ -5,8 +5,9 @@ mod quota;
 use super::*;
 use crate::{PackedIndexMaintenance, RecoveredFrontierTransaction};
 pub use admission::{
-    PackedCoordinatorAdmissionLimits, PackedCoordinatorAdmissionReport,
-    admit_packed_coordinator_prefix,
+    PackedCoordinatorAdmissionCacheReport, PackedCoordinatorAdmissionLimits,
+    PackedCoordinatorAdmissionReport, admit_packed_coordinator_prefix,
+    admit_packed_coordinator_prefix_buffered,
 };
 pub(crate) use quota::stage_packed_quota_prefix_on_journal;
 pub use quota::{
@@ -77,10 +78,27 @@ impl PackedCoordinatorPrefix {
         E: EntropySource,
         I: EntropySource,
     {
+        self.retry_with_cache(maintenance, fs, principal, key, limits, None)
+    }
+    fn retry_with_cache<F, W, E, I>(
+        &self,
+        maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+        fs: &mut F,
+        principal: PrincipalDigest,
+        key: IdempotencyKey,
+        limits: TreeLookupLimits,
+        cache: Option<&mut uste_storage::packed_page_cache::PackedPageCache>,
+    ) -> Result<(Option<TransactionOutcome>, TreeLookupReport), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
         let mut encoded = [0; 48];
         encoded[..32].copy_from_slice(&principal.as_bytes());
         encoded[32..].copy_from_slice(key.as_bytes());
-        let result = maintenance.get(fs, &self.trees[0], &encoded, limits)?;
+        let result = metadata_get(maintenance, fs, &self.trees[0], &encoded, limits, cache)?;
         let outcome = result
             .value
             .map(|value| decode_outcome(&encoded, value.as_slice(), self.anchor.0).map(|v| v.2))
@@ -107,7 +125,36 @@ impl PackedCoordinatorPrefix {
         E: EntropySource,
         I: EntropySource,
     {
-        let result = maintenance.get(fs, &self.trees[1], id.as_bytes(), limits)?;
+        self.transaction_with_cache(maintenance, fs, id, limits, None)
+    }
+    fn transaction_with_cache<F, W, E, I>(
+        &self,
+        maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+        fs: &mut F,
+        id: TransactionId,
+        limits: TreeLookupLimits,
+        cache: Option<&mut uste_storage::packed_page_cache::PackedPageCache>,
+    ) -> Result<
+        (
+            Option<(PrincipalDigest, TransactionOutcome)>,
+            TreeLookupReport,
+        ),
+        TransactionError,
+    >
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        let result = metadata_get(
+            maintenance,
+            fs,
+            &self.trees[1],
+            id.as_bytes(),
+            limits,
+            cache,
+        )?;
         let outcome = result
             .value
             .map(|value| {
@@ -140,7 +187,30 @@ impl PackedCoordinatorPrefix {
         E: EntropySource,
         I: EntropySource,
     {
-        let result = maintenance.get(fs, &self.trees[2], &id.as_bytes(), limits)?;
+        self.owner_with_cache(maintenance, fs, id, limits, None)
+    }
+    fn owner_with_cache<F, W, E, I>(
+        &self,
+        maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+        fs: &mut F,
+        id: BlobId,
+        limits: TreeLookupLimits,
+        cache: Option<&mut uste_storage::packed_page_cache::PackedPageCache>,
+    ) -> Result<(Option<(BlobReference, PrincipalDigest)>, TreeLookupReport), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        let result = metadata_get(
+            maintenance,
+            fs,
+            &self.trees[2],
+            &id.as_bytes(),
+            limits,
+            cache,
+        )?;
         let owner = result
             .value
             .map(|value| decode_owner(self.scope, &id.as_bytes(), value.as_slice()))
@@ -162,7 +232,30 @@ impl PackedCoordinatorPrefix {
         E: EntropySource,
         I: EntropySource,
     {
-        let result = maintenance.get(fs, &self.trees[3], &id.as_bytes(), limits)?;
+        self.first_revision_with_cache(maintenance, fs, id, limits, None)
+    }
+    fn first_revision_with_cache<F, W, E, I>(
+        &self,
+        maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+        fs: &mut F,
+        id: BlobId,
+        limits: TreeLookupLimits,
+        cache: Option<&mut uste_storage::packed_page_cache::PackedPageCache>,
+    ) -> Result<(Option<CommitRevision>, TreeLookupReport), TransactionError>
+    where
+        F: OwnershipFileSystem,
+        W: DurableKeyEnvelope,
+        E: EntropySource,
+        I: EntropySource,
+    {
+        let result = metadata_get(
+            maintenance,
+            fs,
+            &self.trees[3],
+            &id.as_bytes(),
+            limits,
+            cache,
+        )?;
         let revision = result
             .value
             .map(|value| {
@@ -176,6 +269,28 @@ impl PackedCoordinatorPrefix {
             .transpose()
             .map_err(TransactionError::Storage)?;
         Ok((revision, result.report))
+    }
+}
+
+fn metadata_get<F, W, E, I>(
+    maintenance: &PackedIndexMaintenance<'_, F, W, E, I>,
+    fs: &mut F,
+    tree: &CanonicalPackedTree,
+    key: &[u8],
+    limits: TreeLookupLimits,
+    cache: Option<&mut uste_storage::packed_page_cache::PackedPageCache>,
+) -> Result<uste_storage::packed_tree_lookup::TreeLookupResult, TransactionError>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    match cache {
+        Some(cache) => maintenance
+            .as_reader()
+            .get_cached(fs, tree, key, limits, cache),
+        None => maintenance.get(fs, tree, key, limits),
     }
 }
 

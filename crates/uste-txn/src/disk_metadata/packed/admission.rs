@@ -3,6 +3,7 @@ use super::*;
 use uste_storage::journal::{
     CertificateAnchorReadReport, CertifiedPackedRoot, JournalRangeReadReport,
 };
+use uste_storage::packed_page_cache::{PackedCacheReport, PackedPageCache};
 use uste_storage::packed_tree_validation::{TreeValidationLimits, TreeValidationReport};
 
 #[derive(Clone, Copy)]
@@ -17,6 +18,7 @@ pub struct PackedCoordinatorAdmissionLimits {
     pub maximum_lookup_pages: u64,
     pub maximum_lookup_bytes: u64,
 }
+/// Logical proof work, including cache hits when buffered admission is selected.
 pub struct PackedCoordinatorAdmissionReport {
     pub certificate: CertificateAnchorReadReport,
     pub families: [TreeValidationReport; 4],
@@ -24,6 +26,12 @@ pub struct PackedCoordinatorAdmissionReport {
     pub lookup_pages: u64,
     pub lookup_bytes: u64,
     pub first_owners: u64,
+}
+/// Sequential caches are dropped after each phase; these are not simultaneous residencies.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PackedCoordinatorAdmissionCacheReport {
+    pub canonical: [PackedCacheReport; 4],
+    pub correspondence: PackedCacheReport,
 }
 struct LookupBudget {
     pages: u64,
@@ -60,6 +68,53 @@ where
     E: EntropySource,
     I: EntropySource,
 {
+    admit_inner(recovery, fs, root, limits, None).map(|(prefix, report, _)| (prefix, report))
+}
+
+/// Full correspondence admission using fresh bounded operation-local caches only.
+pub fn admit_packed_coordinator_prefix_buffered<F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    fs: &mut F,
+    root: &CertifiedPackedRoot,
+    limits: PackedCoordinatorAdmissionLimits,
+    cache_bytes: usize,
+) -> Result<
+    (
+        PackedCoordinatorPrefix,
+        PackedCoordinatorAdmissionReport,
+        PackedCoordinatorAdmissionCacheReport,
+    ),
+    TransactionError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
+    admit_inner(recovery, fs, root, limits, Some(cache_bytes))
+}
+
+fn admit_inner<F, W, E, I>(
+    recovery: &mut AuthenticatedIndexRecovery<F, W, E, I>,
+    fs: &mut F,
+    root: &CertifiedPackedRoot,
+    limits: PackedCoordinatorAdmissionLimits,
+    cache_bytes: Option<usize>,
+) -> Result<
+    (
+        PackedCoordinatorPrefix,
+        PackedCoordinatorAdmissionReport,
+        PackedCoordinatorAdmissionCacheReport,
+    ),
+    TransactionError,
+>
+where
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+{
     let manifest = root.manifest();
     let revision = manifest.claims().revision;
     let families = manifest.families();
@@ -84,6 +139,11 @@ where
     {
         return Err(TransactionError::ResourceLimit);
     }
+    // Validate the budget before any I/O. No caller-warmed cache can hide late corruption.
+    if let Some(bytes) = cache_bytes {
+        PackedPageCache::new(bytes).map_err(TransactionError::Storage)?;
+    }
+    let mut cache_report = PackedCoordinatorAdmissionCacheReport::default();
     recovery
         .journal
         .validate_packed_root_certificate(root)
@@ -110,7 +170,14 @@ where
         let maintenance =
             PackedIndexMaintenance::new(recovery.scope(), &mut recovery.journal, proof.clone())?;
         for family in 1..=4 {
-            let (tree, report) = maintenance.admit(fs, root, family, limits.family)?;
+            let (tree, report) = if let Some(bytes) = cache_bytes {
+                let (tree, report, cache) =
+                    maintenance.admit_buffered(fs, root, family, limits.family, bytes)?;
+                cache_report.canonical[usize::from(family - 1)] = cache;
+                (tree, report)
+            } else {
+                maintenance.admit(fs, root, family, limits.family)?
+            };
             trees.push(tree);
             reports.push(report);
         }
@@ -127,6 +194,10 @@ where
         bytes: limits.maximum_lookup_bytes,
     };
     let mut first_owners = 0_u64;
+    let mut cache = cache_bytes
+        .map(PackedPageCache::new)
+        .transpose()
+        .map_err(TransactionError::Storage)?;
     let mut cursor = recovery.open_transaction_cursor_with_certificate_window(
         CommitRevision::FIRST,
         revision,
@@ -144,40 +215,44 @@ where
         }
         let maintenance =
             PackedIndexMaintenance::new(recovery.scope(), &mut recovery.journal, proof.clone())?;
-        let (retry, work) = prefix.retry(
+        let (retry, work) = prefix.retry_with_cache(
             &maintenance,
             fs,
             transaction.principal,
             transaction.idempotency_key,
             budget.limits(limits.lookup),
+            cache.as_mut(),
         )?;
         budget.debit(work)?;
         if retry != Some(transaction.outcome) {
             return Err(TransactionError::IntegrityFailure);
         }
-        let (actual, work) = prefix.transaction(
+        let (actual, work) = prefix.transaction_with_cache(
             &maintenance,
             fs,
             transaction.outcome.transaction_id,
             budget.limits(limits.lookup),
+            cache.as_mut(),
         )?;
         budget.debit(work)?;
         if actual != Some((transaction.principal, transaction.outcome)) {
             return Err(TransactionError::IntegrityFailure);
         }
         for reference in references {
-            let (owner, work) = prefix.owner(
+            let (owner, work) = prefix.owner_with_cache(
                 &maintenance,
                 fs,
                 reference.id(),
                 budget.limits(limits.lookup),
+                cache.as_mut(),
             )?;
             budget.debit(work)?;
-            let (witness, work) = prefix.first_revision(
+            let (witness, work) = prefix.first_revision_with_cache(
                 &maintenance,
                 fs,
                 reference.id(),
                 budget.limits(limits.lookup),
+                cache.as_mut(),
             )?;
             budget.debit(work)?;
             let (actual, principal) = owner.ok_or(TransactionError::IntegrityFailure)?;
@@ -199,6 +274,9 @@ where
     if first_owners != prefix.owner_count() {
         return Err(TransactionError::IntegrityFailure);
     }
+    if let Some(cache) = cache {
+        cache_report.correspondence = cache.report().map_err(TransactionError::Storage)?;
+    }
     Ok((
         prefix,
         PackedCoordinatorAdmissionReport {
@@ -211,5 +289,6 @@ where
             lookup_bytes: limits.maximum_lookup_bytes - budget.bytes,
             first_owners,
         },
+        cache_report,
     ))
 }

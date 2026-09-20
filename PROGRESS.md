@@ -2,7 +2,45 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — multi-batch continuation (Decision 0185)
+## Latest verified increment — buffered primary coordinator admission (Decision 0186)
+
+Implemented on pushed `98bcd86`: opt-in primary admission creates fresh sequential canonical
+family caches, then a fresh correspondence cache for streamed retry/transaction/owner/witness
+checks. Uncached APIs and decoding remain shared; logical proof charges and exact limits do not
+change on hits. Fixed per-phase reports expose bounded residency without implying simultaneous
+allocation, complete I/O or consumer authority. Caller-warmed caches are never accepted.
+
+Session 21965 / `run-p1049456-i22010254.scope` exited 0: 11 focused primary-admission cases/16.22 s,
+compile 27.28 s, strict workspace Clippy 8.06 s. Five original cases also run buffered, retaining
+the original uncached 798-fault assertion and sweeping every actually observed buffered read
+fault. A sixth new case checks one-page/larger budgets, identical proof work, fewer adapter reads,
+fresh repeated admission, invalid budgets before I/O and late ciphertext mutation. No failures.
+
+Session 50827 / `run-p1050587-i22049627.scope` exited 0: all **126 transaction-crate tests**
+(10 library, 13 authorization, 103 coordinator; coordinator 102.84 s), compile 0.04 s and strict
+workspace rustdoc 10.41 s. Commands:
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --all-features --locked --offline packed_admission -- --test-threads=1 2>&1 | tee /tmp/uste-d186-primary-admission.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --all-targets --all-features --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d186-txn-verification.log &&
+CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline'
+```
+
+Preflight 22 GiB available RAM/2.5 GiB free swap. Sampled transaction scope peak 102,121,472 bytes/
+zero swap (not final lifetime peak; first compile scope peak unavailable). Formatting, diff,
+documentation and task checks pass; root lockfile unchanged. This is focused/full-crate coverage,
+not a new full-workspace run: full core remains 676 at `0322067`; full harness 109 at `98bcd86`.
+Next apply the same fresh bounded buffering to quota admission, then verify the full core and
+integrate both into the native harness. Safe larger construction, complete accounting and
+reserved-host qualification still precede T-20/T-19 completion. Pinned M1, the full roadmap and
+external release gates are unchanged. This supersedes older next-step text.
+
+## Prior verified increment — multi-batch continuation (Decision 0185)
 
 Implemented on pushed `b7e664e`: native construction resume still ends at the checkpoint,
 but an already-started final generation now completes the full frontier. A shared streaming

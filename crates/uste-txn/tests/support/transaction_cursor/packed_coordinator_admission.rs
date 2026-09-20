@@ -70,6 +70,13 @@ fn root_fixture() -> (
 
 #[test]
 fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes() {
+    packed_admission_cold_correspondence_exact_budgets_and_no_index_writes_case(false);
+}
+#[test]
+fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes_buffered() {
+    packed_admission_cold_correspondence_exact_budgets_and_no_index_writes_case(true);
+}
+fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes_case(buffered: bool) {
     let (mut fs, name, recovery, _, old) = root_fixture();
     drop(recovery);
     let (mut recovery, transactions) = transactions_with_entropy(&mut fs, &name, 3, 2002);
@@ -86,7 +93,7 @@ fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes() {
     assert_eq!(roots.len(), 1);
     fs.arm(FaultPlan::default()).unwrap();
     let (prefix, report) =
-        admit_packed_coordinator_prefix(&mut recovery, &mut fs, &roots[0], admission()).unwrap();
+        admit_selected(buffered, &mut recovery, &mut fs, &roots[0], admission()).unwrap();
     assert_eq!(prefix.anchor(), old.anchor());
     assert_eq!(
         prefix.families().map(|f| f.commitment),
@@ -102,7 +109,7 @@ fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes() {
     exact.maximum_journal_bytes = report.journal.encoded_bytes;
     exact.maximum_references = 2;
     exact.maximum_owners = 2;
-    admit_packed_coordinator_prefix(&mut recovery, &mut fs, &roots[0], exact).unwrap();
+    admit_selected(buffered, &mut recovery, &mut fs, &roots[0], exact).unwrap();
     for limited in [
         PackedCoordinatorAdmissionLimits {
             maximum_lookup_pages: report.lookup_pages - 1,
@@ -129,9 +136,7 @@ fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes() {
             ..exact
         },
     ] {
-        assert!(
-            admit_packed_coordinator_prefix(&mut recovery, &mut fs, &roots[0], limited).is_err()
-        );
+        assert!(admit_selected(buffered, &mut recovery, &mut fs, &roots[0], limited).is_err());
     }
     let maintenance = recovery
         .packed_indexes_with_io(&mut fs, &transactions[2], limits().certificates)
@@ -163,6 +168,13 @@ fn packed_admission_cold_correspondence_exact_budgets_and_no_index_writes() {
 
 #[test]
 fn packed_admission_authenticated_false_metadata_never_grants_a_prefix() {
+    packed_admission_authenticated_false_metadata_never_grants_a_prefix_case(false);
+}
+#[test]
+fn packed_admission_authenticated_false_metadata_never_grants_a_prefix_buffered() {
+    packed_admission_authenticated_false_metadata_never_grants_a_prefix_case(true);
+}
+fn packed_admission_authenticated_false_metadata_never_grants_a_prefix_case(buffered: bool) {
     for case in 0..7 {
         let (mut fs, _, mut recovery, root, _) = root_fixture();
         let mut cursor = recovery
@@ -275,19 +287,25 @@ fn packed_admission_authenticated_false_metadata_never_grants_a_prefix() {
             .unwrap();
         fs.arm(FaultPlan::default()).unwrap();
         assert!(
-            admit_packed_coordinator_prefix(&mut recovery, &mut fs, &false_root, admission())
-                .is_err(),
+            admit_selected(buffered, &mut recovery, &mut fs, &false_root, admission()).is_err(),
             "case {case}"
         );
         assert_eq!(fs.operation_count(Operation::CreateNew), 0);
         let (valid, _) =
-            admit_packed_coordinator_prefix(&mut recovery, &mut fs, &root, admission()).unwrap();
+            admit_selected(buffered, &mut recovery, &mut fs, &root, admission()).unwrap();
         assert_eq!(valid.owner_count(), 2);
     }
 }
 
 #[test]
 fn packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed() {
+    packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed_case(false);
+}
+#[test]
+fn packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed_buffered() {
+    packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed_case(true);
+}
+fn packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed_case(buffered: bool) {
     let (mut fs, name, mut recovery, root, _) = root_fixture();
     let wrong = recovery
         .publish_recovered_packed_root(
@@ -299,7 +317,7 @@ fn packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed() {
         )
         .unwrap();
     fs.arm(FaultPlan::default()).unwrap();
-    assert!(admit_packed_coordinator_prefix(&mut recovery, &mut fs, &wrong, admission()).is_err());
+    assert!(admit_selected(buffered, &mut recovery, &mut fs, &wrong, admission()).is_err());
     assert_eq!(fs.operation_count(Operation::ReadAt), 0);
     let directory = fs.open_directory(&fs.root(), &name).unwrap();
     let file = fs
@@ -311,18 +329,30 @@ fn packed_admission_late_certificate_corruption_and_wrong_shape_fail_closed() {
     fs.write_at(&file, offset, &[byte[0] ^ 1]).unwrap();
     fs.sync_all(&file).unwrap();
     fs.arm(FaultPlan::default()).unwrap();
-    assert!(admit_packed_coordinator_prefix(&mut recovery, &mut fs, &root, admission()).is_err());
+    assert!(admit_selected(buffered, &mut recovery, &mut fs, &root, admission()).is_err());
     assert_eq!(fs.operation_count(Operation::CreateNew), 0);
     assert_eq!(fs.operation_count(Operation::WriteAt), 0);
 }
 
 #[test]
 fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts() {
+    packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts_case(false);
+}
+#[test]
+fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts_buffered() {
+    packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts_case(true);
+}
+fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts_case(buffered: bool) {
     let (mut observed_fs, _, mut observed, root, _) = root_fixture();
     observed_fs.arm(FaultPlan::default()).unwrap();
-    let (expected, _) =
-        admit_packed_coordinator_prefix(&mut observed, &mut observed_fs, &root, admission())
-            .unwrap();
+    let (expected, _) = admit_selected(
+        buffered,
+        &mut observed,
+        &mut observed_fs,
+        &root,
+        admission(),
+    )
+    .unwrap();
     let boundaries = [
         Operation::OpenExisting,
         Operation::Metadata,
@@ -348,8 +378,7 @@ fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts() {
                 )
                 .unwrap();
                 assert!(
-                    admit_packed_coordinator_prefix(&mut recovery, &mut fs, &root, admission())
-                        .is_err(),
+                    admit_selected(buffered, &mut recovery, &mut fs, &root, admission()).is_err(),
                     "{operation:?}/{occurrence}/{action:?}"
                 );
                 assert_eq!(fs.pending_faults(), 0);
@@ -371,7 +400,7 @@ fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts() {
                     .0;
                 assert_eq!(roots.len(), 1);
                 let (actual, _) =
-                    admit_packed_coordinator_prefix(&mut recovery, &mut fs, &roots[0], admission())
+                    admit_selected(buffered, &mut recovery, &mut fs, &roots[0], admission())
                         .unwrap();
                 assert_eq!(actual.anchor(), expected.anchor());
                 assert_eq!(
@@ -382,11 +411,28 @@ fn packed_admission_every_observed_read_fault_returns_no_prefix_and_restarts() {
             }
         }
     }
-    assert_eq!(cases, 798);
+    if buffered {
+        assert_eq!(
+            cases,
+            boundaries.iter().map(|(_, count)| count * 3).sum::<u64>()
+        );
+        assert!(cases > 0 && cases < 798);
+    } else {
+        assert_eq!(cases, 798);
+    }
 }
 
 #[test]
 fn packed_admission_historical_base_advances_only_through_exact_authenticated_suffix() {
+    packed_admission_historical_base_advances_only_through_exact_authenticated_suffix_case(false);
+}
+#[test]
+fn packed_admission_historical_base_advances_only_through_exact_authenticated_suffix_buffered() {
+    packed_admission_historical_base_advances_only_through_exact_authenticated_suffix_case(true);
+}
+fn packed_admission_historical_base_advances_only_through_exact_authenticated_suffix_case(
+    buffered: bool,
+) {
     let (mut fs, name, recovery, _, old) = root_fixture();
     drop(recovery);
     let (mut coordinator, _) = CommitCoordinator::open(
@@ -421,7 +467,7 @@ fn packed_admission_historical_base_advances_only_through_exact_authenticated_su
         .unwrap()
         .0;
     let (base, report) =
-        admit_packed_coordinator_prefix(&mut recovery, &mut fs, &roots[0], admission()).unwrap();
+        admit_selected(buffered, &mut recovery, &mut fs, &roots[0], admission()).unwrap();
     assert_eq!(report.certificate.certificates, 2);
     assert_eq!(base.anchor().0.get(), 3);
     let (next, report) = stage_packed_coordinator_prefix(
@@ -452,4 +498,129 @@ fn packed_admission_historical_base_advances_only_through_exact_authenticated_su
         fourth
     );
     assert_eq!(next.owner_count(), 2);
+}
+
+fn admit_selected(
+    buffered: bool,
+    recovery: &mut Recovery,
+    fs: &mut Fs,
+    root: &CertifiedPackedRoot,
+    limits: PackedCoordinatorAdmissionLimits,
+) -> Result<
+    (
+        PackedCoordinatorPrefix,
+        uste_txn::PackedCoordinatorAdmissionReport,
+    ),
+    TransactionError,
+> {
+    if buffered {
+        uste_txn::admit_packed_coordinator_prefix_buffered(recovery, fs, root, limits, 1024 * 1024)
+            .map(|(prefix, report, _)| (prefix, report))
+    } else {
+        admit_packed_coordinator_prefix(recovery, fs, root, limits)
+    }
+}
+
+#[test]
+fn packed_admission_buffering_is_fresh_bounded_and_preserves_proof_work() {
+    let (mut fs, name, mut recovery, root, _) = root_fixture();
+    fs.arm(FaultPlan::default()).unwrap();
+    let (expected, proof) =
+        admit_packed_coordinator_prefix(&mut recovery, &mut fs, &root, admission()).unwrap();
+    let uncached_reads = fs.operation_count(Operation::ReadAt);
+    for budget in [uste_storage::MIN_INDEX_CACHE_BYTES, 1024 * 1024] {
+        let mut prior = None;
+        for _ in 0..2 {
+            fs.arm(FaultPlan::default()).unwrap();
+            let (actual, report, cache) = uste_txn::admit_packed_coordinator_prefix_buffered(
+                &mut recovery,
+                &mut fs,
+                &root,
+                admission(),
+                budget,
+            )
+            .unwrap();
+            assert_eq!(actual.anchor(), expected.anchor());
+            assert!(actual.families() == expected.families());
+            assert_eq!(report.families, proof.families);
+            assert_eq!(report.lookup_pages, proof.lookup_pages);
+            assert_eq!(report.lookup_bytes, proof.lookup_bytes);
+            assert_eq!(report.first_owners, proof.first_owners);
+            assert_eq!(report.journal.encoded_bytes, proof.journal.encoded_bytes);
+            for (phase, family) in cache.canonical.iter().zip(report.families) {
+                assert_eq!(phase.hits + phase.misses, family.pages);
+            }
+            assert_eq!(
+                cache.correspondence.hits + cache.correspondence.misses,
+                report.lookup_pages
+            );
+            for phase in cache.canonical.into_iter().chain([cache.correspondence]) {
+                assert_eq!(phase.budget_bytes, budget);
+                assert!(phase.accounted_bytes <= budget);
+            }
+            let reads = fs.operation_count(Operation::ReadAt);
+            assert!(reads < uncached_reads);
+            assert_eq!(fs.operation_count(Operation::WriteAt), 0);
+            assert_eq!(fs.operation_count(Operation::CreateNew), 0);
+            if let Some((previous_cache, previous_reads)) = prior {
+                assert_eq!(cache, previous_cache);
+                assert_eq!(reads, previous_reads);
+            }
+            prior = Some((cache, reads));
+        }
+    }
+    for budget in [
+        0,
+        uste_storage::MIN_INDEX_CACHE_BYTES - 1,
+        uste_storage::MAX_INDEX_CACHE_BYTES + 1,
+    ] {
+        fs.arm(FaultPlan::default()).unwrap();
+        assert!(
+            uste_txn::admit_packed_coordinator_prefix_buffered(
+                &mut recovery,
+                &mut fs,
+                &root,
+                admission(),
+                budget
+            )
+            .is_err()
+        );
+        assert_eq!(fs.operation_count(Operation::ReadAt), 0);
+    }
+    let physical = expected.families()[0]
+        .root
+        .unwrap()
+        .resolve(
+            scope(),
+            COORDINATOR_PACKED_PROFILE_V1,
+            1,
+            expected.anchor().0,
+        )
+        .unwrap();
+    let pack = EntryName::new(format!(
+        "pack-{}",
+        physical
+            .object
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    ))
+    .unwrap();
+    let directory = fs.open_directory(&fs.root(), &name).unwrap();
+    let file = fs.open_existing(&directory, &pack).unwrap();
+    let offset = physical.page * 20545 + 137;
+    let mut byte = [0];
+    assert_eq!(fs.read_at(&file, offset, &mut byte).unwrap(), 1);
+    assert_eq!(fs.write_at(&file, offset, &[byte[0] ^ 1]).unwrap(), 1);
+    fs.sync_all(&file).unwrap();
+    assert!(
+        uste_txn::admit_packed_coordinator_prefix_buffered(
+            &mut recovery,
+            &mut fs,
+            &root,
+            admission(),
+            1024 * 1024
+        )
+        .is_err()
+    );
 }
