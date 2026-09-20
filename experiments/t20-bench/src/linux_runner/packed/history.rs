@@ -9,6 +9,18 @@ mod measurement;
 #[cfg(test)]
 mod tests;
 
+fn record_owner(
+    work: &mut OwnerWork,
+    stage: OwnerStage,
+    report: Result<uste_crypto::VaultDecryptReport, uste_txn::TransactionError>,
+) -> Result<(), LinuxRunnerError> {
+    work.record(
+        stage,
+        report.map_err(|_| error("USTE_BM06_CRYPTO_COUNTER"))?,
+    )
+    .map_err(|_| error("USTE_BM06_CRYPTO_COUNTER"))
+}
+
 fn bootstrap_id<T>(profile: Bm06Profile, construct: impl FnOnce([u8; 16]) -> T) -> T {
     let mut bytes = [0; 16];
     bytes[..8].copy_from_slice(b"BM06PK1\0");
@@ -253,6 +265,7 @@ fn run_bounded_observed(
     let started = Instant::now();
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
+    let mut owner_work = OwnerWork::default();
     let limits = buffered_limits(Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?);
     if is_create {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
@@ -270,13 +283,25 @@ fn run_bounded_observed(
         observer(0)?;
         bootstrap::install(&mut raw, &mut fs, profile)?;
         observer(1)?;
+        record_owner(
+            &mut owner_work,
+            OwnerStage::Bootstrap,
+            raw.vault_decrypt_report(),
+        )?;
         drop(raw);
     }
     let (mut recovery, recovered) = open(&mut fs, &mut adapter, limits)?;
     let recovered_frontier = recovered.frontier.map_or(0, |revision| revision.get());
     let bootstrap_resume = is_resume && recovered_frontier <= 1;
     if bootstrap_resume {
-        recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
+        recovery = bootstrap::resume(
+            recovery,
+            &mut fs,
+            &mut adapter,
+            profile,
+            limits,
+            &mut owner_work,
+        )?;
     }
     binding(&mut fs, &mut recovery, profile, limits)?;
     let mut kernel =
@@ -315,6 +340,11 @@ fn run_bounded_observed(
             "issued_nonces": nonces.issued_nonces,
             "nonce_limit": nonces.nonce_limit, "remaining_nonces": nonces.remaining_nonces,
         }));
+        record_owner(
+            &mut owner_work,
+            OwnerStage::Construction,
+            live.vault_decrypt_report(),
+        )?;
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
     }
@@ -347,6 +377,11 @@ fn run_bounded_observed(
             return Err(error("USTE_BM06_PACKED_REBUILD"));
         }
         origin_groups = Some(report.suffix.journal.groups);
+        record_owner(
+            &mut owner_work,
+            OwnerStage::Rebuild,
+            live.vault_decrypt_report(),
+        )?;
         drop(live);
         recovery = open(&mut fs, &mut adapter, limits)?.0;
     }
@@ -413,6 +448,11 @@ fn run_bounded_observed(
             park_after_marker(profile.frontier())?;
         }
     }
+    record_owner(
+        &mut owner_work,
+        OwnerStage::History,
+        live.vault_decrypt_report(),
+    )?;
     drop(live);
     let post_verification_elapsed = started.elapsed();
     let post_verification_io = fs.snapshot()?;
@@ -423,9 +463,15 @@ fn run_bounded_observed(
         let recovery = open(&mut fs, &mut adapter, limits)?.0;
         let mut selected = limits;
         selected.counts = counts(profile, frontier)?;
-        Some(hex(&engine::admit(&mut fs, recovery, selected)
-            .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?
-            .1))
+        let (terminal, digest) = engine::admit(&mut fs, recovery, selected)
+            .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
+        record_owner(
+            &mut owner_work,
+            OwnerStage::Terminal,
+            terminal.vault_decrypt_report(),
+        )?;
+        drop(terminal);
+        Some(hex(&digest))
     };
     let terminal_elapsed = started.elapsed();
     let terminal_io = fs.snapshot()?;
@@ -474,5 +520,6 @@ fn run_bounded_observed(
     report["staging_cache_scope"] = serde_json::json!(STAGING_CACHE_SCOPE);
     report["proof_cache_bytes"] = serde_json::json!(PROOF_CACHE_BYTES);
     report["proof_cache_scope"] = serde_json::json!(PROOF_CACHE_SCOPE);
+    report["owner_vault_work"] = owner_work.history_json();
     Ok(report.to_string())
 }

@@ -2,7 +2,48 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native command owner accounting (Decision 0203)
+## Latest verified increment — native history owner accounting (Decision 0204)
+
+Pushed `2b939e6` contains verified BM-01 lifetime accounting. The verified BM-06 integration
+records bootstrap/resume, construction/rebuild, history validation and fresh terminal digest
+admission owners before drop. Tail-only commands omit the terminal owner. It reuses checked
+fixed slots without double-counting consuming handoffs; existing BM-01 scope and incomplete-I/O
+flags remain unchanged. Tests extend every history command/prefix/process path's report checks.
+
+Session 87818 / `run-p1186476-i22149293.scope` ran the full standalone release suite and
+strict standalone Clippy, log `/tmp/uste-d204-native-suite.log`. Fresh preflight 26 GiB available
+RAM/2.0 GiB free swap/954 GiB disk, no competing heavy workload. One Cargo job/test thread,
+3G/4G/512M limits; exact command is Decision 0203's invocation below with this log path.
+It exited 101 after the new report helper omitted valid `create-prefix`/`resume-prefix` labels:
+two prefix tests failed with `unexpected completed phase`. Library 90/130.04 s and legacy
+BM-01 process 3/11.84 s passed; history CLI had 9 pass/2 fail/3 ignored in 51.49 s. Compile
+55.14 s. Remaining tests and Clippy did not run. Corrected only the new helper's phase mapping,
+retaining exact owner-set/sum/source assertions; no runtime or acceptance relaxation.
+
+Decision 0205's separate pending BM-01 harness fix was written after those binaries compiled:
+bounded concurrent stdout/stderr drains, unchanged default deadline, exact bound/overflow and
+owned-child cleanup controls. Session 82243 / `run-p1188337-i22146299.scope` verified the
+corrected history and remaining process suites including that new harness, then strict Clippy.
+Log `/tmp/uste-d204-d205-native-fixed.log`; same fresh 26/2/954 GiB headroom and process limits.
+It exited zero: history 11 passed/3 ignored/59.52 s, packed terminal 7/35.22 s (including the
+two separate Decision 0205 controls), manifest 3/0.91 s, legacy recovery 8/72.82 s. Compile
+3.10 s; strict standalone Clippy 1.66 s. Combined with the preceding 90 library and 3 legacy
+BM-01 process passes, all 122 active cases were exercised across the split runs; five opt-in
+cases remain ignored. This is not one full-suite invocation on the final tree. Initial scope
+sampled peak 417,042,432 bytes/zero swap; corrected scope 518,733,824 bytes/zero swap, neither
+a final lifetime peak. No runtime behavior or acceptance thresholds were changed to fix tests.
+
+Decision 0205 remains a separately reviewed/tested harness change for its next commit. Next
+T-20: commit that output-safety prerequisite and perform resource-admitted native BM-01 scale
+work. Completed decrypt attribution still omits key unwrap/encryption bytes/pre-vault decode
+failures/device I/O; qualifying campaigns, larger-than-memory evidence and lifecycle work
+remain outstanding. T-20/T-19 stay open; M1's exact pinned result is unchanged.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --test packed_terminal --test recovery_manifest --test recovery_process --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d204-d205-native-fixed.log'
+```
+
+## Prior verified increment — native command owner accounting (Decision 0203)
 
 Pushed `ef70c0b` contains the verified owner diagnostics. Native BM-01 changes now record
 fixed disjoint owner lifetimes, reject duplicate slots/checked overflow, and publish exact

@@ -53,20 +53,22 @@ pub(super) enum OwnerStage {
     Construction,
     Rebuild,
     Terminal,
+    History,
 }
-const OWNER_LABELS: [&str; 5] = [
+const OWNER_LABELS: [&str; 6] = [
     "bootstrap",
     "bootstrap_resume",
     "construction",
     "rebuild",
     "terminal",
+    "history_validation",
 ];
 
 /// Each completed owner is sampled once immediately before drop (or terminal session return).
 /// Fixed-size and checked; no handles, identities, request contents or retained event history.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct OwnerWork {
-    owners: [Option<CryptoWork>; 5],
+    owners: [Option<CryptoWork>; OWNER_LABELS.len()],
     total: CryptoWork,
 }
 impl OwnerWork {
@@ -110,6 +112,13 @@ impl OwnerWork {
             "owner_count": owners.len(), "owners": owners, "total": total,
         })
     }
+
+    pub(super) fn history_json(self) -> serde_json::Value {
+        let mut report = self.json();
+        report["measurement_scope"] =
+            serde_json::json!("completed-bm06-command-through-reported-terminal-state");
+        report
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -130,19 +139,25 @@ mod tests {
             OwnerStage::Construction,
             OwnerStage::Rebuild,
             OwnerStage::Terminal,
+            OwnerStage::History,
         ] {
             work.record(stage, unit).unwrap();
             let before = work;
             assert!(work.record(stage, unit).is_err());
             assert_eq!(work, before);
         }
-        assert_eq!(work.total.0, [5, 10, 15, 20]);
+        assert_eq!(work.total.0, [6, 12, 18, 24]);
         let json = work.json();
-        assert_eq!(json["owner_count"], 5);
+        assert_eq!(json["owner_count"], 6);
         for label in OWNER_LABELS {
             assert_eq!(json["owners"][label]["successful_calls"], 1);
         }
-        assert_eq!(json["total"]["successful_calls"], 5);
+        assert_eq!(json["total"]["successful_calls"], 6);
+        let history = work.history_json();
+        assert_eq!(history["owners"], json["owners"]);
+        assert_eq!(history["total"], json["total"]);
+        assert_eq!(history["complete_authenticated_io"], false);
+        assert_ne!(history["measurement_scope"], json["measurement_scope"]);
         assert_eq!(json["complete_authenticated_io"], false);
         assert_eq!(json["includes_key_unwrap"], false);
         assert_eq!(json["includes_encryption_bytes"], false);

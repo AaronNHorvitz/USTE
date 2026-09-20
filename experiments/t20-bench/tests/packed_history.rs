@@ -146,6 +146,7 @@ impl Drop for Fixture {
 }
 struct OwnedChild(Option<Child>);
 fn assert_phase_work(report: &serde_json::Value) {
+    assert_owner_work(report);
     assert_eq!(report["proof_cache_bytes"], 64 * 1024 * 1024);
     assert_eq!(report["proof_cache_scope"], "fresh-per-preparation");
     assert_eq!(report["staging_cache_bytes"], 64 * 1024 * 1024);
@@ -199,6 +200,66 @@ fn assert_phase_work(report: &serde_json::Value) {
         .sum();
     let elapsed = work["measured_elapsed_microseconds"].as_u64().unwrap();
     assert!(sum <= elapsed && elapsed - sum < 4);
+}
+fn assert_owner_work(report: &serde_json::Value) {
+    let mut expected = vec!["history_validation"];
+    let phase = report["phase"].as_str().unwrap();
+    if phase != "tail" {
+        expected.push("terminal");
+    }
+    match phase {
+        "create" | "create-prefix" => expected.extend(["bootstrap", "construction"]),
+        "resume" | "resume-prefix" => {
+            expected.push("construction");
+            if report["bounded_bootstrap_resume"] == true {
+                expected.push("bootstrap_resume");
+            }
+        }
+        "rebuild" => expected.push("rebuild"),
+        "open" | "tail" | "recover" | "recover-checkpoint" => {}
+        _ => panic!("unexpected completed phase"),
+    }
+    let work = &report["owner_vault_work"];
+    assert_eq!(
+        work["measurement_scope"],
+        "completed-bm06-command-through-reported-terminal-state"
+    );
+    let owners = work["owners"].as_object().unwrap();
+    assert_eq!(owners.len(), expected.len());
+    assert_eq!(work["owner_count"], expected.len());
+    for label in expected {
+        assert!(owners.contains_key(label));
+    }
+    for field in [
+        "successful_calls",
+        "failed_calls",
+        "authenticated_encoded_bytes",
+        "returned_plaintext_bytes",
+    ] {
+        let sum = owners
+            .values()
+            .map(|owner| owner[field].as_u64().unwrap())
+            .sum::<u64>();
+        assert_eq!(work["total"][field], sum);
+    }
+    assert!(
+        owners["history_validation"]["successful_calls"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    if phase != "tail" {
+        assert!(owners["terminal"]["successful_calls"].as_u64().unwrap() > 0);
+    }
+    for flag in [
+        "complete_authenticated_io",
+        "physical_device_io",
+        "includes_key_unwrap",
+        "includes_encryption_bytes",
+        "includes_pre_vault_decode_failures",
+    ] {
+        assert_eq!(work[flag], false);
+    }
 }
 impl Drop for OwnedChild {
     fn drop(&mut self) {

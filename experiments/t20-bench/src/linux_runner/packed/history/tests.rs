@@ -6,6 +6,41 @@ use std::{
     os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::PathBuf,
 };
+
+#[test]
+fn history_owner_reporting_failure_is_content_free_and_atomic() {
+    let mut work = OwnerWork::default();
+    let before = work.history_json();
+    assert_eq!(
+        record_owner(
+            &mut work,
+            OwnerStage::History,
+            Err(uste_txn::TransactionError::OutcomeUnknown)
+        )
+        .unwrap_err()
+        .code(),
+        "USTE_BM06_CRYPTO_COUNTER"
+    );
+    assert_eq!(work.history_json(), before);
+    record_owner(
+        &mut work,
+        OwnerStage::History,
+        Ok(uste_crypto::VaultDecryptReport::default()),
+    )
+    .unwrap();
+    let before = work.history_json();
+    assert_eq!(
+        record_owner(
+            &mut work,
+            OwnerStage::History,
+            Ok(uste_crypto::VaultDecryptReport::default())
+        )
+        .unwrap_err()
+        .code(),
+        "USTE_BM06_CRYPTO_COUNTER"
+    );
+    assert_eq!(work.history_json(), before);
+}
 struct Fixture {
     root: PathBuf,
     password: PathBuf,
@@ -41,7 +76,28 @@ impl Fixture {
             Bm06Profile::new(2).unwrap(),
             phase,
         )
-        .map(|json| serde_json::from_str(&json).unwrap())
+        .map(|json| {
+            let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let count = match phase {
+                "create" => 4,
+                "resume" => {
+                    if report["bounded_bootstrap_resume"] == true {
+                        4
+                    } else {
+                        3
+                    }
+                }
+                "rebuild" => 3,
+                "tail" => 1,
+                "open" | "recover" | "recover-checkpoint" => 2,
+                _ => panic!("unexpected completed phase"),
+            };
+            let work = &report["owner_vault_work"];
+            assert_eq!(work["owner_count"], count);
+            assert_eq!(work["owners"]["terminal"].is_null(), phase == "tail");
+            assert_eq!(work["complete_authenticated_io"], false);
+            report
+        })
     }
     fn files(&self, roots: bool) -> BTreeMap<String, Vec<u8>> {
         fs::read_dir(self.root.join(HISTORY_DATABASE))

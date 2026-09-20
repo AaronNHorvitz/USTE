@@ -52,6 +52,7 @@ pub(super) fn resume(
     adapter: &mut PortableRecoveryAdapter,
     profile: Bm06Profile,
     limits: Limits,
+    owner_work: &mut OwnerWork,
 ) -> Result<Recovery, LinuxRunnerError> {
     if recovery
         .authenticated_frontier_anchor()
@@ -69,6 +70,11 @@ pub(super) fn resume(
         )
         .map_err(|_| error("USTE_BM06_PACKED_BOOTSTRAP"))?;
     install(&mut raw, fs, profile)?;
+    record_owner(
+        owner_work,
+        OwnerStage::BootstrapResume,
+        raw.vault_decrypt_report(),
+    )?;
     drop(raw);
     open(fs, adapter, limits).map(|(recovery, _)| recovery)
 }

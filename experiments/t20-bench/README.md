@@ -92,6 +92,15 @@ their scope. Key unwrap, encryption-byte work, pre-vault decode failures, unsucc
 and physical-device I/O remain excluded; `complete_authenticated_io` stays false. BM-06 owner
 aggregation is not supplied by this BM-01 change.
 
+Decision 0204 adds the corresponding `owner_vault_work` report to native packed BM-06 commands.
+The `history_validation` owner includes its cold open/admission, version verification and later
+retry/tail work; a separate `terminal` owner covers fresh digest admission. Tail-only commands
+omit that terminal owner and keep their null digest. Bootstrap, bootstrap-resume, construction
+and rebuild owners are captured before drop, with consuming handoffs counted once. Exact sums
+still exclude key unwrap, encryption bytes, pre-vault decode failures, unsuccessful commands and
+physical-device I/O. Earlier pinned measurements are unchanged and complete authenticated-I/O
+qualification is still withheld.
+
 Decision 0180 selects Decision 0179's fresh buffered graph admission for packed BM-01/BM-06
 development paths. Each canonical family is validated with a fresh 64 MiB logical cache budget;
 those caches are dropped sequentially, then semantic validation uses a separate fresh cache of
