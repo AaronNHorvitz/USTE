@@ -1,0 +1,52 @@
+{
+  "schema": "uste-packed-engine-development-observation-v1",
+  "implementation_baseline": "6bb43a4",
+  "implementation_increment": "Decision 0166 packed engine equivalence",
+  "engine_benchmark": false,
+  "qualification": "nonqualifying-durable-memory-model-equivalence",
+  "command": "CARGO_BUILD_JOBS=1 /usr/bin/time -v cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- packed-engine-check --entities 1000",
+  "scope_limits": {
+    "memory_high": "3G",
+    "memory_max": "4G",
+    "memory_swap_max": "512M",
+    "sampled_memory_peak_bytes": 449994752,
+    "sampled_swap_peak_bytes": 0
+  },
+  "command_measurement": {
+    "includes_compilation": true,
+    "compilation_seconds": 18.91,
+    "includes_construction_admission_oracle_and_origin_rebuild": true,
+    "wall_seconds": 250.81,
+    "user_seconds": 249.98,
+    "system_seconds": 0.43,
+    "maximum_rss_kib": 431496,
+    "swaps": 0,
+    "exit_status": 0
+  },
+  "result": {
+    "engine_benchmark": false,
+    "qualification": "nonqualifying-packed-development-equivalence",
+    "filesystem_profile": "durable-memory-model",
+    "oracle_memory_resident": true,
+    "complete_authenticated_io": false,
+    "entities": 1000,
+    "relationships": 10000,
+    "recovered_revision": 4,
+    "origin_suffix_groups": 3,
+    "queries": 384,
+    "output_digest": "698901177087f1d26e98857d5cee1e575b90dcacc77908c3a70eb6a4771b43e4",
+    "v1_state_digest": "1f48b963b5d8ca6511dd8e1d29a86256b96ab4b685b42af5b06a4a6d94459385",
+    "cache_budget_bytes": 67108864,
+    "cache_accounted_bytes": 17677312,
+    "cache_hits": 85879413,
+    "cache_misses": 1015,
+    "cache_evictions": 0
+  },
+  "limitations": [
+    "Test-model filesystem and key wrapper; not native storage or crash evidence.",
+    "Whole-command timing is not query latency or recovery duration.",
+    "No cache evictions; this run does not establish cache-pressure acceptance.",
+    "No reserved-host BM-01 or BM-06 campaign; accepted targets remain unchanged.",
+    "No complete adapter/authenticated/physical I/O accounting or RSS attribution by phase."
+  ]
+}

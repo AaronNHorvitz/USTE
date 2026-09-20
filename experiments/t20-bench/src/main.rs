@@ -131,6 +131,7 @@ fn run() -> Result<(), String> {
         && command != "oracle-bundle"
         && command != "engine-check"
         && command != "disk-engine-check"
+        && command != "packed-engine-check"
         && !linux_command
     {
         return Err("unsupported command".into());
@@ -204,6 +205,23 @@ fn run() -> Result<(), String> {
             report.cache_report.budget_bytes,
             report.cache_report.hits,
             report.cache_report.misses,
+        );
+    } else if command == "packed-engine-check" {
+        let report = uste_t20_bench::engine::packed::verify_packed_development_profile(profile)?;
+        println!(
+            "{{\"engine_benchmark\":false,\"qualification\":\"nonqualifying-packed-development-equivalence\",\"filesystem_profile\":\"durable-memory-model\",\"oracle_memory_resident\":true,\"complete_authenticated_io\":false,\"entities\":{},\"relationships\":{},\"recovered_revision\":{},\"origin_suffix_groups\":{},\"queries\":{},\"output_digest\":\"{}\",\"v1_state_digest\":\"{}\",\"cache_budget_bytes\":{},\"cache_accounted_bytes\":{},\"cache_hits\":{},\"cache_misses\":{},\"cache_evictions\":{}}}",
+            report.entities,
+            report.relationships,
+            report.recovered_revision,
+            report.origin_suffix_groups,
+            report.queries,
+            hex(&report.output_digest),
+            hex(&report.v1_state_digest),
+            report.cache_report.budget_bytes,
+            report.cache_report.accounted_bytes,
+            report.cache_report.hits,
+            report.cache_report.misses,
+            report.cache_report.evictions,
         );
     } else if command == "engine-check" {
         let report = verify_development_profile(profile)?;
@@ -337,7 +355,7 @@ fn run() -> Result<(), String> {
 
 fn print_usage() {
     println!(
-        "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check> [--entities COUNT]\n\
+        "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check|packed-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \

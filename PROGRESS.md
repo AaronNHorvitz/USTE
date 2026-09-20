@@ -2,7 +2,59 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — terminal-only packed origin recovery (Decision 0165)
+## Latest verified increment — packed benchmark engine equivalence (Decision 0166)
+
+Implemented on pushed `6bb43a4` plus this increment: `packed-engine-check` constructs the unchanged
+BM-01 mapping through authorized packed writes, one-outcome live overlays and per-batch metadata
+rebase. Bootstrap reconstructs policy only, with no v1 graph/coordinator roots. Disk certificate/blob
+metadata recovery, independent cold triple admission, bounded query caching and explicit zero-overlay
+origin rebuild are all connected. Cold/origin exact retries preserve outcomes without adding overlays.
+Both paths match every oracle query; a second cold admission matches the complete v1 state digest.
+The existing v1/native commands and artifacts are unchanged. No consumer or M1 interface changed.
+
+Focused release session 38957 / `run-p752634-i21715994.scope` passed three tests/4.19 s and strict
+Clippy/1.62 s (compile 28.25 s). The 20/200 case preserves the frozen 384-query digest
+`46f1bdb3138d6325e4c0f56b5fd3bbf5ff092d816e8a0f6c23acd15687b910b5`. Bounds/read-limit arithmetic
+is checked for every accepted profile, while the actual memory-model verifier still refuses over
+1,000 entities before filesystem/key allocation.
+
+Session 17719 / `run-p753212-i21731658.scope` passed the actual 1,000-entity/10,000-relationship
+command: frontier 4, three origin suffix groups and all 384 queries matched. Whole-command wall
+250.81 s includes 18.91 s compilation, construction, admission, queries/oracle and origin rebuild;
+it is not isolated query/recovery timing. Maximum RSS 431,496 KiB, zero swaps; sampled scope peak
+449,994,752 bytes/zero swap. Query cache accounted 17,677,312 of 67,108,864 bytes, with 85,879,413
+hits, 1,015 misses and zero evictions. This does not establish cache-pressure acceptance. Exact
+digests and observations are retained in `docs/evidence/packed-engine-1000-development.json`.
+
+Final benchmark regression session 64228 / `run-p754109-i21762814.scope` exited 0: 74 active tests,
+two pre-existing ignored exact-oracle campaigns, zero failures; library 61/49.59 s, BM-01 process
+3/11.80 s, BM-06 CLI 2/0.49 s and BM-06 process 8/72.74 s. Compile 3.67 s; Clippy/0.04 s.
+Preflight 30 GiB available RAM/5.7 GiB free swap; sampled scope peak 522,870,784 bytes/zero swap.
+One job/thread, one heavy workload and 3G/4G/512M caps were retained. Core regression is the
+658-test Decision 0165 gate at `6bb43a4`; core source did not change in this experiment increment.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --lib --locked --offline engine::packed -- --test-threads=1 --nocapture &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 /usr/bin/time -v cargo run --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- packed-engine-check --entities 1000 2>&1 | tee /tmp/uste-d166-packed1000-development.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d166-native-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Format/diff/docs/task graph and evidence JSON checks pass. Next connect the packed engine to the
+native construction/recovery/query runner, preserving profile binding, explicit rebuild and failure
+controls, then integrate BM-06 packed history. The memory-adapter/oracle measurement does not
+qualify any benchmark. Complete authenticated I/O accounting, exact-scale construction, host
+reservation and qualifying BM-01/BM-06 campaigns remain open. T-20/T-19 remain unchecked; pinned
+M1, full spatial/lifecycle roadmap and distribution gates remain unchanged. This section supersedes
+earlier next steps.
+
+## Prior verified increment — terminal-only packed origin recovery (Decision 0165)
 
 Implemented on pushed `92e5e8c` plus this increment: explicit journal-origin reconstruction needs
 no derived graph/primary/quota root, stages only bounded genesis, releases that reducer, then

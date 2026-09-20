@@ -1,5 +1,31 @@
 # T-20 benchmark fixture foundation
 
+## Packed engine development equivalence
+
+Decision 0166 adds an opt-in packed verifier alongside the unchanged v1 engine and native commands:
+
+```text
+cargo run --release --locked --offline -- packed-engine-check --entities 20
+cargo run --release --locked --offline -- packed-engine-check --entities 1000
+cargo test --release --locked --offline engine::packed -- --test-threads=1
+```
+
+It bootstraps only policy in the ordinary reducer, then uses packed graph/primary/quota roots,
+authorized writes, one-outcome live overlays and metadata rebase after every existing fixture
+batch. Cold open independently admits the terminal triple. Explicit origin rebuild streams every
+transaction with zero recovery overlays; both paths preserve exact retries and all 384 independent
+oracle queries. A final cold admission compares complete v1 logical-state digests. Storage uses
+disk certificate/blob metadata recovery and queries use a bounded 64 MiB packed cache.
+
+The filesystem, entropy/key wrapper and in-process oracle are development models. Requests above
+1,000 entities fail before filesystem/key allocation. The 20/200 frozen oracle and the complete
+1,000/10,000 development check pass. The latter's whole command (including compilation) took
+250.81 s, peaked at 431,496 KiB RSS and recorded no query cache evictions; see the
+[recorded observation](../../docs/evidence/packed-engine-1000-development.json).
+These are not native durability, query-latency, cache-pressure or larger-than-memory qualification.
+Native packed construction/recovery/query integration and the unchanged BM-01/BM-06 campaigns
+remain required. No existing fixture database is migrated or replaced by this command.
+
 ## BM-06 materialization
 
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
