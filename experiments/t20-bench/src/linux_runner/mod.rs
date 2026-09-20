@@ -5,6 +5,7 @@
 
 mod credential;
 pub mod disk;
+pub mod packed;
 mod sampling;
 mod supervision;
 

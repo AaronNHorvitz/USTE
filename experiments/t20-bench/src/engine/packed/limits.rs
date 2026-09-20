@@ -6,7 +6,7 @@ use uste_storage::{
 };
 
 #[derive(Clone, Copy)]
-pub(super) struct Limits {
+pub(crate) struct Limits {
     pub counts: [u64; 8],
     pub legacy: disk::DiskProfileLimits,
     pub lookup: TreeLookupLimits,

@@ -113,6 +113,10 @@ fn run() -> Result<(), String> {
         command.as_str(),
         "linux-create"
             | "linux-disk-create"
+            | "linux-packed-create"
+            | "linux-packed-open"
+            | "linux-packed-rebuild"
+            | "linux-packed-query"
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
@@ -261,6 +265,22 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
+                "linux-packed-create" | "linux-packed-open" | "linux-packed-rebuild" => {
+                    uste_t20_bench::linux_runner::packed::run(
+                        &root,
+                        &password_file,
+                        profile,
+                        command
+                            .strip_prefix("linux-packed-")
+                            .ok_or("invalid packed command")?,
+                    )
+                }
+                "linux-packed-query" => uste_t20_bench::linux_runner::packed::query_correctness(
+                    &root,
+                    &password_file,
+                    &oracle_file.ok_or("--oracle-file is required")?,
+                    profile,
+                ),
                 "linux-disk-sample" => {
                     let executable = env::current_exe()
                         .map_err(|_| "cannot resolve current benchmark executable")?;
@@ -358,6 +378,7 @@ fn print_usage() {
         "usage: uste-t20-bench <manifest|oracle-summary|oracle-bundle|engine-check|disk-engine-check|packed-engine-check> [--entities COUNT]\n\
          uste-t20-bench bm06-manifest [--records COUNT] (fixture only; no recovery benchmark)\n\
          uste-t20-bench bm06-disk-check --records COUNT (at most 2; memory-model equivalence only)\n\
+         uste-t20-bench linux-packed-<create|open|rebuild|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (terminal development phases only)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

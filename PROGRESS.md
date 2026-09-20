@@ -2,7 +2,48 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed benchmark engine equivalence (Decision 0166)
+## Latest verified increment — native packed terminal pipeline (Decision 0167)
+
+Implemented on pushed `f8bc0cf` plus this increment: separate native packed create/open/rebuild/query
+commands use real Linux/Btrfs storage, OS entropy, guarded credentials and the shared packed engine.
+Only policy bootstrap uses the ordinary reducer; recovery uses disk certificate/blob metadata.
+Open independently admits the terminal triple. Explicit rebuild authenticates the revision-two
+fixture marker before derived output, reconstructs with zero overlays, then cold-admits again.
+Queries consume a separate bounded oracle summary and preserve every exact output/typed refusal.
+Existing v1 commands/artifacts and M1 consumer interfaces are unchanged.
+
+Four native library tests and two separate-process CLI tests cover 20 entities/200 relationships,
+all 384 queries, every data-batch exact retry without source/root mutation, create replacement
+refusal, wrong credentials/profile/oracle, absent/corrupt derived roots, explicit rebuild and
+committed-source corruption. Initial focused session 52701 failed two test-harness assertions:
+incorrect packed filename prefix and comparison of optional caches as authoritative files. Fixed
+the fixtures to select `p-` roots and `KEY`, `MANIFEST`, `CERTIFICATES`, `j-*` authority, and avoid
+ciphertext dumps on assertion failure. No production checks weakened. Focused session 71170 passed
+four tests/21.94 s and Clippy/1.41 s; final strengthened retry/authority assertions are in the full run.
+
+Full session 25680 / `run-p757305-i21747995.scope` exited 0: 80 active tests across six executables,
+two pre-existing ignored campaigns, zero failures. Library 65/73.43 s; BM-01 process 3/11.98 s;
+new packed CLI 2/9.59 s; BM-06 CLI 2/0.52 s; BM-06 process 8/74.87 s. Compile 49.19 s;
+strict Clippy 0.58 s. Preflight 30 GiB available RAM/5.7 GiB free swap; observed scope peak sample
+359,600,128 bytes/zero swap (not a final peak). One job/thread and 3G/4G/512M caps retained.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d167-native-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Core source is unchanged; the core gate remains 658 tests at `6bb43a4`. The prior 1,000-entity
+memory-model timing remains pinned to Decision 0166, not remeasured here. Terminal-only commands
+do not implement incomplete-prefix resume or process-loss qualification. Next implement bounded
+native prefix selection/recovery and owned-child interruption controls, then packed BM-06 history.
+Complete authenticated I/O, exact-scale construction and reserved-host campaigns remain open.
+The native 20,000-entity ceiling is only admission, not measured packed capacity. T-20/T-19 remain
+unchecked; pinned M1, full roadmap and release prerequisites are unchanged. This section supersedes
+earlier next steps.
+
+## Prior verified increment — packed benchmark engine equivalence (Decision 0166)
 
 Implemented on pushed `6bb43a4` plus this increment: `packed-engine-check` constructs the unchanged
 BM-01 mapping through authorized packed writes, one-outcome live overlays and per-batch metadata

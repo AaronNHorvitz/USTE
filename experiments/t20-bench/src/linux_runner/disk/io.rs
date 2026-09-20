@@ -19,7 +19,7 @@ const OPERATIONS: [&str; 14] = [
 ];
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) struct IoSnapshot {
+pub(in crate::linux_runner) struct IoSnapshot {
     calls: [u64; 14],
     failures: [u64; 14],
     // Read requested/returned, write requested/returned. No payload or path is retained.
@@ -116,7 +116,7 @@ impl IoSnapshot {
     }
 }
 
-pub(super) struct ObservedFileSystem<F> {
+pub(in crate::linux_runner) struct ObservedFileSystem<F> {
     inner: F,
     counters: IoSnapshot,
 }

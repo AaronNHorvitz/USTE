@@ -1,6 +1,6 @@
 //! Opt-in packed engine/oracle equivalence; never a performance qualification campaign.
 use super::*;
-mod limits;
+pub(crate) mod limits;
 use limits::Limits;
 use uste_graph::{
     GRAPH_PACKED_PROFILE_V1, GraphPackedLiveState, GraphStateDeltaLimits,
@@ -25,15 +25,11 @@ use uste_txn::{
     PackedMetadataRebaseLimits, PackedQuotaAdmissionLimits, admit_packed_coordinator_prefix,
     admit_packed_quota_prefix,
 };
-type Recovery =
-    AuthenticatedIndexRecovery<MemoryFileSystem, TestEnvelope, CounterEntropy, CounterEntropy>;
-type Packed = PackedCommitCoordinator<
-    GraphPackedLiveState,
-    MemoryFileSystem,
-    TestEnvelope,
-    CounterEntropy,
-    CounterEntropy,
->;
+pub(crate) type RecoveryEngine<F, W, E, I> = AuthenticatedIndexRecovery<F, W, E, I>;
+pub(crate) type PackedEngine<F, W, E, I> =
+    PackedCommitCoordinator<GraphPackedLiveState, F, W, E, I>;
+type Recovery = RecoveryEngine<MemoryFileSystem, TestEnvelope, CounterEntropy, CounterEntropy>;
+type Packed = PackedEngine<MemoryFileSystem, TestEnvelope, CounterEntropy, CounterEntropy>;
 
 #[derive(Debug)]
 pub struct PackedDevelopmentVerification {
@@ -66,9 +62,9 @@ fn open(
     .map_err(debug)?;
     Ok(recovery)
 }
-fn root(
-    fs: &mut MemoryFileSystem,
-    recovery: &Recovery,
+fn root<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>(
+    fs: &mut F,
+    recovery: &RecoveryEngine<F, W, E, I>,
     revision: uste_types::CommitRevision,
     profile: [u8; 32],
     limits: Limits,
@@ -87,11 +83,17 @@ fn root(
         .max_by_key(|root| root.manifest().claims().generation)
         .ok_or("missing terminal packed root; origin rebuild must be explicit".into())
 }
-fn admit(
-    fs: &mut MemoryFileSystem,
-    mut recovery: Recovery,
+#[allow(clippy::type_complexity)]
+pub(crate) fn admit<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    fs: &mut F,
+    mut recovery: RecoveryEngine<F, W, E, I>,
     limits: Limits,
-) -> Result<(Packed, [u8; 32]), String> {
+) -> Result<(PackedEngine<F, W, E, I>, [u8; 32]), String> {
     let revision = recovery
         .authenticated_frontier_anchor()
         .ok_or("missing packed frontier")?
@@ -195,6 +197,48 @@ fn admit(
     }
     Ok((live, digest))
 }
+pub(crate) fn commit_batch<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    live: &mut PackedEngine<F, W, E, I>,
+    fs: &mut F,
+    kernel: &mut PolicyKernel,
+    principal: &AuthenticatedPrincipal,
+    batch: disk::DiskBatch,
+    clock: &mut impl uste_storage::Clock,
+    limits: Limits,
+) -> Result<(uste_txn::TransactionOutcome, Vec<u8>), String> {
+    let bytes =
+        encode_transaction(&GraphTransaction::new(scope(), batch.operations)).map_err(debug)?;
+    let mut writer =
+        AuthorizedPackedWriter::new(live, kernel, limits.preparation, limits.publication)
+            .map_err(debug)?;
+    let outcome = writer
+        .commit(
+            fs,
+            principal,
+            AuthorizedTransactionRequest {
+                idempotency_key: batch.idempotency_key,
+                transaction_id: batch.transaction_id,
+                canonical_request: &bytes,
+                blob_inventory: None,
+            },
+            clock,
+            &NeverCancel,
+        )
+        .map_err(debug)?;
+    if outcome.revision.get() != batch.sequence {
+        return Err("packed write frontier mismatch".into());
+    }
+    drop(writer);
+    live.rebase_metadata(fs, limits.origin.suffix.metadata)
+        .map_err(debug)?;
+    Ok((outcome, bytes))
+}
+
 fn verify_queries(
     fs: &mut MemoryFileSystem,
     live: &Packed,
@@ -348,36 +392,20 @@ pub fn verify_packed_development_profile(
     let principal = kernel.authenticate(&mut AuthAdapter, &()).map_err(debug)?;
     let mut last = None;
     let revision = disk::visit_disk_batches(profile, |sequence, operations| {
-        let bytes =
-            encode_transaction(&GraphTransaction::new(scope(), operations)).map_err(debug)?;
-        let mut writer = AuthorizedPackedWriter::new(
+        let (outcome, bytes) = commit_batch(
             &mut live,
+            &mut fs,
             &mut kernel,
-            limits.preparation,
-            limits.publication,
-        )
-        .map_err(debug)?;
-        let request = AuthorizedTransactionRequest {
-            idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
-            transaction_id: identity(sequence, TransactionId::from_bytes),
-            canonical_request: &bytes,
-            blob_inventory: None,
-        };
-        let outcome = writer
-            .commit(
-                &mut fs,
-                &principal,
-                request,
-                &mut clock(sequence),
-                &NeverCancel,
-            )
-            .map_err(debug)?;
-        if outcome.revision.get() != sequence {
-            return Err("packed write frontier mismatch".into());
-        }
-        drop(writer);
-        live.rebase_metadata(&mut fs, limits.origin.suffix.metadata)
-            .map_err(debug)?;
+            &principal,
+            disk::DiskBatch {
+                sequence,
+                idempotency_key: identity(sequence, IdempotencyKey::from_bytes),
+                transaction_id: identity(sequence, TransactionId::from_bytes),
+                operations,
+            },
+            &mut clock(sequence),
+            limits,
+        )?;
         // One bounded request, never an outcome/request map for the fixture history.
         last = Some((bytes, outcome));
         Ok(())

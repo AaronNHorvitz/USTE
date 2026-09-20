@@ -23,7 +23,7 @@ type DiskRaw =
     CommitCoordinator<GraphState, DiskFileSystem, RecoveryEnvelope, OsEntropy, OsEntropy>;
 
 mod index_work;
-mod io;
+pub(super) mod io;
 mod query;
 pub mod recovery;
 mod sampling;
@@ -346,7 +346,7 @@ fn bootstrap(
     Ok(())
 }
 
-fn install_policy<F: uste_storage::OwnershipFileSystem>(
+pub(super) fn install_policy<F: uste_storage::OwnershipFileSystem>(
     raw: &mut CommitCoordinator<GraphState, F, RecoveryEnvelope, OsEntropy, OsEntropy>,
     fs: &mut F,
 ) -> Result<(), LinuxRunnerError> {
