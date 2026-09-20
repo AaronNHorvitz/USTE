@@ -15,7 +15,7 @@ mod query;
 mod query_cache;
 mod sampling;
 pub use query::{query_correctness, query_correctness_with_lookup};
-pub use sampling::sample_worker;
+pub use sampling::{sample_worker, sample_worker_with_lookup};
 type Fs = ObservedFileSystem<LinuxFileSystem>;
 type Packed = engine::PackedEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;
 type Recovery = engine::RecoveryEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;

@@ -77,6 +77,15 @@ guarantee. This command does not provide supervised timing or satisfy benchmark 
 The 20,000-entity development ceiling and all qualifying targets remain unchanged. Its local
 verification status and exact tested baseline are recorded in PROGRESS.md.
 
+Decision 0217 adds the separately supervised `linux-packed-lookup-sample` command, using the
+same arguments and two-section oracle bundle as `linux-packed-sample` below. It retains the
+fixed query deadline, warm-up, paired rounds and all oracle/qualification checks. The positive
+mode has its own report schema. `lookup_cache_work` records separate checked empty/retained
+deltas; its residency is **already included** in the total cache accounting, not added to it.
+The parent reconciles warm-up and measured lookup counters with final totals. Page-only commands
+remain unchanged in configuration and report absent lookup work. This is an optional comparison
+mode, not a recommendation or a demonstrated performance improvement; consult the pinned evidence.
+
 Decision 0174 adds supervised packed sampling over a completed fixture. Generate the two-section
 oracle bundle (not the single-section summary used by `linux-packed-query`):
 

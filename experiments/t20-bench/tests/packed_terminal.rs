@@ -59,7 +59,7 @@ impl Fixture {
             .arg("--password-file")
             .arg(&self.password)
             .args(["--entities", "20"]);
-        if matches!(phase, "query" | "lookup-query" | "sample") {
+        if matches!(phase, "query" | "lookup-query" | "sample" | "lookup-sample") {
             command.arg("--oracle-file").arg(&self.oracle);
         }
         command
@@ -461,6 +461,7 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
         "query",
         "lookup-query",
         "sample",
+        "lookup-sample",
     ] {
         let mut command = Command::new(EXECUTABLE);
         command.arg(format!("linux-packed-{phase}")).args([
@@ -471,7 +472,7 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
             "--entities",
             "100000",
         ]);
-        if matches!(phase, "query" | "lookup-query" | "sample") {
+        if matches!(phase, "query" | "lookup-query" | "sample" | "lookup-sample") {
             command.args(["--oracle-file", "absent-packed-oracle"]);
         }
         let output = complete(command);
@@ -487,6 +488,15 @@ fn packed_cli_qualifying_size_refuses_before_missing_paths_are_used() {
 
 #[test]
 fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
+    supervised_sampling(false);
+}
+
+#[test]
+fn packed_cli_supervised_positive_sampling_preserves_pairs_oracle_and_cache_ledger() {
+    supervised_sampling(true);
+}
+
+fn supervised_sampling(positive: bool) {
     use uste_t20_bench::{Bm01Profile, OracleBundle, OracleExpectedOutcome};
     let fixture = Fixture::new();
     fixture.run("create");
@@ -497,8 +507,15 @@ fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
     let output = complete(command);
     assert!(output.status.success());
     fs::write(&fixture.oracle, output.stdout).unwrap();
-    let report = fixture.run("sample");
-    assert_eq!(report["schema"], "bm01-linux-packed-sampling-v1");
+    let report = fixture.run(if positive { "lookup-sample" } else { "sample" });
+    assert_eq!(
+        report["schema"],
+        if positive {
+            "bm01-linux-packed-lookup-sampling-v1"
+        } else {
+            "bm01-linux-packed-sampling-v1"
+        }
+    );
     assert_eq!(report["query_deadline_enforced"], true);
     assert_eq!(report["query_deadline_postchecked"], true);
     assert_eq!(report["query_deadline_seconds"], 30);
@@ -532,6 +549,37 @@ fn packed_cli_supervised_sampling_preserves_frozen_pairs_and_oracle_digest() {
     assert_eq!(sample["minimum_duration_milliseconds"], 0);
     assert_eq!(sample["latency_groups"].as_array().unwrap().len(), 32);
     assert!(sample.get("cached_index_work").is_none());
+    let config = &report["query_cache_configuration"];
+    assert_eq!(config["total_budget_bytes"], 64 * 1024 * 1024);
+    if positive {
+        assert_eq!(config["page_budget_bytes"], 48 * 1024 * 1024);
+        assert_eq!(config["lookup_budget_bytes"], 16 * 1024 * 1024);
+        assert!(config["lookup"]["hits"].as_u64().unwrap() > 0);
+        for field in ["hits", "misses", "evictions", "oversized_bypasses"] {
+            let sum = report["warmup_lookup_cache_work"]["work"][field]
+                .as_u64()
+                .unwrap()
+                + sample["lookup_cache_work"][0]["work"][field]
+                    .as_u64()
+                    .unwrap()
+                + sample["lookup_cache_work"][1]["work"][field]
+                    .as_u64()
+                    .unwrap();
+            assert_eq!(config["lookup"][field], sum);
+        }
+        for state in sample["lookup_cache_work"].as_array().unwrap() {
+            assert_eq!(state["work"]["included_in_total_cache"], true);
+            assert_eq!(state["work"]["physical_device_io"], false);
+            assert_eq!(state["work"]["logical_proof_work"], false);
+        }
+    } else {
+        assert_eq!(config["page_budget_bytes"], 64 * 1024 * 1024);
+        assert!(config["lookup"].is_null());
+        assert!(report["warmup_lookup_cache_work"]["work"].is_null());
+        for state in sample["lookup_cache_work"].as_array().unwrap() {
+            assert!(state["work"].is_null());
+        }
+    }
     let empty = &sample["cache_work"][0];
     let retained = &sample["cache_work"][1];
     assert_eq!(empty["index_cache_budget_bytes"], 64 * 1024 * 1024);

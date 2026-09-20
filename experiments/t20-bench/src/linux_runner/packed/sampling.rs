@@ -1,5 +1,6 @@
 //! Packed native sampling with the frozen plan, oracle and owned-worker deadline protocol.
 use super::crypto_work::CryptoWork;
+use super::query_cache::{QueryCacheMode, Reader};
 use super::*;
 use crate::linux_runner::{
     disk::sampling::CacheWork,
@@ -12,15 +13,10 @@ use crate::linux_runner::{
 };
 use crate::{OracleExpectation, engine::execute_query_with};
 use std::{collections::BTreeMap, time::Duration};
+use uste_storage::packed_page_cache::PackedCacheReport;
 use uste_txn::AuthorizedDiskCacheReport;
-type Reader<'a> = AuthorizedPackedReader<
-    'a,
-    uste_graph::GraphPackedLiveState,
-    Fs,
-    RecoveryEnvelope,
-    OsEntropy,
-    OsEntropy,
->;
+mod lookup_work;
+use lookup_work::LookupWork;
 
 pub fn sample_worker(
     root: &Path,
@@ -28,8 +24,27 @@ pub fn sample_worker(
     bundle: &Path,
     profile: Bm01Profile,
 ) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Pages)
+}
+
+pub fn sample_worker_with_lookup(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Positive)
+}
+
+fn sample_worker_mode(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+    mode: QueryCacheMode,
+) -> Result<(), LinuxRunnerError> {
     let mut observer = ProtocolObserver::new();
-    match sample(root, password, bundle, profile, &mut observer) {
+    match sample(root, password, bundle, profile, mode, &mut observer) {
         Ok(report) => observer.report(&report),
         Err(error) => {
             let _ = observer.error(error.code());
@@ -42,22 +57,21 @@ fn sample(
     password: &Path,
     bundle: &Path,
     profile: Bm01Profile,
+    mode: QueryCacheMode,
     observer: &mut dyn QueryObserver,
 ) -> Result<String, LinuxRunnerError> {
     disk::validate_native_profile(profile)?;
     let bundle = read_oracle_bundle(bundle)?;
     validate_bundle(&bundle, profile)?;
     let mut session = prepare(root, password, profile, "open")?;
-    let reader = AuthorizedPackedReader::new_with_cache_budget(
+    let reader = mode.reader(
         &session.coordinator,
         &session.policy,
         session
             .limits
             .read()
             .map_err(|_| error("USTE_BM01_LIMITS"))?,
-        64 * 1024 * 1024,
-    )
-    .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))?;
+    )?;
     let setup = session.filesystem.snapshot()?;
     let setup_crypto = CryptoWork::from(
         session
@@ -72,6 +86,7 @@ fn sample(
         principal: &session.principal,
         materializer: Materializer::new(profile),
     };
+    let setup_cache = engine.report()?;
     let mut warmup = [0_usize; 3];
     for expected in bundle.warmup().expectations() {
         engine.clear()?;
@@ -84,13 +99,15 @@ fn sample(
     }
     let warmup_io = engine.filesystem.snapshot()?.delta(setup)?;
     let warmup_crypto = engine.crypto_report()?.delta(setup_crypto)?;
+    let mut warmup_lookup = LookupWork::default();
+    warmup_lookup.add(setup_cache.lookup, engine.report()?.lookup)?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
         samples.push(engine.sample(bundle.measured().expectations(), plan, ordinal, observer)?);
     }
     Ok(serde_json::json!({
-        "schema": "bm01-linux-packed-sampling-v1", "engine_benchmark": true,
+        "schema": match mode { QueryCacheMode::Pages => "bm01-linux-packed-sampling-v1", QueryCacheMode::Positive => "bm01-linux-packed-lookup-sampling-v1" }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",
         "result_size_profile": "bm01-result-v1", "oracle_adjacency_memory_resident": false,
@@ -100,6 +117,8 @@ fn sample(
         "authenticated_io_accounting": "partial-single-owner-vault-decrypt", "adapter_io_accounting": "filesystem-adapter-calls",
         "setup_vault_work": setup_crypto.json(), "setup_vault_work_scope": "last-cold-open-owner-only",
         "warmup_vault_work": warmup_crypto.json(),
+        "warmup_lookup_cache_work": warmup_lookup.json(CacheState::Empty)?,
+        "query_cache_configuration": mode.report(engine.report()?)?,
         "setup": session.report, "setup_adapter_io": setup.json()?, "warmup_adapter_io": warmup_io.json()?,
         "query_deadline_seconds": 30, "query_deadline_enforced": false, "query_deadline_postchecked": true,
         "maximum_timed_executions_per_sample": MAX_TIMED_EXECUTIONS_PER_SAMPLE,
@@ -129,21 +148,13 @@ impl Engine<'_> {
             .clear_cache(self.principal)
             .map_err(|_| error("USTE_BM01_PACKED_CACHE"))
     }
-    fn report(&self) -> Result<AuthorizedDiskCacheReport, LinuxRunnerError> {
+    fn report(&self) -> Result<PackedCacheReport, LinuxRunnerError> {
         let cache = self
             .reader
             .cache_report(self.principal)
             .map_err(|_| error("USTE_BM01_PACKED_CACHE"))?
             .ok_or_else(|| error("USTE_BM01_PACKED_CACHE"))?;
-        // Normalize only the five real cache counters for the shared checked accumulator.
-        // This does not claim v1 index primitives or fabricate authenticated work counters.
-        Ok(AuthorizedDiskCacheReport {
-            budget_bytes: cache.budget_bytes,
-            accounted_bytes: cache.accounted_bytes,
-            hits: cache.hits,
-            misses: cache.misses,
-            evictions: cache.evictions,
-        })
+        Ok(cache)
     }
     fn execute(
         &mut self,
@@ -176,6 +187,7 @@ impl Engine<'_> {
         let mut groups = BTreeMap::new();
         let mut executions = 0;
         let mut work = [CacheWork::default(); 2];
+        let mut lookup_work = [LookupWork::default(); 2];
         let mut io_work = [disk::io::IoSnapshot::default(); 2];
         let mut crypto_work = [CryptoWork::default(); 2];
         let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
@@ -191,7 +203,13 @@ impl Engine<'_> {
                     let before_io = self.filesystem.snapshot()?;
                     let before_crypto = self.crypto_report()?;
                     let (outcome, elapsed) = self.execute(expected, observer)?;
-                    work[cache.index()].add(outcome, before, self.report()?)?;
+                    let after = self.report()?;
+                    work[cache.index()].add(
+                        outcome,
+                        page_counters(before),
+                        page_counters(after),
+                    )?;
+                    lookup_work[cache.index()].add(before.lookup, after.lookup)?;
                     io_work[cache.index()]
                         .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
                     crypto_work[cache.index()]
@@ -236,10 +254,23 @@ impl Engine<'_> {
             "elapsed_milliseconds": started.elapsed().as_millis(), "rounds": rounds, "timed_executions": executions,
             "current_rss_kib": rss, "process_peak_rss_kib": peak, "output_digest": hex(aggregate.finalize().as_bytes()),
             "cache_work": [work[0].json(CacheState::Empty)?, work[1].json(CacheState::Retained)?],
+            "lookup_cache_work": [lookup_work[0].json(CacheState::Empty)?, lookup_work[1].json(CacheState::Retained)?],
             "adapter_io": [{"cache": CacheState::Empty.name(), "work": io_work[0].json()?},
                 {"cache": CacheState::Retained.name(), "work": io_work[1].json()?}], "latency_groups": latencies,
             "vault_work": [{"cache": CacheState::Empty.name(), "work": crypto_work[0].json()},
                 {"cache": CacheState::Retained.name(), "work": crypto_work[1].json()}],
         }))
+    }
+}
+
+fn page_counters(cache: PackedCacheReport) -> AuthorizedDiskCacheReport {
+    // The total includes result-cache residency; observations are strictly page-only.
+    // Separate LookupWork records positive-cache deltas, never fabricated proof/device work.
+    AuthorizedDiskCacheReport {
+        budget_bytes: cache.budget_bytes,
+        accounted_bytes: cache.accounted_bytes,
+        hits: cache.hits,
+        misses: cache.misses,
+        evictions: cache.evictions,
     }
 }

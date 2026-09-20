@@ -10,7 +10,10 @@ mod sampling;
 mod supervision;
 
 pub use sampling::{LinuxSamplingReport, sample, sample_worker, start_parent_watchdog};
-pub use supervision::{supervise_disk_sample, supervise_packed_sample, supervise_sample};
+pub use supervision::{
+    supervise_disk_sample, supervise_packed_lookup_sample, supervise_packed_sample,
+    supervise_sample,
+};
 
 use std::{
     fmt,

@@ -12,6 +12,7 @@ use std::{
 use crate::Bm01Profile;
 
 use super::LinuxRunnerError;
+mod lookup;
 
 const QUERY_DEADLINE: Duration = Duration::from_secs(30);
 const WORKER_EXIT_DEADLINE: Duration = Duration::from_secs(5);
@@ -32,6 +33,25 @@ enum SampleMode {
     Legacy,
     Disk,
     Packed,
+    PackedLookup,
+}
+
+pub fn supervise_packed_lookup_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedLookup,
+    )
 }
 
 pub fn supervise_packed_sample(
@@ -100,6 +120,7 @@ fn supervise_mode(
             SampleMode::Legacy => "linux-sample-worker",
             SampleMode::Disk => "linux-disk-sample-worker",
             SampleMode::Packed => "linux-packed-sample-worker",
+            SampleMode::PackedLookup => "linux-packed-lookup-sample-worker",
         })
         .arg("--root")
         .arg(root)
@@ -324,9 +345,10 @@ fn finalize_report(
             SampleMode::Legacy => "bm01-linux-sampling-v1",
             SampleMode::Disk => "bm01-linux-disk-sampling-v1",
             SampleMode::Packed => "bm01-linux-packed-sampling-v1",
+            SampleMode::PackedLookup => "bm01-linux-packed-lookup-sampling-v1",
         },
     )?;
-    if matches!(mode, SampleMode::Packed) {
+    if matches!(mode, SampleMode::Packed | SampleMode::PackedLookup) {
         super::disk::validate_native_profile(profile)?;
         expect_bool(object, "engine_benchmark", true)?;
         expect_bool(object, "full_memory_graph_state", false)?;
@@ -392,6 +414,12 @@ fn finalize_report(
             crate::engine::materialization_revision_count(profile),
         )?;
     }
+    if matches!(mode, SampleMode::PackedLookup) {
+        lookup::validate(object)?;
+    } else if matches!(mode, SampleMode::Packed) && object.contains_key("query_cache_configuration")
+    {
+        lookup::validate_pages(object)?;
+    }
     if matches!(mode, SampleMode::Disk) {
         expect_bool(object, "full_memory_graph_state", false)?;
         expect_bool(object, "full_memory_coordinator_metadata", false)?;
@@ -440,7 +468,7 @@ fn finalize_report(
             .as_object()
             .ok_or_else(|| LinuxRunnerError::new("USTE_BM01_SAMPLE_PROTOCOL"))?;
         let executions = value_u64(sample, "timed_executions")?;
-        if matches!(mode, SampleMode::Packed) {
+        if matches!(mode, SampleMode::Packed | SampleMode::PackedLookup) {
             let work = sample
                 .get("vault_work")
                 .and_then(serde_json::Value::as_array)
@@ -713,6 +741,7 @@ mod tests {
             super::SampleMode::Legacy,
             super::SampleMode::Disk,
             super::SampleMode::Packed,
+            super::SampleMode::PackedLookup,
         ] {
             let child = Command::new("sleep")
                 .arg("60")
@@ -893,8 +922,7 @@ mod tests {
         );
     }
 
-    #[test]
-    fn supervisor_binds_packed_schema_and_never_upgrades_missing_io_or_qualification() {
+    pub(super) fn packed_report() -> serde_json::Value {
         let work = serde_json::json!({
             "measurement_scope": "single-owner-vault-completed-decrypt-calls",
             "physical_device_io": false, "complete_authenticated_io": false,
@@ -902,7 +930,7 @@ mod tests {
             "successful_calls": 0, "failed_calls": 0,
             "authenticated_encoded_bytes": 0, "returned_plaintext_bytes": 0,
         });
-        let report = serde_json::json!({
+        serde_json::json!({
             "schema": "bm01-linux-packed-sampling-v1", "engine_benchmark": true,
             "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
             "full_memory_graph_state": false, "full_memory_coordinator_metadata": false,
@@ -921,7 +949,12 @@ mod tests {
             "samples": [{"timed_executions": 768, "rounds": 1, "minimum_duration_milliseconds": 0, "elapsed_milliseconds": 12,
                 "vault_work": [{"cache": "uste-empty", "work": work.clone()},
                     {"cache": "uste-retained-after-identical-query", "work": work.clone()}]}],
-        });
+        })
+    }
+
+    #[test]
+    fn supervisor_binds_packed_schema_and_never_upgrades_missing_io_or_qualification() {
+        let report = packed_report();
         let profile = Bm01Profile::new(20).unwrap();
         let finalized =
             finalize_report(&report.to_string(), profile, 864, super::SampleMode::Packed).unwrap();

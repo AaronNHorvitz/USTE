@@ -4,6 +4,26 @@ Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
 ## Current work — supervised positive-cache sampling
 
+D0216 measurement evidence is committed/pushed as `f79f902`. D0217 now passes **131 active
+native release tests, five unchanged opt-in ignores**, strict native Clippy, formatting and
+documentation/task checks. Tested source is `f79f902` plus the reviewed D0217 increment; core
+source remains at D0215's 754-test baseline. No M1 interface or qualification changed.
+Session 54464 / `uste-d217-native.scope`, invocation `dbb6448499684b80b879a06418bd3207`;
+preflight 19 GiB available RAM, 2.1 GiB free swap, 952 GiB disk, previous measurements exited.
+One Cargo job, one test thread, one heavy workload, 3G/4G/512M scope. Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d217-native.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings; } 2>&1 | tee /tmp/uste-d217-native-verification.log; verification_status=$?; systemctl --user show uste-d217-native.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Exit zero; release build 1m00s, library 98/134.66s, disk process 3/12.17s, packed history
+11/62.58s, packed terminal 8/36.56s, manifest 3/0.97s, recovery 8/76.45s; Clippy 2.60s.
+Scope peak **585,973,760 bytes**, zero swap, CPU 336,676,589,000 ns. Counter reference,
+underflow/overflow/atomicity, supervisor refusal, exact owned-child cleanup and both real CLI
+sampling modes passed without failures or weakened assertions. Next continue T-20 performance
+and complete accounting prerequisites; no qualifying campaign is admitted by this small scope.
+Release executable SHA-256: `78d4957453909bcfbfe9d7d3d7f539a09ce06ae7956c92b57e2e3ff77da121c1`.
+
 The same-binary D0216 comparison completed successfully in both modes. Raw reports, exact
 commands, GNU time and scope counters are archived in
 `docs/evidence/positive-cache-native-comparison.json`. Page-only query/setup times were
@@ -12,8 +32,8 @@ zero swap. Both modes matched all 384 outcomes, digests, visits and result bytes
 caching took 828,920 ms: **14.90% slower** in this single sequential development comparison,
 with 23,241,607 versus 18,779,324 page misses. Keep page-only as default. Kernel/device caches
 were uncontrolled; neither run is qualifying or a five-sample latency campaign.
-D0217 source remains uncompiled/unverified and separate from this evidence commit. Next verify
-its arithmetic, supervisor protocol and real-process tests before committing that capability.
+D0217 was uncompiled during that measurement and excluded from its executable. Its separate
+verification is now recorded above.
 
 D0216 is committed/pushed as `b3724d52a39e38e86c1a10da8634e4c2a4589331`. The clean-tree release
 binary remains `f07886105f808cbfb95cee6d9727bf07de8b902b2edcc5e1c10824a6fc6e3d0e`.
@@ -50,10 +70,9 @@ prefix `pages` instead of `positive`, and command `linux-packed-query` instead o
 `linux-packed-lookup-query`; source/profile/oracle, 1800s timeout and all group limits are identical.
 No compilation or second heavy workload overlapped; control exited zero.
 This is not a qualifying 24 GiB reservation, five-sample campaign or latency-budget pass. Keep
-the pinned M1 handoff and full T-20/T-19/R2–R4 requirements. D0217 sampling source is now under
-implementation: checked result-cache accumulation, separate worker/schema and parent ledger
-validation, plus arithmetic/protocol/CLI tests. It remains unbuilt and excluded from this measured
-executable. Finish the paired measurement/evidence first, then verify that separate increment.
+the pinned M1 handoff and full T-20/T-19/R2–R4 requirements. D0217's checked result-cache
+accumulation, separate worker/schema and parent ledger validation are verified above, independently
+of the pinned D0216 measured executable.
 
 ## Latest verified increment — native positive-cache comparison (Decision 0216)
 
