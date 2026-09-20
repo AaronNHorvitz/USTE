@@ -43,8 +43,11 @@ impl Identity {
         if key.is_empty() || key.len() > MAX_KEY_BYTES {
             return Err(StorageError::ResourceLimit);
         }
-        let mut bytes = copy(&self.0, key.len())?;
-        bytes.extend_from_slice(key);
+        // Most searches distinguish logical keys within one root. Avoid comparing the
+        // shared identity prefix on every ordered-map branch. The fixed-size suffix
+        // keeps this encoding injective even for variable-length/prefix-related keys.
+        let mut bytes = copy(key, IDENTITY_BYTES)?;
+        bytes.extend_from_slice(&self.0);
         Ok(bytes)
     }
 }

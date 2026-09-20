@@ -40,6 +40,73 @@ fn assert_invariants(cache: &LookupCache) {
 }
 
 #[test]
+fn logical_first_cache_keys_preserve_every_identity_byte_and_variable_key_boundary() {
+    let keys = [
+        vec![0],
+        vec![0, 0],
+        vec![0, 1],
+        vec![1],
+        vec![255],
+        b"synthetic".to_vec(),
+        vec![0; MAX_KEY_BYTES - 1],
+        vec![0; MAX_KEY_BYTES],
+    ];
+    let mut encoded = std::collections::BTreeSet::new();
+    for variant in 0..=IDENTITY_BYTES {
+        let mut identity = Identity([0; IDENTITY_BYTES]);
+        if variant != 0 {
+            identity.0[variant - 1] = 1;
+        }
+        for key in &keys {
+            let value = identity.key(key).unwrap();
+            assert_eq!(value.len(), key.len() + IDENTITY_BYTES);
+            assert!(value.capacity() >= value.len());
+            assert_eq!(&value[..key.len()], key);
+            assert_eq!(&value[key.len()..], &identity.0);
+            // Equal encodings imply equal total lengths, logical keys and fixed suffixes.
+            assert!(encoded.insert(value.to_vec()));
+        }
+    }
+    assert_eq!(encoded.len(), (IDENTITY_BYTES + 1) * keys.len());
+    assert!(Identity([0; IDENTITY_BYTES]).key(&[]).is_err());
+    assert!(
+        Identity([0; IDENTITY_BYTES])
+            .key(&vec![0; MAX_KEY_BYTES + 1])
+            .is_err()
+    );
+}
+
+#[test]
+fn logical_first_cache_keys_reach_distinct_record_bytes_before_shared_root_identity() {
+    let identity = Identity([7; IDENTITY_BYTES]);
+    let base = [0; 16];
+    let encoded = identity.key(&base).unwrap();
+    for changed in 0..base.len() {
+        let mut other = base;
+        other[changed] = 1;
+        let compared = identity.key(&other).unwrap();
+        let prefix = encoded
+            .iter()
+            .zip(compared.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        assert_eq!(prefix, changed);
+        assert_eq!(encoded.cmp(&compared), base.cmp(&other));
+        assert_eq!(&encoded[base.len()..], &compared[base.len()..]);
+        // This pins representation, not elapsed time or a benchmark improvement claim.
+        let old = [&identity.0[..], &base[..]].concat();
+        let old_other = [&identity.0[..], &other[..]].concat();
+        assert_eq!(
+            old.iter()
+                .zip(&old_other)
+                .take_while(|(a, b)| a == b)
+                .count(),
+            IDENTITY_BYTES + changed
+        );
+    }
+}
+
+#[test]
 fn positive_lookup_cache_matches_independent_variable_byte_lru() {
     let mut cache = LookupCache::new(MINIMUM).unwrap();
     let mut reference: Vec<(u8, usize)> = Vec::new();
@@ -87,7 +154,7 @@ fn positive_lookup_cache_matches_independent_variable_byte_lru() {
         let actual: Vec<_> = cache
             .order
             .values()
-            .map(|key| key.0[IDENTITY_BYTES])
+            .map(|key| key.0[0]) // Logical key precedes the complete fixed-size identity.
             .collect();
         assert_eq!(
             actual,

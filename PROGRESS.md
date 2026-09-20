@@ -2,7 +2,27 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Current work — supervised capacity comparison (Decision 0219)
+## Current work — logical-first positive-cache keys (Decision 0220)
+
+D0219's completed sampling evidence is committed/pushed as `b6cb359`. D0220 core verification
+is now running under `uste-d220-workspace.scope`: focused `uste-storage` filter
+`packed_page_cache::lookup`, then full all-target/all-feature workspace tests, strict Clippy and
+warnings-denied documentation, all locked/offline. One Cargo job, one Rust test thread,
+test opt-level 1 with debug assertions/overflow checks enabled; 3G/4G/512M process-group limits.
+Fresh preflight 21 GiB available RAM, 2.1 GiB free swap, 952 GiB disk; both sample processes exited,
+no competing heavy workload. Log `/tmp/uste-d220-workspace-verification.log`.
+Started 2026-09-20 16:01:21 UTC, session 26813, invocation `4a446332d3d344ec998e2630e1fabeba`.
+Exact command:
+
+```sh
+systemd-run --user --scope --unit=uste-d220-workspace.scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-storage --all-features --locked --offline packed_page_cache::lookup -- --test-threads=1 && CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test --workspace --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d220-workspace-verification.log; verification_status=$?; systemctl --user show uste-d220-workspace.scope -p MemoryHigh -p MemoryMax -p MemorySwapMax -p MemoryPeak -p MemorySwapPeak -p CPUUsageNSec; exit "$verification_status"'
+```
+
+Do not mark the source verified until the complete gate passes. Then run the separate native
+release regression/strict Clippy gate, inspect/stage only reviewed relevant changes and commit/push.
+No M1 or T-20 completion follows from this private optimization or unit tests.
+
+## Completed sampling implementation and development comparison (Decision 0219)
 
 D0219 is committed/pushed as `5be671f94e0be203977e3c6be8ed657b85ca6adc`. The pinned release
 binary remains `0492dcad397f37b7d3e5ac835842f883710e12f8d04119f9c4f291c202f4a8c7`.
