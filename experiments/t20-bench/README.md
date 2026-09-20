@@ -188,6 +188,21 @@ complete accounting, controlled host caches or larger-than-memory claim follows 
 See the [pinned development reports](../../docs/evidence/native-packed-history-513-development.json)
 for the exact source/binary, retained fixtures, initial test failure and successful run.
 
+Decision 0190 adds clean bounded construction steps on the same packed native path:
+
+```sh
+experiments/t20-bench/target/release/uste-t20-bench bm06-packed-linux-create-prefix --root ROOT --password-file PASSWORD --records 513 --through-revision 3
+experiments/t20-bench/target/release/uste-t20-bench bm06-packed-linux-resume-prefix --root ROOT --password-file PASSWORD --records 513 --through-revision 5
+```
+
+Use an existing private root and synthetic 0600 password file as above, under the same memory
+scope and single-workload precautions. Targets are policy revision one or complete-generation
+boundaries through checkpoint 199 for this profile. Repeated targets authenticate/verify and
+exact-retry without certificate appends; rewinds refuse. Ordinary resume can finish the
+checkpoint, while ordinary open still requires checkpoint/terminal state. Reports declare
+`construction_target_revision` (null on other phases). These commands do not rotate the writer
+incarnation, clear nonce tracking, bypass exhausted-session limits or qualify larger scale.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

@@ -14,6 +14,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 const EXE: &str = env!("CARGO_BIN_EXE_uste-t20-bench");
+#[path = "packed_history/prefix.rs"]
+mod prefix;
 #[path = "packed_history/scale.rs"]
 mod scale;
 struct Fixture {

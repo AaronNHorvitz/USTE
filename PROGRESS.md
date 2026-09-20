@@ -2,7 +2,40 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — native multi-batch history (Decision 0189)
+## Latest verified increment — bounded native construction (Decision 0190)
+
+Built and tested on pushed `8cfd933`: packed native create-prefix/resume-prefix accept explicit
+complete-generation targets through the checkpoint, including policy-only revision one.
+They authenticate/verify existing history, preserve exact retries, refuse rewinds/overwrite,
+and retain the 513-record ceiling. Missing/duplicate/mixed flags and invalid targets refuse
+before I/O. Ordinary phases remain unchanged. No writer rotation or nonce reset is implied.
+
+Focused session 35613 / `run-p1116525-i22099492.scope` passed three prefix CLI tests/11.98 s,
+compile 25.87 s. Full session 28027 / `run-p1117739-i22103882.scope` passed **113 active tests**,
+three ignored campaigns (the native scale case separately passed at `8cfd933`), seven executables
+plus empty doctests. Library 85/135.85 s, legacy BM-01 process 3/12.12 s, packed history 9/63.17 s,
+packed BM-01 process 5/36.95 s, manifest 3/0.97 s, legacy history 8/76.18 s; compile 30.04 s,
+strict Clippy 4.06 s. Test executables were built before pending Decision 0191 diagnostics;
+the final Clippy run also checked those additive core APIs, which are excluded from this increment.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --test packed_history --locked --offline bounded_prefix -- --test-threads=1 2>&1 | tee /tmp/uste-d190-prefix.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d190-full-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Preflight 21 GiB available RAM/2.0 GiB free swap; sampled scope peak 390,266,880 bytes/zero swap,
+not final lifetime peak. Format/diff/docs/task checks pass. Core baseline remains 687 at
+`c3b7047`; no qualifying campaign ran. Next verify actual construction-owner nonce headroom,
+then complete accounting and safe larger construction before reserved-host BM-01/BM-06.
+T-20/T-19 remain open; pinned M1 and all roadmap/release requirements are preserved.
+Supersedes older next-step text.
+
+## Prior verified increment — native multi-batch history (Decision 0189)
 
 Built and tested on pushed `b892f12`: packed native BM-06 admits at most 513 records; model and
 legacy native caps remain two. A new owned-child tail-prefix probe stops after intermediate

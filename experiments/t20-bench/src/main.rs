@@ -25,6 +25,7 @@ fn run() -> Result<(), String> {
         let mut password = None;
         let mut records = None;
         let mut pause = None;
+        let mut through = None;
         while let Some(flag) = arguments.next() {
             let value = arguments
                 .next()
@@ -52,10 +53,27 @@ fn run() -> Result<(), String> {
                             .map_err(|_| "BM-06 pause must be unsigned")?,
                     );
                 }
+                Some("--through-revision") if through.is_none() => {
+                    through = Some(
+                        value
+                            .into_string()
+                            .map_err(|_| "BM-06 target must be UTF-8")?
+                            .parse::<u64>()
+                            .map_err(|_| "BM-06 target must be unsigned")?,
+                    );
+                }
                 _ => return Err("unsupported or duplicate BM-06 native flag".into()),
             }
         }
         let root = root.ok_or("BM-06 native command requires --root")?;
+        if (packed_history && matches!(phase, "create-prefix" | "resume-prefix"))
+            != through.is_some()
+        {
+            return Err(
+                "packed construction prefixes require --through-revision; other phases refuse it"
+                    .into(),
+            );
+        }
         let password = password.ok_or("BM-06 native command requires --password-file")?;
         let profile = uste_t20_bench::recovery_materialization::Bm06Profile::new(
             records.ok_or("BM-06 native command requires --records")?,
@@ -71,7 +89,15 @@ fn run() -> Result<(), String> {
         #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
         {
             let report = if packed_history {
-                if let Some(pause) = pause {
+                if let Some(target) = through {
+                    uste_t20_bench::linux_runner::packed::history::construct_prefix(
+                        &root,
+                        &password,
+                        profile,
+                        target,
+                        phase == "create-prefix",
+                    )
+                } else if let Some(pause) = pause {
                     if phase == "create-crash-probe" {
                         uste_t20_bench::linux_runner::packed::history::create_crash_probe(
                             &root, &password, profile, pause,
@@ -97,7 +123,7 @@ fn run() -> Result<(), String> {
         }
         #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
         {
-            let _ = (root, password, profile, phase, pause);
+            let _ = (root, password, profile, phase, pause, through);
             return Err("BM-06 native runner requires x86_64 Linux".into());
         }
         return Ok(());
@@ -455,6 +481,7 @@ fn print_usage() {
          uste-t20-bench bm06-packed-linux-<create|open|tail|recover|recover-checkpoint|rebuild|resume|tail-crash-probe> --root ROOT --password-file PASSWORD --records COUNT (at most 513; nonqualifying)\n\
          uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-packed-linux-tail-prefix-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
+         uste-t20-bench bm06-packed-linux-<create-prefix|resume-prefix> --root ROOT --password-file PASSWORD --records COUNT --through-revision REVISION (complete-generation construction step)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying development sampling)\n\

@@ -1,6 +1,7 @@
 //! Complete a bounded native history prefix using exact retries and authenticated suffixes.
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn complete(
     recovery: Recovery,
     fs: &mut Fs,
@@ -8,6 +9,7 @@ pub(super) fn complete(
     limits: Limits,
     kernel: &mut PolicyKernel,
     principal: &AuthenticatedPrincipal,
+    requested_target: Option<u64>,
     observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
 ) -> Result<(Packed, u64, u64), LinuxRunnerError> {
     let frontier = recovery
@@ -16,6 +18,14 @@ pub(super) fn complete(
         .0
         .get();
     counts(profile, frontier)?;
+    let target = requested_target.unwrap_or(
+        profile
+            .continuation_target(frontier)
+            .map_err(|_| error("USTE_BM06_PACKED_FRONTIER"))?,
+    );
+    if target < frontier {
+        return Err(error("USTE_BM06_PACKED_PREFIX_TARGET"));
+    }
     let (mut live, base, groups) = if frontier == 1 {
         let (live, report) = recover_packed_graph_origin(
             recovery,
@@ -42,9 +52,11 @@ pub(super) fn complete(
         .map_err(|_| error("USTE_BM06_PACKED_ADMISSION"))?;
         (live, base.get(), groups)
     };
-    let target = profile
-        .continuation_target(frontier)
-        .map_err(|_| error("USTE_BM06_PACKED_FRONTIER"))?;
+    if target == 1 {
+        engine::recovery::verify_prefix_history(&live, fs, kernel, principal, profile, 1)
+            .map_err(|_| error("USTE_BM06_PACKED_HISTORY"))?;
+        return Ok((live, base, groups));
+    }
     engine::recovery::complete_generation_prefix(
         &mut live,
         fs,

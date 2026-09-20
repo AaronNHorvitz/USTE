@@ -170,12 +170,47 @@ fn run_observed(
     phase: &str,
     observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
 ) -> Result<String, LinuxRunnerError> {
+    run_bounded_observed(root, password, profile, phase, None, observer)
+}
+
+/// Finish an explicit complete-generation construction prefix, never the final update generation.
+pub fn construct_prefix(
+    root: &Path,
+    password: &Path,
+    profile: Bm06Profile,
+    target: u64,
+    create: bool,
+) -> Result<String, LinuxRunnerError> {
+    run_bounded_observed(
+        root,
+        password,
+        profile,
+        if create {
+            "create-prefix"
+        } else {
+            "resume-prefix"
+        },
+        Some(target),
+        &mut |_| Ok(()),
+    )
+}
+
+fn run_bounded_observed(
+    root: &Path,
+    password: &Path,
+    profile: Bm06Profile,
+    phase: &str,
+    target: Option<u64>,
+    observer: &mut impl FnMut(u64) -> Result<(), LinuxRunnerError>,
+) -> Result<String, LinuxRunnerError> {
     if profile.records() > MAX_RECORDS {
         return Err(error("USTE_BM06_PACKED_DEVELOPMENT_LIMIT"));
     }
     if !matches!(
         phase,
         "create"
+            | "create-prefix"
+            | "resume-prefix"
             | "open"
             | "tail"
             | "recover"
@@ -186,6 +221,18 @@ fn run_observed(
     ) {
         return Err(error("USTE_BM06_PACKED_PHASE"));
     }
+    if matches!(phase, "create-prefix" | "resume-prefix") != target.is_some() {
+        return Err(error("USTE_BM06_PACKED_PREFIX_TARGET"));
+    }
+    if target.is_some_and(|target| {
+        target == 0
+            || target > profile.checkpoint_revision()
+            || !(target - 1).is_multiple_of(profile.batches_per_version())
+    }) {
+        return Err(error("USTE_BM06_PACKED_PREFIX_TARGET"));
+    }
+    let is_create = matches!(phase, "create" | "create-prefix");
+    let is_resume = matches!(phase, "resume" | "resume-prefix");
     let is_tail = matches!(phase, "tail" | "tail-crash-probe");
     let is_checkpoint_recovery = phase == "recover-checkpoint";
     let is_recovery = phase == "recover" || is_checkpoint_recovery;
@@ -193,7 +240,7 @@ fn run_observed(
     let mut fs = ObservedFileSystem::new(open_filesystem(root)?);
     let mut adapter = PortableRecoveryAdapter::new(credential::read_password(password)?);
     let limits = Limits::recovery(profile).map_err(|_| error("USTE_BM06_LIMITS"))?;
-    if phase == "create" {
+    if is_create {
         let vault = KeyVault::create(scope().database(), &mut adapter, OsEntropy)
             .map_err(|_| error("USTE_BM06_KEY_CREATE"))?;
         let mut raw = CommitCoordinator::create(
@@ -213,7 +260,7 @@ fn run_observed(
     }
     let (mut recovery, recovered) = open(&mut fs, &mut adapter, limits)?;
     let recovered_frontier = recovered.frontier.map_or(0, |revision| revision.get());
-    let bootstrap_resume = phase == "resume" && recovered_frontier <= 1;
+    let bootstrap_resume = is_resume && recovered_frontier <= 1;
     if bootstrap_resume {
         recovery = bootstrap::resume(recovery, &mut fs, &mut adapter, profile, limits)?;
     }
@@ -224,8 +271,8 @@ fn run_observed(
     let principal = authenticate(&kernel)?;
     let mut resume_base_revision = None;
     let mut resume_suffix_groups = None;
-    if phase == "create" || phase == "resume" {
-        if phase == "create" && recovered_frontier != 1 {
+    if is_create || is_resume {
+        if is_create && recovered_frontier != 1 {
             return Err(error("USTE_BM06_PACKED_FRONTIER"));
         }
         let (live, base, groups) = continuation::complete(
@@ -235,9 +282,10 @@ fn run_observed(
             limits,
             &mut kernel,
             &principal,
+            target,
             observer,
         )?;
-        if phase == "resume" {
+        if is_resume {
             resume_base_revision = Some(base);
             resume_suffix_groups = Some(groups);
         }
@@ -254,7 +302,8 @@ fn run_observed(
         || (is_tail && frontier != profile.checkpoint_revision())
         || (phase != "rebuild"
             && frontier != profile.frontier()
-            && frontier != profile.checkpoint_revision())
+            && frontier != profile.checkpoint_revision()
+            && Some(frontier) != target)
     {
         return Err(error("USTE_BM06_PACKED_FRONTIER"));
     }
@@ -359,6 +408,7 @@ fn run_observed(
         "coordinator_admission_cache_scope": engine::COORDINATOR_ADMISSION_CACHE_SCOPE,
         "complete_authenticated_io": false, "kernel_filesystem_device_cache": "uncontrolled",
         "records": profile.records(), "frontier": if is_tail { profile.frontier() } else { frontier },
+        "construction_target_revision": target,
         "selected_base_revision": base.get(), "suffix_groups": suffix, "origin_suffix_groups": origin_groups,
         "checkpoint_tail_replay": is_checkpoint_recovery,
         "verified_history_versions": verified, "history_verified_through_revision": frontier, "v1_state_digest": digest,
