@@ -120,7 +120,12 @@ pub(crate) fn admit<
 // The digest belongs to the admitted base. Never expose it as the resulting state's digest
 // when a suffix was replayed; obtaining that digest requires a fresh terminal admission.
 #[allow(clippy::type_complexity)]
-fn admit_at<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: EntropySource>(
+pub(crate) fn admit_at<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
     fs: &mut F,
     mut recovery: RecoveryEngine<F, W, E, I>,
     limits: Limits,

@@ -2,7 +2,46 @@
 
 Updated: 2026-09-19 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — packed BM-06 history equivalence (Decision 0170)
+## Latest verified increment — native packed BM-06 terminal pipeline (Decision 0171)
+
+Implemented on pushed `2819afd` plus this increment: separate native packed BM-06 commands create
+checkpoint 100, open, certify a pending tail at 101, recover and explicitly rebuild. Real credential
+guards, OS entropy, real clock and disk certificate/blob metadata are retained. Source policy and
+profile-bound bootstrap identity authenticate before derived output or a fresh tail. The shared
+bounded triple selector is mechanically factored for both fixture families; selected corruption
+still fails without trying an older admitted base. No consumer or M1 interface changed.
+
+Tail reports only checkpoint history verification and no terminal digest. Recovery verifies all
+200 historical versions and exact-retries the certified tail; repeated recovery is a no-op with no
+root/source mutation. Explicit origin rebuild works at checkpoint or terminal without authority
+changes. Missing all roots, wrong key/profile, committed-certificate and selected-pack corruption
+are tested. The native cap remains two records; incomplete construction resume/process-loss
+controls are not yet implemented. Pending bootstrap helper work is excluded from this increment.
+
+Focused session 75615 / `run-p783866-i21749268.scope` exited 0: four native history tests/26.36 s,
+compile 23.72 s, Clippy/1.32 s. The subsequently added selected-pack corruption case and two
+separate-process CLI tests are in full session 20136 / `run-p786737-i21783196.scope`, which exited 0:
+96 active tests across seven executables, two pre-existing ignored campaigns, zero failures. Library
+76/135.11 s; BM-01 process 3/12.02 s; packed history CLI 2/8.36 s; packed BM-01 CLI 4/51.35 s;
+BM-06 CLI 3/1.14 s; BM-06 process 8/74.08 s. Compile 52.41 s, Clippy 0.65 s. Preflight 29 GiB
+available RAM/3.9 GiB free swap; sampled scope peak 552,792,064 bytes/zero swap. One job/thread
+and 3G/4G/512M caps retained. Format/diff/docs/task graph checks pass.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc '
+set -o pipefail
+CARGO_BUILD_JOBS=1 cargo test --release --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- --test-threads=1 2>&1 | tee /tmp/uste-d171-native-history-verification.log &&
+CARGO_BUILD_JOBS=1 cargo clippy --manifest-path experiments/t20-bench/Cargo.toml --all-targets --locked --offline -- -D warnings'
+```
+
+Core source is unchanged; its gate remains 658 tests at `6bb43a4`. Next implement native packed
+BM-06 incomplete-prefix resume, bounded bootstrap and owned-child process-loss controls, including
+explicit prefix reconstruction after cache loss. Then complete packed sampling/I/O evidence and
+resource-safe scale work before reserved-host qualification. T-20/T-19 remain unchecked; pinned M1,
+full roadmap, lockfile and release prerequisites are unchanged. This section supersedes earlier next
+steps; elapsed development-command timings are not benchmark results.
+
+## Prior verified increment — packed BM-06 history equivalence (Decision 0170)
 
 Implemented on pushed `269c7ba` plus this increment: `bm06-packed-check --records 1|2` constructs
 the unchanged 100-version/4096-byte event fixture with authorized packed writes and metadata rebase.

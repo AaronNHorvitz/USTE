@@ -8,6 +8,7 @@ use disk::io::ObservedFileSystem;
 use uste_graph::recover_packed_graph_origin;
 use uste_txn::{AuthenticatedIndexRecovery, AuthorizedPackedReader, CoordinatorRecoveryLimits};
 mod bootstrap;
+pub mod history;
 mod query;
 pub use query::query_correctness;
 type Fs = ObservedFileSystem<LinuxFileSystem>;

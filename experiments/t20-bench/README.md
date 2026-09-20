@@ -69,6 +69,25 @@ than two records before allocation. This does not run native recovery trials or 
 cargo run --release --locked --offline -- bm06-packed-check --records 2
 ```
 
+Decision 0171 adds separate native packed BM-06 terminal commands. Reuse the existing private
+credential/Btrfs-root setup; no existing v1 or BM-01 database is replaced:
+
+```sh
+cargo run --release --locked --offline -- bm06-packed-linux-create --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-open --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-tail --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-recover --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+cargo run --release --locked --offline -- bm06-packed-linux-rebuild --root "$USTE_BENCH_ROOT" --password-file "$USTE_BENCH_PASSWORD" --records 2
+```
+
+Create ends at checkpoint 100 with 198 verified versions; tail certifies frontier 101 but leaves
+derived publication pending, reports verification only through checkpoint 100 and claims no terminal
+digest. Recover streams the suffix, verifies all 200 versions and exact-retries the tail. Rebuild is
+explicit journal-origin reconstruction at either complete frontier. Ordinary open fails on missing
+or corrupt terminal roots; all-cache loss is not silently rebuilt. Incomplete construction resume
+and packed BM-06 owned-child process-loss controls remain unsupported in these initial native phases.
+The two-record cap is unchanged. None of these commands qualifies BM-06 or measures complete I/O.
+
 `bm06-manifest [--records N]` emits the Decision 0114 versioned-event fixture manifest, not
 a recovery measurement. Default 100,000 records each retain 100 versions (10 million events),
 with 4096 payload bytes per version. The public `recovery_materialization::Bm06Profile::batch`

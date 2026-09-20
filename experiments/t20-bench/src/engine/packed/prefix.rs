@@ -69,6 +69,21 @@ pub(crate) fn recover_latest<
     profile: Bm01Profile,
 ) -> Result<(PackedEngine<F, W, E, I>, u64, u64), String> {
     let limits = Limits::new(profile)?;
+    let revision = latest_revision(fs, &recovery, limits)?;
+    let (live, _, groups) = recover(fs, recovery, profile, revision)?;
+    Ok((live, revision.get(), groups))
+}
+
+pub(crate) fn latest_revision<
+    F: OwnershipFileSystem,
+    W: DurableKeyEnvelope,
+    E: EntropySource,
+    I: EntropySource,
+>(
+    fs: &mut F,
+    recovery: &RecoveryEngine<F, W, E, I>,
+    limits: Limits,
+) -> Result<uste_types::CommitRevision, String> {
     let frontier = recovery
         .authenticated_frontier_anchor()
         .ok_or("missing packed frontier")?
@@ -84,14 +99,13 @@ pub(crate) fn recover_latest<
             COORDINATOR_PACKED_PROFILE_V1,
             COORDINATOR_PACKED_USAGE_PROFILE_V1,
         ] {
-            if optional_root(fs, &recovery, revision, family, limits)?.is_none() {
+            if optional_root(fs, recovery, revision, family, limits)?.is_none() {
                 complete = false;
                 break;
             }
         }
         if complete {
-            let (live, _, groups) = recover(fs, recovery, profile, revision)?;
-            return Ok((live, value, groups));
+            return Ok(revision);
         }
     }
     Err("missing paired packed prefix; origin rebuild must be explicit".into())
