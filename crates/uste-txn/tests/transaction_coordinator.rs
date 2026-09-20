@@ -22,6 +22,9 @@ use uste_types::{
 #[path = "support/bounded_bootstrap.rs"]
 mod bounded_bootstrap;
 
+#[path = "support/owner_work.rs"]
+mod owner_work;
+
 #[path = "support/transaction_cursor.rs"]
 mod transaction_cursor;
 
@@ -630,6 +633,14 @@ fn lost_response_is_outcome_unknown_then_durable_retry_after_restart() {
     assert_eq!(
         coordinator.read_view().unwrap_err(),
         TransactionError::OutcomeUnknown
+    );
+    assert_eq!(
+        coordinator.vault_decrypt_report(),
+        Err(TransactionError::OutcomeUnknown)
+    );
+    assert_eq!(
+        coordinator.vault_nonce_report(),
+        Err(TransactionError::OutcomeUnknown)
     );
     assert_eq!(
         coordinator

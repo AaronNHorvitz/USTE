@@ -2,7 +2,38 @@
 
 Updated: 2026-09-20 · Branch: `codex/uste-implementation`
 
-## Latest verified increment — sixteen-batch native history check (Decision 0201)
+## Latest verified increment — trusted owner diagnostics (Decision 0202)
+
+Pushed `1d477d4` records the complete sixteen-batch development experiment below. Ordinary
+coordinator and authenticated recovery owners now expose their existing cumulative vault decrypt
+and nonce reports, without constructing reducer snapshots or doing I/O. Packed diagnostics
+delegate through the same guarded path. Uncertain owners return `OutcomeUnknown`; storage/vault
+failures remain fail-closed. Consuming recovery-to-packed handoff preserves exact counters.
+No consumer facade, on-disk, authorization, durability or nonce-reset contract changed.
+
+Session 56321 / `run-p1180929-i22176706.scope` exited zero. Log
+`/tmp/uste-d202-owner-verification.log`; preflight 27 GiB available RAM/2.0 GiB free swap/954 GiB
+disk, no competing heavy workload. One Cargo job/thread, 3G/4G/512M process-group limits.
+All 141 transaction-crate tests passed: unit 10/0.00 s, policy 13/0.03 s, coordinator 118/115.90 s.
+Compile 19.75 s, strict workspace Clippy 5.79 s, warning-denied workspace docs 10.49 s.
+The first compile warned about one unnecessary `mut` in a new test. It was removed; the final
+source's three focused `owner_work` tests passed in 0.02 s after 12.75 s compilation, session
+91321 / `run-p1182767-i22149095.scope`, log `/tmp/uste-d202-owner-final.log`, preflight 26 GiB
+RAM/2.0 GiB swap/954 GiB disk. No test failures or weakened assertions. No lifetime peak was
+captured for these two scopes; configured caps are not measured RSS.
+
+```sh
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; { CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --all-targets --all-features --locked --offline -- --test-threads=1 && CARGO_BUILD_JOBS=1 cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings && CARGO_BUILD_JOBS=1 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked --offline; } 2>&1 | tee /tmp/uste-d202-owner-verification.log'
+systemd-run --user --scope -p MemoryHigh=3G -p MemoryMax=4G -p MemorySwapMax=512M bash -lc 'set -o pipefail; CARGO_BUILD_JOBS=1 CARGO_PROFILE_TEST_OPT_LEVEL=1 CARGO_PROFILE_TEST_DEBUG_ASSERTIONS=true CARGO_PROFILE_TEST_OVERFLOW_CHECKS=true cargo test -p uste-txn --test transaction_coordinator --all-features --locked --offline owner_work -- --test-threads=1 2>&1 | tee /tmp/uste-d202-owner-final.log'
+```
+
+These tests cover only Decision 0202's core changes, not the separate pending Decision 0203
+native accounting integration. Next T-20: finish and verify explicit per-command BM-01 vault
+lifetime sums, then equivalent BM-06 attribution and safe scale/qualification prerequisites.
+The getters alone do not establish complete authenticated I/O. T-20/T-19 remain open; pinned M1
+and all accepted roadmap/release gates are unchanged.
+
+## Prior verified increment — sixteen-batch native history check (Decision 0201)
 
 Pushed `fb65972` preserves the verified proof-buffering result. Only packed native experimental
 admission is raised to 8,192 records; the shared explicit scale test adds checkpoint 1,585,

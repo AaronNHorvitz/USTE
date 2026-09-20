@@ -285,6 +285,24 @@ where
         self.journal.checkpoint_anchor()
     }
 
+    /// Trusted diagnostics for this recovery owner's vault, including its cold-open decrypts.
+    /// Excludes other owners/key unwrap and is not source admission or consumer authorization.
+    /// Consuming this owner into a coordinator retains the same cumulative counters.
+    pub fn vault_decrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultDecryptReport, TransactionError> {
+        self.journal
+            .vault_decrypt_report()
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted per-owner nonce headroom; no reset/rotation or whole-process accounting.
+    pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
+        self.journal
+            .vault_nonce_report()
+            .map_err(TransactionError::Storage)
+    }
+
     /// Authenticate the full journal and retain its final transaction without a certificate map.
     /// Other storage blob/inventory metadata remains resident and independently bounded.
     #[allow(clippy::too_many_arguments)]

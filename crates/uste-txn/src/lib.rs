@@ -1141,6 +1141,30 @@ where
         })
     }
 
+    /// Trusted per-owner completed decrypt diagnostics, including this owner's cold-open work.
+    /// Not consumer authorization, other vaults, key unwrap, filesystem I/O or a counter reset.
+    /// Does not construct a reducer snapshot; uncertain/poisoned owners cannot report success.
+    pub fn vault_decrypt_report(
+        &self,
+    ) -> Result<uste_crypto::VaultDecryptReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .vault_decrypt_report()
+            .map_err(TransactionError::Storage)
+    }
+
+    /// Trusted nonce headroom for this owner only; no reset, rotation or allocation-size claim.
+    pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
+        if self.uncertain {
+            return Err(TransactionError::OutcomeUnknown);
+        }
+        self.journal
+            .vault_nonce_report()
+            .map_err(TransactionError::Storage)
+    }
+
     /// Whether a commit may have become durable without a known outcome.
     ///
     /// Trusted authorization facades use this content-free health signal to invalidate views

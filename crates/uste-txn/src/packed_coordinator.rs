@@ -129,19 +129,11 @@ where
     pub fn vault_decrypt_report(
         &self,
     ) -> Result<uste_crypto::VaultDecryptReport, TransactionError> {
-        self.state()?;
-        self.inner
-            .journal
-            .vault_decrypt_report()
-            .map_err(TransactionError::Storage)
+        self.inner.vault_decrypt_report()
     }
     /// Trusted per-owner nonce diagnostics; not caller authorization or a rotation operation.
     pub fn vault_nonce_report(&self) -> Result<uste_crypto::VaultNonceReport, TransactionError> {
-        self.state()?;
-        self.inner
-            .journal
-            .vault_nonce_report()
-            .map_err(TransactionError::Storage)
+        self.inner.vault_nonce_report()
     }
     pub fn reducer_and_index_maintenance(
         &mut self,

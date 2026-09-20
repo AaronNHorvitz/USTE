@@ -193,6 +193,29 @@ fn commit_limits() -> PackedCommitLimits {
 }
 
 #[test]
+fn owner_work_packed_handoff_keeps_exact_vault_counters_without_io() {
+    let mut parts = parts(5);
+    let work = parts.recovery.vault_decrypt_report().unwrap();
+    let nonces = parts.recovery.vault_nonce_report().unwrap();
+    assert!(work.successful_calls > 0 && nonces.issued_nonces > 0);
+    parts.fs.arm(FaultPlan::default()).unwrap();
+    let (fs, _, live, _) = install(parts, 1, 0);
+    for _ in 0..3 {
+        assert_eq!(live.vault_decrypt_report().unwrap(), work);
+        assert_eq!(live.vault_nonce_report().unwrap(), nonces);
+    }
+    for operation in [
+        Operation::OpenExisting,
+        Operation::Metadata,
+        Operation::ReadAt,
+        Operation::CreateNew,
+        Operation::WriteAt,
+    ] {
+        assert_eq!(fs.operation_count(operation), 0);
+    }
+}
+
+#[test]
 fn packed_live_base_retries_expiry_collision_cancellation_and_bounded_overlays() {
     let (mut fs, _, mut live, transactions) = install(parts(5), 1, 0);
     let mut cache = PageCache::new(64 * 1024).unwrap();
