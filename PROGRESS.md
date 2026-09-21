@@ -2,6 +2,29 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest development observation — allocation-preserving cursor handoff (Decision 0227)
+
+D0226 is committed/pushed as `0da3cee`; release executable SHA-256
+`f6d1e71fb724aaac5ff63605763b8d460b4e37089554f985fbded9d669cd6d24`. Its single supervised
+wide positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0225 with normalized SHA-256
+`c848e2b1573de9733014d908a1d51a281fb5c6dc932bfdc39559ca0f0fb9fe78`: 96 warm-ups, 768
+executions, 40 groups, digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`,
+successful work, cache counters, adapter I/O and vault work. This is cross-binary, sequential and
+nonqualifying.
+
+The round took 638,508 ms versus 656,099 ms (-2.68%). Retained all-class successful p99 is
+**8.855924 / 563.377184 / 364.157448 / 1257.307212 ms**. Depth one regressed 0.47%; depths two
+through four improved 6.63%, 2.55% and 0.25%. Four-hop remains over five times the unchanged 250 ms
+target, so no target or T-20 gate passes. Process peak RSS 265,836 KiB; wall/user/system
+808.22/759.11/46.39 seconds; zero process swaps. The enclosing shared scope peaks stayed at
+5,372,850,176 bytes memory and 143,224,832 bytes swap; soft-limit events rose to 24,833, with zero
+maximum/OOM/CPU-throttle events. Source certificate and oracle hashes stayed pinned. Local
+artifacts: `experiments/t20-bench/target/native-d226-positive.SMUcV5`; complete report:
+`docs/evidence/allocation-preserving-cursor-handoff-sampling.json`. Next commit/push this evidence,
+then remove or explicitly measure a higher-level repeated traversal cost before another capacity
+campaign. Keep the page-only default and all qualification prerequisites.
+
 ## Latest verified implementation — allocation-preserving cursor handoff (Decision 0226)
 
 D0225 evidence is committed/pushed as `2bc2c01`. D0226 removes a redundant key/value allocation
