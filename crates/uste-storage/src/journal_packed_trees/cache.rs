@@ -35,6 +35,35 @@ where
             cache,
         )
     }
+    pub fn packed_tree_get_cached_with<R>(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        key: &[u8],
+        limits: TreeLookupLimits,
+        cache: &mut PackedPageCache,
+        map: impl FnOnce(&[u8]) -> R,
+    ) -> Result<packed_tree_lookup::MappedTreeLookupResult<R>, StorageError> {
+        if let Err(error) = self.validate_canonical_packed_tree(tree) {
+            if self.vault.is_locked() {
+                cache.clear();
+            }
+            return Err(error);
+        }
+        cache.bind(&tree.proof, self.vault.unlocked_session()?)?;
+        packed_tree_lookup::lookup_cached_with(
+            filesystem,
+            &self.database_directory,
+            &self.vault,
+            tree.context,
+            tree.commitment,
+            tree.root,
+            key,
+            limits,
+            cache,
+            map,
+        )
+    }
     pub fn next_packed_tree_entry_cached(
         &self,
         filesystem: &mut F,

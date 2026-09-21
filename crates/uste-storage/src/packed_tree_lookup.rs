@@ -63,6 +63,10 @@ pub struct TreeLookupResult {
     pub value: Option<PackedLookupValue>,
     pub report: TreeLookupReport,
 }
+pub struct MappedTreeLookupResult<T> {
+    pub value: Option<T>,
+    pub report: TreeLookupReport,
+}
 
 pub(crate) struct Reader<'a, F: FileSystem, W, E: EntropySource> {
     pub(crate) filesystem: &'a mut F,
@@ -160,7 +164,7 @@ pub fn lookup<F: FileSystem, W, E: EntropySource>(
     limits: TreeLookupLimits,
 ) -> Result<TreeLookupResult, StorageError> {
     lookup_inner(
-        filesystem, directory, vault, context, expected, root, key, limits, None,
+        filesystem, directory, vault, context, expected, root, key, limits, None, true,
     )
 }
 
@@ -186,7 +190,61 @@ pub(crate) fn lookup_cached<F: FileSystem, W, E: EntropySource>(
         key,
         limits,
         Some(cache),
+        true,
     )
+}
+
+/// Cached lookup whose successful value is converted while its resident plaintext is borrowed.
+/// The mapper's result cannot borrow from the cache. Proof-work, key/session checks and cache
+/// admission are identical to [`lookup_cached`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn lookup_cached_with<F: FileSystem, W, E: EntropySource, R>(
+    filesystem: &mut F,
+    directory: &F::Directory,
+    vault: &KeyVault<W, E>,
+    context: TreeReadContext,
+    expected: OrderedCommitment,
+    root: Option<PackedLocator>,
+    key: &[u8],
+    limits: TreeLookupLimits,
+    cache: &mut PackedPageCache,
+    map: impl FnOnce(&[u8]) -> R,
+) -> Result<MappedTreeLookupResult<R>, StorageError> {
+    validate_request(context, key, limits)?;
+    CommitmentContext::new(context.scope, context.profile, context.family)
+        .map_err(|_| StorageError::InvalidState)?;
+    let mut map = Some(map);
+    if let Some(location) = root
+        && expected.entries() != 0
+        && cache.has_lookup_cache()
+    {
+        let identity = crate::packed_page_cache::LookupIdentity::new(context, location, expected);
+        if let Some((value, report)) =
+            cache.lookup_get_with(vault, identity, key, limits, &mut map)?
+        {
+            return Ok(MappedTreeLookupResult {
+                value: Some(value),
+                report,
+            });
+        }
+    }
+    let result = lookup_inner(
+        filesystem,
+        directory,
+        vault,
+        context,
+        expected,
+        root,
+        key,
+        limits,
+        Some(cache),
+        false,
+    )?;
+    let map = map.ok_or(StorageError::InvalidState)?;
+    Ok(MappedTreeLookupResult {
+        value: result.value.map(|value| map(value.as_slice())),
+        report: result.report,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -200,18 +258,9 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
     key: &[u8],
     limits: TreeLookupLimits,
     cache: Option<&mut PackedPageCache>,
+    probe_lookup_cache: bool,
 ) -> Result<TreeLookupResult, StorageError> {
-    if key.is_empty() || context.family == 0 {
-        return Err(StorageError::InvalidState);
-    }
-    if key.len() > logical::MAX_KEY_BYTES
-        || limits.maximum_path_branches > logical::MAX_BRANCH_BITS
-        || limits.maximum_pages > MAX_LOOKUP_PAGES
-        || limits.maximum_encoded_bytes > MAX_LOOKUP_ENCODED_BYTES
-        || limits.maximum_value_bytes > logical::MAX_VALUE_BYTES as u64
-    {
-        return Err(StorageError::ResourceLimit);
-    }
+    validate_request(context, key, limits)?;
     let logical_context = CommitmentContext::new(context.scope, context.profile, context.family)
         .map_err(|_| StorageError::InvalidState)?;
     let Some(mut location) = root else {
@@ -231,7 +280,8 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
         .filter(|cache| cache.has_lookup_cache())
         .map(|_| crate::packed_page_cache::LookupIdentity::new(context, location, expected));
     let mut cache = cache;
-    if let (Some(cache), Some(identity)) = (cache.as_deref_mut(), identity)
+    if probe_lookup_cache
+        && let (Some(cache), Some(identity)) = (cache.as_deref_mut(), identity)
         && let Some((bytes, report)) = cache.lookup_get(vault, identity, key, limits)?
     {
         return Ok(TreeLookupResult {
@@ -354,4 +404,23 @@ fn lookup_inner<F: FileSystem, W, E: EntropySource>(
             }
         }
     }
+}
+
+fn validate_request(
+    context: TreeReadContext,
+    key: &[u8],
+    limits: TreeLookupLimits,
+) -> Result<(), StorageError> {
+    if key.is_empty() || context.family == 0 {
+        return Err(StorageError::InvalidState);
+    }
+    if key.len() > logical::MAX_KEY_BYTES
+        || limits.maximum_path_branches > logical::MAX_BRANCH_BITS
+        || limits.maximum_pages > MAX_LOOKUP_PAGES
+        || limits.maximum_encoded_bytes > MAX_LOOKUP_ENCODED_BYTES
+        || limits.maximum_value_bytes > logical::MAX_VALUE_BYTES as u64
+    {
+        return Err(StorageError::ResourceLimit);
+    }
+    Ok(())
 }

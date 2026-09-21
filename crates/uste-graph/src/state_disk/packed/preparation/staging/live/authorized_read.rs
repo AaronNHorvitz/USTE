@@ -51,22 +51,37 @@ where
             GraphReadRequest::Record { id } => {
                 let tree = &base.trees[usize::from(FAMILY_CURRENT_RECORD - 1)];
                 let key = id.record();
-                let found = match cache {
-                    Some(cache) => {
-                        reader.get_cached(fs, tree, key.as_bytes(), limits.current, cache)
-                    }
-                    None => reader.get(fs, tree, key.as_bytes(), limits.current),
-                }?;
-                found
-                    .value
-                    .map(|value| {
-                        let record = decode_stored_record(value.as_slice())?;
-                        if record.id() != *id || record.modified_revision() > base.anchor.0 {
-                            return Err(GraphDiskError::IndexCorrupt);
-                        }
-                        Ok(record)
-                    })
-                    .transpose()?
+                match cache {
+                    Some(cache) => reader
+                        .get_cached_with(
+                            fs,
+                            tree,
+                            key.as_bytes(),
+                            limits.current,
+                            cache,
+                            decode_stored_record,
+                        )?
+                        .value
+                        .transpose()?
+                        .map(|record| {
+                            if record.id() != *id || record.modified_revision() > base.anchor.0 {
+                                return Err(GraphDiskError::IndexCorrupt);
+                            }
+                            Ok(record)
+                        })
+                        .transpose()?,
+                    None => reader
+                        .get(fs, tree, key.as_bytes(), limits.current)?
+                        .value
+                        .map(|value| {
+                            let record = decode_stored_record(value.as_slice())?;
+                            if record.id() != *id || record.modified_revision() > base.anchor.0 {
+                                return Err(GraphDiskError::IndexCorrupt);
+                            }
+                            Ok(record)
+                        })
+                        .transpose()?,
+                }
             }
             GraphReadRequest::RecordAt { id, revision } => {
                 if *revision > base.anchor.0 {

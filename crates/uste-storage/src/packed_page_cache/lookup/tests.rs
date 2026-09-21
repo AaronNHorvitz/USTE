@@ -158,6 +158,31 @@ fn structured_cache_keys_order_logical_bytes_inside_one_shared_zeroizing_identit
 }
 
 #[test]
+fn scoped_mapper_reads_the_same_resident_allocation_without_an_output_copy() {
+    let identity = Identity([11; IDENTITY_BYTES]);
+    let mut cache = LookupCache::new(MINIMUM).unwrap();
+    cache
+        .insert(identity, b"mapped", b"resident plaintext", work())
+        .unwrap();
+    let mut first_map = Some(|bytes: &[u8]| (bytes.as_ptr() as usize, bytes.len(), bytes[0]));
+    let (first, first_work) = cache
+        .get_with(identity, b"mapped", limits(), &mut first_map)
+        .unwrap()
+        .unwrap();
+    let mut second_map = Some(|bytes: &[u8]| (bytes.as_ptr() as usize, bytes.len(), bytes[0]));
+    let (second, second_work) = cache
+        .get_with(identity, b"mapped", limits(), &mut second_map)
+        .unwrap()
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.1, b"resident plaintext".len());
+    assert_eq!(first.2, b'r');
+    assert_eq!((first_work, second_work), (work(), work()));
+    assert_eq!(cache.report().unwrap().hits, 2);
+    assert_invariants(&cache);
+}
+
+#[test]
 fn positive_lookup_cache_matches_independent_variable_byte_lru() {
     let mut cache = LookupCache::new(MINIMUM).unwrap();
     let mut reference: Vec<(u8, usize)> = Vec::new();

@@ -30,6 +30,19 @@ fn positive_cache_hits_avoid_decryption_and_absence_is_never_retained() {
     assert_eq!((after.hits, after.misses), (before.hits, before.misses));
     assert_eq!(after.lookup.unwrap().hits, before.lookup.unwrap().hits + 1);
     assert_eq!(after.lookup.unwrap().resident_values, 1);
+    f.fs.arm(FaultPlan::default()).unwrap();
+    let mapped = f
+        .store
+        .packed_tree_get_cached_with(&mut f.fs, tree, b"b", reads(), &mut cache, |bytes| {
+            (bytes.len(), bytes.first().copied())
+        })
+        .unwrap();
+    assert_eq!(mapped.value, Some((20_000, Some(9))));
+    assert_eq!(mapped.report, cold.report);
+    assert_eq!(f.fs.operation_count(Operation::ReadAt), 0);
+    let mapped_report = cache.report().unwrap().lookup.unwrap();
+    assert_eq!(mapped_report.hits, after.lookup.unwrap().hits + 1);
+    assert_eq!(mapped_report.resident_values, 1);
     for _ in 0..3 {
         assert!(
             f.store
@@ -41,8 +54,8 @@ fn positive_cache_hits_avoid_decryption_and_absence_is_never_retained() {
     }
     let missing = cache.report().unwrap().lookup.unwrap();
     assert_eq!(missing.resident_values, 1);
-    assert_eq!(missing.hits, after.lookup.unwrap().hits);
-    assert_eq!(missing.misses, after.lookup.unwrap().misses + 3);
+    assert_eq!(missing.hits, mapped_report.hits);
+    assert_eq!(missing.misses, mapped_report.misses + 3);
     assert!(cache.report().unwrap().accounted_bytes <= 256 * 1024);
     f.store.vault.lock();
     assert!(

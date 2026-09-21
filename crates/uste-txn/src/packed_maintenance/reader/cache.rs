@@ -22,6 +22,22 @@ where
             .packed_tree_get_cached(filesystem, tree, key, limits, cache)
             .map_err(TransactionError::Storage)
     }
+    /// Convert a successful cached value while borrowing resident plaintext. The result cannot
+    /// borrow from the cache; all scope, owner, session and proof-work checks are unchanged.
+    pub fn get_cached_with<R>(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        key: &[u8],
+        limits: TreeLookupLimits,
+        cache: &mut PackedPageCache,
+        map: impl FnOnce(&[u8]) -> R,
+    ) -> Result<uste_storage::packed_tree_lookup::MappedTreeLookupResult<R>, TransactionError> {
+        self.check(tree.context())?;
+        self.journal
+            .packed_tree_get_cached_with(filesystem, tree, key, limits, cache, map)
+            .map_err(TransactionError::Storage)
+    }
     pub fn next_cached(
         &self,
         filesystem: &mut F,

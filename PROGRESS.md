@@ -1,6 +1,38 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-20 · Branch: `codex/uste-implementation`
+Updated: 2026-09-21 · Branch: `codex/uste-implementation`
+
+## Latest verified implementation — scoped positive-cache value decoding (Decision 0224)
+
+D0223 is committed/pushed as `c14ffba`. D0224 adds a scoped positive-cache mapper so cached graph
+current-record point reads and expansion fetches decode resident plaintext without first allocating
+and copying the entire encoded value. The mapper result cannot borrow from the cache. Exact request,
+commitment, canonical-proof, owner/session, work-limit and cache-identity checks remain ahead of
+plaintext access; cache integrity/LRU updates complete before the mapper runs. Misses are counted
+once and use the unchanged authenticated lookup/admission path. Cold/cache-disabled reads,
+authorization, corruption checks, graph work charging, cache accounting/counters, zeroization,
+on-disk formats and the page-only benchmark default are unchanged.
+
+Four corrected focused tests passed: same-allocation mapped hits, mapped warm hit with zero adapter
+reads, positive graph point/history warmth, and expansion exact-work/narrow-limit behavior. An
+initial end-to-end expectation omitted the new mapped hit and was corrected; initial strict Clippy
+removed one unnecessary qualification. No product behavior or limit was weakened. The final full
+workspace command passed **757 tests**, zero failures/ignores, then strict Clippy and
+warnings-denied docs. It ran anomalously slowly versus D0222 (notably graph disk 128/22,010.75 s,
+replay checkpoint 50/4,568.87 s, storage unit 244/1,344.90 s and transaction integration
+118/4,819.51 s) while the enclosing cgroup reported no CPU throttling. Treat this only as valid
+correctness evidence, not performance data. Log: `/tmp/uste-d224-workspace-verification.log`.
+
+The standalone native release gate passed **136 active tests with five unchanged opt-in ignores**
+and strict Clippy; log `/tmp/uste-d224-native-verification.log`. Both gates used one Cargo job, one
+test thread and one heavy workload at a time inside `uste-codex.scope`, with the inherited 4 GiB
+per-process address-space limit. The cumulative shared scope peaked at 5,371,727,872 bytes and
+143,224,832 bytes swap, crossed its 5 GiB soft watermark (`high=14528`), and recorded zero
+maximum-limit/OOM events; these are not isolated workload RSS figures. Root and standalone
+formatting, `git diff --check`, `scripts/check_docs.py` (298 links) and
+`scripts/check_task_graph.py` (68 tasks) passed. Next review/commit/push this verified increment,
+then measure it once with the unchanged supervised retained-fixture protocol. No performance,
+T-20, M1 or qualification completion claim yet.
 
 ## Latest development observation — allocation-free cache sampling (Decision 0223)
 

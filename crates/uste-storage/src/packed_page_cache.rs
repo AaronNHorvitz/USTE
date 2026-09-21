@@ -231,6 +231,23 @@ impl PackedPageCache {
             .ok_or(StorageError::InvalidState)?
             .get(identity, key, limits)
     }
+    pub(crate) fn lookup_get_with<W, E: EntropySource, R, F: FnOnce(&[u8]) -> R>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        key: &[u8],
+        limits: TreeLookupLimits,
+        map: &mut Option<F>,
+    ) -> Result<Option<(R, TreeLookupReport)>, StorageError> {
+        if self.lookup.is_none() {
+            return Ok(None);
+        }
+        self.check_lookup_session(vault)?;
+        self.lookup
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .get_with(identity, key, limits, map)
+    }
     pub(crate) fn lookup_insert<W, E: EntropySource>(
         &mut self,
         vault: &KeyVault<W, E>,

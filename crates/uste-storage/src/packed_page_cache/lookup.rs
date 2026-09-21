@@ -214,6 +214,62 @@ impl LookupCache {
         self.clock = next;
         Ok(Some((output, work)))
     }
+    pub(super) fn get_with<R, F: FnOnce(&[u8]) -> R>(
+        &mut self,
+        identity: Identity,
+        key: &[u8],
+        limits: TreeLookupLimits,
+        map: &mut Option<F>,
+    ) -> Result<Option<(R, TreeLookupReport)>, StorageError> {
+        validate_key(key)?;
+        let Some((stored, value)) = self
+            .values
+            .get(&identity.0)
+            .and_then(|values| values.get_key_value(key))
+        else {
+            increment(&mut self.misses, &mut self.overflowed);
+            return Ok(None);
+        };
+        let next = self
+            .clock
+            .checked_add(1)
+            .ok_or(StorageError::ResourceLimit)?;
+        increment(&mut self.hits, &mut self.overflowed);
+        if value.work.pages > limits.maximum_pages
+            || value.work.encoded_bytes > limits.maximum_encoded_bytes
+            || value.work.path_branches > limits.maximum_path_branches
+            || value.bytes.len() as u64 > limits.maximum_value_bytes
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        let work = value.work;
+        let old = value.stamp;
+        let stored = stored.0.clone();
+        let ordered = self
+            .order
+            .remove(&old)
+            .ok_or(StorageError::IntegrityFailure)?;
+        if !Arc::ptr_eq(&ordered, &stored) {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.order.insert(next, stored.clone());
+        self.values
+            .get_mut(&identity.0)
+            .and_then(|values| values.get_mut(key))
+            .ok_or(StorageError::IntegrityFailure)?
+            .stamp = next;
+        self.clock = next;
+        // Complete internal integrity/LRU updates before exposing plaintext to the mapper.
+        // `R` cannot borrow from this argument, so cache ownership never escapes.
+        let bytes = &self
+            .values
+            .get(&identity.0)
+            .and_then(|values| values.get(key))
+            .ok_or(StorageError::IntegrityFailure)?
+            .bytes;
+        let output = map.take().ok_or(StorageError::InvalidState)?(bytes);
+        Ok(Some((output, work)))
+    }
     pub(super) fn insert(
         &mut self,
         identity: Identity,

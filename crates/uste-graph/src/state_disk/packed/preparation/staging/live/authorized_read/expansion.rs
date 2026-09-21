@@ -158,20 +158,31 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
         };
         let tree = &self.base.trees[usize::from(FAMILY_CURRENT_RECORD - 1)];
         let key = id.record();
-        let result = match self.cache.as_deref_mut() {
-            Some(cache) => self
-                .index
-                .get_cached(self.fs, tree, key.as_bytes(), limits, cache),
-            None => self.index.get(self.fs, tree, key.as_bytes(), limits),
-        }?;
-        let value = result.value.ok_or(GraphDiskError::IndexCorrupt)?;
-        self.budget.charge(
-            result.report.pages,
-            result.report.encoded_bytes,
-            0,
-            value.as_slice().len() as u64,
-        )?;
-        let record = decode_stored_record(value.as_slice())?;
+        let (record, returned, report) = match self.cache.as_deref_mut() {
+            Some(cache) => {
+                let result = self.index.get_cached_with(
+                    self.fs,
+                    tree,
+                    key.as_bytes(),
+                    limits,
+                    cache,
+                    |bytes| (decode_stored_record(bytes), bytes.len() as u64),
+                )?;
+                let (record, returned) = result.value.ok_or(GraphDiskError::IndexCorrupt)?;
+                (record?, returned, result.report)
+            }
+            None => {
+                let result = self.index.get(self.fs, tree, key.as_bytes(), limits)?;
+                let value = result.value.ok_or(GraphDiskError::IndexCorrupt)?;
+                (
+                    decode_stored_record(value.as_slice())?,
+                    value.as_slice().len() as u64,
+                    result.report,
+                )
+            }
+        };
+        self.budget
+            .charge(report.pages, report.encoded_bytes, 0, returned)?;
         if record.id() != id || record.modified_revision() > self.base.anchor.0 {
             return Err(GraphDiskError::IndexCorrupt);
         }
