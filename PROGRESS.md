@@ -2,6 +2,33 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — allocation-preserving cursor handoff (Decision 0226)
+
+D0225 evidence is committed/pushed as `2bc2c01`. D0226 removes a redundant key/value allocation
+and copy for every packed secondary-scan candidate: `PackedCursorEntry::into_scan_entry` transfers
+the already-owned buffers into graph expansion. Entry validation remains before conversion;
+cursor proof work, returned-byte accounting, ordering, authorization, corruption checks, aggregate
+budgets, cache behavior and formats are unchanged. The prior graph path already copied plaintext
+into ordinary `IndexScanEntry` vectors for the same lifetime, so moving the sole retained buffers
+does not weaken its erasure boundary; non-consuming callers retain zeroizing drop behavior.
+
+Focused verification passed the exhaustive cursor bounds/reference test with exact key/value
+pointer preservation and both page-only/positive-cache expansion exact-work/narrow-limit cases,
+then strict affected-crate Clippy. The final full workspace command passed **757 tests**, zero
+failures/ignores, strict Clippy and warnings-denied docs. Long-suite timings remained anomalous but
+close to D0224: graph disk 128/21,561.80 s, replay checkpoint 50/4,383.91 s, storage unit
+244/1,327.68 s and transaction integration 118/4,769.96 s. Log:
+`/tmp/uste-d226-workspace-verification.log`.
+
+The standalone native release gate passed **136 active tests with five unchanged opt-in ignores**
+and strict Clippy; log `/tmp/uste-d226-native-verification.log`. Both gates used one Cargo job,
+one test thread and one heavy workload at a time with the inherited 4 GiB process address-space
+limit. The cumulative shared scope peaked at 5,372,850,176 bytes and 143,224,832 bytes swap,
+recorded 22,368 soft-limit events, and recorded zero maximum-limit/OOM/CPU-throttle events; these
+are not isolated workload RSS figures. Next run formatting/doc/task checks, commit/push this
+verified increment, then measure it once with the unchanged supervised retained-fixture protocol.
+No performance, T-20, M1 or qualification completion claim yet.
+
 ## Latest development observation — scoped cache decoding (Decision 0225)
 
 D0224 is committed/pushed as `cbe4880`; release executable SHA-256

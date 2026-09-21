@@ -38,7 +38,12 @@ fn collect<F: FileSystem>(
     let mut out = Vec::new();
     while let Some(entry) = cursor.next(fs, &directory, vault)? {
         assert_eq!(format!("{entry:?}"), "PackedCursorEntry([REDACTED])");
-        out.push((entry.key().to_vec(), entry.value().to_vec()));
+        let key_pointer = entry.key().as_ptr();
+        let value_pointer = entry.value().as_ptr();
+        let entry = entry.into_scan_entry();
+        assert_eq!(entry.key.as_ptr(), key_pointer);
+        assert_eq!(entry.value.as_ptr(), value_pointer);
+        out.push((entry.key, entry.value));
     }
     Ok(out)
 }

@@ -1,6 +1,6 @@
 //! In-process range cursor over a caller-admitted canonical root; no authorization or publication.
 use crate::{
-    FileSystem,
+    FileSystem, IndexScanEntry,
     journal::StorageError,
     ordered_commitment::{
         self as logical, BranchProof, CommitmentContext, CommitmentLimits, LeafProof, LookupProof,
@@ -52,6 +52,13 @@ impl PackedCursorEntry {
     }
     pub fn value(&self) -> &[u8] {
         self.value.as_slice()
+    }
+    /// Transfer the already-owned cursor buffers without allocating or copying them again.
+    pub fn into_scan_entry(mut self) -> IndexScanEntry {
+        IndexScanEntry {
+            key: core::mem::take(&mut *self.key),
+            value: self.value.into_vec(),
+        }
     }
 }
 impl core::fmt::Debug for PackedCursorEntry {

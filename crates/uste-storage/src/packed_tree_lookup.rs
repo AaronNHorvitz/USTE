@@ -53,6 +53,9 @@ impl PackedLookupValue {
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
+    pub(crate) fn into_vec(mut self) -> Vec<u8> {
+        core::mem::take(&mut *self.0)
+    }
 }
 impl core::fmt::Debug for PackedLookupValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

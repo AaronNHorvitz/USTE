@@ -130,10 +130,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             entries
                 .try_reserve(1)
                 .map_err(|_| StorageError::ResourceLimit)?;
-            entries.push(IndexScanEntry {
-                key: entry.key().to_vec(),
-                value: entry.value().to_vec(),
-            });
+            entries.push(entry.into_scan_entry());
         }
         let report = cursor.report();
         self.budget.charge(
