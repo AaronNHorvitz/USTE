@@ -2,6 +2,28 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest development observation — scoped cache decoding (Decision 0225)
+
+D0224 is committed/pushed as `cbe4880`; release executable SHA-256
+`a4141186de339271fc138e6f3b447a0d999f4aa7bd2e59d2ba5ea02450937224`. Its single supervised
+wide positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0223 with normalized SHA-256
+`c848e2b1573de9733014d908a1d51a281fb5c6dc932bfdc39559ca0f0fb9fe78`: 96 warm-ups, 768
+executions, 40 groups, digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`,
+successful work, cache counters, adapter I/O and vault work. This is cross-binary, sequential and
+nonqualifying.
+
+The round took 656,099 ms versus 673,948 ms (-2.65%). Retained all-class successful p99 is
+**8.814519 / 603.351627 / 373.695491 / 1260.417563 ms**; all four depths improved in this one
+observation, but four-hop remains over five times the unchanged 250 ms target. No target or T-20
+gate passes. Process peak RSS 265,372 KiB; wall/user/system 830.22/780.75/45.96 seconds; zero
+process swaps. The enclosing shared scope's prior high, memory-peak and swap-peak counters did not
+increase during the run, and maximum/OOM events remained zero. Source certificate and oracle hashes
+stayed pinned. Local artifacts: `experiments/t20-bench/target/native-d224-positive.Vpgiy5`;
+complete report: `docs/evidence/scoped-positive-cache-value-decoding-sampling.json`. Next
+commit/push this evidence, then profile or remove a higher-level repeated traversal cost before
+another capacity campaign. Keep the page-only default and all qualification prerequisites.
+
 ## Latest verified implementation — scoped positive-cache value decoding (Decision 0224)
 
 D0223 is committed/pushed as `c14ffba`. D0224 adds a scoped positive-cache mapper so cached graph
