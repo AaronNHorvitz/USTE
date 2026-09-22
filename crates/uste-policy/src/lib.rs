@@ -494,6 +494,32 @@ pub struct PolicyKernel {
     authority: Arc<PolicyAuthority>,
 }
 
+/// Borrowed immediate authorization against one principal grant and policy version. The evaluator
+/// cannot outlive the immutable kernel borrow, so policy replacement requires it to be dropped.
+pub struct AuthorizationEvaluator<'a> {
+    scope: NamespaceRef,
+    version: PolicyVersion,
+    grant: &'a NamespaceGrant,
+}
+
+impl AuthorizationEvaluator<'_> {
+    pub fn authorize(&self, action: Action, target: Target) -> Result<(), PolicyError> {
+        if target.scope() != self.scope || !self.grant.permissions.contains(action) {
+            return Err(PolicyError::Unauthorized);
+        }
+        if let Target::Record(record) = target
+            && self
+                .grant
+                .record_rules
+                .get(&record.record())
+                .is_some_and(|rule| rule.deny.contains(action))
+        {
+            return Err(PolicyError::Unauthorized);
+        }
+        Ok(())
+    }
+}
+
 impl fmt::Debug for PolicyKernel {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -540,32 +566,38 @@ impl PolicyKernel {
         action: Action,
         target: Target,
     ) -> Result<AuthorizationLease, PolicyError> {
+        let evaluator = self.authorization_evaluator(principal, target.scope())?;
+        evaluator.authorize(action, target)?;
+        let version = evaluator.version;
+        let scope = evaluator.scope;
+        Ok(AuthorizationLease {
+            principal: principal.digest,
+            scope,
+            action,
+            version,
+            authority: Arc::clone(&self.authority),
+        })
+    }
+
+    /// Resolve the principal and namespace once for repeated immediate target checks. This uses
+    /// the same permission and record-denial rules as `authorize` but does not create a lease.
+    pub fn authorization_evaluator(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        scope: NamespaceRef,
+    ) -> Result<AuthorizationEvaluator<'_>, PolicyError> {
         if !Arc::ptr_eq(&self.authority, &principal.authority) {
             return Err(PolicyError::Unauthorized);
         }
-        let scope = target.scope();
         let policy = self.policies.get(&scope).ok_or(PolicyError::Unauthorized)?;
         let grant = policy
             .grants
             .get(&principal.digest)
             .ok_or(PolicyError::Unauthorized)?;
-        if !grant.permissions.contains(action) {
-            return Err(PolicyError::Unauthorized);
-        }
-        if let Target::Record(record) = target
-            && grant
-                .record_rules
-                .get(&record.record())
-                .is_some_and(|rule| rule.deny.contains(action))
-        {
-            return Err(PolicyError::Unauthorized);
-        }
-        Ok(AuthorizationLease {
-            principal: principal.digest,
+        Ok(AuthorizationEvaluator {
             scope,
-            action,
             version: policy.version,
-            authority: Arc::clone(&self.authority),
+            grant,
         })
     }
 
@@ -722,6 +754,25 @@ mod tests {
             ),
             Err(PolicyError::Unauthorized)
         );
+        let evaluator = kernel.authorization_evaluator(&alice, scope(2)).unwrap();
+        for (action, target) in [
+            (Action::ReadBlob, Target::Namespace(scope(2))),
+            (Action::ReadHistory, Target::Namespace(scope(2))),
+            (
+                Action::ReadRecord,
+                Target::Record(RecordRef::new(
+                    scope(2).database(),
+                    scope(2).namespace(),
+                    denied,
+                )),
+            ),
+            (Action::ReadRecord, Target::Namespace(scope(3))),
+        ] {
+            assert_eq!(
+                evaluator.authorize(action, target),
+                kernel.authorize(&alice, action, target).map(|_| ())
+            );
+        }
         assert!(!format!("{alice:?}").contains('7'));
     }
 
@@ -779,6 +830,10 @@ mod tests {
             ),
             Err(PolicyError::Unauthorized)
         );
+        assert!(matches!(
+            first.authorization_evaluator(&forged_for_first, scope(6)),
+            Err(PolicyError::Unauthorized)
+        ));
     }
 
     #[test]

@@ -2,6 +2,33 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrowed authorization evaluator (Decision 0248)
+
+D0247 is committed/pushed as `d7aec04`. It left retained four-hop p99 at 489.870038 ms with zero
+adapter reads. Inspection found every candidate/reference authorization repeated namespace-policy
+and principal-grant lookup and created then dropped a lease with an `Arc` clone.
+
+D0248 adds a scope-bound evaluator borrowing one immutable policy grant/version. Existing
+lease-producing authorization delegates to its exact target-scope, permission and per-record-deny
+checks, preventing semantic drift. The packed reader keeps top-level authorization and durable
+policy validation, resolves the evaluator once per request, and polls cancellation before every
+candidate check. The borrow prevents policy replacement while active; no evaluator or version
+survives the read. Foreign scopes/kernels, missing grants, denied actions and record denials remain
+closed.
+
+Policy equivalence tests cover allowed, denied-action, record-denied, foreign-scope and
+foreign-kernel cases. Packed graph tests preserve permission/cancellation boundaries and prove
+revocation denies before vault work. Focused strict Clippy passed. The complete optimized workspace
+gate passed **764 tests** and strict all-target/all-feature Clippy. The complete optimized
+standalone T-20 gate passed **142 active tests with five unchanged opt-in ignores** and strict
+Clippy. Logs: `/tmp/uste-d248-workspace-verification.log` and
+`/tmp/uste-d248-native-verification.log`. Gates used one job/thread and the 4 GiB process limit
+under verified enclosing caps; maximum/OOM/CPU-throttle counters remained zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation.
+Preserve authorization, cancellation, existing defaults and all qualification prerequisites.
+
 ## Latest development observation — borrowed range-hit mapping (Decision 0247)
 
 D0246 is committed/pushed as `6d25df6`. Its one supervised 96/128/32 MiB observation completed

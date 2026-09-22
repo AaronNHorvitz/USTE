@@ -77,13 +77,15 @@ where
             .map_err(crate::authorized::map_requirement_error)
             .map_err(auth)?;
         let scope = self.metadata.inner.scope();
+        let evaluator = self
+            .metadata
+            .policy
+            .authorization_evaluator(principal, scope)
+            .map_err(AuthorizedError::from)
+            .map_err(auth)?;
         for requirement in requirements.iter() {
-            if requirement.target.scope() != scope {
-                return Err(auth(AuthorizedError::Unauthorized));
-            }
-            self.metadata
-                .policy
-                .authorize(principal, requirement.action, requirement.target)
+            evaluator
+                .authorize(requirement.action, requirement.target)
                 .map_err(AuthorizedError::from)
                 .map_err(auth)?;
         }
@@ -97,13 +99,7 @@ where
         let mut observed_cancel = false;
         let mut authorize_candidate = |action: Action, target: Target| {
             observed_cancel |= cancellation.is_cancelled();
-            !observed_cancel
-                && target.scope() == scope
-                && self
-                    .metadata
-                    .policy
-                    .authorize(principal, action, target)
-                    .is_ok()
+            !observed_cancel && evaluator.authorize(action, target).is_ok()
         };
         let output = S::read_packed_authorized(
             self.metadata.inner,
