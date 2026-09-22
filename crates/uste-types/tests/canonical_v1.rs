@@ -1,10 +1,11 @@
 use core::str::FromStr;
 
 use uste_types::{
-    BoundedString, DatabaseId, DecodeError, IdempotencyKey, MAX_COLLECTION_ENTRIES,
-    MAX_EPOCH_SECONDS, MAX_INLINE_BYTES, MAX_NESTING_DEPTH, MAX_VALUE_NODES, MAX_VALUE_PAYLOAD,
-    MIN_EPOCH_SECONDS, NamespaceId, RecordId, RecordRef, SourceEventId, TransactionId, UtcInstant,
-    Value, decode_map_value, decode_value, encode_value, encoded_len,
+    BorrowedMapValue, BoundedString, DatabaseId, DecodeError, IdempotencyKey,
+    MAX_COLLECTION_ENTRIES, MAX_EPOCH_SECONDS, MAX_INLINE_BYTES, MAX_NESTING_DEPTH,
+    MAX_VALUE_NODES, MAX_VALUE_PAYLOAD, MIN_EPOCH_SECONDS, NamespaceId, RecordId, RecordRef,
+    SourceEventId, TransactionId, UtcInstant, Value, decode_borrowed_map_value, decode_map_value,
+    decode_value, encode_value, encoded_len,
 };
 
 const VECTORS: &str = include_str!("../../../acceptance/r1/canonical-v1.tsv");
@@ -54,6 +55,40 @@ fn borrowed_root_map_keys_preserve_canonical_validation_and_owned_values() {
     );
     for cut in 0..encoded.len() {
         assert!(decode_map_value(&encoded[..cut]).is_err());
+    }
+}
+
+#[test]
+fn borrowed_root_map_direct_strings_borrow_without_changing_nested_values() {
+    let value = Value::map(vec![
+        (
+            BoundedString::new("direct".into()).unwrap(),
+            Value::string("borrowed".into()).unwrap(),
+        ),
+        (
+            BoundedString::new("nested".into()).unwrap(),
+            Value::list(vec![Value::string("owned".into()).unwrap()]).unwrap(),
+        ),
+    ])
+    .unwrap();
+    let encoded = encode_value(&value).unwrap();
+    let entries = decode_borrowed_map_value(&encoded).unwrap().unwrap();
+    assert_eq!(entries[0], ("direct", BorrowedMapValue::String("borrowed")));
+    assert!(matches!(
+        entries[1].1,
+        BorrowedMapValue::Value(Value::List(_))
+    ));
+    let bounds = encoded.as_ptr_range();
+    let BorrowedMapValue::String(text) = entries[0].1 else {
+        unreachable!();
+    };
+    assert!(text.as_ptr() >= bounds.start && text.as_ptr() < bounds.end);
+    assert_eq!(
+        decode_borrowed_map_value(&encode_value(&Value::Null).unwrap()),
+        Ok(None)
+    );
+    for cut in 0..encoded.len() {
+        assert!(decode_borrowed_map_value(&encoded[..cut]).is_err());
     }
 }
 
@@ -238,6 +273,10 @@ fn map_key_order_utf8_and_normalization_are_not_ambiguous() {
         decode_map_value(&frame(&duplicate)),
         Err(DecodeError::MapKeysOutOfOrder)
     );
+    assert_eq!(
+        decode_borrowed_map_value(&frame(&duplicate)),
+        Err(DecodeError::MapKeysOutOfOrder)
+    );
     let descending = [0x08, 0x02, 0x01, b'b', 0x00, 0x01, b'a', 0x00];
     assert_eq!(
         decode_value(&frame(&descending)),
@@ -248,11 +287,19 @@ fn map_key_order_utf8_and_normalization_are_not_ambiguous() {
         Err(DecodeError::MapKeysOutOfOrder)
     );
     assert_eq!(
+        decode_borrowed_map_value(&frame(&descending)),
+        Err(DecodeError::MapKeysOutOfOrder)
+    );
+    assert_eq!(
         decode_value(&frame(&[0x06, 0x01, 0xff])),
         Err(DecodeError::InvalidUtf8)
     );
     assert_eq!(
         decode_map_value(&frame(&[0x08, 0x01, 0x01, 0xff, 0x00])),
+        Err(DecodeError::InvalidUtf8)
+    );
+    assert_eq!(
+        decode_borrowed_map_value(&frame(&[0x08, 0x01, 0x01, 0xff, 0x00])),
         Err(DecodeError::InvalidUtf8)
     );
 

@@ -1,13 +1,15 @@
 //! Strict canonical graph transaction codec built on the accepted format-1.0 value frame.
 
 use core::fmt;
+use std::borrow::Cow;
+
 use uste_policy::{
     NamespaceGrant, NamespacePolicy, PermissionSet, PolicyVersion, PrincipalDigest, QuotaLimits,
 };
 use uste_types::{
-    BoundedBytes, BoundedList, BoundedString, CanonicalMap, CommitRevision, DatabaseId,
-    DecodeError, EncodeError, NamespaceId, NamespaceRef, RecordId, RecordRef, UtcInstant, Value,
-    decode_map_value, decode_value, encode_value,
+    BorrowedMapValue, BoundedBytes, BoundedList, BoundedString, CanonicalMap, CommitRevision,
+    DatabaseId, DecodeError, EncodeError, NamespaceId, NamespaceRef, RecordId, RecordRef,
+    UtcInstant, Value, decode_borrowed_map_value, decode_value, encode_value,
 };
 
 use crate::{
@@ -347,56 +349,56 @@ pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecErr
     )?)
 }
 
-fn decode_record_fields(mut fields: impl RecordFields) -> Result<Record, GraphCodecError> {
-    let kind = take_text(fields.take("kind")?)?;
-    let record = match kind.as_str() {
+fn decode_record_fields<'a>(mut fields: impl RecordFields<'a>) -> Result<Record, GraphCodecError> {
+    let kind = fields.take_text("kind")?;
+    let record = match kind.as_ref() {
         "entity" => Record::Entity(EntityRecord {
-            id: take_record(fields.take("id")?)?,
-            version: take_record_version(fields.take("version")?)?,
-            lifecycle: match take_text(fields.take("lifecycle")?)?.as_str() {
+            id: take_record(fields.take_value("id")?)?,
+            version: take_record_version(fields.take_value("version")?)?,
+            lifecycle: match fields.take_text("lifecycle")?.as_ref() {
                 "active" => EntityLifecycle::Active,
                 "deleted" => EntityLifecycle::Deleted,
                 _ => return Err(GraphCodecError::InvalidEnum),
             },
-            entity_type: take_bounded_text(fields.take("entity_type")?)?,
-            schema_version: take_u64(fields.take("schema_version")?)?,
-            properties: fields.take("properties")?,
-            created_revision: take_revision(fields.take("created_revision")?)?,
-            modified_revision: take_revision(fields.take("modified_revision")?)?,
+            entity_type: take_bounded_text(fields.take_value("entity_type")?)?,
+            schema_version: take_u64(fields.take_value("schema_version")?)?,
+            properties: fields.take_value("properties")?,
+            created_revision: take_revision(fields.take_value("created_revision")?)?,
+            modified_revision: take_revision(fields.take_value("modified_revision")?)?,
         }),
         "evidence" => Record::Evidence(EvidenceRecord {
-            id: take_record(fields.take("id")?)?,
-            version: take_record_version(fields.take("version")?)?,
-            digest: take_digest(fields.take("digest")?)?,
-            locator: take_bounded_text(fields.take("locator")?)?,
-            created_revision: take_revision(fields.take("created_revision")?)?,
+            id: take_record(fields.take_value("id")?)?,
+            version: take_record_version(fields.take_value("version")?)?,
+            digest: take_digest(fields.take_value("digest")?)?,
+            locator: take_bounded_text(fields.take_value("locator")?)?,
+            created_revision: take_revision(fields.take_value("created_revision")?)?,
         }),
         "assertion" => Record::Assertion(AssertionRecord {
-            id: take_record(fields.take("id")?)?,
-            version: take_record_version(fields.take("version")?)?,
-            subject: take_record(fields.take("subject")?)?,
-            predicate: take_bounded_text(fields.take("predicate")?)?,
-            object: fields.take("object")?,
-            evidence: decode_refs(fields.take("evidence")?)?,
-            status: decode_assertion_status(fields.take("status")?)?,
-            valid_time: decode_valid_time(fields.take("valid_time")?)?,
-            correction_of: decode_optional(fields.take("correction_of")?, take_record)?,
-            recorded_revision: take_revision(fields.take("recorded_revision")?)?,
-            modified_revision: take_revision(fields.take("modified_revision")?)?,
+            id: take_record(fields.take_value("id")?)?,
+            version: take_record_version(fields.take_value("version")?)?,
+            subject: take_record(fields.take_value("subject")?)?,
+            predicate: take_bounded_text(fields.take_value("predicate")?)?,
+            object: fields.take_value("object")?,
+            evidence: decode_refs(fields.take_value("evidence")?)?,
+            status: assertion_status(fields.take_text("status")?.as_ref())?,
+            valid_time: decode_valid_time(fields.take_value("valid_time")?)?,
+            correction_of: decode_optional(fields.take_value("correction_of")?, take_record)?,
+            recorded_revision: take_revision(fields.take_value("recorded_revision")?)?,
+            modified_revision: take_revision(fields.take_value("modified_revision")?)?,
         }),
         "relationship" => Record::Relationship(RelationshipRecord {
-            id: take_record(fields.take("id")?)?,
-            version: take_record_version(fields.take("version")?)?,
-            from: take_record(fields.take("from")?)?,
-            to: take_record(fields.take("to")?)?,
-            relationship_type: take_bounded_text(fields.take("relationship_type")?)?,
-            properties: fields.take("properties")?,
-            evidence: decode_refs(fields.take("evidence")?)?,
-            status: decode_assertion_status(fields.take("status")?)?,
-            valid_time: decode_valid_time(fields.take("valid_time")?)?,
-            correction_of: decode_optional(fields.take("correction_of")?, take_record)?,
-            recorded_revision: take_revision(fields.take("recorded_revision")?)?,
-            modified_revision: take_revision(fields.take("modified_revision")?)?,
+            id: take_record(fields.take_value("id")?)?,
+            version: take_record_version(fields.take_value("version")?)?,
+            from: take_record(fields.take_value("from")?)?,
+            to: take_record(fields.take_value("to")?)?,
+            relationship_type: take_bounded_text(fields.take_value("relationship_type")?)?,
+            properties: fields.take_value("properties")?,
+            evidence: decode_refs(fields.take_value("evidence")?)?,
+            status: assertion_status(fields.take_text("status")?.as_ref())?,
+            valid_time: decode_valid_time(fields.take_value("valid_time")?)?,
+            correction_of: decode_optional(fields.take_value("correction_of")?, take_record)?,
+            recorded_revision: take_revision(fields.take_value("recorded_revision")?)?,
+            modified_revision: take_revision(fields.take_value("modified_revision")?)?,
         }),
         _ => return Err(GraphCodecError::InvalidEnum),
     };
@@ -406,7 +408,7 @@ fn decode_record_fields(mut fields: impl RecordFields) -> Result<Record, GraphCo
 
 /// Decode one complete canonical stored record from a trusted derived projection.
 pub fn decode_stored_record(input: &[u8]) -> Result<Record, GraphCodecError> {
-    let fields = decode_map_value(input)
+    let fields = decode_borrowed_map_value(input)
         .map_err(GraphCodecError::Decode)?
         .ok_or(GraphCodecError::WrongType)?;
     decode_record_fields(BorrowedFields(fields))
@@ -443,8 +445,8 @@ const fn assertion_status_name(status: AssertionStatus) -> &'static str {
     }
 }
 
-fn decode_assertion_status(value: Value) -> Result<AssertionStatus, GraphCodecError> {
-    match take_text(value)?.as_str() {
+fn assertion_status(value: &str) -> Result<AssertionStatus, GraphCodecError> {
+    match value {
         "proposed" => Ok(AssertionStatus::Proposed),
         "accepted" => Ok(AssertionStatus::Accepted),
         "rejected" => Ok(AssertionStatus::Rejected),
@@ -997,8 +999,9 @@ fn text(value: &str) -> Result<Value, GraphCodecError> {
 /// graph records have a small fixed field count; linear removal reuses the decoded allocation.
 struct Fields(Vec<(BoundedString, Value)>);
 
-trait RecordFields: Sized {
-    fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError>;
+trait RecordFields<'a>: Sized {
+    fn take_value(&mut self, name: &'static str) -> Result<Value, GraphCodecError>;
+    fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError>;
     fn finish(self) -> Result<(), GraphCodecError>;
 }
 
@@ -1009,9 +1012,7 @@ impl Fields {
         };
         Ok(Self(map.into_vec()))
     }
-}
 
-impl RecordFields for Fields {
     fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
         let index = self
             .0
@@ -1019,6 +1020,16 @@ impl RecordFields for Fields {
             .position(|(key, _)| key.as_str() == name)
             .ok_or(GraphCodecError::MissingField(name))?;
         Ok(self.0.swap_remove(index).1)
+    }
+}
+
+impl<'a> RecordFields<'a> for Fields {
+    fn take_value(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
+        self.take(name)
+    }
+
+    fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError> {
+        take_text(self.take(name)?).map(Cow::Owned)
     }
 
     fn finish(self) -> Result<(), GraphCodecError> {
@@ -1030,16 +1041,34 @@ impl RecordFields for Fields {
     }
 }
 
-struct BorrowedFields<'a>(Vec<(&'a str, Value)>);
+struct BorrowedFields<'a>(Vec<(&'a str, BorrowedMapValue<'a>)>);
 
-impl RecordFields for BorrowedFields<'_> {
-    fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
+impl<'a> BorrowedFields<'a> {
+    fn take(&mut self, name: &'static str) -> Result<BorrowedMapValue<'a>, GraphCodecError> {
         let index = self
             .0
             .iter()
             .position(|(key, _)| *key == name)
             .ok_or(GraphCodecError::MissingField(name))?;
         Ok(self.0.swap_remove(index).1)
+    }
+}
+
+impl<'a> RecordFields<'a> for BorrowedFields<'a> {
+    fn take_value(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::String(value) => BoundedString::new(value.to_owned())
+                .map(Value::String)
+                .map_err(|_| GraphCodecError::ResourceLimit),
+            BorrowedMapValue::Value(value) => Ok(value),
+        }
+    }
+
+    fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::String(value) => Ok(Cow::Borrowed(value)),
+            BorrowedMapValue::Value(value) => take_text(value).map(Cow::Owned),
+        }
     }
 
     fn finish(self) -> Result<(), GraphCodecError> {

@@ -2,6 +2,31 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrow direct schema strings (Decision 0256)
+
+D0255 is committed/pushed as `83dd314`. It left retained four-hop p99 at 363.516682 ms with zero
+adapter reads. Inspection found stored-record decoding still allocated fixed direct string values
+solely to compare and discard `kind`, entity `lifecycle`, and assertion/relationship `status`.
+
+D0256 adds a separate canonical root-map path that borrows top-level keys and direct strings.
+Stored-record fixed discriminants consume those borrows; actual record text is re-owned before the
+input is released, and all nested values remain owned. Existing generic/key-only decoders and
+checkpoint decoding are unchanged. Frame/canonical/UTF-8/depth/node/byte validation, errors, graph
+semantics and persistent bytes are unchanged. No cache, plaintext retention, authority or
+configuration is added.
+
+Direct-string borrowing, nested ownership, truncation, valid non-map roots and malformed key order
+or UTF-8 have regression coverage. A targeted release oracle test passed. The complete optimized
+workspace gate passed **766 tests** and strict all-target/all-feature Clippy. The complete optimized
+standalone T-20 gate passed **142 active tests with five unchanged opt-in ignores** and strict
+Clippy. Logs: `/tmp/uste-d256-workspace-verification.log` and
+`/tmp/uste-d256-native-verification.log`. Gates used one job/thread and the 4 GiB process limit
+under verified enclosing caps; maximum/OOM/CPU-throttle counters remained zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation. Preserve
+canonical decoding, authorization, existing defaults and all qualification prerequisites.
+
 ## Latest development observation — borrowed canonical schema keys (Decision 0255)
 
 D0254 is committed/pushed as `8162f12`. Its one supervised 96/128/32 MiB observation completed

@@ -75,6 +75,32 @@ pub fn decode_value(input: &[u8]) -> Result<Value, DecodeError> {
 /// Nested values remain fully owned and obey the same depth, node and byte limits as
 /// [`decode_value`]. A valid non-map root returns `None`.
 pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, DecodeError> {
+    decode_map_entries(input, decode_payload)
+}
+
+/// One decoded root-map value whose direct string payload may borrow from the input frame.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BorrowedMapValue<'a> {
+    /// A direct string payload borrowed from the input frame.
+    String(&'a str),
+    /// Every other payload, including nested strings, in its ordinary owned representation.
+    Value(Value),
+}
+
+/// Decode a complete canonical root map while borrowing its keys and direct string values.
+///
+/// Nested values remain fully owned and all validation and resource limits match [`decode_value`].
+/// A valid non-map root returns `None`.
+pub fn decode_borrowed_map_value(
+    input: &[u8],
+) -> Result<Option<Vec<(&str, BorrowedMapValue<'_>)>>, DecodeError> {
+    decode_map_entries(input, decode_borrowed_map_payload)
+}
+
+fn decode_map_entries<'a, T>(
+    input: &'a [u8],
+    mut decode_entry: impl FnMut(&mut Cursor<'a>, usize, &mut DecodeBudget) -> Result<T, DecodeError>,
+) -> Result<Option<Vec<(&'a str, T)>>, DecodeError> {
     let payload_bytes = frame_payload(input)?;
     if payload_bytes.first().copied() != Some(MAP_TAG) {
         decode_value(input)?;
@@ -102,12 +128,26 @@ pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, Deco
             return Err(DecodeError::MapKeysOutOfOrder);
         }
         previous = Some(key.as_bytes());
-        entries.push((key, decode_payload(&mut payload, depth, &mut budget)?));
+        entries.push((key, decode_entry(&mut payload, depth, &mut budget)?));
     }
     if payload.remaining() != 0 {
         return Err(DecodeError::TrailingBytes);
     }
     Ok(Some(entries))
+}
+
+fn decode_borrowed_map_payload<'a>(
+    payload: &mut Cursor<'a>,
+    depth: usize,
+    budget: &mut DecodeBudget,
+) -> Result<BorrowedMapValue<'a>, DecodeError> {
+    if payload.peek()? != STRING_TAG {
+        return decode_payload(payload, depth, budget).map(BorrowedMapValue::Value);
+    }
+    budget.take_node()?;
+    let tag = payload.byte()?;
+    debug_assert_eq!(tag, STRING_TAG);
+    read_str(payload).map(BorrowedMapValue::String)
 }
 
 fn frame_payload(input: &[u8]) -> Result<&[u8], DecodeError> {
@@ -552,6 +592,13 @@ impl<'a> Cursor<'a> {
             .ok_or(DecodeError::UnexpectedEof)?;
         self.offset += 1;
         Ok(byte)
+    }
+
+    fn peek(&self) -> Result<u8, DecodeError> {
+        self.bytes
+            .get(self.offset)
+            .copied()
+            .ok_or(DecodeError::UnexpectedEof)
     }
 
     fn take(&mut self, length: usize) -> Result<&'a [u8], DecodeError> {
