@@ -2,6 +2,32 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — direct record-reference list decoding (Decision 0261)
+
+D0260 is committed/pushed as `9096e69`. Its one supervised 96/128/32 MiB observation completed
+against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768 executions
+and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. After removing only timing,
+percentile and RSS fields, the complete report exactly matches D0259 at SHA-256
+`c472dc13e72e3ed3fd5cd46776824223c89213f9c2dc9ec25bdcc653b633abd9`; all semantic and physical
+work evidence is unchanged.
+
+The range high-water remained 29,231,596 bytes with zero evictions/evicted bytes. The retained half
+hit all 1,074,437 ranges with zero misses and zero adapter reads; empty reads remained 11,240,354.
+The round took 545,588 ms, 0.08% below D0259. Retained all-class successful p99 was **2.682137 /
+91.463877 / 64.022884 / 386.697762 ms**, changing by -0.86%, -0.46%, +3.43% and +1.81%. This single
+sequential uncontrolled observation cannot establish causality; four-hop remains 1.55 times the
+unchanged 250 ms target, so no target, T-20, M1 or qualification gate passes.
+
+Process peak RSS was 265,908 KiB; wall/user/system were 723.35/666.42/54.24 seconds with zero
+process swaps. Inputs and the D0260 binary stayed pinned. Shared memory/swap peaks were unchanged;
+soft-limit events increased by 1,599 while maximum/OOM/socket-memory/CPU-throttle counters did not
+increase. Complete report: `docs/evidence/direct-record-reference-list-sampling.json`; local
+artifacts: `experiments/t20-bench/target/native-d260-refs.16gJC0`.
+
+Next commit/push this evidence, then inspect another measured zero-I/O retained-path cost before an
+implementation change. Preserve existing defaults and all qualification prerequisites.
+
 ## Latest verified implementation — direct record-reference list decoding (Decision 0260)
 
 D0259 is committed/pushed as `6301de9`. It left retained four-hop p99 at 379.813938 ms with zero
