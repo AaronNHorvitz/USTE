@@ -35,6 +35,22 @@ pub fn query_correctness_with_lookup(
     )
 }
 
+pub fn query_correctness_with_ranges(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Range,
+        false,
+    )
+}
+
 pub fn query_correctness_wide(
     root: &Path,
     password_file: &Path,
@@ -63,6 +79,22 @@ pub fn query_correctness_wide_with_lookup(
         oracle_file,
         profile,
         QueryCacheMode::Positive,
+        true,
+    )
+}
+
+pub fn query_correctness_wide_with_ranges(
+    root: &Path,
+    password_file: &Path,
+    oracle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    query_mode(
+        root,
+        password_file,
+        oracle_file,
+        profile,
+        QueryCacheMode::Range,
         true,
     )
 }
@@ -179,7 +211,11 @@ fn query_mode(
     )
     .delta(setup_crypto)?;
     Ok(serde_json::json!({
-        "schema": "bm01-linux-packed-query-v1", "engine_benchmark": false,
+        "schema": if mode == QueryCacheMode::Range {
+            "bm01-linux-packed-range-query-v1"
+        } else {
+            "bm01-linux-packed-query-v1"
+        }, "engine_benchmark": false,
         "qualification": "nonqualifying-development-correctness", "filesystem_profile": "linux-x86_64-btrfs",
         "oracle_adjacency_memory_resident": false, "entities": profile.entities(), "relationships": profile.relationships(),
         "frontier": materialization_revision_count(profile), "queries": summary.expectations().len(),

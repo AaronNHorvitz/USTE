@@ -151,8 +151,10 @@ fn sample(
         "schema": match (mode, wide) {
             (QueryCacheMode::Pages, false) => "bm01-linux-packed-sampling-v1",
             (QueryCacheMode::Positive, false) => "bm01-linux-packed-lookup-sampling-v1",
+            (QueryCacheMode::Range, false) => "bm01-linux-packed-range-sampling-v1",
             (QueryCacheMode::Pages, true) => "bm01-linux-packed-wide-sampling-v1",
             (QueryCacheMode::Positive, true) => "bm01-linux-packed-wide-lookup-sampling-v1",
+            (QueryCacheMode::Range, true) => "bm01-linux-packed-wide-range-sampling-v1",
         }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",

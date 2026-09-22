@@ -16,7 +16,8 @@ mod query_cache;
 mod sampling;
 pub use query::{
     query_correctness, query_correctness_wide, query_correctness_wide_with_lookup,
-    query_correctness_with_lookup,
+    query_correctness_wide_with_ranges, query_correctness_with_lookup,
+    query_correctness_with_ranges,
 };
 pub use sampling::{
     sample_worker, sample_worker_wide, sample_worker_wide_with_lookup, sample_worker_with_lookup,

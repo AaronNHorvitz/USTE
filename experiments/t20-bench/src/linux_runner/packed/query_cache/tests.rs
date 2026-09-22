@@ -5,28 +5,37 @@ use uste_storage::packed_page_cache::PackedPageCache;
 fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() {
     assert_eq!(WIDE_TOTAL, uste_storage::MAX_INDEX_CACHE_BYTES);
     for wide in [false, true] {
-        for mode in [QueryCacheMode::Pages, QueryCacheMode::Positive] {
-            let (total, lookup, name) = mode.configuration(wide);
-            let cache = if lookup == 0 {
-                PackedPageCache::new(total)
-            } else {
-                PackedPageCache::new_with_lookup_budget(total, lookup)
+        for mode in [
+            QueryCacheMode::Pages,
+            QueryCacheMode::Positive,
+            QueryCacheMode::Range,
+        ] {
+            let (total, lookup, range, name) = mode.configuration(wide);
+            let cache = match mode {
+                QueryCacheMode::Pages => PackedPageCache::new(total),
+                QueryCacheMode::Positive => PackedPageCache::new_with_lookup_budget(total, lookup),
+                QueryCacheMode::Range => {
+                    PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range)
+                }
             }
             .unwrap();
             let r = cache.report().unwrap();
             let json = mode.report_with_size(r, wide).unwrap();
             assert_eq!(json["profile"], name);
             assert_eq!(json["total_budget_bytes"], total);
-            assert_eq!(json["page_budget_bytes"], total - lookup);
+            assert_eq!(json["page_budget_bytes"], total - lookup - range);
             assert_eq!(json["lookup_budget_bytes"], lookup);
             assert_eq!(json["total_accounted_bytes"], 0);
             assert!(mode.report_with_size(r, !wide).is_err());
-            let other = if lookup == 0 {
-                QueryCacheMode::Positive
-            } else {
-                QueryCacheMode::Pages
-            };
-            assert!(other.report_with_size(r, wide).is_err());
+            for other in [
+                QueryCacheMode::Pages,
+                QueryCacheMode::Positive,
+                QueryCacheMode::Range,
+            ] {
+                if mode != other {
+                    assert!(other.report_with_size(r, wide).is_err());
+                }
+            }
             for variant in 0..3 {
                 let mut wrong = r;
                 match variant {
@@ -37,6 +46,43 @@ fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() 
                 assert!(mode.report_with_size(wrong, wide).is_err());
             }
         }
+    }
+}
+
+#[test]
+fn native_range_cache_configuration_reports_its_independent_partition() {
+    let mut cache = PackedPageCache::new_with_lookup_and_range_budget(TOTAL, LOOKUP, RANGE)
+        .unwrap()
+        .report()
+        .unwrap();
+    let range = cache.range.as_mut().unwrap();
+    range.accounted_bytes = 8192;
+    range.resident_ranges = 3;
+    range.resident_entries = 7;
+    range.hits = 5;
+    range.misses = 4;
+    range.evictions = 2;
+    range.oversized_bypasses = 1;
+    cache.accounted_bytes = 8192;
+    let report = QueryCacheMode::Range.report(cache).unwrap();
+    assert_eq!(report["profile"], "packed-pages-positive-lookups-ranges-v1");
+    assert_eq!(report["page_budget_bytes"], TOTAL - LOOKUP - RANGE);
+    assert_eq!(report["range_budget_bytes"], RANGE);
+    assert_eq!(report["range"]["resident_ranges"], 3);
+    assert_eq!(report["range"]["resident_entries"], 7);
+    assert_eq!(report["range"]["hits"], 5);
+    assert_eq!(report["range"]["misses"], 4);
+    assert_eq!(report["range"]["evictions"], 2);
+    assert_eq!(report["range"]["oversized_bypasses"], 1);
+    for variant in 0..4 {
+        let mut wrong = cache;
+        match variant {
+            0 => wrong.range = None,
+            1 => wrong.range.as_mut().unwrap().budget_bytes += 1,
+            2 => wrong.range.as_mut().unwrap().accounted_bytes = RANGE + 1,
+            _ => wrong.accounted_bytes = TOTAL + 1,
+        }
+        assert!(QueryCacheMode::Range.report(wrong).is_err());
     }
 }
 

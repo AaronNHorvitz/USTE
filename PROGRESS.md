@@ -2,6 +2,26 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified tooling — explicit range-cache query profile (Decision 0236)
+
+D0235 is committed/pushed as `4edb1b4`. D0236 adds two distinct nonqualifying correctness commands:
+`linux-packed-range-query` splits 64 MiB into 32 MiB pages, 16 MiB positive lookups and 16 MiB
+ranges; `linux-packed-wide-range-query` splits 256 MiB into 64/64/128 MiB. Both use the new
+`bm01-linux-packed-range-query-v1` schema and distinct narrow/wide cache profile names. Range budget,
+accounted bytes, resident ranges/entries, hits, misses, evictions and oversized bypasses are emitted
+and strictly validated. Cross-size/cross-mode reports and missing, wrong-budget or over-accounted
+range reports refuse. Existing page-only and positive-lookup commands, budgets, profile names and
+JSON shapes are unchanged.
+
+The first compile caught missing public re-exports for the two new query functions; corrected before
+verification. Focused three-mode/schema tests passed. The complete optimized standalone T-20 gate
+passed **137 active tests with five unchanged ignores** and strict Clippy; log
+`/tmp/uste-d236-native-verification.log`. It used one Cargo job/thread, offline dependencies and the
+4 GiB process address-space limit. No workload ran, so there is no performance, T-20, M1 or
+qualification claim. Next commit/push this tooling increment, then add separate deadline-supervised
+range worker/parent commands plus strict parent validation before a single retained-fixture
+development observation.
+
 ## Latest verified implementation — bounded authenticated range results (Decision 0235)
 
 D0234 is committed/pushed as `cdb5b56`. D0235 adds an explicitly opt-in complete-range result
