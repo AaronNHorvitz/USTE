@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — small range cache (Decision 0240)
+
+D0239 is committed/pushed as `57920ee`. Its one supervised 112/128/16 MiB page/lookup/range sample
+completed against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768
+executions and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. The semantic subset again
+matches D0233 at SHA-256 `1ee6e2472d2cf96e80492d72ad1588c9133eb3be2014e8f02562bbaec51f76e1`.
+Lookup work exactly matches D0233 with zero evictions and retained misses.
+
+The 16 MiB range partition is still insufficient: warm-up recorded 70,636 evictions, the measured
+empty half 257,206, and the retained half 868,946. Retained range work had 205,491 hits / 868,946
+misses (19.13% hit rate). Terminal residency was only 8,789,091 bytes, so that gauge materially
+understates capacity pressure. Adapter reads were 9,600,066 empty (+16.12% versus D0233) and
+1,557,673 retained (-34.94%); the combined count was 4.65% higher.
+
+The round took 638,531 ms, 1.99% below D0233 and 40.59% below D0238. Retained all-class successful
+p99 is **4.008341 / 123.235164 / 84.051509 / 1294.381737 ms**. Depths one through three improve
+55.16%, 78.31% and 76.89% versus D0233; depth four regresses 2.43% and remains over five times the
+unchanged 250 ms target. This sequential uncontrolled-cache observation is noncausal and
+nonqualifying; no target, T-20 or M1 gate passes.
+
+Process peak RSS was 265,656 KiB; wall/user/system were 813.56/759.16/52.59 seconds with zero swaps.
+Source certificate, oracle and D0239 binary hashes stayed pinned. Shared cgroup peaks and soft-limit
+events stayed unchanged, with zero maximum/OOM/CPU-throttle events. Complete report:
+`docs/evidence/small-range-cache-sampling.json`; local artifacts:
+`experiments/t20-bench/target/native-d239-small-range.BCaDUS`. Next commit/push this evidence, then
+add exact range-cache high-water and evicted-byte accounting before choosing another partition.
+
 ## Latest verified tooling — small-range-cache sampling profile (Decision 0239)
 
 D0238 is committed/pushed as `63e07c3`. D0239 adds a distinct supervised
