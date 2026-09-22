@@ -2,6 +2,29 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest development observation — inline packed prefix upper bound (Decision 0231)
+
+D0230 is committed/pushed as `d621405`; release executable SHA-256
+`75b558fd0b22377ac29d4fd18e3b41fda79d9951f8f3f7c3397095aa214b28b4`. Its single supervised
+wide positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0229 with normalized SHA-256
+`c848e2b1573de9733014d908a1d51a281fb5c6dc932bfdc39559ca0f0fb9fe78`: 96 warm-ups, 768
+executions, 40 groups, digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`,
+successful work, cache counters, adapter I/O and vault work. This is cross-binary, sequential and
+nonqualifying.
+
+The round took 655,451 ms versus 668,628 ms (-1.97%). Retained all-class successful p99 is
+**8.885070 / 576.032616 / 360.335620 / 1296.426702 ms**. Depths one, two and four regressed
+1.22%, 0.06% and 2.05%; depth three improved 1.36%. Four-hop remains over five times the unchanged
+250 ms target, so no target or T-20 gate passes. Process peak RSS 265,692 KiB; wall/user/system
+827.20/774.27/49.83 seconds; zero process swaps. The enclosing shared scope peaks stayed at
+5,372,850,176 bytes memory and 286,691,328 bytes swap; soft-limit events rose from 36,739 to
+38,703, with zero maximum/OOM/CPU-throttle events. Source certificate and oracle hashes stayed
+pinned. Local artifacts: `experiments/t20-bench/target/native-d230-positive.EBEOeE`; complete
+report: `docs/evidence/inline-packed-prefix-upper-bound-sampling.json`. Next commit/push this
+evidence, then evaluate bounded proof-preserving reuse of repeated authenticated adjacency-prefix
+work. Keep the page-only default and all qualification prerequisites.
+
 ## Latest verified implementation — inline packed prefix upper bound (Decision 0230)
 
 D0229 evidence is committed/pushed as `3143851`. D0230 removes one transient heap allocation from
