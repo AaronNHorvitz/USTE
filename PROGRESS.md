@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — authenticated range cache (Decision 0238)
+
+D0237 is committed/pushed as `b530fdb`. Its single supervised wide range-cache development sample
+completed against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768
+executions and 40 groups with digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. Oracle/result profile,
+warm-up outcomes, group shape, output, execution count, successful visits and successful logical
+bytes match D0233 under semantic subset SHA-256
+`1ee6e2472d2cf96e80492d72ad1588c9133eb3be2014e8f02562bbaec51f76e1`. This is sequential,
+noncausal and nonqualifying; physical work intentionally differs under the 64/64/128 MiB
+page/lookup/range split.
+
+The range partition retained all 3,041 ranges / 37,388 entries in 8,789,091 bytes. The measured
+empty half had 1,074,437 range misses; the retained half had exactly 1,074,437 hits and zero misses,
+evictions or bypasses. However, displaced page/lookup capacity drove 17,216,275 empty and 10,104,149
+retained adapter reads, 108% and 322% above D0233. The round took 1,074,832 ms (+64.98%). Retained
+all-class successful p99 is **4.062156 / 126.562816 / 88.816068 / 4172.023623 ms**: depths one to
+three improved, but depth four regressed 230.15% and remains far above the unchanged 250 ms target.
+Reject the tested split; do not infer causality or a default from one sample.
+
+Process peak RSS was 265,912 KiB; wall/user/system were 1,299.82/1,179.72/115.78 seconds with zero
+process swaps. Source certificate, oracle and release binary hashes stayed pinned. Post-run shared
+cgroup peaks were 5,372,850,176 bytes memory / 286,691,328 bytes swap with zero maximum/OOM/CPU
+throttle events. Complete report: `docs/evidence/authenticated-range-cache-sampling.json`; local
+artifacts: `experiments/t20-bench/target/native-d237-range.oLHfca`. Next archive/commit/push this
+evidence, then add a distinct supervised development profile that restores the 128 MiB lookup
+partition and uses a small evidence-backed range partition while preserving the 256 MiB total.
+
 ## Latest verified tooling — supervised range-cache sampling (Decision 0237)
 
 D0236 is committed/pushed as `cf9360e`. D0237 adds distinct narrow/wide range-cache sample workers
