@@ -2,6 +2,30 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest development observation — compact expansion candidates (Decision 0233)
+
+D0232 is committed/pushed as `38e6773`; release executable SHA-256
+`ee5aceba4cb42f33b8a99fd436325581015a0f9d81df2d424b46c4ab8b31b468`. Its single supervised
+wide positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0231 with normalized SHA-256
+`c848e2b1573de9733014d908a1d51a281fb5c6dc932bfdc39559ca0f0fb9fe78`: 96 warm-ups, 768
+executions, 40 groups, digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`,
+successful work, cache counters, adapter I/O and vault work. This is cross-binary, sequential and
+nonqualifying.
+
+The round took 651,479 ms versus 655,451 ms (-0.61%). Retained all-class successful p99 is
+**8.940083 / 568.149641 / 363.751144 / 1263.669322 ms**. Depths two and four improved 1.37% and
+2.53%; depths one and three regressed 0.62% and 0.95%. Four-hop remains over five times the
+unchanged 250 ms target, so no target or T-20 gate passes. Process peak RSS 265,844 KiB, 152 KiB
+above D0231 and not evidence of a memory reduction; wall/user/system 823.43/770.55/50.51 seconds;
+zero process swaps. The enclosing shared scope peaks stayed at 5,372,850,176 bytes memory and
+286,691,328 bytes swap; soft-limit events stayed at 45,222, with zero maximum/OOM/CPU-throttle
+events. Source certificate and oracle hashes stayed pinned. Local artifacts:
+`experiments/t20-bench/target/native-d232-positive.I46R1p`; complete report:
+`docs/evidence/compact-expansion-scan-candidates-sampling.json`. Next commit/push this evidence,
+then design any repeated authenticated-prefix reuse as an explicit reported bounded partition with
+exact cached-work admission. Keep the page-only default and all qualification prerequisites.
+
 ## Latest verified implementation — compact expansion scan candidates (Decision 0232)
 
 D0231 evidence is committed/pushed as `9c88ddf`. D0232 drops each packed cursor candidate's
