@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — medium range pressure (Decision 0245)
+
+D0244 is committed/pushed as `ad48eb0`. Its one supervised 96/128/32 MiB page/lookup/range sample
+completed against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768
+executions and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. An independently selected
+semantic subset matches D0233 and D0243 at SHA-256
+`b80069dd6e102490fcf979457db87f97bb8762c21f169c52a0602a8e1305a1a9`.
+
+The range high-water was 29,231,596 bytes, 4,322,836 bytes below the 32 MiB budget. Warm-up, empty,
+retained and terminal pressure reports recorded zero evictions and zero evicted bytes. The retained
+half hit all 1,074,437 requested ranges with zero misses and performed zero adapter reads. The
+smaller 96 MiB page partition raised empty reads to 11,240,354; combined empty-plus-retained reads
+were 0.74% above D0243 and 5.43% above D0233. This proves only that 32 MiB retained this observed
+range working set, not that the split is a better default.
+
+The round took 583,539 ms, 8.88% below D0243. Retained all-class successful p99 was **3.970467 /
+122.834907 / 85.951997 / 547.486501 ms**. Sequential uncontrolled timing is noncausal; four-hop
+remains 2.19 times the unchanged 250 ms target, so no target, T-20, M1 or qualification gate passes.
+Process peak RSS was 265,592 KiB; wall/user/system were 772.74/716.53/54.47 seconds with zero
+process swaps. Inputs and D0244 binary stayed pinned; shared cgroup peaks/events stayed unchanged
+with zero maximum/OOM/CPU-throttle events.
+
+Complete report: `docs/evidence/medium-range-pressure-sampling.json`; local artifacts:
+`experiments/t20-bench/target/native-d244-medium.sjFJiW`. Next commit/push this evidence, then
+inspect the zero-adapter-I/O retained four-hop path before selecting a bounded implementation or
+telemetry increment. Preserve existing defaults and all qualification prerequisites.
+
 ## Latest verified tooling — medium range-pressure profile (Decision 0244)
 
 D0243 is committed/pushed as `97469be`. D0244 adds the distinct supervised
