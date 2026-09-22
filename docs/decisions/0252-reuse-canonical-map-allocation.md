@@ -7,14 +7,14 @@ Status: Implemented and locally verified; development observation pending.
 Decision 0251 left the zero-I/O retained four-hop path at 522.109698 ms. Inspection of repeated
 stored-record decoding found that the generic canonical decoder already returned each map as one
 owned vector with unique, byte-ordered bounded-string keys. The graph codec then converted every
-such short structured map into a new heap-node `BTreeMap<String, Value>`, allocating owned plain
-strings for all keys, only to remove every known schema field and discard the tree.
+such short structured map into a new heap-node `BTreeMap<String, Value>`, moving all existing key
+strings into it only to remove every known schema field and discard the tree.
 
 Keep the canonical map's existing vector allocation as the graph codec's field consumer. Field
 lookup linearly finds the requested static schema name and `swap_remove`s its owned value. Graph
 records and other structured graph payloads have short fixed schemas, so this removes the second
-map and key-string construction while retaining bounded input and output. Ordering is no longer
-needed after the generic decoder has validated canonical uniqueness and order.
+map's node construction while retaining bounded input and output. Ordering is no longer needed
+after the generic decoder has validated canonical uniqueness and order.
 
 Missing fields still return the exact missing-field error. Unconsumed fields still make `finish`
 return the exact unknown-field error. Wrong types, invalid enums, generic value depth/node/byte

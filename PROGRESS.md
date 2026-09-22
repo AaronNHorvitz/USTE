@@ -2,17 +2,44 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — canonical map reuse (Decision 0253)
+
+D0252 is committed/pushed as `5a90179`. Its one supervised 96/128/32 MiB observation completed
+against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768 executions
+and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. After removing only timing,
+percentile and RSS fields, the complete report exactly matches D0251 at SHA-256
+`c472dc13e72e3ed3fd5cd46776824223c89213f9c2dc9ec25bdcc653b633abd9`; all semantic and physical
+work evidence is unchanged.
+
+The range high-water remained 29,231,596 bytes with zero evictions/evicted bytes. The retained half
+hit all 1,074,437 ranges with zero misses and zero adapter reads; empty reads remained 11,240,354.
+The round took 570,790 ms, 5.99% below D0251. Retained all-class successful p99 was **3.155762 /
+104.617431 / 71.272343 / 421.852798 ms**, changing by -23.58%, -19.46%, -24.11% and -19.20%. This
+single sequential uncontrolled observation cannot establish causality; four-hop remains 1.69 times
+the unchanged 250 ms target, so no target, T-20, M1 or qualification gate passes.
+
+Process peak RSS was 265,604 KiB; wall/user/system were 753.42/696.14/55.45 seconds with zero
+process swaps. Inputs and the D0252 binary stayed pinned. Shared memory/swap peaks were unchanged;
+soft-limit events did not increase and maximum/OOM/CPU-throttle counters remained zero. Complete
+report: `docs/evidence/canonical-map-reuse-sampling.json`; local artifacts:
+`experiments/t20-bench/target/native-d252-canonical.skpZ6h`.
+
+Next commit/push this evidence, then inspect remaining generic-value construction before stored
+record materialization without adding unbudgeted decoded plaintext retention. Preserve existing
+defaults and all qualification prerequisites.
+
 ## Latest verified implementation — reuse canonical map allocation (Decision 0252)
 
 D0251 is committed/pushed as `a66c107`. It left retained four-hop p99 at 522.109698 ms with zero
 adapter reads. Inspection found every stored-record decode took the generic decoder's already
 owned, unique and canonically ordered map vector, then allocated a heap-node
-`BTreeMap<String, Value>` and fresh plain strings for all keys solely to consume fixed schema
+`BTreeMap<String, Value>` and moved all existing key strings into it solely to consume fixed schema
 fields.
 
 D0252 keeps the decoded vector as the graph field consumer. Each static schema name is found
-linearly and its owned value is removed in place; short fixed graph schemas no longer rebuild a
-second map or key strings. Missing fields, leftover unknown fields, wrong types, invalid enums,
+linearly and its owned value is removed in place; short fixed graph schemas no longer build the
+second map's nodes. Missing fields, leftover unknown fields, wrong types, invalid enums,
 generic value limits, canonical ordering, record contents and persistent formats are unchanged.
 No cache, plaintext retention, authority or configuration is added.
 
