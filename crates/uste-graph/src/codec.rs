@@ -9,7 +9,8 @@ use uste_policy::{
 use uste_types::{
     BorrowedMapValue, BoundedBytes, BoundedList, BoundedString, CanonicalMap, CommitRevision,
     DatabaseId, DecodeError, EncodeError, NamespaceId, NamespaceRef, RecordId, RecordRef,
-    UtcInstant, Value, decode_borrowed_map_value_with_fields, decode_value, encode_value,
+    UtcInstant, Value, decode_borrowed_map_value_with_fields_and_record_refs, decode_value,
+    encode_value,
 };
 
 use crate::{
@@ -379,7 +380,7 @@ fn decode_record_fields<'a>(mut fields: impl RecordFields<'a>) -> Result<Record,
             subject: take_record(fields.take_value("subject")?)?,
             predicate: take_bounded_text(fields.take_value("predicate")?)?,
             object: fields.take_value("object")?,
-            evidence: decode_refs(fields.take_value("evidence")?)?,
+            evidence: fields.take_refs("evidence")?,
             status: assertion_status(fields.take_text("status")?.as_ref())?,
             valid_time: fields.take_valid_time("valid_time")?,
             correction_of: decode_optional(fields.take_value("correction_of")?, take_record)?,
@@ -393,7 +394,7 @@ fn decode_record_fields<'a>(mut fields: impl RecordFields<'a>) -> Result<Record,
             to: take_record(fields.take_value("to")?)?,
             relationship_type: take_bounded_text(fields.take_value("relationship_type")?)?,
             properties: fields.take_value("properties")?,
-            evidence: decode_refs(fields.take_value("evidence")?)?,
+            evidence: fields.take_refs("evidence")?,
             status: assertion_status(fields.take_text("status")?.as_ref())?,
             valid_time: fields.take_valid_time("valid_time")?,
             correction_of: decode_optional(fields.take_value("correction_of")?, take_record)?,
@@ -408,9 +409,13 @@ fn decode_record_fields<'a>(mut fields: impl RecordFields<'a>) -> Result<Record,
 
 /// Decode one complete canonical stored record from a trusted derived projection.
 pub fn decode_stored_record(input: &[u8]) -> Result<Record, GraphCodecError> {
-    let fields = decode_borrowed_map_value_with_fields(input, &["valid_time"])
-        .map_err(GraphCodecError::Decode)?
-        .ok_or(GraphCodecError::WrongType)?;
+    let fields = decode_borrowed_map_value_with_fields_and_record_refs(
+        input,
+        &["valid_time"],
+        &["evidence"],
+    )
+    .map_err(GraphCodecError::Decode)?
+    .ok_or(GraphCodecError::WrongType)?;
     decode_record_fields(BorrowedFields(fields))
 }
 
@@ -693,9 +698,9 @@ fn decode_borrowed_bound(value: BorrowedMapValue<'_>) -> Result<IntervalBound, G
     let BorrowedMapValue::Map(fields) = value else {
         return match value {
             BorrowedMapValue::Value(value) => decode_bound(value),
-            BorrowedMapValue::String(_) | BorrowedMapValue::Map(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::String(_)
+            | BorrowedMapValue::Map(_)
+            | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
         };
     };
     let mut fields = BorrowedFields(fields);
@@ -1039,6 +1044,7 @@ struct Fields(Vec<(BoundedString, Value)>);
 trait RecordFields<'a>: Sized {
     fn take_value(&mut self, name: &'static str) -> Result<Value, GraphCodecError>;
     fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError>;
+    fn take_refs(&mut self, name: &'static str) -> Result<Vec<RecordRef>, GraphCodecError>;
     fn take_valid_time(&mut self, name: &'static str) -> Result<ValidTime, GraphCodecError>;
     fn finish(self) -> Result<(), GraphCodecError>;
 }
@@ -1068,6 +1074,10 @@ impl<'a> RecordFields<'a> for Fields {
 
     fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError> {
         take_text(self.take(name)?).map(Cow::Owned)
+    }
+
+    fn take_refs(&mut self, name: &'static str) -> Result<Vec<RecordRef>, GraphCodecError> {
+        decode_refs(self.take(name)?)
     }
 
     fn take_valid_time(&mut self, name: &'static str) -> Result<ValidTime, GraphCodecError> {
@@ -1103,7 +1113,9 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
                 .map(Value::String)
                 .map_err(|_| GraphCodecError::ResourceLimit),
             BorrowedMapValue::Value(value) => Ok(value),
-            BorrowedMapValue::Map(_) => Err(GraphCodecError::WrongType),
+            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
         }
     }
 
@@ -1111,7 +1123,19 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::String(value) => Ok(Cow::Borrowed(value)),
             BorrowedMapValue::Value(value) => take_text(value).map(Cow::Owned),
-            BorrowedMapValue::Map(_) => Err(GraphCodecError::WrongType),
+            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
+        }
+    }
+
+    fn take_refs(&mut self, name: &'static str) -> Result<Vec<RecordRef>, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::RecordRefs(references) => Ok(references),
+            BorrowedMapValue::Value(value) => decode_refs(value),
+            BorrowedMapValue::String(_) | BorrowedMapValue::Map(_) => {
+                Err(GraphCodecError::WrongType)
+            }
         }
     }
 
@@ -1119,7 +1143,9 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::Map(fields) => decode_borrowed_valid_time(fields),
             BorrowedMapValue::Value(value) => decode_valid_time(value),
-            BorrowedMapValue::String(_) => Err(GraphCodecError::WrongType),
+            BorrowedMapValue::String(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
         }
     }
 
@@ -1272,7 +1298,7 @@ mod tests {
             to: record(3),
             relationship_type: BoundedString::new("related".into()).unwrap(),
             properties: Value::Null,
-            evidence: Vec::new(),
+            evidence: vec![record(4)],
             status: AssertionStatus::Accepted,
             valid_time: ValidTime::HalfOpen {
                 start: IntervalBound::Unbounded,

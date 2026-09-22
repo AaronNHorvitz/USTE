@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — direct record-reference list decoding (Decision 0260)
+
+D0259 is committed/pushed as `6301de9`. It left retained four-hop p99 at 379.813938 ms with zero
+adapter reads. Inspection found assertion/relationship `evidence` lists still decoded first into
+`Vec<Value>` and then into the final `Vec<RecordRef>`; the retained fixture relationship carries
+one evidence reference.
+
+D0260 adds an opt-in canonical root-map selection that decodes valid selected record-reference
+lists directly into their final representation. Stored records select only `evidence`. Non-list or
+wrong-element selections rewind cursor and node accounting and use the ordinary owned-value path;
+malformed references and truncations retain their canonical errors. Generic decoding, unselected
+lists, dynamic properties and opaque objects remain owned. Persistent bytes, graph semantics,
+authorization, limits and configuration are unchanged, and no cache or retained plaintext is
+added.
+
+Selected/direct versus unselected/owned lists, every truncation, wrong-element fallback and a
+stored record with nonempty evidence have regression coverage. The targeted release oracle test
+passed. The exact final tree passed **769 workspace tests** and strict all-target/all-feature
+Clippy. The standalone optimized T-20 gate passed **142 active tests with five unchanged explicit
+ignores** and strict Clippy. Logs: `/tmp/uste-d260-workspace-verification.log`,
+`/tmp/uste-d260-release-oracle.log` and `/tmp/uste-d260-native-verification.log`.
+
+Gates used one job/thread and the 4 GiB process limit under verified enclosing caps. Shared
+memory/swap peaks remained 5,373,222,912/286,691,328 bytes; maximum/OOM/CPU-throttle counters
+stayed zero. No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next
+commit/push, rebuild and pin the release benchmark, then run one unchanged medium-pressure
+observation while preserving all existing defaults and qualification prerequisites.
+
 ## Latest development observation — borrowed selected nested schema (Decision 0259)
 
 D0258 is committed/pushed as `56db221`. Its one supervised 96/128/32 MiB observation completed

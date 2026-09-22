@@ -87,6 +87,8 @@ pub enum BorrowedMapValue<'a> {
     String(&'a str),
     /// A recursively borrowed map selected explicitly by the decoder's caller.
     Map(Vec<(&'a str, BorrowedMapValue<'a>)>),
+    /// A selected list decoded directly into its final record-reference representation.
+    RecordRefs(Vec<RecordRef>),
     /// Every other payload, including nested strings, in its ordinary owned representation.
     Value(Value),
 }
@@ -112,9 +114,27 @@ pub fn decode_borrowed_map_value_with_fields<'a>(
     input: &'a [u8],
     borrowed_map_fields: &[&str],
 ) -> Result<Option<Vec<(&'a str, BorrowedMapValue<'a>)>>, DecodeError> {
+    decode_borrowed_map_value_with_fields_and_record_refs(input, borrowed_map_fields, &[])
+}
+
+/// Decode selected nested maps and record-reference lists from a canonical root map.
+///
+/// Selected record-reference lists are decoded directly into their final element type. If a
+/// selected field is not a list of record references, it retains the ordinary owned-value path so
+/// callers observe the same structural errors as [`decode_value`].
+pub fn decode_borrowed_map_value_with_fields_and_record_refs<'a>(
+    input: &'a [u8],
+    borrowed_map_fields: &[&str],
+    record_ref_list_fields: &[&str],
+) -> Result<Option<Vec<(&'a str, BorrowedMapValue<'a>)>>, DecodeError> {
     decode_map_entries(input, |key, payload, depth, budget| {
         if borrowed_map_fields.contains(&key) && payload.peek()? == MAP_TAG {
             decode_borrowed_map_tree(payload, depth, budget)
+        } else if record_ref_list_fields.contains(&key) {
+            match decode_borrowed_record_refs(payload, depth, budget)? {
+                Some(references) => Ok(BorrowedMapValue::RecordRefs(references)),
+                None => decode_borrowed_map_payload(payload, depth, budget),
+            }
         } else {
             decode_borrowed_map_payload(payload, depth, budget)
         }
@@ -213,6 +233,46 @@ fn decode_borrowed_map_tree<'a>(
         }
         _ => decode_payload(payload, depth, budget).map(BorrowedMapValue::Value),
     }
+}
+
+fn decode_borrowed_record_refs(
+    payload: &mut Cursor<'_>,
+    depth: usize,
+    budget: &mut DecodeBudget,
+) -> Result<Option<Vec<RecordRef>>, DecodeError> {
+    if payload.peek()? != LIST_TAG {
+        return Ok(None);
+    }
+    let original_offset = payload.offset;
+    let original_nodes = budget.used_nodes;
+    budget.take_node()?;
+    let tag = payload.byte()?;
+    debug_assert_eq!(tag, LIST_TAG);
+    let _depth = check_depth(depth)?;
+    let count = read_collection_length(payload)?;
+    if count > payload.remaining() {
+        return Err(DecodeError::UnexpectedEof);
+    }
+    budget.require_nodes(count)?;
+    let mut references = Vec::new();
+    references
+        .try_reserve_exact(count)
+        .map_err(|_| DecodeError::ResourceLimit)?;
+    for _ in 0..count {
+        if payload.peek()? != RECORD_REF_TAG {
+            payload.offset = original_offset;
+            budget.used_nodes = original_nodes;
+            return Ok(None);
+        }
+        budget.take_node()?;
+        let tag = payload.byte()?;
+        debug_assert_eq!(tag, RECORD_REF_TAG);
+        let database = DatabaseId::from_bytes(read_identity::<{ DatabaseId::TAG }>(payload)?);
+        let namespace = NamespaceId::from_bytes(read_identity::<{ NamespaceId::TAG }>(payload)?);
+        let record = RecordId::from_bytes(read_identity::<{ RecordId::TAG }>(payload)?);
+        references.push(RecordRef::new(database, namespace, record));
+    }
+    Ok(Some(references))
 }
 
 fn frame_payload(input: &[u8]) -> Result<&[u8], DecodeError> {

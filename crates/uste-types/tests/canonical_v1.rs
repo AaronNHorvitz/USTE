@@ -5,8 +5,8 @@ use uste_types::{
     MAX_COLLECTION_ENTRIES, MAX_EPOCH_SECONDS, MAX_INLINE_BYTES, MAX_NESTING_DEPTH,
     MAX_VALUE_NODES, MAX_VALUE_PAYLOAD, MIN_EPOCH_SECONDS, NamespaceId, RecordId, RecordRef,
     SourceEventId, TransactionId, UtcInstant, Value, decode_borrowed_map_value,
-    decode_borrowed_map_value_with_fields, decode_map_value, decode_value, encode_value,
-    encoded_len,
+    decode_borrowed_map_value_with_fields, decode_borrowed_map_value_with_fields_and_record_refs,
+    decode_map_value, decode_value, encode_value, encoded_len,
 };
 
 const VECTORS: &str = include_str!("../../../acceptance/r1/canonical-v1.tsv");
@@ -150,6 +150,65 @@ fn selected_root_map_fields_borrow_recursively_without_converting_other_maps() {
         decode_borrowed_map_value_with_fields(&frame(&nested_duplicate), &["selected"]),
         Err(DecodeError::MapKeysOutOfOrder)
     );
+}
+
+#[test]
+fn selected_record_ref_lists_decode_directly_and_other_lists_stay_owned() {
+    let scope = |record| {
+        RecordRef::new(
+            DatabaseId::from_bytes([1; 16]),
+            NamespaceId::from_bytes([2; 16]),
+            RecordId::from_bytes([record; 16]),
+        )
+    };
+    let list =
+        || Value::list(vec![Value::RecordRef(scope(3)), Value::RecordRef(scope(4))]).unwrap();
+    let encoded = encode_value(
+        &Value::map(vec![
+            (BoundedString::new("ordinary".into()).unwrap(), list()),
+            (BoundedString::new("selected".into()).unwrap(), list()),
+        ])
+        .unwrap(),
+    )
+    .unwrap();
+    let entries =
+        decode_borrowed_map_value_with_fields_and_record_refs(&encoded, &[], &["selected"])
+            .unwrap()
+            .unwrap();
+    assert!(matches!(
+        entries[0].1,
+        BorrowedMapValue::Value(Value::List(_))
+    ));
+    assert_eq!(
+        entries[1].1,
+        BorrowedMapValue::RecordRefs(vec![scope(3), scope(4)])
+    );
+    for cut in 0..encoded.len() {
+        assert!(
+            decode_borrowed_map_value_with_fields_and_record_refs(
+                &encoded[..cut],
+                &[],
+                &["selected"]
+            )
+            .is_err()
+        );
+    }
+
+    let wrong_element = encode_value(
+        &Value::map(vec![(
+            BoundedString::new("selected".into()).unwrap(),
+            Value::list(vec![Value::Bool(true)]).unwrap(),
+        )])
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        decode_borrowed_map_value_with_fields_and_record_refs(&wrong_element, &[], &["selected"])
+            .unwrap()
+            .unwrap()[0]
+            .1,
+        BorrowedMapValue::Value(Value::List(_))
+    ));
 }
 
 #[test]
