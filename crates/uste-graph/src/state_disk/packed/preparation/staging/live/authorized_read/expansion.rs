@@ -1,8 +1,8 @@
 use super::*;
-use crate::state_disk::authorized_read::{ExpansionRead, read_with};
+use crate::state_disk::authorized_read::{ExpansionRead, ExpansionScanEntry, read_with};
 use uste_storage::packed_tree_cursor::{MAX_CURSOR_ENCODED_BYTES, MAX_CURSOR_PAGES};
 use uste_storage::packed_tree_lookup::{MAX_LOOKUP_ENCODED_BYTES, MAX_LOOKUP_PAGES};
-use uste_storage::{IndexScanEntry, MAX_INDEX_RESULT_BYTES, MAX_INDEX_VALUE_BYTES};
+use uste_storage::{MAX_INDEX_RESULT_BYTES, MAX_INDEX_VALUE_BYTES};
 use uste_txn::PackedIndexReader;
 
 /// Aggregate per-query work; trusted configuration, never consumer-controlled admission.
@@ -85,7 +85,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
         &mut self,
         family: u8,
         id: RecordRef,
-    ) -> Result<Option<Vec<IndexScanEntry>>, GraphDiskError> {
+    ) -> Result<Option<Vec<ExpansionScanEntry>>, GraphDiskError> {
         let record_id = id.record();
         let lower = record_id.as_bytes();
         let (upper, upper_len) = prefix_upper_bound(lower);
@@ -121,7 +121,21 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             entries
                 .try_reserve(1)
                 .map_err(|_| StorageError::ResourceLimit)?;
-            entries.push(entry.into_scan_entry());
+            entries.push(ExpansionScanEntry {
+                id: entry.key()[16..]
+                    .try_into()
+                    .map_err(|_| GraphDiskError::IndexCorrupt)?,
+                neighbor: if family == FAMILY_PROVENANCE {
+                    None
+                } else {
+                    Some(
+                        entry
+                            .value()
+                            .try_into()
+                            .map_err(|_| GraphDiskError::IndexCorrupt)?,
+                    )
+                },
+            });
         }
         let report = cursor.report();
         self.budget.charge(

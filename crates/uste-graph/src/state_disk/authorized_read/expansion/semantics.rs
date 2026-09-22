@@ -1,13 +1,12 @@
 //! Shared pure graph expansion semantics; physical readers own work admission.
 use super::*;
-use uste_storage::IndexScanEntry;
 
 pub(crate) trait ExpansionRead {
     fn scan(
         &mut self,
         family: u8,
         id: RecordRef,
-    ) -> Result<Option<Vec<IndexScanEntry>>, GraphDiskError>;
+    ) -> Result<Option<Vec<ExpansionScanEntry>>, GraphDiskError>;
     fn record(&mut self, id: RecordRef) -> Result<Record, GraphDiskError>;
     fn reference(&self, bytes: &[u8]) -> Result<RecordRef, GraphDiskError>;
 }
@@ -33,7 +32,7 @@ pub(crate) fn read_with(
                     };
                     if let Some(scan) = reader.scan(family, *entity)? {
                         for entry in scan {
-                            let (id, neighbor) = adjacent_candidate(reader, *entity, entry)?;
+                            let (id, neighbor) = adjacent_candidate(reader, entry)?;
                             admit_adjacent(
                                 reader,
                                 *entity,
@@ -57,25 +56,15 @@ pub(crate) fn read_with(
                     let mut incoming = incoming.into_iter().peekable();
                     loop {
                         let ordering = match (outgoing.peek(), incoming.peek()) {
-                            (Some(outgoing), Some(incoming)) => {
-                                adjacent_id_bytes(*entity, outgoing)?
-                                    .cmp(adjacent_id_bytes(*entity, incoming)?)
-                            }
-                            (Some(outgoing), None) => {
-                                adjacent_id_bytes(*entity, outgoing)?;
-                                core::cmp::Ordering::Less
-                            }
-                            (None, Some(incoming)) => {
-                                adjacent_id_bytes(*entity, incoming)?;
-                                core::cmp::Ordering::Greater
-                            }
+                            (Some(outgoing), Some(incoming)) => outgoing.id.cmp(&incoming.id),
+                            (Some(_), None) => core::cmp::Ordering::Less,
+                            (None, Some(_)) => core::cmp::Ordering::Greater,
                             (None, None) => break,
                         };
                         let (id, neighbor, directions) = match ordering {
                             core::cmp::Ordering::Less => {
                                 let (id, neighbor) = adjacent_candidate(
                                     reader,
-                                    *entity,
                                     outgoing.next().expect("peeked outgoing candidate"),
                                 )?;
                                 (id, neighbor, 1)
@@ -83,7 +72,6 @@ pub(crate) fn read_with(
                             core::cmp::Ordering::Greater => {
                                 let (id, neighbor) = adjacent_candidate(
                                     reader,
-                                    *entity,
                                     incoming.next().expect("peeked incoming candidate"),
                                 )?;
                                 (id, neighbor, 2)
@@ -91,12 +79,10 @@ pub(crate) fn read_with(
                             core::cmp::Ordering::Equal => {
                                 let (id, neighbor) = adjacent_candidate(
                                     reader,
-                                    *entity,
                                     outgoing.next().expect("peeked outgoing candidate"),
                                 )?;
                                 let (incoming_id, incoming_neighbor) = adjacent_candidate(
                                     reader,
-                                    *entity,
                                     incoming.next().expect("peeked incoming candidate"),
                                 )?;
                                 if incoming_id != id || incoming_neighbor != neighbor {
@@ -125,13 +111,10 @@ pub(crate) fn read_with(
             let mut visible = Vec::new();
             if let Some(scan) = reader.scan(FAMILY_PROVENANCE, *evidence)? {
                 for entry in scan {
-                    if entry.key.len() != 32
-                        || entry.key[..16] != *evidence.record().as_bytes()
-                        || !entry.value.is_empty()
-                    {
+                    if entry.neighbor.is_some() {
                         return Err(GraphDiskError::IndexCorrupt);
                     }
-                    let id = reader.reference(&entry.key[16..])?;
+                    let id = reader.reference(&entry.id)?;
                     if !authorize(Action::ReadRecord, Target::Record(id)) {
                         continue;
                     }
@@ -157,25 +140,13 @@ pub(crate) fn read_with(
     }
 }
 
-fn adjacent_id_bytes(entity: RecordRef, entry: &IndexScanEntry) -> Result<&[u8], GraphDiskError> {
-    if entry.key.len() != 32
-        || entry.key[..16] != *entity.record().as_bytes()
-        || entry.value.len() != 16
-    {
-        return Err(GraphDiskError::IndexCorrupt);
-    }
-    Ok(&entry.key[16..])
-}
-
 fn adjacent_candidate(
     reader: &impl ExpansionRead,
-    entity: RecordRef,
-    entry: IndexScanEntry,
+    entry: ExpansionScanEntry,
 ) -> Result<(RecordRef, RecordRef), GraphDiskError> {
-    adjacent_id_bytes(entity, &entry)?;
     Ok((
-        reader.reference(&entry.key[16..])?,
-        reader.reference(&entry.value)?,
+        reader.reference(&entry.id)?,
+        reader.reference(&entry.neighbor.ok_or(GraphDiskError::IndexCorrupt)?)?,
     ))
 }
 

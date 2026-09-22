@@ -2,6 +2,33 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — compact expansion scan candidates (Decision 0232)
+
+D0231 evidence is committed/pushed as `9c88ddf`. D0232 drops each packed cursor candidate's
+heap-backed key/value buffers immediately after validation and retains only fixed record/neighbor
+identifiers for shared expansion semantics. Scoped reference validation remains at semantic
+consumption; ordered merge, self-loop checks, authorization, result order, cursor proof work,
+aggregate limits, cache accounting, formats and APIs are unchanged. The legacy reader compacts its
+already collected scan before semantics, so malformed shape can fail earlier but still yields no
+partial output. A persistent prefix-result cache remains deferred until it has an explicit reported
+owner/session/root-bound partition and exact cached-work admission.
+
+Focused legacy reference/shared-budget, packed direction/duplicate/reference, all five exact
+limits, permission/cancellation, late-corruption and both cache-mode exact-work tests passed. One
+grouped default-debug exhaustive read-fault run was interrupted after proving disproportionately
+slow and is excluded; the same test passed in the optimized full gate. The final workspace gate
+passed **758 tests**, zero failures/ignores, strict Clippy and warnings-denied docs. Long-suite
+timings were graph disk 128/536.44 s, transaction metadata 50/104.63 s, storage unit 244/31.21 s
+and transaction integration 118/107.84 s. Log: `/tmp/uste-d232-workspace-verification.log`.
+
+The standalone native release gate passed **136 active tests with five unchanged opt-in ignores**
+and strict Clippy; log `/tmp/uste-d232-native-verification.log`. Both final gates used one Cargo
+job, one test thread and one heavy workload at a time with the inherited 4 GiB process address-space
+limit. Shared scope peaks stayed at 5,372,850,176 bytes memory and 286,691,328 bytes swap;
+soft-limit events reached 45,222, with zero maximum/OOM/CPU-throttle events. Next run formatting/
+doc/task checks, commit/push this verified increment, then measure it once with the unchanged
+supervised retained-fixture protocol. No performance, T-20, M1 or qualification completion claim.
+
 ## Latest development observation — inline packed prefix upper bound (Decision 0231)
 
 D0230 is committed/pushed as `d621405`; release executable SHA-256

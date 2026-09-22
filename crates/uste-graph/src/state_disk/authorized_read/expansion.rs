@@ -8,6 +8,37 @@ use uste_storage::{IndexScanEntry, IndexScanLimits};
 mod semantics;
 pub(crate) use semantics::{ExpansionRead, read_with};
 
+#[derive(Clone, Copy)]
+pub(crate) struct ExpansionScanEntry {
+    pub(crate) id: [u8; 16],
+    pub(crate) neighbor: Option<[u8; 16]>,
+}
+
+fn compact_scan_entry(
+    family: u8,
+    prefix: RecordRef,
+    entry: &IndexScanEntry,
+) -> Result<ExpansionScanEntry, GraphDiskError> {
+    if entry.key.len() != 32 || entry.key[..16] != *prefix.record().as_bytes() {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    let id = entry.key[16..]
+        .try_into()
+        .map_err(|_| GraphDiskError::IndexCorrupt)?;
+    let neighbor = match family {
+        FAMILY_PROVENANCE if entry.value.is_empty() => None,
+        FAMILY_OUTGOING | FAMILY_INCOMING if entry.value.len() == 16 => Some(
+            entry
+                .value
+                .as_slice()
+                .try_into()
+                .map_err(|_| GraphDiskError::IndexCorrupt)?,
+        ),
+        _ => return Err(GraphDiskError::IndexCorrupt),
+    };
+    Ok(ExpansionScanEntry { id, neighbor })
+}
+
 /// Aggregate per-query admission across all secondary scans and record lookups.
 #[derive(Clone, Copy, Debug)]
 pub struct GraphDiskExpansionLimits {
@@ -85,7 +116,7 @@ where
         &mut self,
         family: u8,
         id: RecordRef,
-    ) -> Result<Option<Vec<IndexScanEntry>>, GraphDiskError> {
+    ) -> Result<Option<Vec<ExpansionScanEntry>>, GraphDiskError> {
         if !has_family(self.root, family) {
             return Ok(None);
         }
@@ -98,7 +129,14 @@ where
             self.cache,
         )?;
         self.budget.account(&scan.stats, scan.entries.len())?;
-        Ok(Some(scan.entries))
+        let mut entries = Vec::new();
+        entries
+            .try_reserve_exact(scan.entries.len())
+            .map_err(|_| StorageError::ResourceLimit)?;
+        for entry in &scan.entries {
+            entries.push(compact_scan_entry(family, id, entry)?);
+        }
+        Ok(Some(entries))
     }
 
     fn record(&mut self, id: RecordRef) -> Result<Record, GraphDiskError> {
