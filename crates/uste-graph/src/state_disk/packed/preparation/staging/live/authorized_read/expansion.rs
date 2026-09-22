@@ -88,20 +88,11 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
     ) -> Result<Option<Vec<IndexScanEntry>>, GraphDiskError> {
         let record_id = id.record();
         let lower = record_id.as_bytes();
-        let mut upper = lower.to_vec();
-        while upper.last() == Some(&255) {
-            upper.pop();
-        }
-        let upper = if let Some(last) = upper.last_mut() {
-            *last += 1;
-            Some(upper)
-        } else {
-            None
-        };
+        let (upper, upper_len) = prefix_upper_bound(lower);
         let mut cursor = self.index.cursor(
             &self.base.trees[usize::from(family - 1)],
             lower,
-            upper.as_deref(),
+            (upper_len != 0).then_some(&upper[..upper_len]),
             TreeCursorLimits {
                 // Secondary keys have exactly 32 bytes (9 bits per byte plus terminator).
                 maximum_path_branches: 289,
@@ -189,6 +180,22 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
         record_key(self.base.scope, bytes).map_err(GraphDiskError::Storage)
     }
 }
+
+/// Return the shortest exclusive upper bound for a fixed-width prefix. A zero length denotes an
+/// unbounded upper range when every byte is `0xff`. Keeping the scratch value inline avoids a
+/// temporary heap allocation before the cursor copies its durable bound.
+fn prefix_upper_bound<const N: usize>(prefix: &[u8; N]) -> ([u8; N], usize) {
+    let mut upper = *prefix;
+    let mut len = N;
+    while len != 0 && upper[len - 1] == u8::MAX {
+        len -= 1;
+    }
+    if len != 0 {
+        upper[len - 1] += 1;
+    }
+    (upper, len)
+}
+
 pub(super) fn read<
     F: OwnershipFileSystem,
     W: DurableKeyEnvelope,
@@ -214,4 +221,24 @@ pub(super) fn read<
         request,
         authorize,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefix_upper_bound;
+
+    #[test]
+    fn prefix_upper_bound_is_inline_minimal_and_carry_safe() {
+        let (upper, len) = prefix_upper_bound(&[0x12, 0x34, 0x56]);
+        assert_eq!(&upper[..len], &[0x12, 0x34, 0x57]);
+
+        let (upper, len) = prefix_upper_bound(&[0x12, 0x34, 0xff]);
+        assert_eq!(&upper[..len], &[0x12, 0x35]);
+
+        let (upper, len) = prefix_upper_bound(&[0x12, 0xff, 0xff]);
+        assert_eq!(&upper[..len], &[0x13]);
+
+        let (_, len) = prefix_upper_bound(&[0xff, 0xff, 0xff]);
+        assert_eq!(len, 0);
+    }
 }

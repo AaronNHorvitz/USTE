@@ -2,6 +2,33 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — inline packed prefix upper bound (Decision 0230)
+
+D0229 evidence is committed/pushed as `3143851`. D0230 removes one transient heap allocation from
+every packed adjacency/provenance scan: the 16-byte exclusive prefix upper bound is now derived in
+fixed stack scratch before the cursor makes its required owned zeroizing copy. Minimal successor,
+trailing-`0xff` carry and all-`0xff` unbounded behavior are pinned by a unit test. Cursor range and
+proof work, graph validation, aggregate limits, cache/accounting behavior, authorization, formats
+and APIs are unchanged.
+
+Focused direction/duplicate/reference equivalence and page-only plus positive-cache exact-work/
+narrow-limit tests passed. The first focused invocation named a nonexistent integration target
+after its library filter selected zero tests; corrected exact filters passed. Initial strict Clippy
+then required moving the new test module after production items; the corrected source passed.
+The final workspace gate passed **758 tests**, zero failures/ignores, strict Clippy and
+warnings-denied docs. Long-suite timings were graph disk 128/526.88 s, transaction metadata
+50/106.07 s, storage unit 244/31.46 s and transaction integration 118/107.58 s. Log:
+`/tmp/uste-d230-workspace-verification.log`.
+
+The standalone native release gate passed **136 active tests with five unchanged opt-in ignores**
+and strict Clippy; log `/tmp/uste-d230-native-verification.log`. Both gates used one Cargo job, one
+test thread and one heavy workload at a time with the inherited 4 GiB process address-space limit.
+The cumulative shared scope memory peak stayed at 5,372,850,176 bytes; swap peak rose to
+286,691,328 bytes within its 512 MiB cap. Soft-limit events reached 36,739, with zero maximum/OOM/
+CPU-throttle events. Next run formatting/doc/task checks, commit/push this verified increment, then
+measure it once with the unchanged supervised retained-fixture protocol. No performance, T-20, M1
+or qualification completion claim yet.
+
 ## Latest development observation — ordered adjacency scan merge (Decision 0229)
 
 D0228 is committed/pushed as `1d75d48`; release executable SHA-256
