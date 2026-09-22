@@ -103,7 +103,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             .as_deref()
             .is_some_and(PackedPageCache::has_range_cache)
         {
-            let result = self.index.range_cached(
+            let result = self.index.range_cached_with(
                 self.fs,
                 &self.base.trees[usize::from(family - 1)],
                 lower,
@@ -113,13 +113,14 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
                 self.cache
                     .as_deref_mut()
                     .ok_or(StorageError::InvalidState)?,
+                |key, value| compact_entry(family, lower, key, value),
             )?;
             let mut entries = Vec::new();
             entries
                 .try_reserve_exact(result.entries.len())
                 .map_err(|_| StorageError::ResourceLimit)?;
             for entry in result.entries {
-                entries.push(compact_entry(family, lower, &entry)?);
+                entries.push(entry?);
             }
             self.budget.charge(
                 result.report.pages,
@@ -147,7 +148,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             entries
                 .try_reserve(1)
                 .map_err(|_| StorageError::ResourceLimit)?;
-            entries.push(compact_entry(family, lower, &entry)?);
+            entries.push(compact_entry(family, lower, entry.key(), entry.value())?);
         }
         let report = cursor.report();
         self.budget.charge(
@@ -210,28 +211,24 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
 fn compact_entry(
     family: u8,
     lower: &[u8; 16],
-    entry: &uste_storage::packed_tree_cursor::PackedCursorEntry,
+    key: &[u8],
+    value: &[u8],
 ) -> Result<ExpansionScanEntry, GraphDiskError> {
-    if entry.key().len() != 32
-        || !entry.key().starts_with(lower)
-        || (family == FAMILY_PROVENANCE && !entry.value().is_empty())
-        || (family != FAMILY_PROVENANCE && entry.value().len() != 16)
+    if key.len() != 32
+        || !key.starts_with(lower)
+        || (family == FAMILY_PROVENANCE && !value.is_empty())
+        || (family != FAMILY_PROVENANCE && value.len() != 16)
     {
         return Err(GraphDiskError::IndexCorrupt);
     }
     Ok(ExpansionScanEntry {
-        id: entry.key()[16..]
+        id: key[16..]
             .try_into()
             .map_err(|_| GraphDiskError::IndexCorrupt)?,
         neighbor: if family == FAMILY_PROVENANCE {
             None
         } else {
-            Some(
-                entry
-                    .value()
-                    .try_into()
-                    .map_err(|_| GraphDiskError::IndexCorrupt)?,
-            )
+            Some(value.try_into().map_err(|_| GraphDiskError::IndexCorrupt)?)
         },
     })
 }

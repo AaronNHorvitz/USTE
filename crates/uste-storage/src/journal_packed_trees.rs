@@ -58,6 +58,10 @@ pub struct PackedTreeRangeResult {
     pub entries: Vec<PackedCursorEntry>,
     pub report: TreeCursorReport,
 }
+pub struct MappedPackedTreeRangeResult<T> {
+    pub entries: Vec<T>,
+    pub report: TreeCursorReport,
+}
 impl CertifiedPackedTreeCursor {
     pub fn context(&self) -> TreeReadContext {
         self.context

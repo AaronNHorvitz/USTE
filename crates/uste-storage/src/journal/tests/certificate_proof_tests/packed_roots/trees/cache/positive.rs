@@ -213,7 +213,62 @@ fn complete_range_hits_preserve_results_work_limits_binding_and_zero_io() {
         warm_report.range.unwrap().hits,
         cold_report.range.unwrap().hits + 1
     );
-    let hits = warm_report.range.unwrap().hits;
+    let mapped_calls = std::cell::Cell::new(0);
+    f.fs.arm(FaultPlan::default()).unwrap();
+    let mapped = f
+        .store
+        .packed_tree_range_cached_with(
+            &mut f.fs,
+            tree,
+            b"a",
+            Some(b"d"),
+            cursors(),
+            false,
+            &mut cache,
+            |key, value| {
+                mapped_calls.set(mapped_calls.get() + 1);
+                (key.to_vec(), value.to_vec())
+            },
+        )
+        .unwrap();
+    assert_eq!(mapped.report, cold.report);
+    assert_eq!(
+        mapped.entries,
+        cold.entries
+            .iter()
+            .map(|entry| (entry.key().to_vec(), entry.value().to_vec()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(mapped_calls.get(), 3);
+    assert_eq!(f.fs.operation_count(Operation::ReadAt), 0);
+    assert_eq!(f.store.vault.decrypt_report().unwrap(), crypto);
+    let mapped_report = cache.report().unwrap();
+    assert_eq!(
+        mapped_report.range.unwrap().hits,
+        warm_report.range.unwrap().hits + 1
+    );
+    let refused_calls = std::cell::Cell::new(0);
+    f.fs.arm(FaultPlan::default()).unwrap();
+    assert!(
+        f.store
+            .packed_tree_range_cached_with(
+                &mut f.fs,
+                tree,
+                b"a",
+                Some(b"d"),
+                TreeCursorLimits {
+                    maximum_pages: cold.report.pages - 1,
+                    ..cursors()
+                },
+                false,
+                &mut cache,
+                |_, _| refused_calls.set(refused_calls.get() + 1),
+            )
+            .is_err()
+    );
+    assert_eq!(refused_calls.get(), 0);
+    assert_eq!(f.fs.operation_count(Operation::ReadAt), 0);
+    let hits = cache.report().unwrap().range.unwrap().hits;
     f.fs.arm(FaultPlan::default()).unwrap();
     assert!(
         f.store

@@ -2,6 +2,35 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrowed range-hit mapping (Decision 0246)
+
+D0245 is committed/pushed as `6a9cc3e`. It proved that the retained 96/128/32 MiB profile performs
+zero adapter reads while four-hop p99 remains 547.486501 ms. Inspection found that each range hit
+still allocated and copied every cached key/value into an owned cursor entry before packed graph
+expansion reduced it to fixed record/neighbor identifiers.
+
+D0246 adds a mapped complete-range read alongside the unchanged owned API. Live certificate owner,
+key session, tree identity, direction, bounds and every proof-work limit are checked before the
+mapper observes resident plaintext. Mapped results are owned. Misses retain the same complete
+authenticated range before mapping; warm graph hits now map borrowed slices directly into compact
+expansion entries without intermediary key/value buffers. Formats, existing APIs, authorization,
+cancellation, results and accounting are unchanged.
+
+The storage regression proves exact mapped results/report with zero warm reads/decrypts and proves
+a one-less work budget refuses before the mapper runs. The cold/warm graph integration passes with
+bounded accounting. Focused tests and strict storage/transaction/graph Clippy passed. The complete
+optimized workspace gate passed **764 tests** and strict all-target/all-feature Clippy. The complete
+optimized standalone T-20 gate passed **142 active tests with five unchanged opt-in ignores** and
+strict Clippy. Logs: `/tmp/uste-d246-workspace-verification.log` and
+`/tmp/uste-d246-native-verification.log`. Gates used one job/thread, locked offline dependencies and
+the 4 GiB process limit under the verified enclosing caps; maximum/OOM/CPU-throttle counters stayed
+zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push the
+implementation, rebuild and pin the release benchmark, then run one unchanged medium-pressure
+observation against the retained fixture. Preserve existing defaults and every qualification
+prerequisite.
+
 ## Latest development observation — medium range pressure (Decision 0245)
 
 D0244 is committed/pushed as `ad48eb0`. Its one supervised 96/128/32 MiB page/lookup/range sample

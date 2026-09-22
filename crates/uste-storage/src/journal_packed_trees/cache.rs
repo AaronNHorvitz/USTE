@@ -167,4 +167,100 @@ where
         }
         Ok(PackedTreeRangeResult { entries, report })
     }
+
+    /// Map a complete authenticated range while borrowing each resident key/value. Returned
+    /// values cannot borrow from the cache. A hit is admitted against every logical cursor limit
+    /// before the mapper observes plaintext; misses retain the same authenticated result first.
+    #[allow(clippy::too_many_arguments)]
+    pub fn packed_tree_range_cached_with<T>(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
+        cache: &mut PackedPageCache,
+        mut map: impl FnMut(&[u8], &[u8]) -> T,
+    ) -> Result<MappedPackedTreeRangeResult<T>, StorageError> {
+        if let Err(error) = self.validate_canonical_packed_tree(tree) {
+            if self.vault.is_locked() {
+                cache.clear();
+            }
+            return Err(error);
+        }
+        PackedTreeCursor::validate_request(
+            tree.context,
+            tree.commitment,
+            tree.root,
+            lower,
+            upper,
+            limits,
+        )?;
+        cache.bind(&tree.proof, self.vault.unlocked_session()?)?;
+        let identity = tree.root.map(|root| {
+            crate::packed_page_cache::LookupIdentity::new(tree.context, root, tree.commitment)
+        });
+        if let Some(identity) = identity
+            && let Some(hit) = cache.range_get_with(
+                &self.vault,
+                identity,
+                lower,
+                upper,
+                reverse,
+                limits,
+                &mut |key, value| Ok(map(key, value)),
+            )?
+        {
+            return Ok(MappedPackedTreeRangeResult {
+                entries: hit.entries,
+                report: hit.report,
+            });
+        }
+        let constructor = if reverse {
+            PackedTreeCursor::new_reverse
+        } else {
+            PackedTreeCursor::new
+        };
+        let mut cursor = constructor(
+            tree.context,
+            tree.commitment,
+            tree.root,
+            lower,
+            upper,
+            limits,
+        )?;
+        let mut entries = Vec::new();
+        while let Some(entry) =
+            cursor.next_cached(filesystem, &self.database_directory, &self.vault, cache)?
+        {
+            entries
+                .try_reserve(1)
+                .map_err(|_| StorageError::ResourceLimit)?;
+            entries.push(entry);
+        }
+        let report = cursor.report();
+        if let Some(identity) = identity {
+            cache.range_insert(
+                &self.vault,
+                identity,
+                lower,
+                upper,
+                reverse,
+                &entries,
+                report,
+            )?;
+        }
+        let mut mapped = Vec::new();
+        mapped
+            .try_reserve_exact(entries.len())
+            .map_err(|_| StorageError::ResourceLimit)?;
+        for entry in &entries {
+            mapped.push(map(entry.key(), entry.value()));
+        }
+        Ok(MappedPackedTreeRangeResult {
+            entries: mapped,
+            report,
+        })
+    }
 }

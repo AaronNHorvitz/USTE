@@ -75,4 +75,25 @@ where
             .packed_tree_range_cached(filesystem, tree, lower, upper, limits, reverse, cache)
             .map_err(TransactionError::Storage)
     }
+    /// Map a complete cached range while borrowing its authenticated resident plaintext. The
+    /// mapped values are owned, and all scope, owner, session and proof-work checks are unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub fn range_cached_with<T>(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
+        cache: &mut PackedPageCache,
+        map: impl FnMut(&[u8], &[u8]) -> T,
+    ) -> Result<uste_storage::journal::MappedPackedTreeRangeResult<T>, TransactionError> {
+        self.check(tree.context())?;
+        self.journal
+            .packed_tree_range_cached_with(
+                filesystem, tree, lower, upper, limits, reverse, cache, map,
+            )
+            .map_err(TransactionError::Storage)
+    }
 }

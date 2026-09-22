@@ -29,8 +29,8 @@ pub struct PackedRangeCacheReport {
     pub oversized_bypasses: u64,
 }
 
-pub(crate) struct CachedRange {
-    pub(crate) entries: Vec<PackedCursorEntry>,
+pub(crate) struct CachedRange<T = PackedCursorEntry> {
+    pub(crate) entries: Vec<T>,
     pub(crate) report: TreeCursorReport,
 }
 
@@ -153,6 +153,25 @@ impl RangeCache {
         reverse: bool,
         limits: TreeCursorLimits,
     ) -> Result<Option<CachedRange>, StorageError> {
+        self.get_with(
+            identity,
+            lower,
+            upper,
+            reverse,
+            limits,
+            &mut |key, value| PackedCursorEntry::copy_from_slices(key, value),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn get_with<T>(
+        &mut self,
+        identity: LookupIdentity,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        reverse: bool,
+        limits: TreeCursorLimits,
+        map: &mut impl FnMut(&[u8], &[u8]) -> Result<T, StorageError>,
+    ) -> Result<Option<CachedRange<T>>, StorageError> {
         let logical = encode_key(identity, lower, upper, reverse)?;
         let Some((stored, value)) = self.values.get_key_value(logical.as_slice()) else {
             increment(&mut self.misses, &mut self.overflowed);
@@ -169,10 +188,7 @@ impl RangeCache {
             .try_reserve_exact(value.entries.len())
             .map_err(|_| StorageError::ResourceLimit)?;
         for entry in &value.entries {
-            entries.push(PackedCursorEntry::copy_from_slices(
-                &entry.key,
-                &entry.value,
-            )?);
+            entries.push(map(&entry.key, &entry.value)?);
         }
         let work = value.work;
         let old = value.stamp;

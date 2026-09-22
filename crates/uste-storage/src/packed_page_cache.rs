@@ -324,6 +324,26 @@ impl PackedPageCache {
             .get(identity, lower, upper, reverse, limits)
     }
     #[allow(clippy::too_many_arguments)]
+    pub(crate) fn range_get_with<W, E: EntropySource, T>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        reverse: bool,
+        limits: crate::packed_tree_cursor::TreeCursorLimits,
+        map: &mut impl FnMut(&[u8], &[u8]) -> Result<T, StorageError>,
+    ) -> Result<Option<range::CachedRange<T>>, StorageError> {
+        if self.range.is_none() {
+            return Ok(None);
+        }
+        self.check_lookup_session(vault)?;
+        self.range
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .get_with(identity, lower, upper, reverse, limits, map)
+    }
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn range_insert<W, E: EntropySource>(
         &mut self,
         vault: &KeyVault<W, E>,

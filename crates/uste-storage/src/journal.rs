@@ -48,7 +48,8 @@ pub use packed_roots::{
     PackedRootDiscoveryReport,
 };
 pub use packed_trees::{
-    CanonicalPackedTree, CertifiedPackedTreeCursor, CertifiedPackedTreeStage, PackedTreeRangeResult,
+    CanonicalPackedTree, CertifiedPackedTreeCursor, CertifiedPackedTreeStage,
+    MappedPackedTreeRangeResult, PackedTreeRangeResult,
 };
 #[path = "journal_certificate_proof.rs"]
 mod certificate_proof;
