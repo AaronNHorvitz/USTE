@@ -2,6 +2,33 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — borrowed selected nested schema (Decision 0259)
+
+D0258 is committed/pushed as `56db221`. Its one supervised 96/128/32 MiB observation completed
+against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768 executions
+and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. After removing only timing,
+percentile and RSS fields, the complete report exactly matches D0257 at SHA-256
+`c472dc13e72e3ed3fd5cd46776824223c89213f9c2dc9ec25bdcc653b633abd9`; all semantic and physical
+work evidence is unchanged.
+
+The range high-water remained 29,231,596 bytes with zero evictions/evicted bytes. The retained half
+hit all 1,074,437 ranges with zero misses and zero adapter reads; empty reads remained 11,240,354.
+The round took 546,001 ms, 0.84% above D0257. Retained all-class successful p99 was **2.705347 /
+91.887128 / 61.900717 / 379.813938 ms**, changing by +1.70%, +4.79%, +2.74% and +3.04%. This
+single sequential uncontrolled observation cannot establish causality; four-hop remains 1.52 times
+the unchanged 250 ms target, so no target, T-20, M1 or qualification gate passes.
+
+Process peak RSS was 265,612 KiB; wall/user/system were 724.77/668.75/53.96 seconds with zero
+process swaps. Inputs and the D0258 binary stayed pinned. Shared memory/swap peaks were unchanged;
+soft-limit events increased by 1,510 while maximum/OOM/socket-memory/CPU-throttle counters did not
+increase. Complete report: `docs/evidence/borrowed-selected-nested-schema-sampling.json`; local
+artifacts: `experiments/t20-bench/target/native-d258-nested.TKcFsg`.
+
+Next commit/push this evidence, then inspect another measured zero-I/O retained-path cost before an
+implementation change. Keep dynamic properties and opaque objects owned, and preserve all existing
+defaults and qualification prerequisites.
+
 ## Latest verified implementation — borrow selected nested schema (Decision 0258)
 
 D0257 is committed/pushed as `c8978ab`. It left retained four-hop p99 at 368.605719 ms with zero
