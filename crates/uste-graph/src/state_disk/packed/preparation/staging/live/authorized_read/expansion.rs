@@ -103,7 +103,7 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             .as_deref()
             .is_some_and(PackedPageCache::has_range_cache)
         {
-            let result = self.index.range_cached_with(
+            let result = self.index.try_range_cached_with(
                 self.fs,
                 &self.base.trees[usize::from(family - 1)],
                 lower,
@@ -115,20 +115,13 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
                     .ok_or(StorageError::InvalidState)?,
                 |key, value| compact_entry(family, lower, key, value),
             )?;
-            let mut entries = Vec::new();
-            entries
-                .try_reserve_exact(result.entries.len())
-                .map_err(|_| StorageError::ResourceLimit)?;
-            for entry in result.entries {
-                entries.push(entry?);
-            }
             self.budget.charge(
                 result.report.pages,
                 result.report.encoded_bytes,
                 result.report.candidates,
                 result.report.returned_bytes,
             )?;
-            return Ok(Some(entries));
+            return Ok(Some(result.entries));
         }
         let mut cursor = self.index.cursor(
             &self.base.trees[usize::from(family - 1)],

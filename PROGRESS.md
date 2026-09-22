@@ -2,6 +2,35 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — fallible borrowed range mapping (Decision 0250)
+
+D0249 is committed/pushed as `9219df5`. It left retained four-hop p99 at 475.754743 ms with zero
+adapter reads. Inspection found the packed graph mapper built a vector of fallible compact entries,
+then allocated a second vector and copied every success solely to surface a possible authenticated
+index semantic error.
+
+D0250 adds an additive fallible borrowed-range mapper through storage and the scoped transaction
+reader. Canonical tree, owner/session, identity, bounds, direction and logical-work admission still
+precede mapping; mapped values remain owned. Every admitted entry is inspected on mapper failure,
+the first mapper error is returned after normal hit recency, cold results are retained before
+mapping, internal integrity failures keep precedence, and no partial output escapes. The existing
+infallible API delegates to the new form. Packed graph scans now construct and return one compact
+vector while charging the identical report.
+
+The storage regression proves a warm mapper failure visits all three entries, preserves its exact
+error and hit count, and performs zero reads/decryptions. Existing packed graph cold/warm exactness,
+work-limit and privilege tests pass. Focused strict Clippy passed. The complete optimized workspace
+gate passed **764 tests** and strict all-target/all-feature Clippy. The complete optimized
+standalone T-20 gate passed **142 active tests with five unchanged opt-in ignores** and strict
+Clippy. Logs: `/tmp/uste-d250-workspace-verification.log` and
+`/tmp/uste-d250-native-verification.log`. Gates used one job/thread and the 4 GiB process limit
+under verified enclosing caps; maximum/OOM/CPU-throttle counters remained zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation.
+Preserve authorization, cancellation, failure behavior, existing defaults and all qualification
+prerequisites.
+
 ## Latest development observation — borrowed authorization (Decision 0249)
 
 D0248 is committed/pushed as `1255904`. Its one supervised 96/128/32 MiB observation completed

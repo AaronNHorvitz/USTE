@@ -96,4 +96,27 @@ where
             )
             .map_err(TransactionError::Storage)
     }
+
+    /// Fallible mapped range. The returned values are owned; all binding and proof-work checks
+    /// precede mapping exactly as in [`Self::range_cached_with`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_range_cached_with<T, M>(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
+        cache: &mut PackedPageCache,
+        map: impl FnMut(&[u8], &[u8]) -> Result<T, M>,
+    ) -> Result<uste_storage::journal::MappedPackedTreeRangeResult<T>, M>
+    where
+        M: From<StorageError> + From<TransactionError>,
+    {
+        self.check(tree.context()).map_err(M::from)?;
+        self.journal.try_packed_tree_range_cached_with(
+            filesystem, tree, lower, upper, limits, reverse, cache, map,
+        )
+    }
 }

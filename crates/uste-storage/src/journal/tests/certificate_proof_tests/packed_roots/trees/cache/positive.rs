@@ -247,6 +247,35 @@ fn complete_range_hits_preserve_results_work_limits_binding_and_zero_io() {
         mapped_report.range.unwrap().hits,
         warm_report.range.unwrap().hits + 1
     );
+    let fallible_calls = std::cell::Cell::new(0);
+    f.fs.arm(FaultPlan::default()).unwrap();
+    let failed = f.store.try_packed_tree_range_cached_with(
+        &mut f.fs,
+        tree,
+        b"a",
+        Some(b"d"),
+        cursors(),
+        false,
+        &mut cache,
+        |key, value| {
+            let call = fallible_calls.get() + 1;
+            fallible_calls.set(call);
+            if call == 2 {
+                Err(StorageError::IntegrityFailure)
+            } else {
+                Ok((key.to_vec(), value.to_vec()))
+            }
+        },
+    );
+    assert!(matches!(failed, Err(StorageError::IntegrityFailure)));
+    assert_eq!(fallible_calls.get(), 3);
+    assert_eq!(f.fs.operation_count(Operation::ReadAt), 0);
+    assert_eq!(f.store.vault.decrypt_report().unwrap(), crypto);
+    let failed_report = cache.report().unwrap();
+    assert_eq!(
+        failed_report.range.unwrap().hits,
+        mapped_report.range.unwrap().hits + 1
+    );
     let refused_calls = std::cell::Cell::new(0);
     f.fs.arm(FaultPlan::default()).unwrap();
     assert!(

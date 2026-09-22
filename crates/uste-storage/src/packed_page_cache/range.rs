@@ -163,16 +163,19 @@ impl RangeCache {
         )
     }
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn get_with<T>(
+    pub(super) fn get_with<T, M>(
         &mut self,
         identity: LookupIdentity,
         lower: &[u8],
         upper: Option<&[u8]>,
         reverse: bool,
         limits: TreeCursorLimits,
-        map: &mut impl FnMut(&[u8], &[u8]) -> Result<T, StorageError>,
-    ) -> Result<Option<CachedRange<T>>, StorageError> {
-        let logical = encode_key(identity, lower, upper, reverse)?;
+        map: &mut impl FnMut(&[u8], &[u8]) -> Result<T, M>,
+    ) -> Result<Option<CachedRange<T>>, M>
+    where
+        M: From<StorageError>,
+    {
+        let logical = encode_key(identity, lower, upper, reverse).map_err(M::from)?;
         let Some((stored, value)) = self.values.get_key_value(logical.as_slice()) else {
             increment(&mut self.misses, &mut self.overflowed);
             return Ok(None);
@@ -186,9 +189,15 @@ impl RangeCache {
         let mut entries = Vec::new();
         entries
             .try_reserve_exact(value.entries.len())
-            .map_err(|_| StorageError::ResourceLimit)?;
+            .map_err(|_| M::from(StorageError::ResourceLimit))?;
+        let mut map_error = None;
         for entry in &value.entries {
-            entries.push(map(&entry.key, &entry.value)?);
+            match map(&entry.key, &entry.value) {
+                Ok(mapped) if map_error.is_none() => entries.push(mapped),
+                Ok(_) => {}
+                Err(error) if map_error.is_none() => map_error = Some(error),
+                Err(_) => {}
+            }
         }
         let work = value.work;
         let old = value.stamp;
@@ -198,7 +207,7 @@ impl RangeCache {
             .remove(&old)
             .ok_or(StorageError::IntegrityFailure)?;
         if !Arc::ptr_eq(&ordered, &stored) {
-            return Err(StorageError::IntegrityFailure);
+            return Err(M::from(StorageError::IntegrityFailure));
         }
         self.order.insert(next, stored.clone());
         self.values
@@ -206,6 +215,9 @@ impl RangeCache {
             .ok_or(StorageError::IntegrityFailure)?
             .stamp = next;
         self.clock = next;
+        if let Some(error) = map_error {
+            return Err(error);
+        }
         Ok(Some(CachedRange {
             entries,
             report: work,
