@@ -2,6 +2,33 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — exact range pressure (Decision 0243)
+
+D0242 is committed/pushed as `3548ebe`. Its one supervised pressure sample completed with the
+unchanged retained fixture/oracle and 112/128/16 MiB split. The parent accepted 96 warm-ups, 768
+executions and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. After removing only
+timing/RSS, schema/profile labels and new pressure fields, it exactly matches D0240 at SHA-256
+`7184584f3799a82bef31af0617654937b4ba820e3801e4cdcf6562d3849151cd`; semantic and all prior
+physical-work evidence is unchanged.
+
+The range high-water reached the full 16,777,216-byte budget. Exact evicted charges were
+239,953,583 bytes warm-up, 888,794,394 empty and 2,381,225,814 retained, summing to terminal
+3,509,973,791 bytes. This independently reconciles the existing 70,636 / 257,206 / 868,946
+evictions and proves 16 MiB is saturated. Terminal residency was still only 8,789,091 bytes and is
+not a valid sizing signal.
+
+The round took 640,426 ms, 0.30% above D0240. Retained all-class successful p99 was **4.015284 /
+124.291078 / 85.287004 / 1315.392045 ms**, 0.17%–1.62% above D0240. These sequential uncontrolled
+timing changes are not causal; four-hop remains over five times the 250 ms target. Process peak RSS
+was 265,904 KiB; wall/user/system were 815.67/761.24/52.69 seconds with zero swaps. Inputs and D0242
+binary stayed pinned; shared cgroup peaks/events stayed unchanged with zero maximum/OOM/throttle.
+
+Complete report: `docs/evidence/range-pressure-sampling.json`; local artifacts:
+`experiments/t20-bench/target/native-d242-pressure.LQC7oE`. Next commit/push this evidence, then add a
+distinct 96/128/32 MiB pressure profile as the next bounded capacity point. Preserve the existing
+default, total budget, lookup budget and all qualification prerequisites.
+
 ## Latest verified tooling — supervised range-pressure sampling (Decision 0242)
 
 D0241 is committed/pushed as `1b6f87a`. D0242 adds the distinct supervised
