@@ -77,6 +77,8 @@ fn native_range_cache_configuration_reports_its_independent_partition() {
     assert_eq!(report["range"]["misses"], 4);
     assert_eq!(report["range"]["evictions"], 2);
     assert_eq!(report["range"]["oversized_bypasses"], 1);
+    assert!(report["range"].get("maximum_accounted_bytes").is_none());
+    assert!(report["range"].get("evicted_bytes").is_none());
     for variant in 0..4 {
         let mut wrong = cache;
         match variant {

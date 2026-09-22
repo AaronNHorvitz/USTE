@@ -45,6 +45,9 @@ fn assert_invariants(cache: &RangeCache) {
         assert_eq!(Arc::strong_count(&key.0), 2);
     }
     assert!(cache.report().unwrap().accounted_bytes <= cache.budget);
+    let report = cache.report().unwrap();
+    assert!(report.maximum_accounted_bytes >= report.accounted_bytes);
+    assert!(report.maximum_accounted_bytes <= cache.budget);
     assert!(size_of::<RangeCache>() <= FIXED);
 }
 
@@ -109,13 +112,23 @@ fn complete_range_lru_bypass_clear_and_validation_are_explicit() {
     let mut cache = RangeCache::new(MINIMUM).unwrap();
     let entries = vec![entry(b"a", &[1; 800])];
     let report = work(&entries);
+    let mut charge = None;
     for byte in 0..12 {
         cache
             .insert(identity(byte), b"", None, false, &entries, report)
             .unwrap();
+        if charge.is_none() {
+            charge = Some(cache.values.values().next().unwrap().charge);
+        }
         assert_invariants(&cache);
     }
-    assert!(cache.report().unwrap().evictions > 0);
+    let pressured = cache.report().unwrap();
+    assert!(pressured.evictions > 0);
+    assert_eq!(
+        pressured.evicted_bytes,
+        pressured.evictions * u64::try_from(charge.unwrap()).unwrap()
+    );
+    assert!(pressured.maximum_accounted_bytes > 0);
     let resident = cache.report().unwrap().resident_ranges;
     let oversized = vec![entry(b"a", &vec![2; MINIMUM])];
     cache
@@ -151,5 +164,22 @@ fn complete_range_lru_bypass_clear_and_validation_are_explicit() {
     assert_eq!(cleared.hits, counters.hits);
     assert_eq!(cleared.misses, counters.misses);
     assert_eq!(cleared.evictions, counters.evictions);
+    assert_eq!(cleared.evicted_bytes, counters.evicted_bytes);
+    assert_eq!(
+        cleared.maximum_accounted_bytes,
+        counters.maximum_accounted_bytes
+    );
     assert_invariants(&cache);
+
+    let mut overflow = RangeCache::new(MINIMUM).unwrap();
+    overflow.evicted_bytes = u64::MAX;
+    for byte in 0..12 {
+        overflow
+            .insert(identity(byte), b"", None, false, &entries, report)
+            .unwrap();
+    }
+    assert!(matches!(
+        overflow.report(),
+        Err(StorageError::ResourceLimit)
+    ));
 }

@@ -27,6 +27,8 @@ impl RangeWork {
         for report in [before, after] {
             if !(8192..=uste_storage::MAX_INDEX_CACHE_BYTES).contains(&report.budget_bytes)
                 || report.accounted_bytes > report.budget_bytes
+                || report.maximum_accounted_bytes < report.accounted_bytes
+                || report.maximum_accounted_bytes > report.budget_bytes
                 || report.resident_ranges > report.accounted_bytes
                 || report.resident_entries > report.accounted_bytes
                 || (report.resident_ranges == 0) != (report.accounted_bytes == 0)
@@ -35,6 +37,7 @@ impl RangeWork {
             }
         }
         if before.budget_bytes != after.budget_bytes
+            || before.maximum_accounted_bytes > after.maximum_accounted_bytes
             || self
                 .report
                 .is_some_and(|r| r.budget_bytes != after.budget_bytes)
@@ -51,6 +54,14 @@ impl RangeWork {
             hits: delta(before.hits, after.hits, prior.hits)?,
             misses: delta(before.misses, after.misses, prior.misses)?,
             evictions: delta(before.evictions, after.evictions, prior.evictions)?,
+            evicted_bytes: delta(
+                before.evicted_bytes,
+                after.evicted_bytes,
+                prior.evicted_bytes,
+            )?,
+            maximum_accounted_bytes: prior
+                .maximum_accounted_bytes
+                .max(after.maximum_accounted_bytes),
             oversized_bypasses: delta(
                 before.oversized_bypasses,
                 after.oversized_bypasses,
@@ -87,11 +98,13 @@ mod tests {
         PackedRangeCacheReport {
             budget_bytes: 8192,
             accounted_bytes: accounted,
+            maximum_accounted_bytes: accounted,
             resident_ranges: usize::from(accounted != 0),
             resident_entries: usize::from(accounted != 0) * 2,
             hits,
             misses,
             evictions: 0,
+            evicted_bytes: 0,
             oversized_bypasses: 0,
         }
     }
@@ -102,12 +115,15 @@ mod tests {
             .unwrap();
         work.add(Some(report(4, 5, 768)), Some(report(6, 9, 768)))
             .unwrap();
+        assert_eq!(work.report.unwrap().maximum_accounted_bytes, 768);
         let json = work.json(CacheState::Retained).unwrap();
         assert_eq!(json["work"]["hits"], 5);
         assert_eq!(json["work"]["misses"], 7);
         assert_eq!(json["work"]["accounted_bytes"], 768);
         assert_eq!(json["work"]["resident_ranges"], 1);
         assert_eq!(json["work"]["resident_entries"], 2);
+        assert!(json["work"].get("maximum_accounted_bytes").is_none());
+        assert!(json["work"].get("evicted_bytes").is_none());
         let mut absent = RangeWork::default();
         absent.add(None, None).unwrap();
         assert!(absent.json(CacheState::Empty).unwrap()["work"].is_null());
@@ -125,5 +141,12 @@ mod tests {
         let mut invalid = report(0, 0, 0);
         invalid.resident_ranges = 1;
         assert!(work.add(Some(invalid), Some(invalid)).is_err());
+        let mut regressed = report(0, 0, 0);
+        regressed.evicted_bytes = 1;
+        assert!(
+            RangeWork::default()
+                .add(Some(regressed), Some(report(0, 0, 0)))
+                .is_err()
+        );
     }
 }

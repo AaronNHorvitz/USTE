@@ -19,11 +19,13 @@ pub(super) const MINIMUM: usize = 8192;
 pub struct PackedRangeCacheReport {
     pub budget_bytes: usize,
     pub accounted_bytes: usize,
+    pub maximum_accounted_bytes: usize,
     pub resident_ranges: usize,
     pub resident_entries: usize,
     pub hits: u64,
     pub misses: u64,
     pub evictions: u64,
+    pub evicted_bytes: u64,
     pub oversized_bypasses: u64,
 }
 
@@ -71,12 +73,14 @@ struct Value {
 pub(super) struct RangeCache {
     budget: usize,
     used: usize,
+    maximum_used: usize,
     clock: u128,
     values: BTreeMap<RangeKey, Value>,
     order: BTreeMap<u128, Arc<EntryKey>>,
     hits: u64,
     misses: u64,
     evictions: u64,
+    evicted_bytes: u64,
     bypasses: u64,
     overflowed: bool,
 }
@@ -88,12 +92,14 @@ impl RangeCache {
         Ok(Self {
             budget,
             used: 0,
+            maximum_used: 0,
             clock: 0,
             values: BTreeMap::new(),
             order: BTreeMap::new(),
             hits: 0,
             misses: 0,
             evictions: 0,
+            evicted_bytes: 0,
             bypasses: 0,
             overflowed: false,
         })
@@ -122,11 +128,19 @@ impl RangeCache {
                     .checked_add(self.used)
                     .ok_or(StorageError::ResourceLimit)?
             },
+            maximum_accounted_bytes: if self.maximum_used == 0 {
+                0
+            } else {
+                FIXED
+                    .checked_add(self.maximum_used)
+                    .ok_or(StorageError::ResourceLimit)?
+            },
             resident_ranges: self.values.len(),
             resident_entries,
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
+            evicted_bytes: self.evicted_bytes,
             oversized_bypasses: self.bypasses,
         })
     }
@@ -257,6 +271,15 @@ impl RangeCache {
                 .checked_sub(removed.charge)
                 .ok_or(StorageError::IntegrityFailure)?;
             increment(&mut self.evictions, &mut self.overflowed);
+            if let Ok(bytes) = u64::try_from(removed.charge) {
+                if let Some(total) = self.evicted_bytes.checked_add(bytes) {
+                    self.evicted_bytes = total;
+                } else {
+                    self.overflowed = true;
+                }
+            } else {
+                self.overflowed = true;
+            }
         }
         let key = Arc::new(EntryKey { bytes: logical });
         self.order.insert(next, key.clone());
@@ -273,6 +296,7 @@ impl RangeCache {
             .used
             .checked_add(charge)
             .ok_or(StorageError::ResourceLimit)?;
+        self.maximum_used = self.maximum_used.max(self.used);
         self.clock = next;
         Ok(())
     }

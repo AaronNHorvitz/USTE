@@ -2,6 +2,29 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — range-cache pressure accounting (Decision 0241)
+
+D0240 is committed/pushed as `6ba87a8`. D0241 adds exact monotonic
+`maximum_accounted_bytes` and cumulative `evicted_bytes` to the privileged Rust range-cache report.
+The high-water gauge tracks fixed overhead plus maximum resident charges across clears. The byte
+counter sums each exact range charge removed by capacity pressure; clear drops and oversized
+bypasses remain separate. Checked conversion/addition makes overflow sticky and reporting fails
+closed. Sampling accumulation rejects gauge/counter regression and invalid accounting.
+
+Existing range query/sampling JSON schemas deliberately remain byte-shape compatible; focused tests
+assert the new Rust fields are absent. This avoids retroactively changing D0237/D0239 contracts or
+archived evidence. A separately named telemetry schema must expose and validate the fields before
+another sizing observation.
+
+Focused storage, cache JSON and sampling tests passed. The complete optimized workspace gate passed
+**764 tests** and strict all-target/all-feature Clippy. The complete optimized standalone T-20 gate
+passed **141 active tests with five unchanged opt-in ignores** and strict Clippy. Logs:
+`/tmp/uste-d241-workspace-verification.log` and `/tmp/uste-d241-native-verification.log`. Gates used
+one Cargo job/thread, locked offline dependencies and the 4 GiB process limit under the verified
+5/6 GiB enclosing memory caps. No benchmark ran, so no performance, T-20, M1 or qualification claim
+follows. Next commit/push this core accounting, then add a distinct supervised pressure-report
+schema requiring terminal, warm-up and per-pair pressure fields.
+
 ## Latest development observation — small range cache (Decision 0240)
 
 D0239 is committed/pushed as `57920ee`. Its one supervised 112/128/16 MiB page/lookup/range sample
