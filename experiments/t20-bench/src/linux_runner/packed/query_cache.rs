@@ -12,6 +12,7 @@ const WIDE_RANGE_LOOKUP: usize = 64 * 1024 * 1024;
 const WIDE_RANGE: usize = 128 * 1024 * 1024;
 const WIDE_SMALL_RANGE_LOOKUP: usize = 128 * 1024 * 1024;
 const WIDE_SMALL_RANGE: usize = 16 * 1024 * 1024;
+const WIDE_MEDIUM_RANGE: usize = 32 * 1024 * 1024;
 pub(super) type Reader<'a> = AuthorizedPackedReader<
     'a,
     uste_graph::GraphPackedLiveState,
@@ -28,16 +29,23 @@ pub(super) enum QueryCacheMode {
     Range,
     WideSmallRange,
     WideSmallRangePressure,
+    WideMediumRangePressure,
 }
 impl QueryCacheMode {
     pub(super) fn includes_ranges(self) -> bool {
         matches!(
             self,
-            Self::Range | Self::WideSmallRange | Self::WideSmallRangePressure
+            Self::Range
+                | Self::WideSmallRange
+                | Self::WideSmallRangePressure
+                | Self::WideMediumRangePressure
         )
     }
     pub(super) fn includes_range_pressure(self) -> bool {
-        matches!(self, Self::WideSmallRangePressure)
+        matches!(
+            self,
+            Self::WideSmallRangePressure | Self::WideMediumRangePressure
+        )
     }
     pub(super) fn reader_with_size<'a>(
         self,
@@ -58,7 +66,10 @@ impl QueryCacheMode {
                 total,
                 lookup,
             ),
-            Self::Range | Self::WideSmallRange | Self::WideSmallRangePressure => {
+            Self::Range
+            | Self::WideSmallRange
+            | Self::WideSmallRangePressure
+            | Self::WideMediumRangePressure => {
                 AuthorizedPackedReader::new_with_lookup_and_range_cache_budget(
                     coordinator,
                     policy,
@@ -120,6 +131,18 @@ impl QueryCacheMode {
                 "packed-pages-positive-lookups-small-ranges-pressure-256m-v1",
             ),
             (Self::WideSmallRangePressure, false) => (
+                TOTAL,
+                LOOKUP,
+                RANGE,
+                "packed-pages-positive-lookups-ranges-v1",
+            ),
+            (Self::WideMediumRangePressure, true) => (
+                WIDE_TOTAL,
+                WIDE_SMALL_RANGE_LOOKUP,
+                WIDE_MEDIUM_RANGE,
+                "packed-pages-positive-lookups-medium-ranges-pressure-256m-v1",
+            ),
+            (Self::WideMediumRangePressure, false) => (
                 TOTAL,
                 LOOKUP,
                 RANGE,

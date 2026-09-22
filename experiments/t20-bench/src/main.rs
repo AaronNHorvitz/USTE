@@ -210,6 +210,8 @@ fn run() -> Result<(), String> {
             | "linux-packed-wide-small-range-sample-worker"
             | "linux-packed-wide-small-range-pressure-sample"
             | "linux-packed-wide-small-range-pressure-sample-worker"
+            | "linux-packed-wide-medium-range-pressure-sample"
+            | "linux-packed-wide-medium-range-pressure-sample-worker"
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
@@ -352,6 +354,7 @@ fn run() -> Result<(), String> {
                     | "linux-packed-wide-range-sample-worker"
                     | "linux-packed-wide-small-range-sample-worker"
                     | "linux-packed-wide-small-range-pressure-sample-worker"
+                    | "linux-packed-wide-medium-range-pressure-sample-worker"
             ) {
                 uste_t20_bench::linux_runner::start_parent_watchdog()
                     .map_err(|error| error.code().to_owned())?;
@@ -359,6 +362,8 @@ fn run() -> Result<(), String> {
                     uste_t20_bench::linux_runner::packed::sample_worker_wide
                 } else if command == "linux-packed-wide-lookup-sample-worker" {
                     uste_t20_bench::linux_runner::packed::sample_worker_wide_with_lookup
+                } else if command == "linux-packed-wide-medium-range-pressure-sample-worker" {
+                    uste_t20_bench::linux_runner::packed::sample_worker_wide_with_medium_range_pressure
                 } else if command == "linux-packed-wide-small-range-pressure-sample-worker" {
                     uste_t20_bench::linux_runner::packed::sample_worker_wide_with_small_range_pressure
                 } else if command == "linux-packed-wide-small-range-sample-worker" {
@@ -390,11 +395,14 @@ fn run() -> Result<(), String> {
                 | "linux-packed-wide-lookup-sample"
                 | "linux-packed-wide-range-sample"
                 | "linux-packed-wide-small-range-sample"
-                | "linux-packed-wide-small-range-pressure-sample" => {
+                | "linux-packed-wide-small-range-pressure-sample"
+                | "linux-packed-wide-medium-range-pressure-sample" => {
                     let executable = env::current_exe()
                         .map_err(|_| "cannot resolve current benchmark executable")?;
                     let supervisor = if command == "linux-packed-wide-sample" {
                         uste_t20_bench::linux_runner::supervise_packed_wide_sample
+                    } else if command == "linux-packed-wide-medium-range-pressure-sample" {
+                        uste_t20_bench::linux_runner::supervise_packed_wide_medium_range_pressure_sample
                     } else if command == "linux-packed-wide-small-range-pressure-sample" {
                         uste_t20_bench::linux_runner::supervise_packed_wide_small_range_pressure_sample
                     } else if command == "linux-packed-wide-small-range-sample" {
@@ -627,6 +635,7 @@ fn print_usage() {
          uste-t20-bench linux-packed-wide-range-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 64 MiB pages + 64 MiB positive lookups + 128 MiB ranges)\n\
          uste-t20-bench linux-packed-wide-small-range-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 112 MiB pages + 128 MiB positive lookups + 16 MiB ranges)\n\
          uste-t20-bench linux-packed-wide-small-range-pressure-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; same 112/128/16 MiB split with range pressure telemetry)\n\
+         uste-t20-bench linux-packed-wide-medium-range-pressure-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 96 MiB pages + 128 MiB positive lookups + 32 MiB ranges with pressure telemetry)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

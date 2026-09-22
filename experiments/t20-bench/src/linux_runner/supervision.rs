@@ -40,6 +40,7 @@ enum SampleMode {
     PackedWideRange,
     PackedWideSmallRange,
     PackedWideSmallRangePressure,
+    PackedWideMediumRangePressure,
 }
 
 impl SampleMode {
@@ -54,6 +55,7 @@ impl SampleMode {
                 | Self::PackedWideRange
                 | Self::PackedWideSmallRange
                 | Self::PackedWideSmallRangePressure
+                | Self::PackedWideMediumRangePressure
         )
     }
 }
@@ -141,6 +143,23 @@ pub fn supervise_packed_wide_small_range_pressure_sample(
         bundle_file,
         profile,
         SampleMode::PackedWideSmallRangePressure,
+    )
+}
+pub fn supervise_packed_wide_medium_range_pressure_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedWideMediumRangePressure,
     )
 }
 
@@ -253,6 +272,9 @@ fn supervise_mode(
             SampleMode::PackedWideSmallRange => "linux-packed-wide-small-range-sample-worker",
             SampleMode::PackedWideSmallRangePressure => {
                 "linux-packed-wide-small-range-pressure-sample-worker"
+            }
+            SampleMode::PackedWideMediumRangePressure => {
+                "linux-packed-wide-medium-range-pressure-sample-worker"
             }
         })
         .arg("--root")
@@ -487,6 +509,9 @@ fn finalize_report(
             SampleMode::PackedWideSmallRangePressure => {
                 "bm01-linux-packed-wide-small-range-pressure-sampling-v1"
             }
+            SampleMode::PackedWideMediumRangePressure => {
+                "bm01-linux-packed-wide-medium-range-pressure-sampling-v1"
+            }
         },
     )?;
     if mode.packed() {
@@ -566,6 +591,7 @@ fn finalize_report(
             | SampleMode::PackedWideRange
             | SampleMode::PackedWideSmallRange
             | SampleMode::PackedWideSmallRangePressure
+            | SampleMode::PackedWideMediumRangePressure
     ) {
         lookup::validate_range(
             object,
@@ -574,12 +600,18 @@ fn finalize_report(
                 SampleMode::PackedWideRange
                     | SampleMode::PackedWideSmallRange
                     | SampleMode::PackedWideSmallRangePressure
+                    | SampleMode::PackedWideMediumRangePressure
             ),
             matches!(
                 mode,
                 SampleMode::PackedWideSmallRange | SampleMode::PackedWideSmallRangePressure
             ),
-            matches!(mode, SampleMode::PackedWideSmallRangePressure),
+            matches!(
+                mode,
+                SampleMode::PackedWideSmallRangePressure
+                    | SampleMode::PackedWideMediumRangePressure
+            ),
+            matches!(mode, SampleMode::PackedWideMediumRangePressure),
         )?;
     } else if matches!(mode, SampleMode::PackedWide) {
         lookup::validate_pages(object, true)?;

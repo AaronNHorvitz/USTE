@@ -2,6 +2,26 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified tooling — medium range-pressure profile (Decision 0244)
+
+D0243 is committed/pushed as `97469be`. D0244 adds the distinct supervised
+`linux-packed-wide-medium-range-pressure-sample` parent/worker command. It preserves the 256 MiB
+total and 128 MiB positive-lookup partition while assigning 96 MiB to pages and 32 MiB to complete
+ranges. This is the next geometric pressure measurement point after 16 MiB saturated, not a new
+default or a sufficiency claim.
+
+The new medium schema/profile requires exact 96/128/32 MiB budgets plus D0242's terminal, warm-up
+and per-pair high-water/evicted-byte reconciliation. Cross-profile schema or budget substitution
+refuses. The owned worker, 30-second per-query deadline, existing commands/schemas and defaults are
+unchanged.
+
+Focused cache and supervisor suites passed. The complete optimized standalone T-20 gate passed
+**142 active tests with five unchanged opt-in ignores** and strict Clippy. Log:
+`/tmp/uste-d244-native-verification.log`. It used one Cargo job/thread, locked offline dependencies
+and the 4 GiB process limit under the verified enclosing caps. No sample ran, so no performance,
+T-20, M1 or qualification claim follows. Next commit/push this tooling, then run one unchanged
+retained-fixture medium-pressure observation and archive the exact result.
+
 ## Latest development observation — exact range pressure (Decision 0243)
 
 D0242 is committed/pushed as `3548ebe`. Its one supervised pressure sample completed with the

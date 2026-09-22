@@ -19,7 +19,8 @@ fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() 
             QueryCacheMode::Positive => PackedPageCache::new_with_lookup_budget(total, lookup),
             QueryCacheMode::Range
             | QueryCacheMode::WideSmallRange
-            | QueryCacheMode::WideSmallRangePressure => {
+            | QueryCacheMode::WideSmallRangePressure
+            | QueryCacheMode::WideMediumRangePressure => {
                 PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range)
             }
         }
@@ -81,6 +82,24 @@ fn pressure_profile_exposes_only_the_new_exact_fields() {
         .unwrap();
     assert!(ordinary["range"].get("maximum_accounted_bytes").is_none());
     assert!(ordinary["range"].get("evicted_bytes").is_none());
+
+    let medium = PackedPageCache::new_with_lookup_and_range_budget(
+        WIDE_TOTAL,
+        WIDE_SMALL_RANGE_LOOKUP,
+        WIDE_MEDIUM_RANGE,
+    )
+    .unwrap()
+    .report()
+    .unwrap();
+    let medium = QueryCacheMode::WideMediumRangePressure
+        .report_with_size(medium, true)
+        .unwrap();
+    assert_eq!(
+        medium["profile"],
+        "packed-pages-positive-lookups-medium-ranges-pressure-256m-v1"
+    );
+    assert_eq!(medium["page_budget_bytes"], 96 * 1024 * 1024);
+    assert_eq!(medium["range_budget_bytes"], WIDE_MEDIUM_RANGE);
 }
 
 #[test]

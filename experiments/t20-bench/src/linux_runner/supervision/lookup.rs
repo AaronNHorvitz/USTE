@@ -238,8 +238,11 @@ pub(super) fn validate_range(
     wide: bool,
     small_range: bool,
     pressure: bool,
+    medium_range: bool,
 ) -> Result<(), LinuxRunnerError> {
-    let (total, lookup_budget, range_budget) = if small_range {
+    let (total, lookup_budget, range_budget) = if medium_range {
+        (256 * 1024 * 1024, 128 * 1024 * 1024, 32 * 1024 * 1024)
+    } else if small_range {
         (256 * 1024 * 1024, 128 * 1024 * 1024, 16 * 1024 * 1024)
     } else if wide {
         (256 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024)
@@ -250,7 +253,9 @@ pub(super) fn validate_range(
     expect_string(
         config,
         "profile",
-        if pressure {
+        if medium_range {
+            "packed-pages-positive-lookups-medium-ranges-pressure-256m-v1"
+        } else if pressure {
             "packed-pages-positive-lookups-small-ranges-pressure-256m-v1"
         } else if small_range {
             "packed-pages-positive-lookups-small-ranges-256m-v1"

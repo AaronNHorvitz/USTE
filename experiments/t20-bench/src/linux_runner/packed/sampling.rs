@@ -128,6 +128,21 @@ pub fn sample_worker_wide_with_small_range_pressure(
         true,
     )
 }
+pub fn sample_worker_wide_with_medium_range_pressure(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::WideMediumRangePressure,
+        true,
+    )
+}
 
 fn sample_worker_mode(
     root: &Path,
@@ -218,6 +233,8 @@ fn sample(
             (QueryCacheMode::WideSmallRange, false) => "bm01-linux-packed-range-sampling-v1",
             (QueryCacheMode::WideSmallRangePressure, true) => "bm01-linux-packed-wide-small-range-pressure-sampling-v1",
             (QueryCacheMode::WideSmallRangePressure, false) => "bm01-linux-packed-range-sampling-v1",
+            (QueryCacheMode::WideMediumRangePressure, true) => "bm01-linux-packed-wide-medium-range-pressure-sampling-v1",
+            (QueryCacheMode::WideMediumRangePressure, false) => "bm01-linux-packed-range-sampling-v1",
         }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",

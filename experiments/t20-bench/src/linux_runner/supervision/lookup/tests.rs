@@ -165,6 +165,24 @@ fn small_range_supervisor_binds_distinct_wide_partition() {
     pressure["samples"][0]["range_cache_work"][1]["work"]["maximum_accounted_bytes"] = 16384.into();
     pressure["samples"][0]["range_cache_work"][1]["work"]["evicted_bytes"] = 4.into();
     assert!(finish(&pressure, SampleMode::PackedWideSmallRangePressure).is_ok());
+    let mut medium = pressure.clone();
+    let medium_range = 32 * 1024 * 1024_u64;
+    medium["schema"] = "bm01-linux-packed-wide-medium-range-pressure-sampling-v1".into();
+    medium["query_cache_configuration"]["profile"] =
+        "packed-pages-positive-lookups-medium-ranges-pressure-256m-v1".into();
+    medium["query_cache_configuration"]["page_budget_bytes"] =
+        (total - lookup - medium_range).into();
+    medium["query_cache_configuration"]["range_budget_bytes"] = medium_range.into();
+    medium["query_cache_configuration"]["range"]["budget_bytes"] = medium_range.into();
+    medium["warmup_range_cache_work"]["work"]["budget_bytes"] = medium_range.into();
+    for value in medium["samples"][0]["range_cache_work"]
+        .as_array_mut()
+        .unwrap()
+    {
+        value["work"]["budget_bytes"] = medium_range.into();
+    }
+    assert!(finish(&medium, SampleMode::PackedWideMediumRangePressure).is_ok());
+    assert!(finish(&medium, SampleMode::PackedWideSmallRangePressure).is_err());
     let mut missing = pressure.clone();
     missing["samples"][0]["range_cache_work"][1]["work"]["evicted_bytes"] = Value::Null;
     assert!(finish(&missing, SampleMode::PackedWideSmallRangePressure).is_err());
