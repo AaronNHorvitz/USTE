@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest development observation — borrowed range-hit mapping (Decision 0247)
+
+D0246 is committed/pushed as `6d25df6`. Its one supervised 96/128/32 MiB observation completed
+against the unchanged retained fixture and oracle. The parent accepted 96 warm-ups, 768 executions
+and 40 groups with output digest
+`aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`. After removing only timing
+and RSS fields, the complete report exactly matches D0245 at SHA-256
+`c472dc13e72e3ed3fd5cd46776824223c89213f9c2dc9ec25bdcc653b633abd9`; all semantic and physical
+work evidence is unchanged.
+
+The range high-water remained 29,231,596 bytes with zero evictions/evicted bytes. The retained half
+hit all 1,074,437 ranges with zero misses and zero adapter reads; empty reads remained 11,240,354.
+The round took 582,786 ms, 0.13% below D0245. Retained all-class successful p99 was **3.940148 /
+126.474289 / 89.712790 / 489.870038 ms**, changing by -0.76%, +2.96%, +4.38% and -10.52%. This
+single sequential uncontrolled observation cannot establish causality; four-hop remains 1.96 times
+the unchanged 250 ms target, so no target, T-20, M1 or qualification gate passes.
+
+Process peak RSS was 266,096 KiB; wall/user/system were 768.81/711.62/54.42 seconds with zero
+process swaps. Inputs and the D0246 binary stayed pinned. The shared cgroup peaks stayed unchanged;
+soft-limit events increased by 1,623 while maximum/OOM/CPU-throttle counters remained zero.
+Complete report: `docs/evidence/borrowed-range-mapping-sampling.json`; local artifacts:
+`experiments/t20-bench/target/native-d246-mapped.JS3Bmg`.
+
+Next commit/push this evidence, then inspect repeated compact-result construction, record decoding
+and authorization on the zero-I/O retained four-hop path before selecting another bounded
+implementation or telemetry increment. Preserve existing defaults and all qualification
+prerequisites.
+
 ## Latest verified implementation — borrowed range-hit mapping (Decision 0246)
 
 D0245 is committed/pushed as `6a9cc3e`. It proved that the retained 96/128/32 MiB profile performs
