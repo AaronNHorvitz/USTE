@@ -39,6 +39,7 @@ enum SampleMode {
     PackedWideLookup,
     PackedWideRange,
     PackedWideSmallRange,
+    PackedWideSmallRangePressure,
 }
 
 impl SampleMode {
@@ -52,6 +53,7 @@ impl SampleMode {
                 | Self::PackedWideLookup
                 | Self::PackedWideRange
                 | Self::PackedWideSmallRange
+                | Self::PackedWideSmallRangePressure
         )
     }
 }
@@ -122,6 +124,23 @@ pub fn supervise_packed_wide_small_range_sample(
         bundle_file,
         profile,
         SampleMode::PackedWideSmallRange,
+    )
+}
+pub fn supervise_packed_wide_small_range_pressure_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedWideSmallRangePressure,
     )
 }
 
@@ -232,6 +251,9 @@ fn supervise_mode(
             SampleMode::PackedWideLookup => "linux-packed-wide-lookup-sample-worker",
             SampleMode::PackedWideRange => "linux-packed-wide-range-sample-worker",
             SampleMode::PackedWideSmallRange => "linux-packed-wide-small-range-sample-worker",
+            SampleMode::PackedWideSmallRangePressure => {
+                "linux-packed-wide-small-range-pressure-sample-worker"
+            }
         })
         .arg("--root")
         .arg(root)
@@ -462,6 +484,9 @@ fn finalize_report(
             SampleMode::PackedWideLookup => "bm01-linux-packed-wide-lookup-sampling-v1",
             SampleMode::PackedWideRange => "bm01-linux-packed-wide-range-sampling-v1",
             SampleMode::PackedWideSmallRange => "bm01-linux-packed-wide-small-range-sampling-v1",
+            SampleMode::PackedWideSmallRangePressure => {
+                "bm01-linux-packed-wide-small-range-pressure-sampling-v1"
+            }
         },
     )?;
     if mode.packed() {
@@ -537,15 +562,24 @@ fn finalize_report(
         lookup::validate(object, matches!(mode, SampleMode::PackedWideLookup))?;
     } else if matches!(
         mode,
-        SampleMode::PackedRange | SampleMode::PackedWideRange | SampleMode::PackedWideSmallRange
+        SampleMode::PackedRange
+            | SampleMode::PackedWideRange
+            | SampleMode::PackedWideSmallRange
+            | SampleMode::PackedWideSmallRangePressure
     ) {
         lookup::validate_range(
             object,
             matches!(
                 mode,
-                SampleMode::PackedWideRange | SampleMode::PackedWideSmallRange
+                SampleMode::PackedWideRange
+                    | SampleMode::PackedWideSmallRange
+                    | SampleMode::PackedWideSmallRangePressure
             ),
-            matches!(mode, SampleMode::PackedWideSmallRange),
+            matches!(
+                mode,
+                SampleMode::PackedWideSmallRange | SampleMode::PackedWideSmallRangePressure
+            ),
+            matches!(mode, SampleMode::PackedWideSmallRangePressure),
         )?;
     } else if matches!(mode, SampleMode::PackedWide) {
         lookup::validate_pages(object, true)?;

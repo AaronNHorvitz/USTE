@@ -113,6 +113,21 @@ pub fn sample_worker_wide_with_small_ranges(
         true,
     )
 }
+pub fn sample_worker_wide_with_small_range_pressure(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::WideSmallRangePressure,
+        true,
+    )
+}
 
 fn sample_worker_mode(
     root: &Path,
@@ -167,6 +182,7 @@ fn sample(
         principal: &session.principal,
         materializer: Materializer::new(profile),
         range: mode.includes_ranges(),
+        range_pressure: mode.includes_range_pressure(),
     };
     let setup_cache = engine.report()?;
     let mut warmup = [0_usize; 3];
@@ -200,6 +216,8 @@ fn sample(
             (QueryCacheMode::Range, true) => "bm01-linux-packed-wide-range-sampling-v1",
             (QueryCacheMode::WideSmallRange, true) => "bm01-linux-packed-wide-small-range-sampling-v1",
             (QueryCacheMode::WideSmallRange, false) => "bm01-linux-packed-range-sampling-v1",
+            (QueryCacheMode::WideSmallRangePressure, true) => "bm01-linux-packed-wide-small-range-pressure-sampling-v1",
+            (QueryCacheMode::WideSmallRangePressure, false) => "bm01-linux-packed-range-sampling-v1",
         }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",
@@ -221,7 +239,11 @@ fn sample(
         "oracle_bundle_digest": hex(&bundle.digest()), "samples": samples,
     });
     if mode.includes_ranges() {
-        report["warmup_range_cache_work"] = warmup_range.json(CacheState::Empty)?;
+        report["warmup_range_cache_work"] = if mode.includes_range_pressure() {
+            warmup_range.json_with_pressure(CacheState::Empty)?
+        } else {
+            warmup_range.json(CacheState::Empty)?
+        };
     }
     Ok(report.to_string())
 }
@@ -233,6 +255,7 @@ struct Engine<'a> {
     principal: &'a AuthenticatedPrincipal,
     materializer: Materializer,
     range: bool,
+    range_pressure: bool,
 }
 impl Engine<'_> {
     fn crypto_report(&self) -> Result<CryptoWork, LinuxRunnerError> {
@@ -362,8 +385,16 @@ impl Engine<'_> {
         });
         if self.range {
             report["range_cache_work"] = serde_json::json!([
-                range_work[0].json(CacheState::Empty)?,
-                range_work[1].json(CacheState::Retained)?,
+                if self.range_pressure {
+                    range_work[0].json_with_pressure(CacheState::Empty)?
+                } else {
+                    range_work[0].json(CacheState::Empty)?
+                },
+                if self.range_pressure {
+                    range_work[1].json_with_pressure(CacheState::Retained)?
+                } else {
+                    range_work[1].json(CacheState::Retained)?
+                },
             ]);
         }
         Ok(report)

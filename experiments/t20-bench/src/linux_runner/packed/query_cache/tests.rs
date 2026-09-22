@@ -17,7 +17,9 @@ fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() 
         let cache = match mode {
             QueryCacheMode::Pages => PackedPageCache::new(total),
             QueryCacheMode::Positive => PackedPageCache::new_with_lookup_budget(total, lookup),
-            QueryCacheMode::Range | QueryCacheMode::WideSmallRange => {
+            QueryCacheMode::Range
+            | QueryCacheMode::WideSmallRange
+            | QueryCacheMode::WideSmallRangePressure => {
                 PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range)
             }
         }
@@ -50,6 +52,35 @@ fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() 
             assert!(mode.report_with_size(wrong, wide).is_err());
         }
     }
+}
+
+#[test]
+fn pressure_profile_exposes_only_the_new_exact_fields() {
+    let mut cache = PackedPageCache::new_with_lookup_and_range_budget(
+        WIDE_TOTAL,
+        WIDE_SMALL_RANGE_LOOKUP,
+        WIDE_SMALL_RANGE,
+    )
+    .unwrap()
+    .report()
+    .unwrap();
+    let range = cache.range.as_mut().unwrap();
+    range.maximum_accounted_bytes = 8192;
+    range.evicted_bytes = 4096;
+    let pressure = QueryCacheMode::WideSmallRangePressure
+        .report_with_size(cache, true)
+        .unwrap();
+    assert_eq!(
+        pressure["profile"],
+        "packed-pages-positive-lookups-small-ranges-pressure-256m-v1"
+    );
+    assert_eq!(pressure["range"]["maximum_accounted_bytes"], 8192);
+    assert_eq!(pressure["range"]["evicted_bytes"], 4096);
+    let ordinary = QueryCacheMode::WideSmallRange
+        .report_with_size(cache, true)
+        .unwrap();
+    assert!(ordinary["range"].get("maximum_accounted_bytes").is_none());
+    assert!(ordinary["range"].get("evicted_bytes").is_none());
 }
 
 #[test]

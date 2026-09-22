@@ -27,10 +27,17 @@ pub(super) enum QueryCacheMode {
     Positive,
     Range,
     WideSmallRange,
+    WideSmallRangePressure,
 }
 impl QueryCacheMode {
     pub(super) fn includes_ranges(self) -> bool {
-        matches!(self, Self::Range | Self::WideSmallRange)
+        matches!(
+            self,
+            Self::Range | Self::WideSmallRange | Self::WideSmallRangePressure
+        )
+    }
+    pub(super) fn includes_range_pressure(self) -> bool {
+        matches!(self, Self::WideSmallRangePressure)
     }
     pub(super) fn reader_with_size<'a>(
         self,
@@ -51,7 +58,7 @@ impl QueryCacheMode {
                 total,
                 lookup,
             ),
-            Self::Range | Self::WideSmallRange => {
+            Self::Range | Self::WideSmallRange | Self::WideSmallRangePressure => {
                 AuthorizedPackedReader::new_with_lookup_and_range_cache_budget(
                     coordinator,
                     policy,
@@ -101,6 +108,18 @@ impl QueryCacheMode {
                 "packed-pages-positive-lookups-small-ranges-256m-v1",
             ),
             (Self::WideSmallRange, false) => (
+                TOTAL,
+                LOOKUP,
+                RANGE,
+                "packed-pages-positive-lookups-ranges-v1",
+            ),
+            (Self::WideSmallRangePressure, true) => (
+                WIDE_TOTAL,
+                WIDE_SMALL_RANGE_LOOKUP,
+                WIDE_SMALL_RANGE,
+                "packed-pages-positive-lookups-small-ranges-pressure-256m-v1",
+            ),
+            (Self::WideSmallRangePressure, false) => (
                 TOTAL,
                 LOOKUP,
                 RANGE,
@@ -157,6 +176,10 @@ impl QueryCacheMode {
                 "hits": range.hits, "misses": range.misses, "evictions": range.evictions,
                 "oversized_bypasses": range.oversized_bypasses,
             });
+            if self.includes_range_pressure() {
+                output["range"]["maximum_accounted_bytes"] = range.maximum_accounted_bytes.into();
+                output["range"]["evicted_bytes"] = range.evicted_bytes.into();
+            }
         }
         Ok(output)
     }

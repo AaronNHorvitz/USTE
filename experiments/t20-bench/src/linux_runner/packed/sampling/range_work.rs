@@ -73,10 +73,23 @@ impl RangeWork {
         Ok(())
     }
     pub(super) fn json(self, state: CacheState) -> Result<serde_json::Value, LinuxRunnerError> {
+        self.json_mode(state, false)
+    }
+    pub(super) fn json_with_pressure(
+        self,
+        state: CacheState,
+    ) -> Result<serde_json::Value, LinuxRunnerError> {
+        self.json_mode(state, true)
+    }
+    fn json_mode(
+        self,
+        state: CacheState,
+        pressure: bool,
+    ) -> Result<serde_json::Value, LinuxRunnerError> {
         if !self.observed {
             return Err(error("USTE_BM01_SAMPLE_OBSERVATIONS"));
         }
-        Ok(serde_json::json!({
+        let mut output = serde_json::json!({
             "cache": state.name(),
             "work": self.report.map(|r| serde_json::json!({
                 "measurement_scope": "complete-range-cache-observations",
@@ -87,7 +100,12 @@ impl RangeWork {
                 "hits": r.hits, "misses": r.misses, "evictions": r.evictions,
                 "oversized_bypasses": r.oversized_bypasses,
             })),
-        }))
+        });
+        if pressure && let Some(report) = self.report {
+            output["work"]["maximum_accounted_bytes"] = report.maximum_accounted_bytes.into();
+            output["work"]["evicted_bytes"] = report.evicted_bytes.into();
+        }
+        Ok(output)
     }
 }
 
@@ -124,6 +142,14 @@ mod tests {
         assert_eq!(json["work"]["resident_entries"], 2);
         assert!(json["work"].get("maximum_accounted_bytes").is_none());
         assert!(json["work"].get("evicted_bytes").is_none());
+        let mut pressure = RangeWork::default();
+        let before = report(0, 0, 0);
+        let mut after = report(0, 1, 768);
+        after.evicted_bytes = 512;
+        pressure.add(Some(before), Some(after)).unwrap();
+        let json = pressure.json_with_pressure(CacheState::Empty).unwrap();
+        assert_eq!(json["work"]["maximum_accounted_bytes"], 768);
+        assert_eq!(json["work"]["evicted_bytes"], 512);
         let mut absent = RangeWork::default();
         absent.add(None, None).unwrap();
         assert!(absent.json(CacheState::Empty).unwrap()["work"].is_null());

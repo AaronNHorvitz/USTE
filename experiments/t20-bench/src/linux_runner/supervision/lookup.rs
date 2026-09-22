@@ -237,6 +237,7 @@ pub(super) fn validate_range(
     root: &Object,
     wide: bool,
     small_range: bool,
+    pressure: bool,
 ) -> Result<(), LinuxRunnerError> {
     let (total, lookup_budget, range_budget) = if small_range {
         (256 * 1024 * 1024, 128 * 1024 * 1024, 16 * 1024 * 1024)
@@ -249,7 +250,9 @@ pub(super) fn validate_range(
     expect_string(
         config,
         "profile",
-        if small_range {
+        if pressure {
+            "packed-pages-positive-lookups-small-ranges-pressure-256m-v1"
+        } else if small_range {
             "packed-pages-positive-lookups-small-ranges-256m-v1"
         } else if wide {
             "packed-pages-positive-lookups-ranges-256m-v1"
@@ -267,6 +270,7 @@ pub(super) fn validate_range(
     }
     let expected_lookup = counters(config.get("lookup"), false, lookup_budget)?;
     let expected_range = range_counters(config.get("range"), false, range_budget)?;
+    let expected_pressure = range_pressure(config.get("range"), pressure, range_budget)?;
     let page_accounted = value_u64(config, "page_accounted_bytes")?;
     let lookup_accounted = value_u64(object(config.get("lookup"))?, "accounted_bytes")?;
     let range_accounted = value_u64(object(config.get("range"))?, "accounted_bytes")?;
@@ -290,6 +294,13 @@ pub(super) fn validate_range(
         true,
         range_budget,
     )?;
+    let mut evicted_bytes = range_pressure(
+        state(root.get("warmup_range_cache_work"), "uste-empty")?.get("work"),
+        pressure,
+        range_budget,
+    )?
+    .1;
+    let mut latest_range = None;
     let samples = root
         .get("samples")
         .and_then(Value::as_array)
@@ -318,13 +329,42 @@ pub(super) fn validate_range(
                 for (sum, value) in total_counters.iter_mut().zip(part) {
                     *sum = sum.checked_add(value).ok_or_else(fail)?;
                 }
+                if parser {
+                    let observed = range_pressure(work, pressure, budget)?;
+                    evicted_bytes = evicted_bytes.checked_add(observed.1).ok_or_else(fail)?;
+                    latest_range = work;
+                }
             }
         }
     }
-    if lookup_total != expected_lookup || range_total != expected_range {
+    if lookup_total != expected_lookup
+        || range_total != expected_range
+        || evicted_bytes != expected_pressure.1
+        || pressure && range_pressure(latest_range, true, range_budget)?.0 != expected_pressure.0
+    {
         return Err(fail());
     }
     Ok(())
+}
+
+fn range_pressure(
+    value: Option<&Value>,
+    enabled: bool,
+    budget: u64,
+) -> Result<(u64, u64), LinuxRunnerError> {
+    let report = object(value)?;
+    if !enabled {
+        if report.contains_key("maximum_accounted_bytes") || report.contains_key("evicted_bytes") {
+            return Err(fail());
+        }
+        return Ok((0, 0));
+    }
+    let maximum = value_u64(report, "maximum_accounted_bytes")?;
+    let accounted = value_u64(report, "accounted_bytes")?;
+    if maximum < accounted || maximum > budget {
+        return Err(fail());
+    }
+    Ok((maximum, value_u64(report, "evicted_bytes")?))
 }
 
 fn range_counters(

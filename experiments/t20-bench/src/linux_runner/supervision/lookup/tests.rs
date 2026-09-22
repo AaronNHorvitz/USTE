@@ -152,6 +152,33 @@ fn small_range_supervisor_binds_distinct_wide_partition() {
     }
     assert!(finish(&r, SampleMode::PackedWideSmallRange).is_ok());
     assert!(finish(&r, SampleMode::PackedWideRange).is_err());
+    let mut pressure = r.clone();
+    pressure["schema"] = "bm01-linux-packed-wide-small-range-pressure-sampling-v1".into();
+    pressure["query_cache_configuration"]["profile"] =
+        "packed-pages-positive-lookups-small-ranges-pressure-256m-v1".into();
+    pressure["query_cache_configuration"]["range"]["maximum_accounted_bytes"] = 16384.into();
+    pressure["query_cache_configuration"]["range"]["evicted_bytes"] = 7.into();
+    pressure["warmup_range_cache_work"]["work"]["maximum_accounted_bytes"] = 16384.into();
+    pressure["warmup_range_cache_work"]["work"]["evicted_bytes"] = 1.into();
+    pressure["samples"][0]["range_cache_work"][0]["work"]["maximum_accounted_bytes"] = 16384.into();
+    pressure["samples"][0]["range_cache_work"][0]["work"]["evicted_bytes"] = 2.into();
+    pressure["samples"][0]["range_cache_work"][1]["work"]["maximum_accounted_bytes"] = 16384.into();
+    pressure["samples"][0]["range_cache_work"][1]["work"]["evicted_bytes"] = 4.into();
+    assert!(finish(&pressure, SampleMode::PackedWideSmallRangePressure).is_ok());
+    let mut missing = pressure.clone();
+    missing["samples"][0]["range_cache_work"][1]["work"]["evicted_bytes"] = Value::Null;
+    assert!(finish(&missing, SampleMode::PackedWideSmallRangePressure).is_err());
+    let mut wrong_total = pressure;
+    wrong_total["query_cache_configuration"]["range"]["evicted_bytes"] = 8.into();
+    assert!(finish(&wrong_total, SampleMode::PackedWideSmallRangePressure).is_err());
+    let mut wrong_maximum = r.clone();
+    wrong_maximum["schema"] = "bm01-linux-packed-wide-small-range-pressure-sampling-v1".into();
+    wrong_maximum["query_cache_configuration"]["profile"] =
+        "packed-pages-positive-lookups-small-ranges-pressure-256m-v1".into();
+    wrong_maximum["query_cache_configuration"]["range"]["maximum_accounted_bytes"] =
+        (range + 1).into();
+    wrong_maximum["query_cache_configuration"]["range"]["evicted_bytes"] = 0.into();
+    assert!(finish(&wrong_maximum, SampleMode::PackedWideSmallRangePressure).is_err());
     let mut wrong = r;
     wrong["query_cache_configuration"]["page_budget_bytes"] = (128 * 1024 * 1024_u64).into();
     assert!(finish(&wrong, SampleMode::PackedWideSmallRange).is_err());

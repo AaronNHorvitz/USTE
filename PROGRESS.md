@@ -2,6 +2,27 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified tooling — supervised range-pressure sampling (Decision 0242)
+
+D0241 is committed/pushed as `1b6f87a`. D0242 adds the distinct supervised
+`linux-packed-wide-small-range-pressure-sample` parent/worker command. It preserves D0239's
+112/128/16 MiB page/lookup/range split while emitting a new pressure schema/profile. Existing
+commands and JSON shapes are unchanged and reject injected pressure fields.
+
+Terminal configuration, warm-up and every empty/retained range entry must contain exact
+`maximum_accounted_bytes` and `evicted_bytes`. Parent validation bounds every high-water gauge,
+sums all evicted-byte deltas to the terminal counter and requires the latest retained high-water to
+equal terminal configuration. Missing/mutated pressure, old-schema relabelling, existing counter or
+residency mutation, and total-accounting mismatch refuse. The owned child and 30-second per-query
+deadline remain unchanged.
+
+Focused cache/sampler/supervisor tests passed 4/2/7 cases. The complete optimized standalone T-20
+gate passed **142 active tests with five unchanged opt-in ignores** and strict Clippy. Log:
+`/tmp/uste-d242-native-verification.log`. It used one Cargo job/thread, locked offline dependencies
+and the 4 GiB process limit under the verified 5/6 GiB enclosing caps. No sample ran, so no
+performance, T-20, M1 or qualification claim follows. Next commit/push this tooling, then run one
+unchanged retained-fixture pressure observation and archive the exact sizing evidence.
+
 ## Latest verified implementation — range-cache pressure accounting (Decision 0241)
 
 D0240 is committed/pushed as `6ba87a8`. D0241 adds exact monotonic
