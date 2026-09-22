@@ -2,6 +2,29 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest development observation — ordered adjacency scan merge (Decision 0229)
+
+D0228 is committed/pushed as `1d75d48`; release executable SHA-256
+`fd6a056ef4f0f782d44d422de7df44a60e1058f09d058b3e6274522950781e23`. Its single supervised
+wide positive-cache development sample completed against the unchanged retained fixture and oracle.
+After removing only timing/RSS, it exactly matches D0227 with normalized SHA-256
+`c848e2b1573de9733014d908a1d51a281fb5c6dc932bfdc39559ca0f0fb9fe78`: 96 warm-ups, 768
+executions, 40 groups, digest `aec16fdc8a1630a97eace654862a192929550c5fb771aed0862a9bed67d81584`,
+successful work, cache counters, adapter I/O and vault work. This is cross-binary, sequential and
+nonqualifying.
+
+The round took 668,628 ms versus 638,508 ms (+4.72%). Retained all-class successful p99 is
+**8.777650 / 575.710303 / 365.319741 / 1270.350394 ms**. Depth one improved 0.88%; depths two
+through four regressed 2.19%, 0.32% and 1.04%. Four-hop remains over five times the unchanged
+250 ms target, so no target or T-20 gate passes. Process peak RSS 265,836 KiB;
+wall/user/system 846.57/792.29/50.36 seconds; zero process swaps. The enclosing shared scope peaks
+stayed at 5,372,850,176 bytes memory and 143,224,832 bytes swap; soft-limit events stayed at
+26,549, with zero maximum/OOM/CPU-throttle events. Source certificate and oracle hashes stayed
+pinned. Local artifacts: `experiments/t20-bench/target/native-d228-positive.OaeCIR`; complete
+report: `docs/evidence/ordered-adjacency-scan-merge-sampling.json`. Next commit/push this evidence,
+then remove or explicitly measure another higher-level repeated traversal cost before a capacity
+campaign. Keep the page-only default and all qualification prerequisites.
+
 ## Latest verified implementation — ordered adjacency scan merge (Decision 0228)
 
 D0227 evidence is committed/pushed as `4ebc1c0`. D0228 removes the per-candidate `BTreeMap` rebuild
