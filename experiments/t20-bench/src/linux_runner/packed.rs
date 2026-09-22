@@ -20,7 +20,8 @@ pub use query::{
     query_correctness_with_ranges,
 };
 pub use sampling::{
-    sample_worker, sample_worker_wide, sample_worker_wide_with_lookup, sample_worker_with_lookup,
+    sample_worker, sample_worker_wide, sample_worker_wide_with_lookup,
+    sample_worker_wide_with_ranges, sample_worker_with_lookup, sample_worker_with_ranges,
 };
 type Fs = ObservedFileSystem<LinuxFileSystem>;
 type Packed = engine::PackedEngine<Fs, RecoveryEnvelope, OsEntropy, OsEntropy>;

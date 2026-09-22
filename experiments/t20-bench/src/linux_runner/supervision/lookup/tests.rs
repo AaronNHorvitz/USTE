@@ -43,6 +43,48 @@ fn finish(r: &Value, mode: SampleMode) -> Result<String, LinuxRunnerError> {
 }
 
 #[test]
+fn range_supervisor_requires_partition_conservation_and_complete_deltas() {
+    let mut r = report();
+    let range_budget = 16 * 1024 * 1024;
+    let raw = |hits, misses| {
+        serde_json::json!({
+            "budget_bytes": range_budget, "accounted_bytes": 8192,
+            "resident_ranges": 2, "resident_entries": 5,
+            "hits": hits, "misses": misses, "evictions": 0, "oversized_bypasses": 0,
+        })
+    };
+    let work = |hits, misses| {
+        let mut value = raw(hits, misses);
+        value["measurement_scope"] = "complete-range-cache-observations".into();
+        value["included_in_total_cache"] = true.into();
+        value["physical_device_io"] = false.into();
+        value["logical_proof_work"] = false.into();
+        value
+    };
+    r["schema"] = "bm01-linux-packed-range-sampling-v1".into();
+    r["query_cache_configuration"]["profile"] = "packed-pages-positive-lookups-ranges-v1".into();
+    r["query_cache_configuration"]["page_budget_bytes"] = (TOTAL - LOOKUP - range_budget).into();
+    r["query_cache_configuration"]["range_budget_bytes"] = range_budget.into();
+    r["query_cache_configuration"]["range"] = raw(7, 4);
+    r["query_cache_configuration"]["total_accounted_bytes"] = 39936.into();
+    r["warmup_range_cache_work"] = serde_json::json!({"cache": "uste-empty", "work": work(1, 1)});
+    r["samples"][0]["range_cache_work"] = serde_json::json!([
+        {"cache": "uste-empty", "work": work(2, 3)},
+        {"cache": "uste-retained-after-identical-query", "work": work(4, 0)},
+    ]);
+    for value in r["samples"][0]["cache_work"].as_array_mut().unwrap() {
+        value["index_cache_accounted_bytes"] = 39936.into();
+    }
+    assert!(finish(&r, SampleMode::PackedRange).is_ok());
+    let mut wrong = r.clone();
+    wrong["samples"][0]["range_cache_work"][1]["work"]["hits"] = 3.into();
+    assert!(finish(&wrong, SampleMode::PackedRange).is_err());
+    let mut wrong = r;
+    wrong["query_cache_configuration"]["range"]["accounted_bytes"] = (range_budget + 1).into();
+    assert!(finish(&wrong, SampleMode::PackedRange).is_err());
+}
+
+#[test]
 fn positive_supervisor_requires_exact_configuration_and_complete_observation_ledger() {
     let r = report();
     let final_report: Value =

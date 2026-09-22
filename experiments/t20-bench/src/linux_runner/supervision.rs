@@ -34,15 +34,22 @@ enum SampleMode {
     Disk,
     Packed,
     PackedLookup,
+    PackedRange,
     PackedWide,
     PackedWideLookup,
+    PackedWideRange,
 }
 
 impl SampleMode {
     fn packed(self) -> bool {
         matches!(
             self,
-            Self::Packed | Self::PackedLookup | Self::PackedWide | Self::PackedWideLookup
+            Self::Packed
+                | Self::PackedLookup
+                | Self::PackedRange
+                | Self::PackedWide
+                | Self::PackedWideLookup
+                | Self::PackedWideRange
         )
     }
 }
@@ -81,6 +88,23 @@ pub fn supervise_packed_wide_lookup_sample(
         SampleMode::PackedWideLookup,
     )
 }
+pub fn supervise_packed_wide_range_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedWideRange,
+    )
+}
 
 pub fn supervise_packed_lookup_sample(
     executable: &Path,
@@ -97,6 +121,23 @@ pub fn supervise_packed_lookup_sample(
         bundle_file,
         profile,
         SampleMode::PackedLookup,
+    )
+}
+pub fn supervise_packed_range_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedRange,
     )
 }
 
@@ -167,8 +208,10 @@ fn supervise_mode(
             SampleMode::Disk => "linux-disk-sample-worker",
             SampleMode::Packed => "linux-packed-sample-worker",
             SampleMode::PackedLookup => "linux-packed-lookup-sample-worker",
+            SampleMode::PackedRange => "linux-packed-range-sample-worker",
             SampleMode::PackedWide => "linux-packed-wide-sample-worker",
             SampleMode::PackedWideLookup => "linux-packed-wide-lookup-sample-worker",
+            SampleMode::PackedWideRange => "linux-packed-wide-range-sample-worker",
         })
         .arg("--root")
         .arg(root)
@@ -394,8 +437,10 @@ fn finalize_report(
             SampleMode::Disk => "bm01-linux-disk-sampling-v1",
             SampleMode::Packed => "bm01-linux-packed-sampling-v1",
             SampleMode::PackedLookup => "bm01-linux-packed-lookup-sampling-v1",
+            SampleMode::PackedRange => "bm01-linux-packed-range-sampling-v1",
             SampleMode::PackedWide => "bm01-linux-packed-wide-sampling-v1",
             SampleMode::PackedWideLookup => "bm01-linux-packed-wide-lookup-sampling-v1",
+            SampleMode::PackedWideRange => "bm01-linux-packed-wide-range-sampling-v1",
         },
     )?;
     if mode.packed() {
@@ -469,6 +514,8 @@ fn finalize_report(
         SampleMode::PackedLookup | SampleMode::PackedWideLookup
     ) {
         lookup::validate(object, matches!(mode, SampleMode::PackedWideLookup))?;
+    } else if matches!(mode, SampleMode::PackedRange | SampleMode::PackedWideRange) {
+        lookup::validate_range(object, matches!(mode, SampleMode::PackedWideRange))?;
     } else if matches!(mode, SampleMode::PackedWide) {
         lookup::validate_pages(object, true)?;
     } else if matches!(mode, SampleMode::Packed) && object.contains_key("query_cache_configuration")
@@ -797,8 +844,10 @@ mod tests {
             super::SampleMode::Disk,
             super::SampleMode::Packed,
             super::SampleMode::PackedLookup,
+            super::SampleMode::PackedRange,
             super::SampleMode::PackedWide,
             super::SampleMode::PackedWideLookup,
+            super::SampleMode::PackedWideRange,
         ] {
             let child = Command::new("sleep")
                 .arg("60")

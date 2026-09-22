@@ -232,3 +232,124 @@ pub(super) fn validate(root: &Object, wide: bool) -> Result<(), LinuxRunnerError
     }
     Ok(())
 }
+
+pub(super) fn validate_range(root: &Object, wide: bool) -> Result<(), LinuxRunnerError> {
+    let (total, lookup_budget, range_budget) = if wide {
+        (256 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024)
+    } else {
+        (TOTAL, LOOKUP, 16 * 1024 * 1024)
+    };
+    let config = object(root.get("query_cache_configuration"))?;
+    expect_string(
+        config,
+        "profile",
+        if wide {
+            "packed-pages-positive-lookups-ranges-256m-v1"
+        } else {
+            "packed-pages-positive-lookups-ranges-v1"
+        },
+    )?;
+    for (field, value) in [
+        ("total_budget_bytes", total),
+        ("lookup_budget_bytes", lookup_budget),
+        ("range_budget_bytes", range_budget),
+        ("page_budget_bytes", total - lookup_budget - range_budget),
+    ] {
+        expect_u64(config, field, value)?;
+    }
+    let expected_lookup = counters(config.get("lookup"), false, lookup_budget)?;
+    let expected_range = range_counters(config.get("range"), false, range_budget)?;
+    let page_accounted = value_u64(config, "page_accounted_bytes")?;
+    let lookup_accounted = value_u64(object(config.get("lookup"))?, "accounted_bytes")?;
+    let range_accounted = value_u64(object(config.get("range"))?, "accounted_bytes")?;
+    let total_accounted = value_u64(config, "total_accounted_bytes")?;
+    if page_accounted > total - lookup_budget - range_budget
+        || page_accounted
+            .checked_add(lookup_accounted)
+            .and_then(|value| value.checked_add(range_accounted))
+            != Some(total_accounted)
+        || total_accounted > total
+    {
+        return Err(fail());
+    }
+    let mut lookup_total = counters(
+        state(root.get("warmup_lookup_cache_work"), "uste-empty")?.get("work"),
+        true,
+        lookup_budget,
+    )?;
+    let mut range_total = range_counters(
+        state(root.get("warmup_range_cache_work"), "uste-empty")?.get("work"),
+        true,
+        range_budget,
+    )?;
+    let samples = root
+        .get("samples")
+        .and_then(Value::as_array)
+        .ok_or_else(fail)?;
+    for sample in samples {
+        let sample = object(Some(sample))?;
+        for (field, budget, total_counters, parser) in [
+            ("lookup_cache_work", lookup_budget, &mut lookup_total, false),
+            ("range_cache_work", range_budget, &mut range_total, true),
+        ] {
+            let pair = sample
+                .get(field)
+                .and_then(Value::as_array)
+                .filter(|values| values.len() == 2)
+                .ok_or_else(fail)?;
+            for (value, label) in pair
+                .iter()
+                .zip(["uste-empty", "uste-retained-after-identical-query"])
+            {
+                let work = state(Some(value), label)?.get("work");
+                let part = if parser {
+                    range_counters(work, true, budget)?
+                } else {
+                    counters(work, true, budget)?
+                };
+                for (sum, value) in total_counters.iter_mut().zip(part) {
+                    *sum = sum.checked_add(value).ok_or_else(fail)?;
+                }
+            }
+        }
+    }
+    if lookup_total != expected_lookup || range_total != expected_range {
+        return Err(fail());
+    }
+    Ok(())
+}
+
+fn range_counters(
+    value: Option<&Value>,
+    labelled: bool,
+    budget: u64,
+) -> Result<[u64; 4], LinuxRunnerError> {
+    let report = object(value)?;
+    if labelled {
+        expect_string(
+            report,
+            "measurement_scope",
+            "complete-range-cache-observations",
+        )?;
+        expect_bool(report, "included_in_total_cache", true)?;
+        expect_bool(report, "physical_device_io", false)?;
+        expect_bool(report, "logical_proof_work", false)?;
+    }
+    expect_u64(report, "budget_bytes", budget)?;
+    let accounted = value_u64(report, "accounted_bytes")?;
+    let ranges = value_u64(report, "resident_ranges")?;
+    let entries = value_u64(report, "resident_entries")?;
+    if accounted > budget
+        || ranges > accounted
+        || entries > accounted
+        || (ranges == 0) != (accounted == 0)
+    {
+        return Err(fail());
+    }
+    Ok([
+        value_u64(report, FIELDS[0])?,
+        value_u64(report, FIELDS[1])?,
+        value_u64(report, FIELDS[2])?,
+        value_u64(report, FIELDS[3])?,
+    ])
+}

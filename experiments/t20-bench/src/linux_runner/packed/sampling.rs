@@ -17,6 +17,8 @@ use uste_storage::packed_page_cache::PackedCacheReport;
 use uste_txn::AuthorizedDiskCacheReport;
 mod lookup_work;
 use lookup_work::LookupWork;
+mod range_work;
+use range_work::RangeWork;
 
 pub fn sample_worker(
     root: &Path,
@@ -73,6 +75,29 @@ pub fn sample_worker_wide_with_lookup(
         true,
     )
 }
+pub fn sample_worker_with_ranges(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::Range,
+        false,
+    )
+}
+pub fn sample_worker_wide_with_ranges(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Range, true)
+}
 
 fn sample_worker_mode(
     root: &Path,
@@ -126,6 +151,7 @@ fn sample(
         filesystem: &mut session.filesystem,
         principal: &session.principal,
         materializer: Materializer::new(profile),
+        range: mode == QueryCacheMode::Range,
     };
     let setup_cache = engine.report()?;
     let mut warmup = [0_usize; 3];
@@ -142,12 +168,14 @@ fn sample(
     let warmup_crypto = engine.crypto_report()?.delta(setup_crypto)?;
     let mut warmup_lookup = LookupWork::default();
     warmup_lookup.add(setup_cache.lookup, engine.report()?.lookup)?;
+    let mut warmup_range = RangeWork::default();
+    warmup_range.add(setup_cache.range, engine.report()?.range)?;
     let plan = SamplingPlan::for_profile(profile);
     let mut samples = Vec::with_capacity(plan.samples);
     for ordinal in 1..=plan.samples {
         samples.push(engine.sample(bundle.measured().expectations(), plan, ordinal, observer)?);
     }
-    Ok(serde_json::json!({
+    let mut report = serde_json::json!({
         "schema": match (mode, wide) {
             (QueryCacheMode::Pages, false) => "bm01-linux-packed-sampling-v1",
             (QueryCacheMode::Positive, false) => "bm01-linux-packed-lookup-sampling-v1",
@@ -174,7 +202,11 @@ fn sample(
         "frontier": materialization_revision_count(profile), "development_entity_limit": disk::MAX_NATIVE_DEVELOPMENT_ENTITIES,
         "warmup": { "queries": bundle.warmup().expectations().len(), "successes": warmup[0], "visit_limits": warmup[1], "result_limits": warmup[2] },
         "oracle_bundle_digest": hex(&bundle.digest()), "samples": samples,
-    }).to_string())
+    });
+    if mode == QueryCacheMode::Range {
+        report["warmup_range_cache_work"] = warmup_range.json(CacheState::Empty)?;
+    }
+    Ok(report.to_string())
 }
 
 struct Engine<'a> {
@@ -183,6 +215,7 @@ struct Engine<'a> {
     filesystem: &'a mut Fs,
     principal: &'a AuthenticatedPrincipal,
     materializer: Materializer,
+    range: bool,
 }
 impl Engine<'_> {
     fn crypto_report(&self) -> Result<CryptoWork, LinuxRunnerError> {
@@ -236,6 +269,7 @@ impl Engine<'_> {
         let mut executions = 0;
         let mut work = [CacheWork::default(); 2];
         let mut lookup_work = [LookupWork::default(); 2];
+        let mut range_work = [RangeWork::default(); 2];
         let mut io_work = [disk::io::IoSnapshot::default(); 2];
         let mut crypto_work = [CryptoWork::default(); 2];
         let mut aggregate = blake3::Hasher::new_derive_key("USTE BM-01 linux-sampling-v1");
@@ -258,6 +292,7 @@ impl Engine<'_> {
                         page_counters(after),
                     )?;
                     lookup_work[cache.index()].add(before.lookup, after.lookup)?;
+                    range_work[cache.index()].add(before.range, after.range)?;
                     io_work[cache.index()]
                         .accumulate(self.filesystem.snapshot()?.delta(before_io)?)?;
                     crypto_work[cache.index()]
@@ -297,7 +332,7 @@ impl Engine<'_> {
             "depth": latency.depth, "count": latency.count, "p50_nanoseconds": latency.p50_nanoseconds,
             "p95_nanoseconds": latency.p95_nanoseconds, "p99_nanoseconds": latency.p99_nanoseconds,
         })).collect();
-        Ok(serde_json::json!({
+        let mut report = serde_json::json!({
             "sample": ordinal, "minimum_duration_milliseconds": plan.minimum_duration.as_millis(),
             "elapsed_milliseconds": started.elapsed().as_millis(), "rounds": rounds, "timed_executions": executions,
             "current_rss_kib": rss, "process_peak_rss_kib": peak, "output_digest": hex(aggregate.finalize().as_bytes()),
@@ -307,7 +342,14 @@ impl Engine<'_> {
                 {"cache": CacheState::Retained.name(), "work": io_work[1].json()?}], "latency_groups": latencies,
             "vault_work": [{"cache": CacheState::Empty.name(), "work": crypto_work[0].json()},
                 {"cache": CacheState::Retained.name(), "work": crypto_work[1].json()}],
-        }))
+        });
+        if self.range {
+            report["range_cache_work"] = serde_json::json!([
+                range_work[0].json(CacheState::Empty)?,
+                range_work[1].json(CacheState::Retained)?,
+            ]);
+        }
+        Ok(report)
     }
 }
 

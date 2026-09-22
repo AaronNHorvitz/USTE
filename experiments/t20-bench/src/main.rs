@@ -198,10 +198,14 @@ fn run() -> Result<(), String> {
             | "linux-packed-sample-worker"
             | "linux-packed-lookup-sample"
             | "linux-packed-lookup-sample-worker"
+            | "linux-packed-range-sample"
+            | "linux-packed-range-sample-worker"
             | "linux-packed-wide-sample"
             | "linux-packed-wide-sample-worker"
             | "linux-packed-wide-lookup-sample"
             | "linux-packed-wide-lookup-sample-worker"
+            | "linux-packed-wide-range-sample"
+            | "linux-packed-wide-range-sample-worker"
             | "linux-disk-resume"
             | "linux-disk-open"
             | "linux-disk-query"
@@ -338,8 +342,10 @@ fn run() -> Result<(), String> {
                     | "linux-disk-sample-worker"
                     | "linux-packed-sample-worker"
                     | "linux-packed-lookup-sample-worker"
+                    | "linux-packed-range-sample-worker"
                     | "linux-packed-wide-sample-worker"
                     | "linux-packed-wide-lookup-sample-worker"
+                    | "linux-packed-wide-range-sample-worker"
             ) {
                 uste_t20_bench::linux_runner::start_parent_watchdog()
                     .map_err(|error| error.code().to_owned())?;
@@ -347,6 +353,10 @@ fn run() -> Result<(), String> {
                     uste_t20_bench::linux_runner::packed::sample_worker_wide
                 } else if command == "linux-packed-wide-lookup-sample-worker" {
                     uste_t20_bench::linux_runner::packed::sample_worker_wide_with_lookup
+                } else if command == "linux-packed-wide-range-sample-worker" {
+                    uste_t20_bench::linux_runner::packed::sample_worker_wide_with_ranges
+                } else if command == "linux-packed-range-sample-worker" {
+                    uste_t20_bench::linux_runner::packed::sample_worker_with_ranges
                 } else if command == "linux-packed-lookup-sample-worker" {
                     uste_t20_bench::linux_runner::packed::sample_worker_with_lookup
                 } else if command == "linux-packed-sample-worker" {
@@ -366,11 +376,15 @@ fn run() -> Result<(), String> {
                 return Ok(());
             }
             let report = match command.as_str() {
-                "linux-packed-wide-sample" | "linux-packed-wide-lookup-sample" => {
+                "linux-packed-wide-sample"
+                | "linux-packed-wide-lookup-sample"
+                | "linux-packed-wide-range-sample" => {
                     let executable = env::current_exe()
                         .map_err(|_| "cannot resolve current benchmark executable")?;
                     let supervisor = if command == "linux-packed-wide-sample" {
                         uste_t20_bench::linux_runner::supervise_packed_wide_sample
+                    } else if command == "linux-packed-wide-range-sample" {
+                        uste_t20_bench::linux_runner::supervise_packed_wide_range_sample
                     } else {
                         uste_t20_bench::linux_runner::supervise_packed_wide_lookup_sample
                     };
@@ -386,6 +400,17 @@ fn run() -> Result<(), String> {
                     let executable = env::current_exe()
                         .map_err(|_| "cannot resolve current benchmark executable")?;
                     uste_t20_bench::linux_runner::supervise_packed_lookup_sample(
+                        &executable,
+                        &root,
+                        &password_file,
+                        &oracle_file.ok_or("--oracle-file is required")?,
+                        profile,
+                    )
+                }
+                "linux-packed-range-sample" => {
+                    let executable = env::current_exe()
+                        .map_err(|_| "cannot resolve current benchmark executable")?;
+                    uste_t20_bench::linux_runner::supervise_packed_range_sample(
                         &executable,
                         &root,
                         &password_file,
@@ -580,8 +605,10 @@ fn print_usage() {
          uste-t20-bench linux-packed-create-crash-probe --root ROOT --password-file PASSWORD --entities COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench linux-packed-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying development sampling)\n\
          uste-t20-bench linux-packed-lookup-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 48 MiB pages + 16 MiB positive lookups)\n\
+         uste-t20-bench linux-packed-range-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 32 MiB pages + 16 MiB positive lookups + 16 MiB ranges)\n\
          uste-t20-bench linux-packed-wide-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 256 MiB pages)\n\
          uste-t20-bench linux-packed-wide-lookup-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 128 MiB pages + 128 MiB positive lookups)\n\
+         uste-t20-bench linux-packed-wide-range-sample --root ROOT --password-file PASSWORD --entities COUNT --oracle-file BUNDLE (supervised, nonqualifying; 64 MiB pages + 64 MiB positive lookups + 128 MiB ranges)\n\
          uste-t20-bench bm06-linux-<create|resume|tail|recover|rebuild|open|tail-crash-probe> \
          --root DIR --password-file FILE --records COUNT (at most 2; nonqualifying)\n\
          uste-t20-bench bm06-linux-create-crash-probe --root DIR --password-file FILE \

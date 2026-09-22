@@ -2,6 +2,23 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified tooling — supervised range-cache sampling (Decision 0237)
+
+D0236 is committed/pushed as `cf9360e`. D0237 adds distinct narrow/wide range-cache sample workers
+and parent commands to the existing owned-child 30-second deadline protocol. Range warm-up and every
+empty/retained execution now carry checked budget/residency and hit/miss/eviction/bypass deltas only
+in the new schemas. Parent validation requires exact 32/16/16 MiB or 64/64/128 MiB partitions,
+conserves page/lookup/range accounting, validates every labelled pair, and reconciles summed lookup
+and range deltas to the terminal report. Counter regression, missing/mixed partitions, mutated
+ledger entries and over-accounting refuse. Existing sampling commands and JSON shapes are unchanged.
+
+Targeted range counter and supervisor mutation tests passed. The complete optimized standalone T-20
+gate passed **140 active tests with five unchanged ignores** and strict Clippy; log
+`/tmp/uste-d237-native-verification.log`. It used one Cargo job/thread, offline dependencies and the
+4 GiB process limit. No sample ran, so no performance, T-20, M1 or qualification claim follows.
+Next commit/push this tooling, then run one unchanged retained-fixture wide supervised range sample
+and archive its complete report without changing targets or qualification prerequisites.
+
 ## Latest verified tooling — explicit range-cache query profile (Decision 0236)
 
 D0235 is committed/pushed as `4edb1b4`. D0236 adds two distinct nonqualifying correctness commands:
