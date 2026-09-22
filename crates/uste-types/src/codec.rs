@@ -75,7 +75,9 @@ pub fn decode_value(input: &[u8]) -> Result<Value, DecodeError> {
 /// Nested values remain fully owned and obey the same depth, node and byte limits as
 /// [`decode_value`]. A valid non-map root returns `None`.
 pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, DecodeError> {
-    decode_map_entries(input, decode_payload)
+    decode_map_entries(input, |_, payload, depth, budget| {
+        decode_payload(payload, depth, budget)
+    })
 }
 
 /// One decoded root-map value whose direct string payload may borrow from the input frame.
@@ -83,6 +85,8 @@ pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, Deco
 pub enum BorrowedMapValue<'a> {
     /// A direct string payload borrowed from the input frame.
     String(&'a str),
+    /// A recursively borrowed map selected explicitly by the decoder's caller.
+    Map(Vec<(&'a str, BorrowedMapValue<'a>)>),
     /// Every other payload, including nested strings, in its ordinary owned representation.
     Value(Value),
 }
@@ -94,12 +98,37 @@ pub enum BorrowedMapValue<'a> {
 pub fn decode_borrowed_map_value(
     input: &[u8],
 ) -> Result<Option<Vec<(&str, BorrowedMapValue<'_>)>>, DecodeError> {
-    decode_map_entries(input, decode_borrowed_map_payload)
+    decode_map_entries(input, |_, payload, depth, budget| {
+        decode_borrowed_map_payload(payload, depth, budget)
+    })
+}
+
+/// Decode a canonical root map while recursively borrowing maps in selected root fields.
+///
+/// Root keys and direct root strings always borrow as in [`decode_borrowed_map_value`]. A selected
+/// field whose payload is a map becomes [`BorrowedMapValue::Map`], recursively borrowing its map
+/// keys and direct strings. Unselected nested values remain fully owned.
+pub fn decode_borrowed_map_value_with_fields<'a>(
+    input: &'a [u8],
+    borrowed_map_fields: &[&str],
+) -> Result<Option<Vec<(&'a str, BorrowedMapValue<'a>)>>, DecodeError> {
+    decode_map_entries(input, |key, payload, depth, budget| {
+        if borrowed_map_fields.contains(&key) && payload.peek()? == MAP_TAG {
+            decode_borrowed_map_tree(payload, depth, budget)
+        } else {
+            decode_borrowed_map_payload(payload, depth, budget)
+        }
+    })
 }
 
 fn decode_map_entries<'a, T>(
     input: &'a [u8],
-    mut decode_entry: impl FnMut(&mut Cursor<'a>, usize, &mut DecodeBudget) -> Result<T, DecodeError>,
+    mut decode_entry: impl FnMut(
+        &'a str,
+        &mut Cursor<'a>,
+        usize,
+        &mut DecodeBudget,
+    ) -> Result<T, DecodeError>,
 ) -> Result<Option<Vec<(&'a str, T)>>, DecodeError> {
     let payload_bytes = frame_payload(input)?;
     if payload_bytes.first().copied() != Some(MAP_TAG) {
@@ -128,7 +157,7 @@ fn decode_map_entries<'a, T>(
             return Err(DecodeError::MapKeysOutOfOrder);
         }
         previous = Some(key.as_bytes());
-        entries.push((key, decode_entry(&mut payload, depth, &mut budget)?));
+        entries.push((key, decode_entry(key, &mut payload, depth, &mut budget)?));
     }
     if payload.remaining() != 0 {
         return Err(DecodeError::TrailingBytes);
@@ -148,6 +177,42 @@ fn decode_borrowed_map_payload<'a>(
     let tag = payload.byte()?;
     debug_assert_eq!(tag, STRING_TAG);
     read_str(payload).map(BorrowedMapValue::String)
+}
+
+fn decode_borrowed_map_tree<'a>(
+    payload: &mut Cursor<'a>,
+    depth: usize,
+    budget: &mut DecodeBudget,
+) -> Result<BorrowedMapValue<'a>, DecodeError> {
+    match payload.peek()? {
+        STRING_TAG => decode_borrowed_map_payload(payload, depth, budget),
+        MAP_TAG => {
+            budget.take_node()?;
+            let tag = payload.byte()?;
+            debug_assert_eq!(tag, MAP_TAG);
+            let depth = check_depth(depth)?;
+            let count = read_collection_length(payload)?;
+            if count > payload.remaining() {
+                return Err(DecodeError::UnexpectedEof);
+            }
+            budget.require_nodes(count)?;
+            let mut entries = Vec::new();
+            entries
+                .try_reserve_exact(count)
+                .map_err(|_| DecodeError::ResourceLimit)?;
+            let mut previous: Option<&[u8]> = None;
+            for _ in 0..count {
+                let key = read_str(payload)?;
+                if previous.is_some_and(|old| old >= key.as_bytes()) {
+                    return Err(DecodeError::MapKeysOutOfOrder);
+                }
+                previous = Some(key.as_bytes());
+                entries.push((key, decode_borrowed_map_tree(payload, depth, budget)?));
+            }
+            Ok(BorrowedMapValue::Map(entries))
+        }
+        _ => decode_payload(payload, depth, budget).map(BorrowedMapValue::Value),
+    }
 }
 
 fn frame_payload(input: &[u8]) -> Result<&[u8], DecodeError> {

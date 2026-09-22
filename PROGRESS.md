@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrow selected nested schema (Decision 0258)
+
+D0257 is committed/pushed as `c8978ab`. It left retained four-hop p99 at 368.605719 ms with zero
+adapter reads. Inspection found assertion/relationship `valid_time` still built and discarded
+owned nested maps for fixed interval schema, while dynamic properties and opaque objects must
+remain owned.
+
+D0258 adds an opt-in root decoder that recursively borrows maps only for selected fields. Stored
+records select `valid_time`, including its nested interval bounds; unselected dynamic maps stay on
+the owned path. Existing generic/key-only/direct-string decoders remain unchanged. Frame and
+recursive canonical validation, UTF-8, depth/node/byte limits, errors, graph semantics and
+persistent bytes are unchanged. No cache, plaintext retention, authority or configuration is
+added.
+
+Selected-versus-unselected ownership, borrowed pointers, truncation, nested duplicate keys and a
+stored half-open bounded/unbounded interval have direct regression coverage. A targeted release
+oracle test passed. The complete optimized workspace gate passed **768 tests** and strict
+all-target/all-feature Clippy. The complete optimized standalone T-20 gate passed **142 active
+tests with five unchanged opt-in ignores** and strict Clippy. Logs:
+`/tmp/uste-d258-workspace-verification.log` and `/tmp/uste-d258-native-verification.log`. Gates used
+one job/thread and the 4 GiB process limit under verified enclosing caps. Maximum/OOM/CPU-throttle
+counters stayed zero; the shared cumulative socket-memory throttle counter increased from one to
+two and is not attributed to this increment.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation. Preserve
+canonical decoding, authorization, existing defaults and all qualification prerequisites.
+
 ## Latest development observation — borrowed direct schema strings (Decision 0257)
 
 D0256 is committed/pushed as `691fa0a`. Its one supervised 96/128/32 MiB observation completed

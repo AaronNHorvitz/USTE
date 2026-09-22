@@ -4,8 +4,9 @@ use uste_types::{
     BorrowedMapValue, BoundedString, DatabaseId, DecodeError, IdempotencyKey,
     MAX_COLLECTION_ENTRIES, MAX_EPOCH_SECONDS, MAX_INLINE_BYTES, MAX_NESTING_DEPTH,
     MAX_VALUE_NODES, MAX_VALUE_PAYLOAD, MIN_EPOCH_SECONDS, NamespaceId, RecordId, RecordRef,
-    SourceEventId, TransactionId, UtcInstant, Value, decode_borrowed_map_value, decode_map_value,
-    decode_value, encode_value, encoded_len,
+    SourceEventId, TransactionId, UtcInstant, Value, decode_borrowed_map_value,
+    decode_borrowed_map_value_with_fields, decode_map_value, decode_value, encode_value,
+    encoded_len,
 };
 
 const VECTORS: &str = include_str!("../../../acceptance/r1/canonical-v1.tsv");
@@ -90,6 +91,65 @@ fn borrowed_root_map_direct_strings_borrow_without_changing_nested_values() {
     for cut in 0..encoded.len() {
         assert!(decode_borrowed_map_value(&encoded[..cut]).is_err());
     }
+}
+
+#[test]
+fn selected_root_map_fields_borrow_recursively_without_converting_other_maps() {
+    let nested = || {
+        Value::map(vec![
+            (
+                BoundedString::new("kind".into()).unwrap(),
+                Value::string("borrowed".into()).unwrap(),
+            ),
+            (
+                BoundedString::new("leaf".into()).unwrap(),
+                Value::map(vec![(
+                    BoundedString::new("kind".into()).unwrap(),
+                    Value::string("nested".into()).unwrap(),
+                )])
+                .unwrap(),
+            ),
+        ])
+        .unwrap()
+    };
+    let encoded = encode_value(
+        &Value::map(vec![
+            (BoundedString::new("ordinary".into()).unwrap(), nested()),
+            (BoundedString::new("selected".into()).unwrap(), nested()),
+        ])
+        .unwrap(),
+    )
+    .unwrap();
+    let entries = decode_borrowed_map_value_with_fields(&encoded, &["selected"])
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        entries[0].1,
+        BorrowedMapValue::Value(Value::Map(_))
+    ));
+    let BorrowedMapValue::Map(selected) = &entries[1].1 else {
+        panic!("selected map stayed owned");
+    };
+    assert_eq!(selected[0].1, BorrowedMapValue::String("borrowed"));
+    let BorrowedMapValue::Map(leaf) = &selected[1].1 else {
+        panic!("nested selected map stayed owned");
+    };
+    assert_eq!(leaf[0].1, BorrowedMapValue::String("nested"));
+    let bounds = encoded.as_ptr_range();
+    for text in [selected[0].0, selected[1].0, leaf[0].0] {
+        assert!(text.as_ptr() >= bounds.start && text.as_ptr() < bounds.end);
+    }
+    for cut in 0..encoded.len() {
+        assert!(decode_borrowed_map_value_with_fields(&encoded[..cut], &["selected"]).is_err());
+    }
+    let nested_duplicate = [
+        0x08, 0x01, 0x08, b's', b'e', b'l', b'e', b'c', b't', b'e', b'd', 0x08, 0x02, 0x01, b'a',
+        0x00, 0x01, b'a', 0x00,
+    ];
+    assert_eq!(
+        decode_borrowed_map_value_with_fields(&frame(&nested_duplicate), &["selected"]),
+        Err(DecodeError::MapKeysOutOfOrder)
+    );
 }
 
 #[test]
