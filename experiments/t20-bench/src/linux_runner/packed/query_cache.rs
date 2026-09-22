@@ -10,6 +10,8 @@ const WIDE_TOTAL: usize = 256 * 1024 * 1024;
 const WIDE_LOOKUP: usize = 128 * 1024 * 1024;
 const WIDE_RANGE_LOOKUP: usize = 64 * 1024 * 1024;
 const WIDE_RANGE: usize = 128 * 1024 * 1024;
+const WIDE_SMALL_RANGE_LOOKUP: usize = 128 * 1024 * 1024;
+const WIDE_SMALL_RANGE: usize = 16 * 1024 * 1024;
 pub(super) type Reader<'a> = AuthorizedPackedReader<
     'a,
     uste_graph::GraphPackedLiveState,
@@ -24,8 +26,12 @@ pub(super) enum QueryCacheMode {
     Pages,
     Positive,
     Range,
+    WideSmallRange,
 }
 impl QueryCacheMode {
+    pub(super) fn includes_ranges(self) -> bool {
+        matches!(self, Self::Range | Self::WideSmallRange)
+    }
     pub(super) fn reader_with_size<'a>(
         self,
         coordinator: &'a Packed,
@@ -45,14 +51,16 @@ impl QueryCacheMode {
                 total,
                 lookup,
             ),
-            Self::Range => AuthorizedPackedReader::new_with_lookup_and_range_cache_budget(
-                coordinator,
-                policy,
-                limits,
-                total,
-                lookup,
-                range,
-            ),
+            Self::Range | Self::WideSmallRange => {
+                AuthorizedPackedReader::new_with_lookup_and_range_cache_budget(
+                    coordinator,
+                    policy,
+                    limits,
+                    total,
+                    lookup,
+                    range,
+                )
+            }
         }
         .map_err(|_| error("USTE_BM01_PACKED_AUTHORIZATION"))
     }
@@ -85,6 +93,18 @@ impl QueryCacheMode {
                 WIDE_RANGE_LOOKUP,
                 WIDE_RANGE,
                 "packed-pages-positive-lookups-ranges-256m-v1",
+            ),
+            (Self::WideSmallRange, true) => (
+                WIDE_TOTAL,
+                WIDE_SMALL_RANGE_LOOKUP,
+                WIDE_SMALL_RANGE,
+                "packed-pages-positive-lookups-small-ranges-256m-v1",
+            ),
+            (Self::WideSmallRange, false) => (
+                TOTAL,
+                LOOKUP,
+                RANGE,
+                "packed-pages-positive-lookups-ranges-v1",
             ),
         }
     }

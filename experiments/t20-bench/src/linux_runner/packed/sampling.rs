@@ -98,6 +98,21 @@ pub fn sample_worker_wide_with_ranges(
 ) -> Result<(), LinuxRunnerError> {
     sample_worker_mode(root, password, bundle, profile, QueryCacheMode::Range, true)
 }
+pub fn sample_worker_wide_with_small_ranges(
+    root: &Path,
+    password: &Path,
+    bundle: &Path,
+    profile: Bm01Profile,
+) -> Result<(), LinuxRunnerError> {
+    sample_worker_mode(
+        root,
+        password,
+        bundle,
+        profile,
+        QueryCacheMode::WideSmallRange,
+        true,
+    )
+}
 
 fn sample_worker_mode(
     root: &Path,
@@ -151,7 +166,7 @@ fn sample(
         filesystem: &mut session.filesystem,
         principal: &session.principal,
         materializer: Materializer::new(profile),
-        range: mode == QueryCacheMode::Range,
+        range: mode.includes_ranges(),
     };
     let setup_cache = engine.report()?;
     let mut warmup = [0_usize; 3];
@@ -183,6 +198,8 @@ fn sample(
             (QueryCacheMode::Pages, true) => "bm01-linux-packed-wide-sampling-v1",
             (QueryCacheMode::Positive, true) => "bm01-linux-packed-wide-lookup-sampling-v1",
             (QueryCacheMode::Range, true) => "bm01-linux-packed-wide-range-sampling-v1",
+            (QueryCacheMode::WideSmallRange, true) => "bm01-linux-packed-wide-small-range-sampling-v1",
+            (QueryCacheMode::WideSmallRange, false) => "bm01-linux-packed-range-sampling-v1",
         }, "engine_benchmark": true,
         "qualification": "nonqualifying-development-sampling", "budget_evaluation": "not-performed",
         "filesystem_profile": "linux-x86_64-btrfs", "oracle_profile": "bm01-oracle-bundle-v1",
@@ -203,7 +220,7 @@ fn sample(
         "warmup": { "queries": bundle.warmup().expectations().len(), "successes": warmup[0], "visit_limits": warmup[1], "result_limits": warmup[2] },
         "oracle_bundle_digest": hex(&bundle.digest()), "samples": samples,
     });
-    if mode == QueryCacheMode::Range {
+    if mode.includes_ranges() {
         report["warmup_range_cache_work"] = warmup_range.json(CacheState::Empty)?;
     }
     Ok(report.to_string())

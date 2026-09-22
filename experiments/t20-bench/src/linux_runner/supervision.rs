@@ -38,6 +38,7 @@ enum SampleMode {
     PackedWide,
     PackedWideLookup,
     PackedWideRange,
+    PackedWideSmallRange,
 }
 
 impl SampleMode {
@@ -50,6 +51,7 @@ impl SampleMode {
                 | Self::PackedWide
                 | Self::PackedWideLookup
                 | Self::PackedWideRange
+                | Self::PackedWideSmallRange
         )
     }
 }
@@ -103,6 +105,23 @@ pub fn supervise_packed_wide_range_sample(
         bundle_file,
         profile,
         SampleMode::PackedWideRange,
+    )
+}
+pub fn supervise_packed_wide_small_range_sample(
+    executable: &Path,
+    root: &Path,
+    password_file: &Path,
+    bundle_file: &Path,
+    profile: Bm01Profile,
+) -> Result<String, LinuxRunnerError> {
+    super::disk::validate_native_profile(profile)?;
+    supervise_mode(
+        executable,
+        root,
+        password_file,
+        bundle_file,
+        profile,
+        SampleMode::PackedWideSmallRange,
     )
 }
 
@@ -212,6 +231,7 @@ fn supervise_mode(
             SampleMode::PackedWide => "linux-packed-wide-sample-worker",
             SampleMode::PackedWideLookup => "linux-packed-wide-lookup-sample-worker",
             SampleMode::PackedWideRange => "linux-packed-wide-range-sample-worker",
+            SampleMode::PackedWideSmallRange => "linux-packed-wide-small-range-sample-worker",
         })
         .arg("--root")
         .arg(root)
@@ -441,6 +461,7 @@ fn finalize_report(
             SampleMode::PackedWide => "bm01-linux-packed-wide-sampling-v1",
             SampleMode::PackedWideLookup => "bm01-linux-packed-wide-lookup-sampling-v1",
             SampleMode::PackedWideRange => "bm01-linux-packed-wide-range-sampling-v1",
+            SampleMode::PackedWideSmallRange => "bm01-linux-packed-wide-small-range-sampling-v1",
         },
     )?;
     if mode.packed() {
@@ -514,8 +535,18 @@ fn finalize_report(
         SampleMode::PackedLookup | SampleMode::PackedWideLookup
     ) {
         lookup::validate(object, matches!(mode, SampleMode::PackedWideLookup))?;
-    } else if matches!(mode, SampleMode::PackedRange | SampleMode::PackedWideRange) {
-        lookup::validate_range(object, matches!(mode, SampleMode::PackedWideRange))?;
+    } else if matches!(
+        mode,
+        SampleMode::PackedRange | SampleMode::PackedWideRange | SampleMode::PackedWideSmallRange
+    ) {
+        lookup::validate_range(
+            object,
+            matches!(
+                mode,
+                SampleMode::PackedWideRange | SampleMode::PackedWideSmallRange
+            ),
+            matches!(mode, SampleMode::PackedWideSmallRange),
+        )?;
     } else if matches!(mode, SampleMode::PackedWide) {
         lookup::validate_pages(object, true)?;
     } else if matches!(mode, SampleMode::Packed) && object.contains_key("query_cache_configuration")

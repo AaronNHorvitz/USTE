@@ -4,47 +4,50 @@ use uste_storage::packed_page_cache::PackedPageCache;
 #[test]
 fn capacity_comparison_profiles_refuse_cross_size_and_cross_partition_reports() {
     assert_eq!(WIDE_TOTAL, uste_storage::MAX_INDEX_CACHE_BYTES);
-    for wide in [false, true] {
-        for mode in [
+    for (mode, wide) in [
+        (QueryCacheMode::Pages, false),
+        (QueryCacheMode::Positive, false),
+        (QueryCacheMode::Range, false),
+        (QueryCacheMode::Pages, true),
+        (QueryCacheMode::Positive, true),
+        (QueryCacheMode::Range, true),
+        (QueryCacheMode::WideSmallRange, true),
+    ] {
+        let (total, lookup, range, name) = mode.configuration(wide);
+        let cache = match mode {
+            QueryCacheMode::Pages => PackedPageCache::new(total),
+            QueryCacheMode::Positive => PackedPageCache::new_with_lookup_budget(total, lookup),
+            QueryCacheMode::Range | QueryCacheMode::WideSmallRange => {
+                PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range)
+            }
+        }
+        .unwrap();
+        let r = cache.report().unwrap();
+        let json = mode.report_with_size(r, wide).unwrap();
+        assert_eq!(json["profile"], name);
+        assert_eq!(json["total_budget_bytes"], total);
+        assert_eq!(json["page_budget_bytes"], total - lookup - range);
+        assert_eq!(json["lookup_budget_bytes"], lookup);
+        assert_eq!(json["total_accounted_bytes"], 0);
+        assert!(mode.report_with_size(r, !wide).is_err());
+        for other in [
             QueryCacheMode::Pages,
             QueryCacheMode::Positive,
             QueryCacheMode::Range,
+            QueryCacheMode::WideSmallRange,
         ] {
-            let (total, lookup, range, name) = mode.configuration(wide);
-            let cache = match mode {
-                QueryCacheMode::Pages => PackedPageCache::new(total),
-                QueryCacheMode::Positive => PackedPageCache::new_with_lookup_budget(total, lookup),
-                QueryCacheMode::Range => {
-                    PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range)
-                }
+            if mode != other && mode.configuration(wide) != other.configuration(wide) {
+                assert!(other.report_with_size(r, wide).is_err());
             }
-            .unwrap();
-            let r = cache.report().unwrap();
-            let json = mode.report_with_size(r, wide).unwrap();
-            assert_eq!(json["profile"], name);
-            assert_eq!(json["total_budget_bytes"], total);
-            assert_eq!(json["page_budget_bytes"], total - lookup - range);
-            assert_eq!(json["lookup_budget_bytes"], lookup);
-            assert_eq!(json["total_accounted_bytes"], 0);
-            assert!(mode.report_with_size(r, !wide).is_err());
-            for other in [
-                QueryCacheMode::Pages,
-                QueryCacheMode::Positive,
-                QueryCacheMode::Range,
-            ] {
-                if mode != other {
-                    assert!(other.report_with_size(r, wide).is_err());
-                }
+        }
+        for variant in 0..3 {
+            let mut wrong = r;
+            match variant {
+                0 => wrong.budget_bytes += 1,
+                1 => wrong.page_budget_bytes += 1,
+                _ => wrong.accounted_bytes = total + 1,
             }
-            for variant in 0..3 {
-                let mut wrong = r;
-                match variant {
-                    0 => wrong.budget_bytes += 1,
-                    1 => wrong.page_budget_bytes += 1,
-                    _ => wrong.accounted_bytes = total + 1,
-                }
-                assert!(mode.report_with_size(wrong, wide).is_err());
-            }
+            assert!(mode.report_with_size(wrong, wide).is_err());
         }
     }
 }

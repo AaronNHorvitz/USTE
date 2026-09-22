@@ -2,6 +2,28 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified tooling — small-range-cache sampling profile (Decision 0239)
+
+D0238 is committed/pushed as `63e07c3`. D0239 adds a distinct supervised
+`linux-packed-wide-small-range-sample` parent/worker command after rejecting the 64/64/128 MiB
+split. It preserves the 256 MiB total as 112 MiB pages, 128 MiB positive lookups and 16 MiB ranges.
+The range partition is over 1.9 times D0238's 8,789,091-byte residency while restoring the prior
+non-evicting lookup budget. This is only an evidence-backed experimental size, not a new default.
+
+The new `bm01-linux-packed-wide-small-range-sampling-v1` schema and
+`packed-pages-positive-lookups-small-ranges-256m-v1` profile are exact. Parent validation binds the
+112/128/16 MiB split, total conservation and complete lookup/range ledgers; old wide-range schema
+substitution and page-budget relabelling refuse. The owned child and 30-second per-query deadline are
+unchanged. All existing page/lookup/range commands, schemas and defaults remain unchanged.
+
+Focused cache tests passed three cases and supervisor tests passed seven. The complete optimized
+standalone T-20 gate passed **141 active tests with five unchanged opt-in ignores**; strict
+all-target Clippy passed. Verification used one Cargo job/thread, locked offline dependencies and
+the 4 GiB process limit under the verified 5/6 GiB enclosing memory caps; maximum/OOM counters
+remained zero. No sample ran, so no performance, T-20, M1 or qualification claim follows. Next
+commit/push this tooling, then run one unchanged retained-fixture small-range observation and archive
+its complete report without changing targets or qualification prerequisites.
+
 ## Latest development observation — authenticated range cache (Decision 0238)
 
 D0237 is committed/pushed as `b530fdb`. Its single supervised wide range-cache development sample

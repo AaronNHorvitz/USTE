@@ -233,8 +233,14 @@ pub(super) fn validate(root: &Object, wide: bool) -> Result<(), LinuxRunnerError
     Ok(())
 }
 
-pub(super) fn validate_range(root: &Object, wide: bool) -> Result<(), LinuxRunnerError> {
-    let (total, lookup_budget, range_budget) = if wide {
+pub(super) fn validate_range(
+    root: &Object,
+    wide: bool,
+    small_range: bool,
+) -> Result<(), LinuxRunnerError> {
+    let (total, lookup_budget, range_budget) = if small_range {
+        (256 * 1024 * 1024, 128 * 1024 * 1024, 16 * 1024 * 1024)
+    } else if wide {
         (256 * 1024 * 1024, 64 * 1024 * 1024, 128 * 1024 * 1024)
     } else {
         (TOTAL, LOOKUP, 16 * 1024 * 1024)
@@ -243,7 +249,9 @@ pub(super) fn validate_range(root: &Object, wide: bool) -> Result<(), LinuxRunne
     expect_string(
         config,
         "profile",
-        if wide {
+        if small_range {
+            "packed-pages-positive-lookups-small-ranges-256m-v1"
+        } else if wide {
             "packed-pages-positive-lookups-ranges-256m-v1"
         } else {
             "packed-pages-positive-lookups-ranges-v1"

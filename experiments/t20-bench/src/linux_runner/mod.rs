@@ -13,7 +13,8 @@ pub use sampling::{LinuxSamplingReport, sample, sample_worker, start_parent_watc
 pub use supervision::{
     supervise_disk_sample, supervise_packed_lookup_sample, supervise_packed_range_sample,
     supervise_packed_sample, supervise_packed_wide_lookup_sample,
-    supervise_packed_wide_range_sample, supervise_packed_wide_sample, supervise_sample,
+    supervise_packed_wide_range_sample, supervise_packed_wide_sample,
+    supervise_packed_wide_small_range_sample, supervise_sample,
 };
 
 use std::{

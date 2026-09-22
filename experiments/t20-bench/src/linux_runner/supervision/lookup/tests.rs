@@ -85,6 +85,79 @@ fn range_supervisor_requires_partition_conservation_and_complete_deltas() {
 }
 
 #[test]
+fn small_range_supervisor_binds_distinct_wide_partition() {
+    let mut r = report();
+    let total = 256 * 1024 * 1024_u64;
+    let lookup = 128 * 1024 * 1024_u64;
+    let range = 16 * 1024 * 1024_u64;
+    let raw_range = serde_json::json!({
+        "budget_bytes": range, "accounted_bytes": 8192,
+        "resident_ranges": 2, "resident_entries": 5,
+        "hits": 7, "misses": 4, "evictions": 0, "oversized_bypasses": 0,
+    });
+    let range_work = |hits, misses| {
+        serde_json::json!({
+            "budget_bytes": range, "accounted_bytes": 8192,
+            "resident_ranges": 2, "resident_entries": 5,
+            "hits": hits, "misses": misses, "evictions": 0, "oversized_bypasses": 0,
+            "measurement_scope": "complete-range-cache-observations",
+            "included_in_total_cache": true, "physical_device_io": false,
+            "logical_proof_work": false,
+        })
+    };
+    let lookup_raw = |hits, misses, evictions, bypasses| {
+        serde_json::json!({
+            "budget_bytes": lookup, "accounted_bytes": 6144, "resident_values": 2,
+            "hits": hits, "misses": misses, "evictions": evictions,
+            "oversized_bypasses": bypasses,
+        })
+    };
+    let lookup_work = |hits, misses, evictions, bypasses| {
+        serde_json::json!({
+            "budget_bytes": lookup, "accounted_bytes": 6144, "resident_values": 2,
+            "hits": hits, "misses": misses, "evictions": evictions,
+            "oversized_bypasses": bypasses,
+            "measurement_scope": "positive-lookup-cache-observations",
+            "included_in_total_cache": true, "physical_device_io": false,
+            "logical_proof_work": false,
+        })
+    };
+    r["schema"] = "bm01-linux-packed-wide-small-range-sampling-v1".into();
+    r["query_cache_configuration"] = serde_json::json!({
+        "profile": "packed-pages-positive-lookups-small-ranges-256m-v1",
+        "total_budget_bytes": total, "page_budget_bytes": total - lookup - range,
+        "lookup_budget_bytes": lookup, "range_budget_bytes": range,
+        "total_accounted_bytes": 39936, "page_accounted_bytes": 25600,
+        "logical_accounting_not_rss": true, "page_counter_scope": "packed-pages-only",
+        "clear_drops": "all-enabled-uste-partitions",
+        "lookup": lookup_raw(9, 8, 1, 2), "range": raw_range,
+    });
+    r["warmup_lookup_cache_work"] = serde_json::json!({
+        "cache": "uste-empty", "work": lookup_work(1, 2, 0, 0)
+    });
+    r["warmup_range_cache_work"] = serde_json::json!({
+        "cache": "uste-empty", "work": range_work(1, 1)
+    });
+    r["samples"][0]["lookup_cache_work"] = serde_json::json!([
+        {"cache": "uste-empty", "work": lookup_work(3, 6, 1, 2)},
+        {"cache": "uste-retained-after-identical-query", "work": lookup_work(5, 0, 0, 0)},
+    ]);
+    r["samples"][0]["range_cache_work"] = serde_json::json!([
+        {"cache": "uste-empty", "work": range_work(2, 3)},
+        {"cache": "uste-retained-after-identical-query", "work": range_work(4, 0)},
+    ]);
+    for value in r["samples"][0]["cache_work"].as_array_mut().unwrap() {
+        value["index_cache_budget_bytes"] = total.into();
+        value["index_cache_accounted_bytes"] = 39936.into();
+    }
+    assert!(finish(&r, SampleMode::PackedWideSmallRange).is_ok());
+    assert!(finish(&r, SampleMode::PackedWideRange).is_err());
+    let mut wrong = r;
+    wrong["query_cache_configuration"]["page_budget_bytes"] = (128 * 1024 * 1024_u64).into();
+    assert!(finish(&wrong, SampleMode::PackedWideSmallRange).is_err());
+}
+
+#[test]
 fn positive_supervisor_requires_exact_configuration_and_complete_observation_ledger() {
     let r = report();
     let final_report: Value =
