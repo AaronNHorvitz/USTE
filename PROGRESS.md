@@ -2,6 +2,34 @@
 
 Updated: 2026-09-21 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — ordered adjacency scan merge (Decision 0228)
+
+D0227 evidence is committed/pushed as `4ebc1c0`. D0228 removes the per-candidate `BTreeMap` rebuild
+from shared disk expansion semantics. Outgoing-only and incoming-only requests now consume their
+already ordered authenticated scans directly; `Either` performs a linear two-way merge by the
+fixed 16-byte relationship suffix. Equal suffixes still require identical scoped relationship and
+neighbor references, combine both direction bits and emit once. Key/value shape, entity prefix,
+status/endpoints, authorization, neighbor type, result limits and output order remain checked as
+before. Scan/lookup proof work, caches, accounting, formats and APIs are unchanged.
+
+Focused verification passed shared legacy reference/work budgets; packed direction, duplicate
+self-loop and visibility equivalence; all five exact aggregate limits; late corruption; and both
+page-only/positive-cache exact-work/narrow-limit cases, followed by strict affected-crate Clippy.
+The final full workspace gate passed **757 tests**, zero failures/ignores, strict Clippy and
+warnings-denied docs. Long-suite timings were graph disk 128/21,927.68 s, replay checkpoint
+50/4,448.54 s, storage unit 244/1,349.76 s and transaction integration 118/4,836.75 s. The first
+silent transport attempt ended without terminal status and is excluded; the complete heartbeat
+rerun is `/tmp/uste-d228-workspace-verification.log`.
+
+The standalone native release gate passed **136 active tests with five unchanged opt-in ignores**
+and strict Clippy; log `/tmp/uste-d228-native-verification.log`. Both final gates used one Cargo job,
+one test thread and one heavy workload at a time under the inherited 4 GiB process address-space
+limit. The cumulative shared scope peaks remained 5,372,850,176 bytes memory and 143,224,832 bytes
+swap; soft-limit events remained 26,549, with zero maximum/OOM/CPU-throttle events. These are not
+isolated workload RSS figures. Next run formatting/doc/task checks, commit/push this verified
+increment, then measure it once with the unchanged supervised retained-fixture protocol. No
+performance, T-20, M1 or qualification completion claim yet.
+
 ## Latest development observation — allocation-preserving cursor handoff (Decision 0227)
 
 D0226 is committed/pushed as `0da3cee`; release executable SHA-256
