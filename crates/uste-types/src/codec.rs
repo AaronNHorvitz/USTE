@@ -61,6 +61,56 @@ pub fn encode_value(value: &Value) -> Result<Vec<u8>, EncodeError> {
 
 /// Decode exactly one canonical format-1.0 generic-value frame.
 pub fn decode_value(input: &[u8]) -> Result<Value, DecodeError> {
+    let payload_bytes = frame_payload(input)?;
+    let mut payload = Cursor::new(payload_bytes);
+    let mut budget = DecodeBudget::new();
+    let value = decode_payload(&mut payload, 0, &mut budget)?;
+    if payload.remaining() != 0 {
+        return Err(DecodeError::TrailingBytes);
+    }
+    Ok(value)
+}
+
+/// Decode a complete canonical value when its root is a map, borrowing only its validated keys.
+/// Nested values remain fully owned and obey the same depth, node and byte limits as
+/// [`decode_value`]. A valid non-map root returns `None`.
+pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, DecodeError> {
+    let payload_bytes = frame_payload(input)?;
+    if payload_bytes.first().copied() != Some(MAP_TAG) {
+        decode_value(input)?;
+        return Ok(None);
+    }
+    let mut payload = Cursor::new(payload_bytes);
+    let tag = payload.byte()?;
+    debug_assert_eq!(tag, MAP_TAG);
+    let mut budget = DecodeBudget::new();
+    budget.take_node()?;
+    let depth = check_depth(0)?;
+    let count = read_collection_length(&mut payload)?;
+    if count > payload.remaining() {
+        return Err(DecodeError::UnexpectedEof);
+    }
+    budget.require_nodes(count)?;
+    let mut entries = Vec::new();
+    entries
+        .try_reserve_exact(count)
+        .map_err(|_| DecodeError::ResourceLimit)?;
+    let mut previous: Option<&[u8]> = None;
+    for _ in 0..count {
+        let key = read_str(&mut payload)?;
+        if previous.is_some_and(|old| old >= key.as_bytes()) {
+            return Err(DecodeError::MapKeysOutOfOrder);
+        }
+        previous = Some(key.as_bytes());
+        entries.push((key, decode_payload(&mut payload, depth, &mut budget)?));
+    }
+    if payload.remaining() != 0 {
+        return Err(DecodeError::TrailingBytes);
+    }
+    Ok(Some(entries))
+}
+
+fn frame_payload(input: &[u8]) -> Result<&[u8], DecodeError> {
     let mut frame = Cursor::new(input);
     if frame.take(MAGIC.len())? != MAGIC {
         return Err(DecodeError::InvalidMagic);
@@ -86,13 +136,7 @@ pub fn decode_value(input: &[u8]) -> Result<Value, DecodeError> {
     if frame.remaining() != 0 {
         return Err(DecodeError::TrailingBytes);
     }
-    let mut payload = Cursor::new(payload_bytes);
-    let mut budget = DecodeBudget::new();
-    let value = decode_payload(&mut payload, 0, &mut budget)?;
-    if payload.remaining() != 0 {
-        return Err(DecodeError::TrailingBytes);
-    }
-    Ok(value)
+    Ok(payload_bytes)
 }
 
 fn payload_len(value: &Value) -> Result<usize, EncodeError> {
@@ -355,15 +399,19 @@ fn read_collection_length(cursor: &mut Cursor<'_>) -> Result<usize, DecodeError>
 }
 
 fn read_string(cursor: &mut Cursor<'_>) -> Result<BoundedString, DecodeError> {
-    let length = read_inline_length(cursor)?;
-    let bytes = cursor.take(length)?;
-    let text = core::str::from_utf8(bytes).map_err(|_| DecodeError::InvalidUtf8)?;
+    let text = read_str(cursor)?;
     let mut owned = String::new();
     owned
-        .try_reserve_exact(length)
+        .try_reserve_exact(text.len())
         .map_err(|_| DecodeError::ResourceLimit)?;
     owned.push_str(text);
     Ok(BoundedString::new(owned).expect("decoded inline length was checked"))
+}
+
+fn read_str<'a>(cursor: &mut Cursor<'a>) -> Result<&'a str, DecodeError> {
+    let length = read_inline_length(cursor)?;
+    let bytes = cursor.take(length)?;
+    core::str::from_utf8(bytes).map_err(|_| DecodeError::InvalidUtf8)
 }
 
 struct DecodeBudget {

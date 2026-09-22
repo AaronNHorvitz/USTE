@@ -7,7 +7,7 @@ use uste_policy::{
 use uste_types::{
     BoundedBytes, BoundedList, BoundedString, CanonicalMap, CommitRevision, DatabaseId,
     DecodeError, EncodeError, NamespaceId, NamespaceRef, RecordId, RecordRef, UtcInstant, Value,
-    decode_value, encode_value,
+    decode_map_value, decode_value, encode_value,
 };
 
 use crate::{
@@ -342,7 +342,12 @@ pub fn encode_stored_record(record: &Record) -> Result<Vec<u8>, GraphCodecError>
 }
 
 pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecError> {
-    let mut fields = Fields::new(decode_value(input).map_err(GraphCodecError::Decode)?)?;
+    decode_record_fields(Fields::new(
+        decode_value(input).map_err(GraphCodecError::Decode)?,
+    )?)
+}
+
+fn decode_record_fields(mut fields: impl RecordFields) -> Result<Record, GraphCodecError> {
     let kind = take_text(fields.take("kind")?)?;
     let record = match kind.as_str() {
         "entity" => Record::Entity(EntityRecord {
@@ -401,7 +406,10 @@ pub(crate) fn decode_result_record(input: &[u8]) -> Result<Record, GraphCodecErr
 
 /// Decode one complete canonical stored record from a trusted derived projection.
 pub fn decode_stored_record(input: &[u8]) -> Result<Record, GraphCodecError> {
-    decode_result_record(input)
+    let fields = decode_map_value(input)
+        .map_err(GraphCodecError::Decode)?
+        .ok_or(GraphCodecError::WrongType)?;
+    decode_record_fields(BorrowedFields(fields))
 }
 
 pub(crate) fn encode_result_policy(
@@ -989,6 +997,11 @@ fn text(value: &str) -> Result<Value, GraphCodecError> {
 /// graph records have a small fixed field count; linear removal reuses the decoded allocation.
 struct Fields(Vec<(BoundedString, Value)>);
 
+trait RecordFields: Sized {
+    fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError>;
+    fn finish(self) -> Result<(), GraphCodecError>;
+}
+
 impl Fields {
     fn new(value: Value) -> Result<Self, GraphCodecError> {
         let Value::Map(map) = value else {
@@ -996,12 +1009,35 @@ impl Fields {
         };
         Ok(Self(map.into_vec()))
     }
+}
 
+impl RecordFields for Fields {
     fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
         let index = self
             .0
             .iter()
             .position(|(key, _)| key.as_str() == name)
+            .ok_or(GraphCodecError::MissingField(name))?;
+        Ok(self.0.swap_remove(index).1)
+    }
+
+    fn finish(self) -> Result<(), GraphCodecError> {
+        if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(GraphCodecError::UnknownField)
+        }
+    }
+}
+
+struct BorrowedFields<'a>(Vec<(&'a str, Value)>);
+
+impl RecordFields for BorrowedFields<'_> {
+    fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
+        let index = self
+            .0
+            .iter()
+            .position(|(key, _)| *key == name)
             .ok_or(GraphCodecError::MissingField(name))?;
         Ok(self.0.swap_remove(index).1)
     }

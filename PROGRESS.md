@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrow canonical schema keys (Decision 0254)
+
+D0253 is committed/pushed as `9e4a263`. It left retained four-hop p99 at 421.852798 ms with zero
+adapter reads. Inspection found that stored-record decoding still allocated owned strings for
+every top-level fixed schema key even though those keys are consumed before the encoded record
+input is released.
+
+D0254 adds a canonical root-map decoder that borrows validated top-level UTF-8 keys while keeping
+nested values fully owned. Stored-record decoding uses the borrowed keys through the shared record
+field consumer; generic and checkpoint decoding retain their existing owned API. Frame parsing,
+canonical order/uniqueness, UTF-8, depth/node/byte limits, errors, graph semantics and persistent
+bytes are unchanged. No cache, plaintext retention, authority or configuration is added.
+
+The first standalone optimized gate honestly failed 23 tests after an earlier debug-assertion gate
+passed: a state-changing tag read was incorrectly inside `debug_assert_eq!` and therefore absent in
+release. The tag read is now unconditional, the targeted release regression passed, and the
+corrected complete native gate passed **142 active tests with five unchanged opt-in ignores** plus
+strict Clippy. The exact final tree passed **765 workspace tests** plus strict all-target/all-feature
+Clippy. Borrowing, truncation, duplicate/descending keys and invalid UTF-8 have direct regression
+coverage. Logs: `/tmp/uste-d254-native-verification.log` (preserved failing gate),
+`/tmp/uste-d254-native-verification-fixed.log` and
+`/tmp/uste-d254-workspace-verification-final.log`. Gates used one job/thread and the 4 GiB process
+limit under verified enclosing caps; maximum/OOM/CPU-throttle counters remained zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation. Preserve
+canonical decoding, authorization, existing defaults and all qualification prerequisites.
+
 ## Latest development observation — canonical map reuse (Decision 0253)
 
 D0252 is committed/pushed as `5a90179`. Its one supervised 96/128/32 MiB observation completed

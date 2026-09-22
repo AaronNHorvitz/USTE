@@ -14,8 +14,8 @@ pub mod spatial;
 mod value;
 
 pub use codec::{
-    FORMAT_MAJOR, FORMAT_MINOR, MAGIC, MAX_VALUE_PAYLOAD, VALUE_RECORD_KIND, decode_value,
-    encode_value, encoded_len,
+    FORMAT_MAJOR, FORMAT_MINOR, MAGIC, MAX_VALUE_PAYLOAD, VALUE_RECORD_KIND, decode_map_value,
+    decode_value, encode_value, encoded_len,
 };
 pub use error::{DecodeError, EncodeError, IdentityParseError, ValidationError};
 pub use id::{

@@ -4,7 +4,7 @@ use uste_types::{
     BoundedString, DatabaseId, DecodeError, IdempotencyKey, MAX_COLLECTION_ENTRIES,
     MAX_EPOCH_SECONDS, MAX_INLINE_BYTES, MAX_NESTING_DEPTH, MAX_VALUE_NODES, MAX_VALUE_PAYLOAD,
     MIN_EPOCH_SECONDS, NamespaceId, RecordId, RecordRef, SourceEventId, TransactionId, UtcInstant,
-    Value, decode_value, encode_value, encoded_len,
+    Value, decode_map_value, decode_value, encode_value, encoded_len,
 };
 
 const VECTORS: &str = include_str!("../../../acceptance/r1/canonical-v1.tsv");
@@ -22,6 +22,38 @@ fn literal_golden_vectors_are_exact_and_canonical() {
         let decoded = decode_value(&expected).expect("golden bytes decode");
         assert_eq!(decoded, value, "case {}", columns[0]);
         assert_eq!(encode_value(&decoded).expect("re-encode"), expected);
+    }
+}
+
+#[test]
+fn borrowed_root_map_keys_preserve_canonical_validation_and_owned_values() {
+    let value = Value::map(vec![
+        (
+            BoundedString::new("alpha".into()).unwrap(),
+            Value::Unsigned(7),
+        ),
+        (
+            BoundedString::new("omega".into()).unwrap(),
+            Value::string("owned".into()).unwrap(),
+        ),
+    ])
+    .unwrap();
+    let encoded = encode_value(&value).unwrap();
+    let entries = decode_map_value(&encoded).unwrap().unwrap();
+    assert_eq!(entries[0], ("alpha", Value::Unsigned(7)));
+    assert_eq!(entries[1].0, "omega");
+    assert!(matches!(entries[1].1, Value::String(_)));
+    let bounds = encoded.as_ptr_range();
+    assert!(entries.iter().all(|(key, _)| {
+        let pointer = key.as_ptr();
+        pointer >= bounds.start && pointer < bounds.end
+    }));
+    assert_eq!(
+        decode_map_value(&encode_value(&Value::Null).unwrap()),
+        Ok(None)
+    );
+    for cut in 0..encoded.len() {
+        assert!(decode_map_value(&encoded[..cut]).is_err());
     }
 }
 
@@ -202,13 +234,25 @@ fn map_key_order_utf8_and_normalization_are_not_ambiguous() {
         decode_value(&frame(&duplicate)),
         Err(DecodeError::MapKeysOutOfOrder)
     );
+    assert_eq!(
+        decode_map_value(&frame(&duplicate)),
+        Err(DecodeError::MapKeysOutOfOrder)
+    );
     let descending = [0x08, 0x02, 0x01, b'b', 0x00, 0x01, b'a', 0x00];
     assert_eq!(
         decode_value(&frame(&descending)),
         Err(DecodeError::MapKeysOutOfOrder)
     );
     assert_eq!(
+        decode_map_value(&frame(&descending)),
+        Err(DecodeError::MapKeysOutOfOrder)
+    );
+    assert_eq!(
         decode_value(&frame(&[0x06, 0x01, 0xff])),
+        Err(DecodeError::InvalidUtf8)
+    );
+    assert_eq!(
+        decode_map_value(&frame(&[0x08, 0x01, 0x01, 0xff, 0x00])),
         Err(DecodeError::InvalidUtf8)
     );
 
