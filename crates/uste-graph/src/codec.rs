@@ -1,8 +1,6 @@
 //! Strict canonical graph transaction codec built on the accepted format-1.0 value frame.
 
 use core::fmt;
-use std::collections::BTreeMap;
-
 use uste_policy::{
     NamespaceGrant, NamespacePolicy, PermissionSet, PolicyVersion, PrincipalDigest, QuotaLimits,
 };
@@ -986,25 +984,26 @@ fn text(value: &str) -> Result<Value, GraphCodecError> {
         .map_err(|_| GraphCodecError::ResourceLimit)
 }
 
-struct Fields(BTreeMap<String, Value>);
+/// Consumed canonical map fields. `decode_value` already proved keys unique and ordered, so
+/// rebuilding this short schema map as heap-node `String` keys adds no validation. Structured
+/// graph records have a small fixed field count; linear removal reuses the decoded allocation.
+struct Fields(Vec<(BoundedString, Value)>);
 
 impl Fields {
     fn new(value: Value) -> Result<Self, GraphCodecError> {
         let Value::Map(map) = value else {
             return Err(GraphCodecError::WrongType);
         };
-        Ok(Self(
-            map.into_vec()
-                .into_iter()
-                .map(|(key, value)| (key.into_string(), value))
-                .collect(),
-        ))
+        Ok(Self(map.into_vec()))
     }
 
     fn take(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
-        self.0
-            .remove(name)
-            .ok_or(GraphCodecError::MissingField(name))
+        let index = self
+            .0
+            .iter()
+            .position(|(key, _)| key.as_str() == name)
+            .ok_or(GraphCodecError::MissingField(name))?;
+        Ok(self.0.swap_remove(index).1)
     }
 
     fn finish(self) -> Result<(), GraphCodecError> {

@@ -2,6 +2,32 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — reuse canonical map allocation (Decision 0252)
+
+D0251 is committed/pushed as `a66c107`. It left retained four-hop p99 at 522.109698 ms with zero
+adapter reads. Inspection found every stored-record decode took the generic decoder's already
+owned, unique and canonically ordered map vector, then allocated a heap-node
+`BTreeMap<String, Value>` and fresh plain strings for all keys solely to consume fixed schema
+fields.
+
+D0252 keeps the decoded vector as the graph field consumer. Each static schema name is found
+linearly and its owned value is removed in place; short fixed graph schemas no longer rebuild a
+second map or key strings. Missing fields, leftover unknown fields, wrong types, invalid enums,
+generic value limits, canonical ordering, record contents and persistent formats are unchanged.
+No cache, plaintext retention, authority or configuration is added.
+
+Focused codec, checkpoint and independent differential-history tests passed, as did strict graph
+Clippy. The complete optimized workspace gate passed **764 tests** and strict
+all-target/all-feature Clippy. The complete optimized standalone T-20 gate passed **142 active
+tests with five unchanged opt-in ignores** and strict Clippy. Logs:
+`/tmp/uste-d252-workspace-verification.log` and `/tmp/uste-d252-native-verification.log`. Gates used
+one job/thread and the 4 GiB process limit under verified enclosing caps; maximum/OOM/CPU-throttle
+counters remained zero.
+
+No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next commit/push,
+rebuild and pin the release benchmark, then run one unchanged medium-pressure observation.
+Preserve canonical decoding, authorization, existing defaults and all qualification prerequisites.
+
 ## Latest development observation — fallible borrowed range mapping (Decision 0251)
 
 D0250 is committed/pushed as `1f43cee`. Its one supervised 96/128/32 MiB observation completed
