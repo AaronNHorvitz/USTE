@@ -223,12 +223,13 @@ fn packed_tree_cursor_exact_cumulative_limits_and_sticky_errors() {
     let report = c.report();
     assert_eq!(report.pages, 21);
     assert_eq!(report.candidates, 7);
+    assert!(report.path_branches > 0);
     let exact = TreeCursorLimits {
+        maximum_path_branches: report.path_branches,
         maximum_candidates: report.candidates,
         maximum_returned_bytes: report.returned_bytes,
         maximum_pages: report.pages,
         maximum_encoded_bytes: report.encoded_bytes,
-        ..cursor_limits()
     };
     let mut c = cursor(f.root, b"", None, exact);
     assert_eq!(collect(&mut observed, &f.vault, &mut c).unwrap(), expected);
@@ -251,7 +252,7 @@ fn packed_tree_cursor_exact_cumulative_limits_and_sticky_errors() {
             ..exact
         },
         TreeCursorLimits {
-            maximum_path_branches: 0,
+            maximum_path_branches: exact.maximum_path_branches - 1,
             ..exact
         },
     ] {

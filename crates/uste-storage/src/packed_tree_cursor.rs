@@ -40,6 +40,8 @@ pub struct TreeCursorReport {
     pub pages: u64,
     /// Encoded-byte proof-work units, including cache hits.
     pub encoded_bytes: u64,
+    /// Greatest authenticated branch depth reached by any candidate.
+    pub path_branches: u32,
     pub value_chunks: u64,
 }
 pub struct PackedCursorEntry {
@@ -314,6 +316,12 @@ impl PackedTreeCursor {
                         bit,
                         rightward,
                     });
+                    self.report.path_branches = self.report.path_branches.max(
+                        self.path
+                            .len()
+                            .try_into()
+                            .map_err(|_| StorageError::ResourceLimit)?,
+                    );
                     link = if rightward { right } else { left };
                 }
                 TreeNode::Leaf {

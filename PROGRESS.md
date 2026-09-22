@@ -1,6 +1,35 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-21 · Branch: `codex/uste-implementation`
+Updated: 2026-09-22 · Branch: `codex/uste-implementation`
+
+## Latest verified implementation — exact cursor path-depth accounting (Decision 0234)
+
+D0233 evidence is committed/pushed as `407d15e`. D0234 adds the one missing logical-work field
+needed for exact retained range-result admission: `TreeCursorReport.path_branches` records the
+greatest live authenticated traversal depth actually reached. Successful forward and reverse
+cursors rerun at that exact path limit with identical output/report, while one-less depth refuses
+with the unchanged sticky resource failure. Empty/no-traversal cursors report zero. Candidate,
+returned-entry/byte, page, encoded-byte and value-chunk work; traversal behavior; authorization;
+existing cache constructors; persisted formats; and the page-only benchmark default are unchanged.
+
+This is only a prerequisite for repeated prefix reuse. No result bytes are retained yet. A later
+cache still requires an explicit reported budget partition, complete tree/direction/bounds and
+owner/session identity, successful-completion-only admission, every-limit replay checks, bounded
+plaintext lifetime, clear/eviction coverage, counters and a separate opt-in benchmark mode.
+
+Focused forward/reverse exact and one-less depth tests passed. A default-debug full attempt reached
+the exhaustive packed expansion read-fault case after all preceding cases passed, but repeated the
+known disproportionate slowdown and was interrupted/excluded; partial log
+`/tmp/uste-d234-workspace-verification.log`. The corrected complete optimized gate passed **758
+workspace tests**, strict workspace Clippy, warnings-denied docs, documentation/task validators,
+vectors/publication checks and isolated tooling. The isolated T-20 driver passed **140 active tests
+with five unchanged opt-in ignores** and strict Clippy. Log:
+`/tmp/uste-d234-workspace-verification-optimized.log`. Both attempts used one Cargo job/test thread,
+offline dependencies and the 4 GiB process address-space limit inside the verified enclosing scope.
+Its cumulative peaks stayed at 5,372,850,176 bytes memory and 286,691,328 bytes swap; soft-limit
+events reached 73,298, with zero maximum/OOM/CPU-throttle events. No performance, T-20, M1 or
+qualification claim follows. Next commit/push this verified accounting prerequisite, then add the
+explicit bounded range-result partition before connecting graph or benchmark behavior.
 
 ## Latest development observation — compact expansion candidates (Decision 0233)
 

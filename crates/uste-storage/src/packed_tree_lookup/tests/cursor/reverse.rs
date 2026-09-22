@@ -68,12 +68,13 @@ fn packed_tree_reverse_exact_budgets_and_all_observed_faults_are_sticky() {
     let mut c = reverse(f.root, b"a", Some(&[255]), cursor_limits());
     let result = collect(&mut observed, &f.vault, &mut c).unwrap();
     let report = c.report();
+    assert!(report.path_branches > 0);
     let exact = TreeCursorLimits {
+        maximum_path_branches: report.path_branches,
         maximum_candidates: report.candidates,
         maximum_returned_bytes: report.returned_bytes,
         maximum_pages: report.pages,
         maximum_encoded_bytes: report.encoded_bytes,
-        ..cursor_limits()
     };
     let mut c = reverse(f.root, b"a", Some(&[255]), exact);
     assert_eq!(collect(&mut observed, &f.vault, &mut c).unwrap(), result);
@@ -95,7 +96,7 @@ fn packed_tree_reverse_exact_budgets_and_all_observed_faults_are_sticky() {
             ..exact
         },
         TreeCursorLimits {
-            maximum_path_branches: 0,
+            maximum_path_branches: exact.maximum_path_branches - 1,
             ..exact
         },
     ] {
