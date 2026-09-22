@@ -2,6 +2,43 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — bounded authenticated range results (Decision 0235)
+
+D0234 is committed/pushed as `cdb5b56`. D0235 adds an explicitly opt-in complete-range result
+partition inside the existing total packed-cache budget. Its identity binds database, namespace,
+profile, family, revision, root locator and commitment, direction, and both exact bounds. The
+enclosing certificate owner and unlocked key session remain mandatory. Reports expose the range
+budget, accounted bytes, resident ranges/entries, hits, misses, evictions and oversized bypasses;
+total accounted bytes include page, positive-lookup and range partitions once and remain bounded by
+the declared total. Clear, lock and session change drop all resident plaintext while retaining
+counters.
+
+Only complete successful storage cursors admit a result. Failed/partial scans, invalid order/report,
+inconsistent work and duplicates do not. Values and identities are zeroizing, variable-size LRU
+charges buffers plus conservative metadata, and oversized results bypass retention. Before a hit
+can return an entry, the request passes ordinary global cursor validation and its exact path depth,
+candidates, returned bytes, pages and encoded bytes admit the stored report. Forward/reverse hits
+replay the same report with zero packed-page I/O/decryption.
+
+The trusted authorized-reader constructor opts into the new partition. Packed graph expansion uses
+whole-range reuse only when it is present, validates cached key/value shape, then compacts to fixed
+identifiers. Existing page-only and page/lookup readers retain D0232's streaming compact path;
+authorization, cancellation, aggregate accounting, ordering, formats and defaults are unchanged.
+
+Focused storage/graph tests cover total-budget bounds, identity/direction/bounds, all five exact and
+one-less limits, global invalid limits before probing, forward/reverse order, failed-read
+non-admission, zero-I/O/decryption warmth, LRU/oversize/clear and privilege. One initial reverse test
+expected a nonexistent fixture key; the reference correctly established `b, ab`, and the expectation
+was fixed. The complete optimized gate passed **764 workspace tests**, strict workspace Clippy,
+warnings-denied docs, validators/vectors and isolated tooling. The standalone T-20 driver passed
+**136 active tests with five unchanged ignores** and strict Clippy. Log:
+`/tmp/uste-d235-workspace-verification.log`. The gate used one Cargo job/thread, offline dependencies
+and the 4 GiB process address-space limit. Shared scope peaks stayed at 5,372,850,176 bytes memory
+and 286,691,328 bytes swap; soft-limit events reached 92,262 with zero maximum/OOM/CPU-throttle
+events. No performance, T-20, M1 or qualification claim follows. Next commit/push this core, then
+add a separate benchmark command/profile/schema and fixed range partition before one supervised
+development observation; preserve the existing page-only and positive-cache modes.
+
 ## Latest verified implementation — exact cursor path-depth accounting (Decision 0234)
 
 D0233 evidence is committed/pushed as `407d15e`. D0234 adds the one missing logical-work field

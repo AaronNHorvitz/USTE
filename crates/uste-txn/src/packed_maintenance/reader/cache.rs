@@ -57,4 +57,22 @@ where
         }
         result
     }
+    /// Complete ascending `[lower, upper)` or descending `(lower, upper]` traversal with an
+    /// optional independently budgeted range-result partition in `cache`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn range_cached(
+        &self,
+        filesystem: &mut F,
+        tree: &CanonicalPackedTree,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+        reverse: bool,
+        cache: &mut PackedPageCache,
+    ) -> Result<uste_storage::journal::PackedTreeRangeResult, TransactionError> {
+        self.check(tree.context())?;
+        self.journal
+            .packed_tree_range_cached(filesystem, tree, lower, upper, limits, reverse, cache)
+            .map_err(TransactionError::Storage)
+    }
 }

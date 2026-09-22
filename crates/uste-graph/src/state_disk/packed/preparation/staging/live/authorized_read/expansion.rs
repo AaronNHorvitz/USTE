@@ -89,18 +89,51 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
         let record_id = id.record();
         let lower = record_id.as_bytes();
         let (upper, upper_len) = prefix_upper_bound(lower);
+        let upper = (upper_len != 0).then_some(&upper[..upper_len]);
+        let limits = TreeCursorLimits {
+            // Secondary keys have exactly 32 bytes (9 bits per byte plus terminator).
+            maximum_path_branches: 289,
+            maximum_candidates: self.budget.candidates,
+            maximum_returned_bytes: self.budget.returned_bytes,
+            maximum_pages: self.budget.pages,
+            maximum_encoded_bytes: self.budget.encoded_bytes,
+        };
+        if self
+            .cache
+            .as_deref()
+            .is_some_and(PackedPageCache::has_range_cache)
+        {
+            let result = self.index.range_cached(
+                self.fs,
+                &self.base.trees[usize::from(family - 1)],
+                lower,
+                upper,
+                limits,
+                false,
+                self.cache
+                    .as_deref_mut()
+                    .ok_or(StorageError::InvalidState)?,
+            )?;
+            let mut entries = Vec::new();
+            entries
+                .try_reserve_exact(result.entries.len())
+                .map_err(|_| StorageError::ResourceLimit)?;
+            for entry in result.entries {
+                entries.push(compact_entry(family, lower, &entry)?);
+            }
+            self.budget.charge(
+                result.report.pages,
+                result.report.encoded_bytes,
+                result.report.candidates,
+                result.report.returned_bytes,
+            )?;
+            return Ok(Some(entries));
+        }
         let mut cursor = self.index.cursor(
             &self.base.trees[usize::from(family - 1)],
             lower,
-            (upper_len != 0).then_some(&upper[..upper_len]),
-            TreeCursorLimits {
-                // Secondary keys have exactly 32 bytes (9 bits per byte plus terminator).
-                maximum_path_branches: 289,
-                maximum_candidates: self.budget.candidates,
-                maximum_returned_bytes: self.budget.returned_bytes,
-                maximum_pages: self.budget.pages,
-                maximum_encoded_bytes: self.budget.encoded_bytes,
-            },
+            upper,
+            limits,
         )?;
         let mut entries = Vec::new();
         loop {
@@ -111,31 +144,10 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
             let Some(entry) = entry else {
                 break;
             };
-            if entry.key().len() != 32
-                || !entry.key().starts_with(lower)
-                || (family == FAMILY_PROVENANCE && !entry.value().is_empty())
-                || (family != FAMILY_PROVENANCE && entry.value().len() != 16)
-            {
-                return Err(GraphDiskError::IndexCorrupt);
-            }
             entries
                 .try_reserve(1)
                 .map_err(|_| StorageError::ResourceLimit)?;
-            entries.push(ExpansionScanEntry {
-                id: entry.key()[16..]
-                    .try_into()
-                    .map_err(|_| GraphDiskError::IndexCorrupt)?,
-                neighbor: if family == FAMILY_PROVENANCE {
-                    None
-                } else {
-                    Some(
-                        entry
-                            .value()
-                            .try_into()
-                            .map_err(|_| GraphDiskError::IndexCorrupt)?,
-                    )
-                },
-            });
+            entries.push(compact_entry(family, lower, &entry)?);
         }
         let report = cursor.report();
         self.budget.charge(
@@ -193,6 +205,35 @@ impl<F: OwnershipFileSystem, W: DurableKeyEnvelope, E: EntropySource, I: Entropy
     fn reference(&self, bytes: &[u8]) -> Result<RecordRef, GraphDiskError> {
         record_key(self.base.scope, bytes).map_err(GraphDiskError::Storage)
     }
+}
+
+fn compact_entry(
+    family: u8,
+    lower: &[u8; 16],
+    entry: &uste_storage::packed_tree_cursor::PackedCursorEntry,
+) -> Result<ExpansionScanEntry, GraphDiskError> {
+    if entry.key().len() != 32
+        || !entry.key().starts_with(lower)
+        || (family == FAMILY_PROVENANCE && !entry.value().is_empty())
+        || (family != FAMILY_PROVENANCE && entry.value().len() != 16)
+    {
+        return Err(GraphDiskError::IndexCorrupt);
+    }
+    Ok(ExpansionScanEntry {
+        id: entry.key()[16..]
+            .try_into()
+            .map_err(|_| GraphDiskError::IndexCorrupt)?,
+        neighbor: if family == FAMILY_PROVENANCE {
+            None
+        } else {
+            Some(
+                entry
+                    .value()
+                    .try_into()
+                    .map_err(|_| GraphDiskError::IndexCorrupt)?,
+            )
+        },
+    })
 }
 
 /// Return the shortest exclusive upper bound for a fixed-width prefix. A zero length denotes an

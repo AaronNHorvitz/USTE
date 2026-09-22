@@ -56,6 +56,9 @@ impl PackedLookupValue {
     pub(crate) fn into_vec(mut self) -> Vec<u8> {
         core::mem::take(&mut *self.0)
     }
+    pub(crate) fn from_owned(bytes: Zeroizing<Vec<u8>>) -> Self {
+        Self(bytes)
+    }
 }
 impl core::fmt::Debug for PackedLookupValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {

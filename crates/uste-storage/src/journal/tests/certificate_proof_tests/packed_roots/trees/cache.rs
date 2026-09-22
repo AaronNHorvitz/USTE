@@ -10,6 +10,10 @@ fn lookup_cache() -> PackedPageCache {
     PackedPageCache::new_with_lookup_budget(256 * 1024, 64 * 1024).unwrap()
 }
 
+fn range_cache() -> PackedPageCache {
+    PackedPageCache::new_with_lookup_and_range_budget(384 * 1024, 64 * 1024, 128 * 1024).unwrap()
+}
+
 #[test]
 fn packed_cached_lookup_and_cursors_preserve_results_and_work_limits() {
     lookup_and_cursors(cache);

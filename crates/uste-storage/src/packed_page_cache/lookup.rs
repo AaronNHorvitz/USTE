@@ -6,14 +6,14 @@ use crate::packed_tree_record::PackedLocator;
 use std::{borrow::Borrow, collections::BTreeMap};
 use zeroize::Zeroizing;
 
-const IDENTITY_BYTES: usize = 175;
+pub(super) const IDENTITY_BYTES: usize = 175;
 const FIXED: usize = 4096;
 const ENTRY: usize = 512;
 pub(super) const MINIMUM: usize = 8192;
 pub(crate) type CachedLookup = (Zeroizing<Vec<u8>>, TreeLookupReport);
 
 #[derive(Clone, Copy)]
-pub(crate) struct Identity([u8; IDENTITY_BYTES]);
+pub(crate) struct Identity(pub(super) [u8; IDENTITY_BYTES]);
 impl Identity {
     pub(crate) fn new(
         c: TreeReadContext,

@@ -9,9 +9,11 @@ use crate::{
 use std::sync::Arc;
 use uste_crypto::{CryptoError, EntropySource, KeyVault, UnlockedKeySession};
 mod lookup;
+mod range;
 use crate::packed_tree_lookup::{TreeLookupLimits, TreeLookupReport};
 pub(crate) use lookup::Identity as LookupIdentity;
 pub use lookup::PackedLookupCacheReport;
+pub use range::PackedRangeCacheReport;
 #[cfg(test)]
 mod tests;
 
@@ -31,6 +33,8 @@ pub struct PackedCacheReport {
     pub evictions: u64,
     /// Included in total accounted bytes, never add it a second time.
     pub lookup: Option<PackedLookupCacheReport>,
+    /// Included in total accounted bytes, never add it a second time.
+    pub range: Option<PackedRangeCacheReport>,
 }
 /// Bounded resident plaintext with logical accounting, not an RSS or erasure guarantee.
 /// Private readers may retain a bounded page handle during proof validation after eviction.
@@ -40,6 +44,7 @@ pub struct PackedPageCache {
     budget: usize,
     page_budget: usize,
     lookup: Option<lookup::LookupCache>,
+    range: Option<range::RangeCache>,
     pages: CachePages<PackedPageContext, Arc<PackedPage>>,
     owner: Option<CertificateAnchorProof>,
     session: Option<UnlockedKeySession>,
@@ -72,6 +77,7 @@ impl PackedPageCache {
             budget,
             page_budget: budget,
             lookup: None,
+            range: None,
             pages: CachePages::default(),
             owner: None,
             session: None,
@@ -95,8 +101,31 @@ impl PackedPageCache {
         cache.page_budget = page_budget;
         Ok(cache)
     }
+    /// Trusted opt-in split of one total budget across pages, positive lookups and complete ranges.
+    /// Existing constructors retain their exact page-only or page/lookup behavior.
+    pub fn new_with_lookup_and_range_budget(
+        total: usize,
+        lookup_bytes: usize,
+        range_bytes: usize,
+    ) -> Result<Self, StorageError> {
+        let mut cache = Self::new(total)?;
+        let page_budget = total
+            .checked_sub(lookup_bytes)
+            .and_then(|bytes| bytes.checked_sub(range_bytes))
+            .ok_or(StorageError::ResourceLimit)?;
+        if page_budget < MIN_INDEX_CACHE_BYTES {
+            return Err(StorageError::ResourceLimit);
+        }
+        cache.lookup = Some(lookup::LookupCache::new(lookup_bytes)?);
+        cache.range = Some(range::RangeCache::new(range_bytes)?);
+        cache.page_budget = page_budget;
+        Ok(cache)
+    }
     pub(crate) fn has_lookup_cache(&self) -> bool {
         self.lookup.is_some()
+    }
+    pub fn has_range_cache(&self) -> bool {
+        self.range.is_some()
     }
     /// Clear only this USTE cache and its binding, not host caches or cumulative counters.
     pub fn clear(&mut self) {
@@ -105,6 +134,9 @@ impl PackedPageCache {
         self.session = None;
         if let Some(lookup) = &mut self.lookup {
             lookup.clear();
+        }
+        if let Some(range) = &mut self.range {
+            range.clear();
         }
     }
     pub fn report(&self) -> Result<PackedCacheReport, StorageError> {
@@ -116,6 +148,11 @@ impl PackedPageCache {
             .as_ref()
             .map(lookup::LookupCache::report)
             .transpose()?;
+        let range = self
+            .range
+            .as_ref()
+            .map(range::RangeCache::report)
+            .transpose()?;
         let page_bytes = if self.pages.is_empty() {
             0
         } else {
@@ -126,12 +163,14 @@ impl PackedPageCache {
             page_budget_bytes: self.page_budget,
             accounted_bytes: page_bytes
                 .checked_add(lookup.map_or(0, |r| r.accounted_bytes))
+                .and_then(|bytes| bytes.checked_add(range.map_or(0, |r| r.accounted_bytes)))
                 .ok_or(StorageError::ResourceLimit)?,
             resident_pages: self.pages.len(),
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
             lookup,
+            range,
         })
     }
     pub(crate) fn bind(
@@ -264,6 +303,45 @@ impl PackedPageCache {
             .as_mut()
             .ok_or(StorageError::InvalidState)?
             .insert(identity, key, bytes, report)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn range_get<W, E: EntropySource>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        reverse: bool,
+        limits: crate::packed_tree_cursor::TreeCursorLimits,
+    ) -> Result<Option<range::CachedRange>, StorageError> {
+        if self.range.is_none() {
+            return Ok(None);
+        }
+        self.check_lookup_session(vault)?;
+        self.range
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .get(identity, lower, upper, reverse, limits)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn range_insert<W, E: EntropySource>(
+        &mut self,
+        vault: &KeyVault<W, E>,
+        identity: LookupIdentity,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        reverse: bool,
+        entries: &[crate::packed_tree_cursor::PackedCursorEntry],
+        report: crate::packed_tree_cursor::TreeCursorReport,
+    ) -> Result<(), StorageError> {
+        if self.range.is_none() {
+            return Ok(());
+        }
+        self.check_lookup_session(vault)?;
+        self.range
+            .as_mut()
+            .ok_or(StorageError::InvalidState)?
+            .insert(identity, lower, upper, reverse, entries, report)
     }
     fn check_lookup_session<W, E: EntropySource>(
         &mut self,

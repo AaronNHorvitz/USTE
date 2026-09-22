@@ -18,6 +18,7 @@ fn positive_lookup_partition_is_within_one_explicit_total_budget() {
         assert_eq!(report.budget_bytes, total);
         assert_eq!(report.page_budget_bytes, total - lookup::MINIMUM);
         assert_eq!(report.lookup.unwrap().budget_bytes, lookup::MINIMUM);
+        assert_eq!(report.range, None);
         assert_eq!(report.accounted_bytes, 0);
         cache.assert_metadata_allowance();
         cache.clear();
@@ -25,7 +26,33 @@ fn positive_lookup_partition_is_within_one_explicit_total_budget() {
     }
     let report = PackedPageCache::new(minimum).unwrap().report().unwrap();
     assert_eq!(report.lookup, None);
+    assert_eq!(report.range, None);
     assert_eq!(report.page_budget_bytes, minimum);
+}
+
+#[test]
+fn complete_range_partition_is_within_the_same_explicit_total_budget() {
+    let minimum = MIN_INDEX_CACHE_BYTES + lookup::MINIMUM + range::MINIMUM;
+    for (total, lookup, range) in [
+        (minimum - 1, lookup::MINIMUM, range::MINIMUM),
+        (minimum, lookup::MINIMUM - 1, range::MINIMUM),
+        (minimum, lookup::MINIMUM, range::MINIMUM - 1),
+        (minimum, lookup::MINIMUM, minimum),
+        (MAX_INDEX_CACHE_BYTES + 1, lookup::MINIMUM, range::MINIMUM),
+    ] {
+        assert!(PackedPageCache::new_with_lookup_and_range_budget(total, lookup, range).is_err());
+    }
+    let mut cache =
+        PackedPageCache::new_with_lookup_and_range_budget(minimum, lookup::MINIMUM, range::MINIMUM)
+            .unwrap();
+    let report = cache.report().unwrap();
+    assert_eq!(report.budget_bytes, minimum);
+    assert_eq!(report.page_budget_bytes, MIN_INDEX_CACHE_BYTES);
+    assert_eq!(report.lookup.unwrap().budget_bytes, lookup::MINIMUM);
+    assert_eq!(report.range.unwrap().budget_bytes, range::MINIMUM);
+    assert_eq!(report.accounted_bytes, 0);
+    cache.clear();
+    assert_eq!(cache.report().unwrap(), report);
 }
 
 #[test]

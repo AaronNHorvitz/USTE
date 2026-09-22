@@ -47,7 +47,9 @@ pub use packed_roots::{
     CertifiedPackedRoot, MAX_PACKED_ROOT_ATTEMPTS, PackedRootDiscoveryLimits,
     PackedRootDiscoveryReport,
 };
-pub use packed_trees::{CanonicalPackedTree, CertifiedPackedTreeCursor, CertifiedPackedTreeStage};
+pub use packed_trees::{
+    CanonicalPackedTree, CertifiedPackedTreeCursor, CertifiedPackedTreeStage, PackedTreeRangeResult,
+};
 #[path = "journal_certificate_proof.rs"]
 mod certificate_proof;
 use certificate_proof::CertificateProofOwner;

@@ -55,6 +55,17 @@ impl PackedCursorEntry {
     pub fn value(&self) -> &[u8] {
         self.value.as_slice()
     }
+    pub(crate) fn copy_from_slices(key: &[u8], value: &[u8]) -> Result<Self, StorageError> {
+        let mut copied_value = Zeroizing::new(Vec::new());
+        copied_value
+            .try_reserve_exact(value.len())
+            .map_err(|_| StorageError::ResourceLimit)?;
+        copied_value.extend_from_slice(value);
+        Ok(Self {
+            key: copy_key(key)?,
+            value: PackedLookupValue::from_owned(copied_value),
+        })
+    }
     /// Transfer the already-owned cursor buffers without allocating or copying them again.
     pub fn into_scan_entry(mut self) -> IndexScanEntry {
         IndexScanEntry {
@@ -144,6 +155,45 @@ impl PackedTreeCursor {
         reverse: bool,
     ) -> Result<Self, StorageError> {
         let logical_context =
+            Self::validate_request(context, expected, root, lower, upper, limits)?;
+        let mut path = Vec::new();
+        path.try_reserve_exact(limits.maximum_path_branches as usize)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        let mut proof = Vec::new();
+        proof
+            .try_reserve_exact(limits.maximum_path_branches as usize)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        let mut previous = Zeroizing::new(Vec::new());
+        previous
+            .try_reserve_exact(logical::MAX_KEY_BYTES)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        Ok(Self {
+            context,
+            logical_context,
+            expected,
+            root,
+            lower: copy_key(lower)?,
+            upper: upper.map(copy_key).transpose()?,
+            previous,
+            path,
+            proof,
+            limits,
+            report: TreeCursorReport::default(),
+            started: false,
+            done: root.is_none() || upper == Some(lower),
+            failed: false,
+            reverse,
+        })
+    }
+    pub(crate) fn validate_request(
+        context: TreeReadContext,
+        expected: OrderedCommitment,
+        root: Option<PackedLocator>,
+        lower: &[u8],
+        upper: Option<&[u8]>,
+        limits: TreeCursorLimits,
+    ) -> Result<CommitmentContext, StorageError> {
+        let logical_context =
             CommitmentContext::new(context.scope, context.profile, context.family)
                 .map_err(|_| StorageError::InvalidState)?;
         if upper.is_some_and(|end| lower > end) {
@@ -173,34 +223,7 @@ impl PackedTreeCursor {
             )?;
         }
         metadata_allowance(limits.maximum_path_branches)?;
-        let mut path = Vec::new();
-        path.try_reserve_exact(limits.maximum_path_branches as usize)
-            .map_err(|_| StorageError::ResourceLimit)?;
-        let mut proof = Vec::new();
-        proof
-            .try_reserve_exact(limits.maximum_path_branches as usize)
-            .map_err(|_| StorageError::ResourceLimit)?;
-        let mut previous = Zeroizing::new(Vec::new());
-        previous
-            .try_reserve_exact(logical::MAX_KEY_BYTES)
-            .map_err(|_| StorageError::ResourceLimit)?;
-        Ok(Self {
-            context,
-            logical_context,
-            expected,
-            root,
-            lower: copy_key(lower)?,
-            upper: upper.map(copy_key).transpose()?,
-            previous,
-            path,
-            proof,
-            limits,
-            report: TreeCursorReport::default(),
-            started: false,
-            done: root.is_none() || upper == Some(lower),
-            failed: false,
-            reverse,
-        })
+        Ok(logical_context)
     }
     pub fn report(&self) -> TreeCursorReport {
         self.report
