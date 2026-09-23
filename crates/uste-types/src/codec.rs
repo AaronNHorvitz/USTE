@@ -85,6 +85,8 @@ pub fn decode_map_value(input: &[u8]) -> Result<Option<Vec<(&str, Value)>>, Deco
 pub enum BorrowedMapValue<'a> {
     /// A direct string payload borrowed from the input frame.
     String(&'a str),
+    /// A selected one-entry map whose key and value are both borrowed strings.
+    SingletonStringMap { key: &'a str, value: &'a str },
     /// A recursively borrowed map selected explicitly by the decoder's caller.
     Map(Vec<(&'a str, BorrowedMapValue<'a>)>),
     /// A selected list decoded directly into its final record-reference representation.
@@ -292,6 +294,22 @@ fn decode_borrowed_map_tree<'a>(
                 return Err(DecodeError::UnexpectedEof);
             }
             budget.require_nodes(count)?;
+            if count == 1 {
+                let key = read_str(payload)?;
+                if payload.peek()? == STRING_TAG {
+                    budget.take_node()?;
+                    let tag = payload.byte()?;
+                    debug_assert_eq!(tag, STRING_TAG);
+                    let value = read_str(payload)?;
+                    return Ok(BorrowedMapValue::SingletonStringMap { key, value });
+                }
+                let mut entries = Vec::new();
+                entries
+                    .try_reserve_exact(1)
+                    .map_err(|_| DecodeError::ResourceLimit)?;
+                entries.push((key, decode_borrowed_map_tree(payload, depth, budget)?));
+                return Ok(BorrowedMapValue::Map(entries));
+            }
             let mut entries = Vec::new();
             entries
                 .try_reserve_exact(count)

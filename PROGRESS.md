@@ -2,6 +2,33 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — borrowed singleton selected maps (Decision 0264)
+
+D0263 is committed/pushed as `5edd3d9`. It left retained four-hop p99 at 381.871066 ms with zero
+adapter reads. The retained fixture's relationship `valid_time` is the one-entry map
+`{kind: "unknown"}`; D0258 borrowed its strings but still allocated a one-entry `Vec` for every
+decoded relationship. Unbounded interval bounds have the same shape.
+
+D0264 represents an explicitly selected singleton string map as two borrowed slices, without a
+collection. Other selected maps keep their recursive collected representation; generic and
+unselected maps stay owned. Stored valid-time and bound decoding consume the singleton form while
+preserving missing-field versus invalid-enum errors. Canonical map/key/UTF-8 validation,
+depth/node/byte limits, persistent bytes, graph semantics, authorization and configuration are
+unchanged. No cache or retained plaintext is added.
+
+Selected singleton shape/pointers, every truncation, half-open unbounded bounds and the direct
+unknown fixture valid time have regression coverage. The targeted release oracle test passed. The
+exact final tree passed **769 workspace tests** and strict all-target/all-feature Clippy. The
+standalone optimized T-20 gate passed **142 active tests with five unchanged explicit ignores** and
+strict Clippy. Logs: `/tmp/uste-d264-workspace-verification.log`,
+`/tmp/uste-d264-release-oracle.log` and `/tmp/uste-d264-native-verification.log`.
+
+Gates used one job/thread and the 4 GiB process limit under verified enclosing caps. Shared
+memory/swap peaks remained 5,373,222,912/459,055,104 bytes; maximum/OOM/socket-memory/CPU-throttle
+counters did not increase. No benchmark ran, so no performance, T-20, M1 or qualification claim
+follows. Next commit/push, rebuild and pin the release benchmark, then run one unchanged
+medium-pressure observation while preserving all existing defaults and qualification prerequisites.
+
 ## Latest development observation — fixed stored-record root field table (Decision 0263)
 
 D0262 is committed/pushed as `108b882`. Its one supervised 96/128/32 MiB observation completed

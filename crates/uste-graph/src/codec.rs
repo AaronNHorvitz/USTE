@@ -674,6 +674,20 @@ fn decode_borrowed_valid_time(
     Ok(valid_time)
 }
 
+fn decode_borrowed_singleton_valid_time(
+    key: &str,
+    value: &str,
+) -> Result<ValidTime, GraphCodecError> {
+    if key != "kind" {
+        return Err(GraphCodecError::MissingField("kind"));
+    }
+    match value {
+        "unknown" => Ok(ValidTime::Unknown),
+        "half_open" => Err(GraphCodecError::MissingField("start")),
+        _ => Err(GraphCodecError::InvalidEnum),
+    }
+}
+
 fn encode_bound(bound: IntervalBound) -> Result<Value, GraphCodecError> {
     match bound {
         IntervalBound::Unbounded => map([("kind", text("unbounded")?)]),
@@ -700,6 +714,17 @@ fn decode_borrowed_bound(value: BorrowedMapValue<'_>) -> Result<IntervalBound, G
     let BorrowedMapValue::Map(fields) = value else {
         return match value {
             BorrowedMapValue::Value(value) => decode_bound(value),
+            BorrowedMapValue::SingletonStringMap { key, value } => {
+                if key != "kind" {
+                    Err(GraphCodecError::MissingField("kind"))
+                } else {
+                    match value {
+                        "unbounded" => Ok(IntervalBound::Unbounded),
+                        "bounded" => Err(GraphCodecError::MissingField("instant")),
+                        _ => Err(GraphCodecError::InvalidEnum),
+                    }
+                }
+            }
             BorrowedMapValue::String(_)
             | BorrowedMapValue::Map(_)
             | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
@@ -1183,9 +1208,9 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
                 .map(Value::String)
                 .map_err(|_| GraphCodecError::ResourceLimit),
             BorrowedMapValue::Value(value) => Ok(value),
-            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_)
+            | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
         }
     }
 
@@ -1193,9 +1218,9 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::String(value) => Ok(Cow::Borrowed(value)),
             BorrowedMapValue::Value(value) => take_text(value).map(Cow::Owned),
-            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_)
+            | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
         }
     }
 
@@ -1203,15 +1228,18 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::RecordRefs(references) => Ok(references),
             BorrowedMapValue::Value(value) => decode_refs(value),
-            BorrowedMapValue::String(_) | BorrowedMapValue::Map(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::String(_)
+            | BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_) => Err(GraphCodecError::WrongType),
         }
     }
 
     fn take_valid_time(&mut self, name: &'static str) -> Result<ValidTime, GraphCodecError> {
         match self.take(name)? {
             BorrowedMapValue::Map(fields) => decode_borrowed_valid_time(fields),
+            BorrowedMapValue::SingletonStringMap { key, value } => {
+                decode_borrowed_singleton_valid_time(key, value)
+            }
             BorrowedMapValue::Value(value) => decode_valid_time(value),
             BorrowedMapValue::String(_) | BorrowedMapValue::RecordRefs(_) => {
                 Err(GraphCodecError::WrongType)
@@ -1235,9 +1263,9 @@ impl<'a> RecordFields<'a> for BorrowedRecordFields<'a> {
                 .map(Value::String)
                 .map_err(|_| GraphCodecError::ResourceLimit),
             BorrowedMapValue::Value(value) => Ok(value),
-            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_)
+            | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
         }
     }
 
@@ -1245,9 +1273,9 @@ impl<'a> RecordFields<'a> for BorrowedRecordFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::String(value) => Ok(Cow::Borrowed(value)),
             BorrowedMapValue::Value(value) => take_text(value).map(Cow::Owned),
-            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_)
+            | BorrowedMapValue::RecordRefs(_) => Err(GraphCodecError::WrongType),
         }
     }
 
@@ -1255,15 +1283,18 @@ impl<'a> RecordFields<'a> for BorrowedRecordFields<'a> {
         match self.take(name)? {
             BorrowedMapValue::RecordRefs(references) => Ok(references),
             BorrowedMapValue::Value(value) => decode_refs(value),
-            BorrowedMapValue::String(_) | BorrowedMapValue::Map(_) => {
-                Err(GraphCodecError::WrongType)
-            }
+            BorrowedMapValue::String(_)
+            | BorrowedMapValue::SingletonStringMap { .. }
+            | BorrowedMapValue::Map(_) => Err(GraphCodecError::WrongType),
         }
     }
 
     fn take_valid_time(&mut self, name: &'static str) -> Result<ValidTime, GraphCodecError> {
         match self.take(name)? {
             BorrowedMapValue::Map(fields) => decode_borrowed_valid_time(fields),
+            BorrowedMapValue::SingletonStringMap { key, value } => {
+                decode_borrowed_singleton_valid_time(key, value)
+            }
             BorrowedMapValue::Value(value) => decode_valid_time(value),
             BorrowedMapValue::String(_) | BorrowedMapValue::RecordRefs(_) => {
                 Err(GraphCodecError::WrongType)
@@ -1431,10 +1462,21 @@ mod tests {
             modified_revision: CommitRevision::new(1).unwrap(),
         });
         let encoded = encode_stored_record(&relationship).unwrap();
-        assert_eq!(decode_stored_record(&encoded), Ok(relationship));
+        assert_eq!(decode_stored_record(&encoded), Ok(relationship.clone()));
         for cut in 0..encoded.len() {
             assert!(decode_stored_record(&encoded[..cut]).is_err());
         }
+
+        let mut unknown_time = relationship.clone();
+        let Record::Relationship(unknown_time_fields) = &mut unknown_time else {
+            unreachable!()
+        };
+        unknown_time_fields.valid_time = ValidTime::Unknown;
+        let unknown_time_encoded = encode_stored_record(&unknown_time).unwrap();
+        assert_eq!(
+            decode_stored_record(&unknown_time_encoded),
+            Ok(unknown_time)
+        );
 
         let Value::Map(map) = decode_value(&encoded).unwrap() else {
             panic!("stored record root map")

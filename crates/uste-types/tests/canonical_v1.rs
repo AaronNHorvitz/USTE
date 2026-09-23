@@ -132,12 +132,12 @@ fn selected_root_map_fields_borrow_recursively_without_converting_other_maps() {
         panic!("selected map stayed owned");
     };
     assert_eq!(selected[0].1, BorrowedMapValue::String("borrowed"));
-    let BorrowedMapValue::Map(leaf) = &selected[1].1 else {
+    let BorrowedMapValue::SingletonStringMap { key, value } = &selected[1].1 else {
         panic!("nested selected map stayed owned");
     };
-    assert_eq!(leaf[0].1, BorrowedMapValue::String("nested"));
+    assert_eq!((*key, *value), ("kind", "nested"));
     let bounds = encoded.as_ptr_range();
-    for text in [selected[0].0, selected[1].0, leaf[0].0] {
+    for text in [selected[0].0, selected[1].0, *key, *value] {
         assert!(text.as_ptr() >= bounds.start && text.as_ptr() < bounds.end);
     }
     for cut in 0..encoded.len() {
