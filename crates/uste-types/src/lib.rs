@@ -17,7 +17,7 @@ pub use codec::{
     BorrowedMapValue, FORMAT_MAJOR, FORMAT_MINOR, MAGIC, MAX_VALUE_PAYLOAD, VALUE_RECORD_KIND,
     decode_borrowed_map_value, decode_borrowed_map_value_with_fields,
     decode_borrowed_map_value_with_fields_and_record_refs, decode_map_value, decode_value,
-    encode_value, encoded_len,
+    encode_value, encoded_len, visit_borrowed_map_value_with_fields_and_record_refs,
 };
 pub use error::{DecodeError, EncodeError, IdentityParseError, ValidationError};
 pub use id::{

@@ -9,8 +9,8 @@ use uste_policy::{
 use uste_types::{
     BorrowedMapValue, BoundedBytes, BoundedList, BoundedString, CanonicalMap, CommitRevision,
     DatabaseId, DecodeError, EncodeError, NamespaceId, NamespaceRef, RecordId, RecordRef,
-    UtcInstant, Value, decode_borrowed_map_value_with_fields_and_record_refs, decode_value,
-    encode_value,
+    UtcInstant, Value, decode_value, encode_value,
+    visit_borrowed_map_value_with_fields_and_record_refs,
 };
 
 use crate::{
@@ -409,14 +409,16 @@ fn decode_record_fields<'a>(mut fields: impl RecordFields<'a>) -> Result<Record,
 
 /// Decode one complete canonical stored record from a trusted derived projection.
 pub fn decode_stored_record(input: &[u8]) -> Result<Record, GraphCodecError> {
-    let fields = decode_borrowed_map_value_with_fields_and_record_refs(
+    let mut fields = BorrowedRecordFields::new();
+    visit_borrowed_map_value_with_fields_and_record_refs(
         input,
         &["valid_time"],
         &["evidence"],
+        |key, value| fields.insert(key, value),
     )
     .map_err(GraphCodecError::Decode)?
     .ok_or(GraphCodecError::WrongType)?;
-    decode_record_fields(BorrowedFields(fields))
+    decode_record_fields(fields)
 }
 
 pub(crate) fn encode_result_policy(
@@ -1095,6 +1097,74 @@ impl<'a> RecordFields<'a> for Fields {
 
 struct BorrowedFields<'a>(Vec<(&'a str, BorrowedMapValue<'a>)>);
 
+const BORROWED_RECORD_FIELD_COUNT: usize = 22;
+
+struct BorrowedRecordFields<'a> {
+    fields: [Option<BorrowedMapValue<'a>>; BORROWED_RECORD_FIELD_COUNT],
+    remaining: usize,
+    unknown: bool,
+}
+
+impl<'a> BorrowedRecordFields<'a> {
+    fn new() -> Self {
+        Self {
+            fields: std::array::from_fn(|_| None),
+            remaining: 0,
+            unknown: false,
+        }
+    }
+
+    fn insert(&mut self, name: &str, value: BorrowedMapValue<'a>) {
+        let Some(index) = borrowed_record_field_index(name) else {
+            self.unknown = true;
+            return;
+        };
+        if self.fields[index].replace(value).is_some() {
+            self.unknown = true;
+        } else {
+            self.remaining += 1;
+        }
+    }
+
+    fn take(&mut self, name: &'static str) -> Result<BorrowedMapValue<'a>, GraphCodecError> {
+        let index = borrowed_record_field_index(name)
+            .expect("record decoder requested a field outside its fixed schema");
+        let value = self.fields[index]
+            .take()
+            .ok_or(GraphCodecError::MissingField(name))?;
+        self.remaining -= 1;
+        Ok(value)
+    }
+}
+
+const fn borrowed_record_field_index(name: &str) -> Option<usize> {
+    match name.as_bytes() {
+        b"correction_of" => Some(0),
+        b"created_revision" => Some(1),
+        b"digest" => Some(2),
+        b"entity_type" => Some(3),
+        b"evidence" => Some(4),
+        b"from" => Some(5),
+        b"id" => Some(6),
+        b"kind" => Some(7),
+        b"lifecycle" => Some(8),
+        b"locator" => Some(9),
+        b"modified_revision" => Some(10),
+        b"object" => Some(11),
+        b"predicate" => Some(12),
+        b"properties" => Some(13),
+        b"recorded_revision" => Some(14),
+        b"relationship_type" => Some(15),
+        b"schema_version" => Some(16),
+        b"status" => Some(17),
+        b"subject" => Some(18),
+        b"to" => Some(19),
+        b"valid_time" => Some(20),
+        b"version" => Some(21),
+        _ => None,
+    }
+}
+
 impl<'a> BorrowedFields<'a> {
     fn take(&mut self, name: &'static str) -> Result<BorrowedMapValue<'a>, GraphCodecError> {
         let index = self
@@ -1151,6 +1221,58 @@ impl<'a> RecordFields<'a> for BorrowedFields<'a> {
 
     fn finish(self) -> Result<(), GraphCodecError> {
         if self.0.is_empty() {
+            Ok(())
+        } else {
+            Err(GraphCodecError::UnknownField)
+        }
+    }
+}
+
+impl<'a> RecordFields<'a> for BorrowedRecordFields<'a> {
+    fn take_value(&mut self, name: &'static str) -> Result<Value, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::String(value) => BoundedString::new(value.to_owned())
+                .map(Value::String)
+                .map_err(|_| GraphCodecError::ResourceLimit),
+            BorrowedMapValue::Value(value) => Ok(value),
+            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
+        }
+    }
+
+    fn take_text(&mut self, name: &'static str) -> Result<Cow<'a, str>, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::String(value) => Ok(Cow::Borrowed(value)),
+            BorrowedMapValue::Value(value) => take_text(value).map(Cow::Owned),
+            BorrowedMapValue::Map(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
+        }
+    }
+
+    fn take_refs(&mut self, name: &'static str) -> Result<Vec<RecordRef>, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::RecordRefs(references) => Ok(references),
+            BorrowedMapValue::Value(value) => decode_refs(value),
+            BorrowedMapValue::String(_) | BorrowedMapValue::Map(_) => {
+                Err(GraphCodecError::WrongType)
+            }
+        }
+    }
+
+    fn take_valid_time(&mut self, name: &'static str) -> Result<ValidTime, GraphCodecError> {
+        match self.take(name)? {
+            BorrowedMapValue::Map(fields) => decode_borrowed_valid_time(fields),
+            BorrowedMapValue::Value(value) => decode_valid_time(value),
+            BorrowedMapValue::String(_) | BorrowedMapValue::RecordRefs(_) => {
+                Err(GraphCodecError::WrongType)
+            }
+        }
+    }
+
+    fn finish(self) -> Result<(), GraphCodecError> {
+        if self.remaining == 0 && !self.unknown {
             Ok(())
         } else {
             Err(GraphCodecError::UnknownField)
@@ -1313,6 +1435,32 @@ mod tests {
         for cut in 0..encoded.len() {
             assert!(decode_stored_record(&encoded[..cut]).is_err());
         }
+
+        let Value::Map(map) = decode_value(&encoded).unwrap() else {
+            panic!("stored record root map")
+        };
+        let entries = map.into_vec();
+        let missing_to = Value::Map(
+            CanonicalMap::new(
+                entries
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != "to")
+                    .cloned()
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            decode_stored_record(&encode_value(&missing_to).unwrap()),
+            Err(GraphCodecError::MissingField("to"))
+        );
+        let mut extra = entries;
+        extra.push((BoundedString::new("unknown".into()).unwrap(), Value::Null));
+        let extra = Value::Map(CanonicalMap::new(extra).unwrap());
+        assert_eq!(
+            decode_stored_record(&encode_value(&extra).unwrap()),
+            Err(GraphCodecError::UnknownField)
+        );
     }
 
     #[test]

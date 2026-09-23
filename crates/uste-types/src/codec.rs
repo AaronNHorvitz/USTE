@@ -128,28 +128,106 @@ pub fn decode_borrowed_map_value_with_fields_and_record_refs<'a>(
     record_ref_list_fields: &[&str],
 ) -> Result<Option<Vec<(&'a str, BorrowedMapValue<'a>)>>, DecodeError> {
     decode_map_entries(input, |key, payload, depth, budget| {
-        if borrowed_map_fields.contains(&key) && payload.peek()? == MAP_TAG {
-            decode_borrowed_map_tree(payload, depth, budget)
-        } else if record_ref_list_fields.contains(&key) {
-            match decode_borrowed_record_refs(payload, depth, budget)? {
-                Some(references) => Ok(BorrowedMapValue::RecordRefs(references)),
-                None => decode_borrowed_map_payload(payload, depth, budget),
-            }
-        } else {
-            decode_borrowed_map_payload(payload, depth, budget)
-        }
+        decode_selected_borrowed_payload(
+            key,
+            payload,
+            depth,
+            budget,
+            borrowed_map_fields,
+            record_ref_list_fields,
+        )
     })
+}
+
+/// Visit a canonical root map without allocating a root entry collection.
+///
+/// Values use the same selected-map and selected-record-reference behavior as
+/// [`decode_borrowed_map_value_with_fields_and_record_refs`]. The visitor is invoked in canonical
+/// key order after each complete entry has passed its ordinary validation. A valid non-map root is
+/// still fully validated and returns `None`.
+pub fn visit_borrowed_map_value_with_fields_and_record_refs<'a>(
+    input: &'a [u8],
+    borrowed_map_fields: &[&str],
+    record_ref_list_fields: &[&str],
+    mut visit: impl FnMut(&'a str, BorrowedMapValue<'a>),
+) -> Result<Option<()>, DecodeError> {
+    decode_map_entries_with(
+        input,
+        |_| Ok(()),
+        |key, payload, depth, budget| {
+            decode_selected_borrowed_payload(
+                key,
+                payload,
+                depth,
+                budget,
+                borrowed_map_fields,
+                record_ref_list_fields,
+            )
+        },
+        |(), key, value| {
+            visit(key, value);
+            Ok(())
+        },
+    )
+}
+
+fn decode_selected_borrowed_payload<'a>(
+    key: &str,
+    payload: &mut Cursor<'a>,
+    depth: usize,
+    budget: &mut DecodeBudget,
+    borrowed_map_fields: &[&str],
+    record_ref_list_fields: &[&str],
+) -> Result<BorrowedMapValue<'a>, DecodeError> {
+    if borrowed_map_fields.contains(&key) && payload.peek()? == MAP_TAG {
+        decode_borrowed_map_tree(payload, depth, budget)
+    } else if record_ref_list_fields.contains(&key) {
+        match decode_borrowed_record_refs(payload, depth, budget)? {
+            Some(references) => Ok(BorrowedMapValue::RecordRefs(references)),
+            None => decode_borrowed_map_payload(payload, depth, budget),
+        }
+    } else {
+        decode_borrowed_map_payload(payload, depth, budget)
+    }
 }
 
 fn decode_map_entries<'a, T>(
     input: &'a [u8],
-    mut decode_entry: impl FnMut(
+    decode_entry: impl FnMut(
         &'a str,
         &mut Cursor<'a>,
         usize,
         &mut DecodeBudget,
     ) -> Result<T, DecodeError>,
 ) -> Result<Option<Vec<(&'a str, T)>>, DecodeError> {
+    decode_map_entries_with(
+        input,
+        |count| {
+            let mut entries = Vec::new();
+            entries
+                .try_reserve_exact(count)
+                .map_err(|_| DecodeError::ResourceLimit)?;
+            Ok(entries)
+        },
+        decode_entry,
+        |entries, key, value| {
+            entries.push((key, value));
+            Ok(())
+        },
+    )
+}
+
+fn decode_map_entries_with<'a, T, R>(
+    input: &'a [u8],
+    initialize: impl FnOnce(usize) -> Result<R, DecodeError>,
+    mut decode_entry: impl FnMut(
+        &'a str,
+        &mut Cursor<'a>,
+        usize,
+        &mut DecodeBudget,
+    ) -> Result<T, DecodeError>,
+    mut collect: impl FnMut(&mut R, &'a str, T) -> Result<(), DecodeError>,
+) -> Result<Option<R>, DecodeError> {
     let payload_bytes = frame_payload(input)?;
     if payload_bytes.first().copied() != Some(MAP_TAG) {
         decode_value(input)?;
@@ -166,10 +244,7 @@ fn decode_map_entries<'a, T>(
         return Err(DecodeError::UnexpectedEof);
     }
     budget.require_nodes(count)?;
-    let mut entries = Vec::new();
-    entries
-        .try_reserve_exact(count)
-        .map_err(|_| DecodeError::ResourceLimit)?;
+    let mut result = initialize(count)?;
     let mut previous: Option<&[u8]> = None;
     for _ in 0..count {
         let key = read_str(&mut payload)?;
@@ -177,12 +252,13 @@ fn decode_map_entries<'a, T>(
             return Err(DecodeError::MapKeysOutOfOrder);
         }
         previous = Some(key.as_bytes());
-        entries.push((key, decode_entry(key, &mut payload, depth, &mut budget)?));
+        let value = decode_entry(key, &mut payload, depth, &mut budget)?;
+        collect(&mut result, key, value)?;
     }
     if payload.remaining() != 0 {
         return Err(DecodeError::TrailingBytes);
     }
-    Ok(Some(entries))
+    Ok(Some(result))
 }
 
 fn decode_borrowed_map_payload<'a>(

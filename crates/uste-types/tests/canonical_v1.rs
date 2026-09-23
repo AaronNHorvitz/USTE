@@ -7,6 +7,7 @@ use uste_types::{
     SourceEventId, TransactionId, UtcInstant, Value, decode_borrowed_map_value,
     decode_borrowed_map_value_with_fields, decode_borrowed_map_value_with_fields_and_record_refs,
     decode_map_value, decode_value, encode_value, encoded_len,
+    visit_borrowed_map_value_with_fields_and_record_refs,
 };
 
 const VECTORS: &str = include_str!("../../../acceptance/r1/canonical-v1.tsv");
@@ -183,12 +184,32 @@ fn selected_record_ref_lists_decode_directly_and_other_lists_stay_owned() {
         entries[1].1,
         BorrowedMapValue::RecordRefs(vec![scope(3), scope(4)])
     );
+    let mut visited = Vec::new();
+    assert_eq!(
+        visit_borrowed_map_value_with_fields_and_record_refs(
+            &encoded,
+            &[],
+            &["selected"],
+            |key, value| visited.push((key, value)),
+        ),
+        Ok(Some(()))
+    );
+    assert_eq!(visited, entries);
     for cut in 0..encoded.len() {
         assert!(
             decode_borrowed_map_value_with_fields_and_record_refs(
                 &encoded[..cut],
                 &[],
                 &["selected"]
+            )
+            .is_err()
+        );
+        assert!(
+            visit_borrowed_map_value_with_fields_and_record_refs(
+                &encoded[..cut],
+                &[],
+                &["selected"],
+                |_, _| {},
             )
             .is_err()
         );

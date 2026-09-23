@@ -2,6 +2,34 @@
 
 Updated: 2026-09-22 · Branch: `codex/uste-implementation`
 
+## Latest verified implementation — fixed stored-record root field table (Decision 0262)
+
+D0261 is committed/pushed as `40fb160`. It left retained four-hop p99 at 386.697762 ms with zero
+adapter reads. Inspection found each stored record still allocated a root entry `Vec`, linearly
+searched it for every fixed field and removed entries during assembly, although the complete root
+schema is a closed 22-name union.
+
+D0262 adds an opt-in canonical root visitor and sends stored-record entries directly into a fixed
+22-slot stack table. Selected nested `valid_time` maps and direct `evidence` lists retain their D0258
+and D0260 paths; generic and collected decoder APIs remain unchanged. Missing names retain named
+missing-field errors, while extra recognized or unknown names retain unknown-field errors. Frame,
+canonical order/uniqueness, UTF-8, identity, depth/node/byte limits, persistent bytes, graph
+semantics, authorization and configuration are unchanged. No cache or retained plaintext is added.
+
+Visitor/collected equivalence, every truncation and fixed-table missing/unknown fields have direct
+regression coverage. The targeted release oracle test passed. The exact final tree passed **769
+workspace tests** and strict all-target/all-feature Clippy. The standalone optimized T-20 gate
+passed **142 active tests with five unchanged explicit ignores** and strict Clippy. Logs:
+`/tmp/uste-d262-workspace-verification.log`, `/tmp/uste-d262-release-oracle.log` and
+`/tmp/uste-d262-native-verification.log`.
+
+Gates used one job/thread and the 4 GiB process limit under verified enclosing caps. Shared memory
+peak stayed 5,373,222,912 bytes; shared swap peak rose to 459,055,104 bytes and the cumulative
+socket-memory-throttle counter rose from two to four. Maximum/OOM/CPU-throttle counters stayed
+zero. No benchmark ran, so no performance, T-20, M1 or qualification claim follows. Next
+commit/push, rebuild and pin the release benchmark, then run one unchanged medium-pressure
+observation while preserving all existing defaults and qualification prerequisites.
+
 ## Latest development observation — direct record-reference list decoding (Decision 0261)
 
 D0260 is committed/pushed as `9096e69`. Its one supervised 96/128/32 MiB observation completed
