@@ -1,5 +1,15 @@
 # Spatial-temporal database implementation plan
 
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](../CAPABILITY-ROADMAP.md) and
+[the implementation amendment](../IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
+Preserve and finish the current T-20 lookup/index correctness and performance campaign, then T-19 and the existing database dependency order. Add the consumer-facing contract packages below at their real prerequisites; this does not replace the full spatial/temporal/physics roadmap.
+
 Design draft 1.11 · 2026-09-17 · R1 implementation through T-49 complete; T-19 acceptance open
 
 This is the delivery guide for the [PRD](../PRD.md), not an alternative task authority.

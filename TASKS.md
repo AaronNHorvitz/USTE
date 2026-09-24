@@ -1,5 +1,29 @@
 # USTE — Product development tasks
 
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](CAPABILITY-ROADMAP.md) and
+[the implementation amendment](IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
+### Capability Work Packages
+
+These crosswalk packages extend, rather than replace or renumber, existing tasks. All start
+open. Reconcile existing source/evidence, split into bounded subtasks here, then implement
+in dependency order. Catalogue priority P0 precedes P1/P2; a grouped package cannot pull a
+later capability ahead of an unblocked P0 dependency. Checked historical rows are not proof
+of the new acceptance criteria. Detailed proof requirements are in the linked amendment.
+
+| Status | Package | Capability mapping | Dependencies | Deliverable and acceptance |
+| --- | --- | --- | --- | --- |
+| [ ] | DB-R01 | CAP-05,20,25,29,30,36,46 | T-20, T-19 and applicable correctness gates | Finish bounded disk-backed lookup correctness, cache/reopen/fault behavior and honest resource measurements. Preserve benchmark targets, exact environments and unavailable reservation blockers. |
+| [ ] | DB-R02 | CAP-20,22,27,29 | T-63-T-68; DB-R01 only where disk-scale guarantees are claimed | Specify versioned source/artifact/claim/edge records for research, docs and repository memory with scope, provenance, revisions, freshness and budgets. Do not fetch the web or execute tools inside storage. |
+| [ ] | DB-R03 | CAP-20,23,24,29,30,34,42 | DB-R02; existing source and query authority | Test corrections, contradictions, revocation, source deletion, stale generations, cross-scope denial, restart and rebuild. A derived index is never permission or the sole source of truth before migration qualification. |
+| [ ] | DB-R04 | CAP-08,17,21,25,28,32,40 | DB-R02, DB-R03; pinned generic consumer contract | Expose a restricted Rust adapter and conformance fixtures for runtime and coordinator consumers. Verify producer and consumer independently; combined functionality needs an actual authorized integration run. |
+| [ ] | DB-R05 | CAP-35,36,43,45,46,47,48 | Original R1-R4 lifecycle and distribution gates | Retain full database/spatial/physics delivery, clean installation, no-egress and resource qualification, manual redacted diagnostics and MIT OR Apache-2.0 notices. No release claim from the synthetic memory pilot. |
+
 Database design draft 1.4 · 2026-09-17
 
 **R0 design readiness is complete; implementation tasks remain open.** This document is not

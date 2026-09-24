@@ -1,5 +1,24 @@
 # Contributing
 
+Current development publication follows [the main-first workflow](DEVELOPMENT-WORKFLOW.md).
+This supersedes older local-only/feature-branch-only instructions for this repository;
+runtime authority, truthful verification and release gates are unchanged.
+
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](CAPABILITY-ROADMAP.md) and
+[the implementation amendment](IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
+For the assigned implementation worker, the owner's explicit 2026-09-24 restart supersedes
+older planning-only, permanently-paused and narrower-slice instructions. It does not enlarge
+filesystem, network, spending, publication or independent-acceptance authority. Read the
+current private operator assignment for GPU/build reservations; unavailable resources are
+queued/blocked, never grounds to kill another worker or raise limits. Use one designated
+writer, preserve existing changes, and do not put private consumer identities in public Git.
+
 The repository contains accepted R0 design evidence, a Rust workspace, canonical type/codec
 kernel and development experiments, not a released or supported database executable. Reproduce
 them using

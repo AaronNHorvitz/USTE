@@ -1,5 +1,15 @@
 # USTE — Product requirements
 
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](CAPABILITY-ROADMAP.md) and
+[the implementation amendment](IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
+Preserve and finish the current T-20 lookup/index correctness and performance campaign, then T-19 and the existing database dependency order. Add the consumer-facing contract packages below at their real prerequisites; this does not replace the full spatial/temporal/physics roadmap.
+
 Version: database design draft 1.4 · Date: 2026-09-17
 
 Status: R0 design ready; T-08/T-09 workspace and canonical types implemented. Requirement and test

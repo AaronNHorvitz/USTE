@@ -1,5 +1,13 @@
 # USTE — Architecture
 
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](CAPABILITY-ROADMAP.md) and
+[the implementation amendment](IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
 Database design draft 1.6 · 2026-09-17 · R0 design ready; T-08–T-18/T-45 foundation implemented
 
 ## Delivery profile: bounded memory pilot

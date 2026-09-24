@@ -1,5 +1,19 @@
 # USTE — Universal Spatial-Temporal Engine
 
+Current development publication follows [the main-first workflow](DEVELOPMENT-WORKFLOW.md).
+This supersedes older local-only/feature-branch-only instructions for this repository;
+runtime authority, truthful verification and release gates are unchanged.
+
+## Current Delivery Amendment (2026-09-24)
+
+[The 48-capability roadmap](CAPABILITY-ROADMAP.md) and
+[the implementation amendment](IMPLEMENTATION-AMENDMENT.md) define the current
+Rust-first delivery direction and ownership. TASKS.md remains the only completion ledger.
+This is accepted implementation scope, not evidence that the capabilities already work.
+Existing security, independent-review, licensing and release gates remain in force.
+
+Preserve and finish the current T-20 lookup/index correctness and performance campaign, then T-19 and the existing database dependency order. Add the consumer-facing contract packages below at their real prerequisites; this does not replace the full spatial/temporal/physics roadmap.
+
 A local-first, Rust-native spatial-temporal graph and content database with a deterministic
 physics/simulation kernel for queryable world models, agent systems and future game development.
 
