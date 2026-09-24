@@ -1,6 +1,39 @@
 # Implementation progress and handoff
 
-Updated: 2026-09-22 · Branch: `codex/uste-implementation`
+Updated: 2026-09-23 · Branch: `build/uste-t20` (standalone lane branched from
+`codex/uste-implementation` at `2263dc5`; merged back by the owner after review)
+
+## Latest development observations — hash-indexed lookup cache (Decisions 0266–0268)
+
+The standalone lane regenerated the 20,000-entity/200,000-relationship fixture with the pinned
+`linux-packed-create` command (state digest `6880abb8…` and manifest/oracle hashes identical to
+the retained fixture; only the fresh-key `CERTIFICATES` hash differs), then reproduced the D0265
+protocol once at `2263dc5`: output digest `aec16fdc…`, every counter identical, retained
+all-class successful p99 **2.765 / 100.721 / 67.027 / 374.535 ms**. A `gdb`-sampled second run
+placed 63% of retained-half samples inside the positive lookup cache's ordered-map bookkeeping
+and 32% inside stored-record decoding (Decision 0266,
+`docs/evidence/standalone-lane-baseline-sampling.json`).
+
+Decision 0267 replaces the lookup partition's nested `BTreeMap` index and `BTreeMap<u128>`
+recency map with a hash index over interned identities plus an intrusive exact-LRU list. Eviction
+order, counters, bypass, refusal and logical accounting are unchanged; the storage suite (268
+tests), strict Clippy and formatting passed. Three supervised observations (Decision 0268)
+accepted the identical output digest and identical semantic report (lane recipe
+`0334c5cd…`), with retained p99 **2.292 / 63.261 / 45.136 / 227.248**, **2.429 / 63.196 /
+44.428 / 231.487** and **2.370 / 63.707 / 46.042 / 233.320 ms** at 265,964 KiB peak RSS. Four-hop
+is below the unchanged 250 ms target in every run and one-hop below 20 ms — a development-profile
+pass at 20,000 entities in this lane only. BM-01 qualification (100,000 entities, five samples,
+24 GiB reserved host), BM-02, BM-04 (95.923 MiB/s recorded failure) and BM-06 remain unpassed,
+so T-20 and T-19 stay open. Reports: `docs/evidence/hash-indexed-lookup-cache-sampling*.json`.
+
+The full `scripts/check.sh` gate on the D0267 tree passed every step (793 workspace tests, docs,
+rustdoc, R0 vectors, storage-publication model, isolated experiment tests) except one legacy BM-06
+process test whose fixed 30-second child-startup wait is exceeded by this lane's unoptimized
+build (57.9–58.7 s to the revision-99/100 marker on both the changed and the unchanged `2263dc5`
+binaries); the gate took 693 min 58 s. The skipped final bench Clippy step passed separately.
+
+Next re-profile this binary's retained path, remove the next zero-I/O cost (stored-record
+decoding, client-harness set structures, range-cache index), and draft the T-19 report.
 
 ## Latest development observation — borrowed singleton selected maps (Decision 0265)
 
