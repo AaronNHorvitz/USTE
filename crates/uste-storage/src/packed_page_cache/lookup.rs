@@ -1,9 +1,18 @@
 //! Bounded positive lookup retention. The enclosing cache supplies owner/session authority.
+//!
+//! Resident values are indexed by a hash map keyed on the interned identity index and the
+//! logical key bytes, and ordered by an intrusive doubly linked exact least-recently-used list.
+//! Hit, miss, eviction, bypass and logical accounting semantics are identical to the earlier
+//! ordered-map representation; only the constant per-hit bookkeeping cost differs.
 use super::*;
 use crate::ordered_commitment::{MAX_KEY_BYTES, MAX_VALUE_BYTES, OrderedCommitment};
 use crate::packed_tree_lookup::{TreeLookupLimits, TreeLookupReport, TreeReadContext};
 use crate::packed_tree_record::PackedLocator;
-use std::{borrow::Borrow, collections::BTreeMap};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
 use zeroize::Zeroizing;
 
 pub(super) const IDENTITY_BYTES: usize = 175;
@@ -11,6 +20,8 @@ const FIXED: usize = 4096;
 const ENTRY: usize = 512;
 pub(super) const MINIMUM: usize = 8192;
 pub(crate) type CachedLookup = (Zeroizing<Vec<u8>>, TreeLookupReport);
+const NONE: u32 = u32::MAX;
+const INLINE_PROBE_BYTES: usize = 64;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Identity(pub(super) [u8; IDENTITY_BYTES]);
@@ -53,72 +64,99 @@ pub struct PackedLookupCacheReport {
     pub oversized_bypasses: u64,
 }
 
-struct RetainedIdentity(Zeroizing<[u8; IDENTITY_BYTES]>);
-
-#[derive(Clone)]
-struct IdentityKey(Arc<RetainedIdentity>);
-impl Borrow<[u8; IDENTITY_BYTES]> for IdentityKey {
-    fn borrow(&self) -> &[u8; IDENTITY_BYTES] {
-        &self.0.0
-    }
-}
-impl PartialEq for IdentityKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.0 == other.0.0
-    }
-}
-impl Eq for IdentityKey {}
-impl PartialOrd for IdentityKey {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for IdentityKey {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.0.cmp(&other.0.0)
-    }
+/// One interned authenticated identity shared by every resident value under it.
+struct RetainedIdentity {
+    bytes: Zeroizing<[u8; IDENTITY_BYTES]>,
+    live: usize,
 }
 
-struct EntryKey {
-    identity: IdentityKey,
-    bytes: Zeroizing<Vec<u8>>,
-}
-
-#[derive(Clone)]
-struct LogicalKey(Arc<EntryKey>);
-impl Borrow<[u8]> for LogicalKey {
+/// Hash-map key: the interned identity index followed by the logical key bytes.
+struct MapKey(Zeroizing<Vec<u8>>);
+impl Borrow<[u8]> for MapKey {
     fn borrow(&self) -> &[u8] {
-        self.0.bytes.as_slice()
+        self.0.as_slice()
     }
 }
-impl PartialEq for LogicalKey {
+impl PartialEq for MapKey {
     fn eq(&self, other: &Self) -> bool {
-        self.0.bytes.as_slice() == other.0.bytes.as_slice()
+        self.0.as_slice() == other.0.as_slice()
     }
 }
-impl Eq for LogicalKey {}
-impl PartialOrd for LogicalKey {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
+impl Eq for MapKey {}
+impl Hash for MapKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.as_slice().hash(state);
     }
 }
-impl Ord for LogicalKey {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.bytes.as_slice().cmp(other.0.bytes.as_slice())
+
+/// Stack-first probe buffer so ordinary keys never allocate on the hit path.
+enum Probe {
+    Inline(Zeroizing<[u8; INLINE_PROBE_BYTES]>, usize),
+    Heap(Zeroizing<Vec<u8>>),
+}
+impl Probe {
+    fn new(identity: u32, key: &[u8]) -> Result<Self, StorageError> {
+        let total = key
+            .len()
+            .checked_add(4)
+            .ok_or(StorageError::ResourceLimit)?;
+        if total <= INLINE_PROBE_BYTES {
+            let mut inline = Zeroizing::new([0; INLINE_PROBE_BYTES]);
+            inline[..4].copy_from_slice(&identity.to_be_bytes());
+            inline[4..total].copy_from_slice(key);
+            return Ok(Self::Inline(inline, total));
+        }
+        let mut heap = Zeroizing::new(Vec::new());
+        heap.try_reserve_exact(total)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        heap.extend_from_slice(&identity.to_be_bytes());
+        heap.extend_from_slice(key);
+        Ok(Self::Heap(heap))
+    }
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Inline(bytes, len) => &bytes[..*len],
+            Self::Heap(bytes) => bytes.as_slice(),
+        }
+    }
+    fn into_key(self) -> Result<MapKey, StorageError> {
+        match self {
+            Self::Heap(bytes) => Ok(MapKey(bytes)),
+            Self::Inline(bytes, len) => {
+                let mut heap = Zeroizing::new(Vec::new());
+                heap.try_reserve_exact(len)
+                    .map_err(|_| StorageError::ResourceLimit)?;
+                heap.extend_from_slice(&bytes[..len]);
+                Ok(MapKey(heap))
+            }
+        }
     }
 }
-struct Value {
+
+struct Slot {
+    identity: u32,
+    key: Zeroizing<Vec<u8>>,
     bytes: Zeroizing<Vec<u8>>,
     work: TreeLookupReport,
-    stamp: u128,
     charge: usize,
+    /// More recently used neighbour; `NONE` at the head.
+    newer: u32,
+    /// Less recently used neighbour; `NONE` at the tail.
+    older: u32,
 }
+
 pub(super) struct LookupCache {
     budget: usize,
     used: usize,
-    clock: u128,
-    values: BTreeMap<IdentityKey, BTreeMap<LogicalKey, Value>>,
-    order: BTreeMap<u128, Arc<EntryKey>>,
+    identities: Vec<Option<RetainedIdentity>>,
+    free_identities: Vec<u32>,
+    slots: Vec<Option<Slot>>,
+    free_slots: Vec<u32>,
+    index: HashMap<MapKey, u32>,
+    /// Most recently used slot.
+    head: u32,
+    /// Least recently used slot; evicted first.
+    tail: u32,
     hits: u64,
     misses: u64,
     evictions: u64,
@@ -133,9 +171,13 @@ impl LookupCache {
         Ok(Self {
             budget,
             used: 0,
-            clock: 0,
-            values: BTreeMap::new(),
-            order: BTreeMap::new(),
+            identities: Vec::new(),
+            free_identities: Vec::new(),
+            slots: Vec::new(),
+            free_slots: Vec::new(),
+            index: HashMap::new(),
+            head: NONE,
+            tail: NONE,
             hits: 0,
             misses: 0,
             evictions: 0,
@@ -144,10 +186,14 @@ impl LookupCache {
         })
     }
     pub(super) fn clear(&mut self) {
-        self.values.clear();
-        self.order.clear();
+        self.index.clear();
+        self.slots.clear();
+        self.free_slots.clear();
+        self.identities.clear();
+        self.free_identities.clear();
+        self.head = NONE;
+        self.tail = NONE;
         self.used = 0;
-        self.clock = 0;
     }
     pub(super) fn report(&self) -> Result<PackedLookupCacheReport, StorageError> {
         if self.overflowed {
@@ -155,17 +201,111 @@ impl LookupCache {
         }
         Ok(PackedLookupCacheReport {
             budget_bytes: self.budget,
-            accounted_bytes: if self.order.is_empty() {
+            accounted_bytes: if self.index.is_empty() {
                 0
             } else {
                 FIXED + self.used
             },
-            resident_values: self.order.len(),
+            resident_values: self.index.len(),
             hits: self.hits,
             misses: self.misses,
             evictions: self.evictions,
             oversized_bypasses: self.bypasses,
         })
+    }
+    fn identity_index(&self, identity: &Identity) -> Option<u32> {
+        self.identities
+            .iter()
+            .position(|slot| slot.as_ref().is_some_and(|slot| *slot.bytes == identity.0))
+            .and_then(|index| u32::try_from(index).ok())
+    }
+    fn slot(&self, index: u32) -> Result<&Slot, StorageError> {
+        self.slots
+            .get(index as usize)
+            .and_then(Option::as_ref)
+            .ok_or(StorageError::IntegrityFailure)
+    }
+    fn slot_mut(&mut self, index: u32) -> Result<&mut Slot, StorageError> {
+        self.slots
+            .get_mut(index as usize)
+            .and_then(Option::as_mut)
+            .ok_or(StorageError::IntegrityFailure)
+    }
+    fn unlink(&mut self, index: u32) -> Result<(), StorageError> {
+        let (newer, older) = {
+            let slot = self.slot(index)?;
+            (slot.newer, slot.older)
+        };
+        if newer == NONE {
+            if self.head != index {
+                return Err(StorageError::IntegrityFailure);
+            }
+            self.head = older;
+        } else {
+            self.slot_mut(newer)?.older = older;
+        }
+        if older == NONE {
+            if self.tail != index {
+                return Err(StorageError::IntegrityFailure);
+            }
+            self.tail = newer;
+        } else {
+            self.slot_mut(older)?.newer = newer;
+        }
+        Ok(())
+    }
+    fn push_head(&mut self, index: u32) -> Result<(), StorageError> {
+        let head = self.head;
+        {
+            let slot = self.slot_mut(index)?;
+            slot.newer = NONE;
+            slot.older = head;
+        }
+        if head == NONE {
+            self.tail = index;
+        } else {
+            self.slot_mut(head)?.newer = index;
+        }
+        self.head = index;
+        Ok(())
+    }
+    /// Locate a resident value, count the observation and admit it against `limits` without
+    /// changing recency; the caller promotes the slot only after admission succeeds.
+    fn locate(
+        &mut self,
+        identity: Identity,
+        key: &[u8],
+        limits: TreeLookupLimits,
+    ) -> Result<Option<u32>, StorageError> {
+        validate_key(key)?;
+        let found = match self.identity_index(&identity) {
+            Some(interned) => {
+                let probe = Probe::new(interned, key)?;
+                self.index.get(probe.as_slice()).copied()
+            }
+            None => None,
+        };
+        let Some(index) = found else {
+            increment(&mut self.misses, &mut self.overflowed);
+            return Ok(None);
+        };
+        increment(&mut self.hits, &mut self.overflowed);
+        let slot = self.slot(index)?;
+        if slot.work.pages > limits.maximum_pages
+            || slot.work.encoded_bytes > limits.maximum_encoded_bytes
+            || slot.work.path_branches > limits.maximum_path_branches
+            || slot.bytes.len() as u64 > limits.maximum_value_bytes
+        {
+            return Err(StorageError::ResourceLimit);
+        }
+        Ok(Some(index))
+    }
+    fn promote(&mut self, index: u32) -> Result<(), StorageError> {
+        if self.head == index {
+            return Ok(());
+        }
+        self.unlink(index)?;
+        self.push_head(index)
     }
     pub(super) fn get(
         &mut self,
@@ -173,46 +313,13 @@ impl LookupCache {
         key: &[u8],
         limits: TreeLookupLimits,
     ) -> Result<Option<CachedLookup>, StorageError> {
-        validate_key(key)?;
-        let Some((stored, value)) = self
-            .values
-            .get(&identity.0)
-            .and_then(|values| values.get_key_value(key))
-        else {
-            increment(&mut self.misses, &mut self.overflowed);
+        let Some(index) = self.locate(identity, key, limits)? else {
             return Ok(None);
         };
-        let next = self
-            .clock
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-        increment(&mut self.hits, &mut self.overflowed);
-        if value.work.pages > limits.maximum_pages
-            || value.work.encoded_bytes > limits.maximum_encoded_bytes
-            || value.work.path_branches > limits.maximum_path_branches
-            || value.bytes.len() as u64 > limits.maximum_value_bytes
-        {
-            return Err(StorageError::ResourceLimit);
-        }
-        let output = copy(&value.bytes, 0)?;
-        let work = value.work;
-        let old = value.stamp;
-        let stored = stored.0.clone();
-        let ordered = self
-            .order
-            .remove(&old)
-            .ok_or(StorageError::IntegrityFailure)?;
-        if !Arc::ptr_eq(&ordered, &stored) {
-            return Err(StorageError::IntegrityFailure);
-        }
-        self.order.insert(next, stored.clone());
-        self.values
-            .get_mut(&identity.0)
-            .and_then(|values| values.get_mut(key))
-            .ok_or(StorageError::IntegrityFailure)?
-            .stamp = next;
-        self.clock = next;
-        Ok(Some((output, work)))
+        self.promote(index)?;
+        let slot = self.slot(index)?;
+        let output = copy(&slot.bytes, 0)?;
+        Ok(Some((output, slot.work)))
     }
     pub(super) fn get_with<R, F: FnOnce(&[u8]) -> R>(
         &mut self,
@@ -221,54 +328,90 @@ impl LookupCache {
         limits: TreeLookupLimits,
         map: &mut Option<F>,
     ) -> Result<Option<(R, TreeLookupReport)>, StorageError> {
-        validate_key(key)?;
-        let Some((stored, value)) = self
-            .values
-            .get(&identity.0)
-            .and_then(|values| values.get_key_value(key))
-        else {
-            increment(&mut self.misses, &mut self.overflowed);
+        let Some(index) = self.locate(identity, key, limits)? else {
             return Ok(None);
         };
-        let next = self
-            .clock
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-        increment(&mut self.hits, &mut self.overflowed);
-        if value.work.pages > limits.maximum_pages
-            || value.work.encoded_bytes > limits.maximum_encoded_bytes
-            || value.work.path_branches > limits.maximum_path_branches
-            || value.bytes.len() as u64 > limits.maximum_value_bytes
-        {
-            return Err(StorageError::ResourceLimit);
-        }
-        let work = value.work;
-        let old = value.stamp;
-        let stored = stored.0.clone();
-        let ordered = self
-            .order
-            .remove(&old)
-            .ok_or(StorageError::IntegrityFailure)?;
-        if !Arc::ptr_eq(&ordered, &stored) {
-            return Err(StorageError::IntegrityFailure);
-        }
-        self.order.insert(next, stored.clone());
-        self.values
-            .get_mut(&identity.0)
-            .and_then(|values| values.get_mut(key))
-            .ok_or(StorageError::IntegrityFailure)?
-            .stamp = next;
-        self.clock = next;
+        self.promote(index)?;
         // Complete internal integrity/LRU updates before exposing plaintext to the mapper.
         // `R` cannot borrow from this argument, so cache ownership never escapes.
-        let bytes = &self
-            .values
-            .get(&identity.0)
-            .and_then(|values| values.get(key))
-            .ok_or(StorageError::IntegrityFailure)?
-            .bytes;
-        let output = map.take().ok_or(StorageError::InvalidState)?(bytes);
-        Ok(Some((output, work)))
+        let slot = self.slot(index)?;
+        let output = map.take().ok_or(StorageError::InvalidState)?(&slot.bytes);
+        Ok(Some((output, slot.work)))
+    }
+    fn evict_oldest(&mut self) -> Result<(), StorageError> {
+        let index = self.tail;
+        if index == NONE {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.unlink(index)?;
+        let removed = self
+            .slots
+            .get_mut(index as usize)
+            .and_then(Option::take)
+            .ok_or(StorageError::IntegrityFailure)?;
+        let probe = Probe::new(removed.identity, &removed.key)?;
+        if self.index.remove(probe.as_slice()) != Some(index) {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.release_identity(removed.identity)?;
+        self.free_slots.push(index);
+        self.used = self
+            .used
+            .checked_sub(removed.charge)
+            .ok_or(StorageError::IntegrityFailure)?;
+        increment(&mut self.evictions, &mut self.overflowed);
+        Ok(())
+    }
+    fn release_identity(&mut self, index: u32) -> Result<(), StorageError> {
+        let entry = self
+            .identities
+            .get_mut(index as usize)
+            .ok_or(StorageError::IntegrityFailure)?;
+        let retained = entry.as_mut().ok_or(StorageError::IntegrityFailure)?;
+        retained.live = retained
+            .live
+            .checked_sub(1)
+            .ok_or(StorageError::IntegrityFailure)?;
+        if retained.live == 0 {
+            *entry = None;
+            self.free_identities.push(index);
+        }
+        Ok(())
+    }
+    fn retain_identity(&mut self, identity: Identity) -> Result<u32, StorageError> {
+        if let Some(index) = self.identity_index(&identity) {
+            self.identities
+                .get_mut(index as usize)
+                .and_then(Option::as_mut)
+                .ok_or(StorageError::IntegrityFailure)?
+                .live += 1;
+            return Ok(index);
+        }
+        let retained = RetainedIdentity {
+            bytes: Zeroizing::new(identity.0),
+            live: 1,
+        };
+        if let Some(index) = self.free_identities.pop() {
+            let entry = self
+                .identities
+                .get_mut(index as usize)
+                .ok_or(StorageError::IntegrityFailure)?;
+            if entry.is_some() {
+                return Err(StorageError::IntegrityFailure);
+            }
+            *entry = Some(retained);
+            return Ok(index);
+        }
+        let index =
+            u32::try_from(self.identities.len()).map_err(|_| StorageError::ResourceLimit)?;
+        if index == NONE {
+            return Err(StorageError::ResourceLimit);
+        }
+        self.identities
+            .try_reserve(1)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        self.identities.push(Some(retained));
+        Ok(index)
     }
     pub(super) fn insert(
         &mut self,
@@ -288,83 +431,74 @@ impl LookupCache {
             return Err(StorageError::InvalidState);
         }
         validate_key(key)?;
-        if self
-            .values
-            .get(&identity.0)
-            .is_some_and(|values| values.contains_key(key))
+        if let Some(interned) = self.identity_index(&identity)
+            && self
+                .index
+                .contains_key(Probe::new(interned, key)?.as_slice())
         {
             return Err(StorageError::InvalidState);
         }
-        let estimated = ENTRY
+        // Logical charge: fixed entry allowance plus identity, exact key and exact value bytes.
+        let charge = ENTRY
             .checked_add(IDENTITY_BYTES)
             .and_then(|n| n.checked_add(key.len()))
             .and_then(|n| n.checked_add(bytes.len()))
-            .ok_or(StorageError::ResourceLimit)?;
-        if estimated > self.budget - FIXED {
-            increment(&mut self.bypasses, &mut self.overflowed);
-            return Ok(());
-        }
-        let next = self
-            .clock
-            .checked_add(1)
-            .ok_or(StorageError::ResourceLimit)?;
-        let logical = copy(key, 0)?;
-        let output = copy(bytes, 0)?;
-        let charge = ENTRY
-            .checked_add(IDENTITY_BYTES)
-            .and_then(|n| n.checked_add(logical.capacity()))
-            .and_then(|n| n.checked_add(output.capacity()))
             .ok_or(StorageError::ResourceLimit)?;
         if charge > self.budget - FIXED {
             increment(&mut self.bypasses, &mut self.overflowed);
             return Ok(());
         }
+        let logical = copy(key, 0)?;
+        let output = copy(bytes, 0)?;
         while self.used > self.budget - FIXED - charge {
-            let (stamp, oldest) = self
-                .order
-                .pop_first()
-                .ok_or(StorageError::IntegrityFailure)?;
-            let values = self
-                .values
-                .get_mut(&*oldest.identity.0.0)
-                .ok_or(StorageError::IntegrityFailure)?;
-            let removed = values
-                .remove(oldest.bytes.as_slice())
-                .ok_or(StorageError::IntegrityFailure)?;
-            let empty = values.is_empty();
-            if stamp != removed.stamp {
-                return Err(StorageError::IntegrityFailure);
-            }
-            if empty && self.values.remove(&*oldest.identity.0.0).is_none() {
-                return Err(StorageError::IntegrityFailure);
-            }
-            self.used = self
-                .used
-                .checked_sub(removed.charge)
-                .ok_or(StorageError::IntegrityFailure)?;
-            increment(&mut self.evictions, &mut self.overflowed);
+            self.evict_oldest()?;
         }
-        let retained_identity = self
-            .values
-            .get_key_value(&identity.0)
-            .map(|(identity, _)| identity.clone())
-            .unwrap_or_else(|| IdentityKey(Arc::new(RetainedIdentity(Zeroizing::new(identity.0)))));
-        let key = Arc::new(EntryKey {
-            identity: retained_identity.clone(),
-            bytes: logical,
-        });
-        self.order.insert(next, key.clone());
-        self.values.entry(retained_identity).or_default().insert(
-            LogicalKey(key),
-            Value {
-                bytes: output,
-                work,
-                stamp: next,
-                charge,
-            },
-        );
+        self.index
+            .try_reserve(1)
+            .map_err(|_| StorageError::ResourceLimit)?;
+        if self.free_slots.is_empty() {
+            self.slots
+                .try_reserve(1)
+                .map_err(|_| StorageError::ResourceLimit)?;
+        }
+        let interned = self.retain_identity(identity)?;
+        let map_key = Probe::new(interned, key)?.into_key()?;
+        let slot = Slot {
+            identity: interned,
+            key: logical,
+            bytes: output,
+            work,
+            charge,
+            newer: NONE,
+            older: NONE,
+        };
+        let index = match self.free_slots.pop() {
+            Some(index) => {
+                let entry = self
+                    .slots
+                    .get_mut(index as usize)
+                    .ok_or(StorageError::IntegrityFailure)?;
+                if entry.is_some() {
+                    return Err(StorageError::IntegrityFailure);
+                }
+                *entry = Some(slot);
+                index
+            }
+            None => {
+                let index =
+                    u32::try_from(self.slots.len()).map_err(|_| StorageError::ResourceLimit)?;
+                if index == NONE {
+                    return Err(StorageError::ResourceLimit);
+                }
+                self.slots.push(Some(slot));
+                index
+            }
+        };
+        if self.index.insert(map_key, index).is_some() {
+            return Err(StorageError::IntegrityFailure);
+        }
+        self.push_head(index)?;
         self.used += charge;
-        self.clock = next;
         Ok(())
     }
 }

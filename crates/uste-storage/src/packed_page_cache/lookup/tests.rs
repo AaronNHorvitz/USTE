@@ -16,47 +16,92 @@ fn limits() -> TreeLookupLimits {
         maximum_value_bytes: 100,
     }
 }
+/// Resident slots from least to most recently used, following the intrusive list.
+fn lru_order(cache: &LookupCache) -> Vec<u32> {
+    let mut order = Vec::new();
+    let mut cursor = cache.tail;
+    while cursor != NONE {
+        order.push(cursor);
+        cursor = cache.slot(cursor).unwrap().newer;
+    }
+    order
+}
+fn lru_first_key_bytes(cache: &LookupCache) -> Vec<u8> {
+    lru_order(cache)
+        .into_iter()
+        .map(|index| cache.slot(index).unwrap().key[0])
+        .collect()
+}
 fn assert_invariants(cache: &LookupCache) {
-    assert_eq!(
-        cache.values.values().map(BTreeMap::len).sum::<usize>(),
-        cache.order.len()
-    );
+    let live: Vec<u32> = cache
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| slot.as_ref().map(|_| index as u32))
+        .collect();
+    assert_eq!(live.len(), cache.index.len());
+    let mut oldest_first = lru_order(cache);
+    let mut newest_first = Vec::new();
+    let mut cursor = cache.head;
+    while cursor != NONE {
+        newest_first.push(cursor);
+        cursor = cache.slot(cursor).unwrap().older;
+    }
+    newest_first.reverse();
+    assert_eq!(oldest_first, newest_first);
+    oldest_first.sort_unstable();
+    assert_eq!(oldest_first, live);
+    let mut free = cache.free_slots.clone();
+    free.sort_unstable();
+    let mut vacant: Vec<u32> = cache
+        .slots
+        .iter()
+        .enumerate()
+        .filter_map(|(index, slot)| slot.is_none().then_some(index as u32))
+        .collect();
+    vacant.sort_unstable();
+    assert_eq!(free, vacant);
     assert_eq!(
         cache.used,
-        cache
-            .values
-            .values()
-            .flat_map(|values| values.values())
-            .map(|value| value.charge)
+        live.iter()
+            .map(|index| cache.slot(*index).unwrap().charge)
             .sum()
     );
-    for (identity, values) in &cache.values {
-        assert!(!values.is_empty());
-        assert_eq!(Arc::strong_count(&identity.0), values.len() + 1);
-        for (key, value) in values {
-            assert_eq!(identity.0.0.as_slice(), key.0.identity.0.0.as_slice());
-            assert!(
-                cache
-                    .order
-                    .get(&value.stamp)
-                    .is_some_and(|ordered| Arc::ptr_eq(ordered, &key.0))
-            );
-            assert_eq!(
-                value.charge,
-                ENTRY + IDENTITY_BYTES + key.0.bytes.capacity() + value.bytes.capacity()
-            );
-            assert_eq!(Arc::strong_count(&key.0), 2);
+    let mut live_per_identity = vec![0_usize; cache.identities.len()];
+    for index in &live {
+        let slot = cache.slot(*index).unwrap();
+        assert_eq!(
+            slot.charge,
+            ENTRY + IDENTITY_BYTES + slot.key.len() + slot.bytes.len()
+        );
+        live_per_identity[slot.identity as usize] += 1;
+        let probe = Probe::new(slot.identity, &slot.key).unwrap();
+        assert_eq!(cache.index.get(probe.as_slice()), Some(index));
+    }
+    let mut free_identities = cache.free_identities.clone();
+    free_identities.sort_unstable();
+    let mut vacant_identities = Vec::new();
+    for (index, retained) in cache.identities.iter().enumerate() {
+        match retained {
+            Some(retained) => {
+                assert_ne!(retained.live, 0);
+                assert_eq!(retained.live, live_per_identity[index]);
+            }
+            None => {
+                assert_eq!(live_per_identity[index], 0);
+                vacant_identities.push(index as u32);
+            }
         }
     }
+    assert_eq!(free_identities, vacant_identities);
     assert!(cache.report().unwrap().accounted_bytes <= cache.budget);
     // Conservative logical allowance, not a claim about allocator/RSS behavior.
     assert!(
-        3 * size_of::<(LogicalKey, Value)>()
-            + 3 * size_of::<(u128, Arc<EntryKey>)>()
-            + size_of::<IdentityKey>()
-            + size_of::<EntryKey>()
-            + size_of::<Zeroizing<Vec<u8>>>()
-            + 2 * size_of::<usize>()
+        size_of::<Option<Slot>>()
+            + size_of::<(MapKey, u32)>()
+            + 2 * size_of::<Zeroizing<Vec<u8>>>()
+            + size_of::<Option<RetainedIdentity>>()
+            + 4 * size_of::<usize>()
             <= ENTRY
     );
     assert!(size_of::<LookupCache>() <= FIXED);
@@ -71,6 +116,8 @@ fn structured_cache_keys_preserve_every_identity_byte_and_variable_key_boundary(
         vec![1],
         vec![255],
         b"synthetic".to_vec(),
+        vec![0; INLINE_PROBE_BYTES - 4],
+        vec![0; INLINE_PROBE_BYTES - 3],
         vec![0; MAX_KEY_BYTES - 1],
         vec![0; MAX_KEY_BYTES],
     ];
@@ -119,6 +166,7 @@ fn structured_cache_keys_preserve_every_identity_byte_and_variable_key_boundary(
         cache.report().unwrap().resident_values,
         IDENTITY_BYTES + variable_keys.len()
     );
+    assert_eq!(cache.identities.len(), IDENTITY_BYTES + 1);
     assert!(
         cache
             .get(Identity([0; IDENTITY_BYTES]), &[], limits())
@@ -137,23 +185,47 @@ fn structured_cache_keys_preserve_every_identity_byte_and_variable_key_boundary(
 }
 
 #[test]
-fn structured_cache_keys_order_logical_bytes_inside_one_shared_zeroizing_identity() {
+fn shared_identity_is_interned_once_and_released_with_its_last_value() {
     let identity = Identity([7; IDENTITY_BYTES]);
+    let other = Identity([9; IDENTITY_BYTES]);
     let mut cache = LookupCache::new(2 * MINIMUM).unwrap();
-    let mut expected = Vec::new();
     for byte in (0..8).rev() {
         let key = [byte, 255 - byte];
-        expected.push(key.to_vec());
         cache.insert(identity, &key, &key, work()).unwrap();
     }
-    expected.sort();
-    let (retained, values) = cache.values.get_key_value(&identity.0).unwrap();
-    let actual: Vec<_> = values
-        .keys()
-        .map(|key| key.0.bytes.as_slice().to_vec())
-        .collect();
-    assert_eq!(actual, expected);
-    assert_eq!(Arc::strong_count(&retained.0), values.len() + 1);
+    cache.insert(other, b"other", b"other", work()).unwrap();
+    assert_eq!(cache.identities.len(), 2);
+    assert_eq!(cache.identities[0].as_ref().unwrap().live, 8);
+    assert_eq!(cache.identities[1].as_ref().unwrap().live, 1);
+    assert_eq!(
+        lru_first_key_bytes(&cache),
+        vec![7, 6, 5, 4, 3, 2, 1, 0, b'o']
+    );
+    assert_invariants(&cache);
+    // A filler sized to evict exactly the eight older values frees the first interned
+    // identity, whose index the filler's own new identity then reuses.
+    let filler = vec![0; 10_500];
+    cache
+        .insert(Identity([1; IDENTITY_BYTES]), b"filler", &filler, work())
+        .unwrap();
+    assert_invariants(&cache);
+    assert_eq!(cache.report().unwrap().evictions, 8);
+    assert_eq!(cache.report().unwrap().resident_values, 2);
+    assert_eq!(cache.identities.len(), 2);
+    assert!(cache.free_identities.is_empty());
+    assert_eq!(
+        *cache.identities[0].as_ref().unwrap().bytes,
+        [1; IDENTITY_BYTES]
+    );
+    assert_eq!(
+        *cache.identities[1].as_ref().unwrap().bytes,
+        [9; IDENTITY_BYTES]
+    );
+    assert_eq!(lru_first_key_bytes(&cache), vec![b'o', b'f']);
+    assert!(cache.get(identity, &[0, 255], limits()).unwrap().is_none());
+    cache.clear();
+    assert!(cache.identities.is_empty());
+    assert!(cache.slots.is_empty());
     assert_invariants(&cache);
 }
 
@@ -227,9 +299,8 @@ fn positive_lookup_cache_matches_independent_variable_byte_lru() {
         assert_eq!(cache.report().unwrap().hits, hits);
         assert_eq!(cache.report().unwrap().misses, misses);
         assert_eq!(cache.report().unwrap().evictions, evictions);
-        let actual: Vec<_> = cache.order.values().map(|key| key.bytes[0]).collect();
         assert_eq!(
-            actual,
+            lru_first_key_bytes(&cache),
             reference.iter().map(|(key, _)| *key).collect::<Vec<_>>()
         );
     }
@@ -242,6 +313,7 @@ fn positive_lookup_cache_limits_identity_bypass_and_clear_are_exact() {
     cache
         .insert(identity, b"synthetic secret", &[8; 100], work())
         .unwrap();
+    cache.insert(identity, b"newer", &[9; 10], work()).unwrap();
     for changed in 0..IDENTITY_BYTES {
         let mut other = identity;
         other.0[changed] ^= 1;
@@ -266,12 +338,15 @@ fn positive_lookup_cache_limits_identity_bypass_and_clear_are_exact() {
             2 => narrow.maximum_encoded_bytes -= 1,
             _ => narrow.maximum_value_bytes -= 1,
         }
-        let clock = cache.clock;
+        let order = lru_order(&cache);
+        let hits = cache.hits;
         assert!(matches!(
             cache.get(identity, b"synthetic secret", narrow),
             Err(StorageError::ResourceLimit)
         ));
-        assert_eq!(cache.clock, clock);
+        // A refused hit is counted but never promotes the value.
+        assert_eq!(cache.hits, hits + 1);
+        assert_eq!(lru_order(&cache), order);
         assert_invariants(&cache);
     }
     let before = cache.report().unwrap();
@@ -285,7 +360,7 @@ fn positive_lookup_cache_limits_identity_bypass_and_clear_are_exact() {
         .insert(identity, b"oversized", &vec![0; MINIMUM], work())
         .unwrap();
     assert_eq!(cache.report().unwrap().oversized_bypasses, 1);
-    assert_eq!(cache.report().unwrap().resident_values, 1);
+    assert_eq!(cache.report().unwrap().resident_values, 2);
     assert_eq!(
         cache
             .get(identity, b"synthetic secret", limits())
@@ -295,6 +370,7 @@ fn positive_lookup_cache_limits_identity_bypass_and_clear_are_exact() {
             .as_slice(),
         &[8; 100]
     );
+    assert_eq!(lru_first_key_bytes(&cache), vec![b'n', b's']);
     let hits = cache.hits;
     cache.clear();
     assert_eq!(cache.report().unwrap().accounted_bytes, 0);
@@ -328,13 +404,17 @@ fn positive_lookup_cache_refuses_invalid_work_and_retains_overflow_diagnostics()
     cache
         .insert(Identity([0; IDENTITY_BYTES]), b"key", b"value", work())
         .unwrap();
-    cache.clock = u128::MAX;
-    assert!(matches!(
-        cache.get(Identity([0; IDENTITY_BYTES]), b"key", limits()),
-        Err(StorageError::ResourceLimit)
-    ));
-    assert_invariants(&cache);
+    cache.hits = u64::MAX;
+    assert!(
+        cache
+            .get(Identity([0; IDENTITY_BYTES]), b"key", limits())
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(cache.report(), Err(StorageError::ResourceLimit));
+    assert_eq!(cache.index.len(), lru_order(&cache).len());
     cache.clear();
+    cache.overflowed = false;
     cache.misses = u64::MAX;
     assert!(
         cache
