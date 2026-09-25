@@ -3,6 +3,15 @@
 Updated: 2026-09-23 · Branch: `build/uste-t20` (standalone lane branched from
 `codex/uste-implementation` at `2263dc5`; merged back by the owner after review)
 
+## Latest implementation — DB-R02 research memory records (Decisions 0275–0276)
+
+Decision 0275 accepts `docs/research-memory-records.md` as the `research-memory-v1` contract for
+source, artifact, claim/citation and edge records with provenance, fetch outcome, freshness,
+support kinds and frozen per-namespace budgets; storage never fetches, executes or authorizes.
+Decision 0276 implements its canonical fail-closed codec in `uste-memory` (DB-R02.2) with
+focused verification; the full gate was not rerun for this additive module. DB-R02.3–DB-R02.5
+(reducer, queries, pilot mapping) remain open, as do DB-R01, T-20 and T-19.
+
 ## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
 
 Decision 0271 replaces the BM-01 client harness's `BTreeSet` visit/result tracking with ordinal

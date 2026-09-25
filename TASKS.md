@@ -24,6 +24,13 @@ of the new acceptance criteria. Detailed proof requirements are in the linked am
 | [ ] | DB-R04 | CAP-08,17,21,25,28,32,40 | DB-R02, DB-R03; pinned generic consumer contract | Expose a restricted Rust adapter and conformance fixtures for runtime and coordinator consumers. Verify producer and consumer independently; combined functionality needs an actual authorized integration run. |
 | [ ] | DB-R05 | CAP-35,36,43,45,46,47,48 | Original R1-R4 lifecycle and distribution gates | Retain full database/spatial/physics delivery, clean installation, no-egress and resource qualification, manual redacted diagnostics and MIT OR Apache-2.0 notices. No release claim from the synthetic memory pilot. |
 
+DB-R02 progress: [Decision 0275](docs/decisions/0275-research-memory-record-specification.md)
+accepts the [research memory record specification](docs/research-memory-records.md) and splits the
+package into DB-R02.1 specification, DB-R02.2 codec and golden vectors, DB-R02.3 reducer, budgets
+and reference model, DB-R02.4 bounded authorized queries, and DB-R02.5 pilot mapping fixtures.
+[Decision 0276](docs/decisions/0276-research-memory-record-codec.md) implements DB-R02.2 in
+`uste-memory`. DB-R02.3–DB-R02.5 remain open, so DB-R02 stays unchecked.
+
 Database design draft 1.4 · 2026-09-17
 
 **R0 design readiness is complete; implementation tasks remain open.** This document is not

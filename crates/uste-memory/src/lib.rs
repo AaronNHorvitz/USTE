@@ -7,12 +7,19 @@
 
 mod profile;
 mod query;
+mod research;
 mod state;
 
 pub use profile::{PILOT_PROFILE, PilotProfile, PilotProfileError};
 pub use query::{
     Citation, EventTimeFilter, FactView, KnowledgeAt, MemoryReadError, MemoryReadOutput,
     MemoryReadRequest, SearchResults,
+};
+pub use research::{
+    ArtifactInput, CitationInput, ClaimInput, EdgeInput, EdgeKind, FetchOutcome, Freshness,
+    ProducerIdentity, RESEARCH_HEADER_BYTES, RESEARCH_PROFILE, ResearchCodecError, ResearchProfile,
+    ResearchRecord, RetainedContent, SourceKind, SourceRecordInput, SupportKind,
+    decode_research_record, encode_research_record,
 };
 pub use state::{
     FactInput, FactRecord, FactTerminal, MemoryCodecError, MemoryMutation, MemoryState,
