@@ -5,8 +5,6 @@ pub use disk::{DiskDevelopmentVerification, verify_disk_development_profile};
 pub mod packed;
 pub mod recovery;
 
-use std::collections::BTreeSet;
-
 use uste_crypto::{
     CryptoError, EntropyFailure, EntropySource, KeyAdapter, KeyVault, SecretKeyMaterial,
 };
@@ -306,13 +304,16 @@ pub(crate) fn execute_query_with(
 ) -> Result<OracleOutput, EngineQueryError> {
     let limits = OracleLimits::default();
     let mut visits = 0_usize;
-    let mut relationships = BTreeSet::new();
-    let mut reachable_entities = BTreeSet::new();
-    let mut seen_entities = BTreeSet::from([query.root]);
-    let mut frontier = BTreeSet::from([query.root]);
+    let mut relationships = OrdinalSet::new(materializer.profile().relationships());
+    let mut reachable_entities = OrdinalSet::new(materializer.profile().entities());
+    let mut seen_entities = OrdinalSet::new(materializer.profile().entities());
+    seen_entities.insert(query.root);
+    // The frontier is always ascending and duplicate-free, so reads are issued in exactly the
+    // order an ordered set would have produced.
+    let mut frontier = vec![query.root];
     for _ in 0..query.depth {
-        let mut next = BTreeSet::new();
-        for entity in frontier {
+        let mut next = Vec::new();
+        for entity in frontier.iter().copied() {
             let output = read(&GraphReadRequest::Adjacent {
                 entity: entity_ref(scope(), materializer, entity),
                 direction: direction(query.direction),
@@ -382,21 +383,82 @@ pub(crate) fn execute_query_with(
                 }
                 reachable_entities.insert(neighbor);
                 if seen_entities.insert(neighbor) {
-                    next.insert(neighbor);
+                    next.push(neighbor);
                 }
             }
         }
+        next.sort_unstable();
         frontier = next;
         if frontier.is_empty() {
             break;
         }
     }
-    reachable_entities.remove(&query.root);
+    reachable_entities.remove(query.root);
     Ok(OracleOutput {
         visits,
-        relationships: relationships.into_iter().collect(),
-        reachable_entities: reachable_entities.into_iter().collect(),
+        relationships: relationships.into_sorted_vec(),
+        reachable_entities: reachable_entities.into_sorted_vec(),
     })
+}
+
+/// Fixed-width membership set over fixture ordinals below a known bound. Members are reported
+/// in ascending order, matching the ordered-set iteration the harness previously relied on.
+struct OrdinalSet {
+    words: Vec<u64>,
+    len: usize,
+}
+
+impl OrdinalSet {
+    fn new(bound: u64) -> Self {
+        let words = usize::try_from(bound.div_ceil(64)).expect("fixture bound fits in memory");
+        Self {
+            words: vec![0; words],
+            len: 0,
+        }
+    }
+
+    /// Insert one ordinal below the bound; returns whether it was newly inserted.
+    fn insert(&mut self, ordinal: u64) -> bool {
+        let (word, bit) = Self::locate(ordinal);
+        let mask = 1_u64 << bit;
+        if self.words[word] & mask != 0 {
+            return false;
+        }
+        self.words[word] |= mask;
+        self.len += 1;
+        true
+    }
+
+    fn remove(&mut self, ordinal: u64) {
+        let (word, bit) = Self::locate(ordinal);
+        let mask = 1_u64 << bit;
+        if self.words[word] & mask != 0 {
+            self.words[word] &= !mask;
+            self.len -= 1;
+        }
+    }
+
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    fn locate(ordinal: u64) -> (usize, u32) {
+        let word = usize::try_from(ordinal / 64).expect("ordinal below the fixture bound");
+        (word, (ordinal % 64) as u32)
+    }
+
+    fn into_sorted_vec(self) -> Vec<u64> {
+        let mut output = Vec::with_capacity(self.len);
+        for (index, word) in self.words.iter().enumerate() {
+            let mut bits = *word;
+            while bits != 0 {
+                let bit = bits.trailing_zeros();
+                output.push(index as u64 * 64 + u64::from(bit));
+                bits &= bits - 1;
+            }
+        }
+        output
+    }
 }
 
 fn commit_operations(

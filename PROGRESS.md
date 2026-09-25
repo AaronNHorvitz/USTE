@@ -3,6 +3,24 @@
 Updated: 2026-09-23 · Branch: `build/uste-t20` (standalone lane branched from
 `codex/uste-implementation` at `2263dc5`; merged back by the owner after review)
 
+## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
+
+Decision 0271 replaces the BM-01 client harness's `BTreeSet` visit/result tracking with ordinal
+bitsets while issuing reads in exactly the same order; it removes harness overhead inside the
+measured interval, not engine work. Decision 0273 applies the Decision 0267 hash-index/exact-LRU
+structure to the complete-range cache partition, with a charge helper that reproduces the earlier
+reserved-capacity accounting exactly. Focused checks: packed page cache tests 12/12, storage
+`cache` filter 43/43, strict Clippy, release `engine-check` 20/1000 and `packed-engine-check` 20.
+
+Three observations (Decisions 0272, 0274) kept output digest `aec16fdc…` and the lane semantic
+digest `0334c5cd…`, including identical range accounting. Retained p99 was **2.372 / 65.824 /
+39.905 / 211.094 ms** (D0271) and **2.320 / 59.547 / 40.537 / 208.501** and **2.466 / 60.453 /
+41.401 / 199.612 ms** (D0271 + D0273). These are 20,000-entity development observations in the
+lane only. Verification: every `scripts/check.sh` step passed except the legacy BM-06 process
+test's fixed 30-second child-marker deadline, which fails in this lane on changed and unchanged
+code alike (see Decision 0273). The T-19 draft is `docs/evidence/r1-acceptance-report.md` (not accepted). BM-01
+qualification, BM-02, BM-04 and BM-06 remain open, so T-20 and T-19 stay open.
+
 ## Latest development observations — hash-indexed lookup cache (Decisions 0266–0268)
 
 The standalone lane regenerated the 20,000-entity/200,000-relationship fixture with the pinned
