@@ -38,6 +38,9 @@ DB-R03 progress: [Decision 0280](docs/decisions/0280-research-stale-views-and-li
 fixes stale research read views and adds the authorized durable lifecycle matrix (contradictions,
 correction chains, revocation, cross-scope and per-record denial, stale generations, rebuild across
 restart). Source deletion and purge remain T-34, so DB-R03 stays unchecked.
+DB-R04 hold: its "pinned generic consumer contract" does not exist in this repository and is owned
+by the runtime and coordinator consumers; the adapter and conformance fixtures wait for that pinned
+contract rather than inventing one. DB-R02/DB-R03 reviewer acceptance is also outstanding.
 
 Database design draft 1.4 · 2026-09-17
 
