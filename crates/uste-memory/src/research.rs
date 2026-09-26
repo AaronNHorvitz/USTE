@@ -26,6 +26,7 @@ pub struct ResearchProfile {
     pub maximum_source_versions: usize,
     pub maximum_source_bytes: u64,
     pub maximum_source_bytes_per_version: u64,
+    pub maximum_artifacts: usize,
     pub maximum_claims: usize,
     pub maximum_edges: usize,
     pub maximum_citations_per_claim: usize,
@@ -50,6 +51,7 @@ pub const RESEARCH_PROFILE: ResearchProfile = ResearchProfile {
     maximum_source_versions: 262_144,
     maximum_source_bytes: 4 * 1024 * 1024 * 1024,
     maximum_source_bytes_per_version: 16 * 1024 * 1024,
+    maximum_artifacts: 262_144,
     maximum_claims: 1_048_576,
     maximum_edges: 4_194_304,
     maximum_citations_per_claim: 16,
@@ -980,6 +982,14 @@ impl<'a> Cursor<'a> {
         }))
     }
 }
+
+mod state;
+
+pub use state::{
+    ClaimStatus, RESEARCH_TRANSACTION_HEADER_BYTES, ResearchArtifactEntry, ResearchClaimEntry,
+    ResearchEdgeEntry, ResearchMutation, ResearchSourceEntry, ResearchState, ResearchTransaction,
+    decode_research_transaction, encode_research_transaction,
+};
 
 #[cfg(test)]
 mod tests;

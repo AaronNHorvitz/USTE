@@ -9,8 +9,11 @@ Decision 0275 accepts `docs/research-memory-records.md` as the `research-memory-
 source, artifact, claim/citation and edge records with provenance, fetch outcome, freshness,
 support kinds and frozen per-namespace budgets; storage never fetches, executes or authorizes.
 Decision 0276 implements its canonical fail-closed codec in `uste-memory` (DB-R02.2) with
-focused verification; the full gate was not rerun for this additive module. DB-R02.3–DB-R02.5
-(reducer, queries, pilot mapping) remain open, as do DB-R01, T-20 and T-19.
+focused verification; the full gate was not rerun for this additive module. Decision 0277 adds
+the research transaction codec and bounded `ResearchState` reducer (DB-R02.3), checked against an
+independent reference model and a durable journal reopen test, and adds a frozen artifact-count
+limit the specification lacked. DB-R02.4–DB-R02.5 (queries, pilot mapping) remain open, as do
+DB-R01, T-20 and T-19.
 
 ## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
 

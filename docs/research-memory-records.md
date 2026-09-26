@@ -2,7 +2,8 @@
 
 Accepted specification · 2026-09-25 · Package DB-R02 (CAP-20, CAP-22, CAP-27, CAP-29) ·
 [Decision 0275](decisions/0275-research-memory-record-specification.md); canonical codec only
-([Decision 0276](decisions/0276-research-memory-record-codec.md)); reducer and queries not implemented
+([Decision 0276](decisions/0276-research-memory-record-codec.md)) and reducer
+([Decision 0277](decisions/0277-research-memory-reducer.md)); queries not implemented
 
 This document specifies versioned, scoped records that a consumer uses to retain what it learned
 from web research, documentation packs and repositories, with exact provenance. It extends the
@@ -76,8 +77,8 @@ Numbers are frozen before implementation and may only change by a versioned deci
 | Limit | Value |
 |---|---|
 | sources / source versions | 65,536 / 262,144 |
-| retained source bytes / per version | 4 GiB / 16 MiB |
-| claims / edges | 1,048,576 / 4,194,304 |
+| retained source and artifact bytes / per version | 4 GiB / 16 MiB |
+| artifacts / claims / edges | 262,144 / 1,048,576 / 4,194,304 (artifact limit added by Decision 0277) |
 | citations per claim / edges per record (fan-out) | 16 / 256 |
 | claim field bytes (subject, predicate, value each) | 4 KiB |
 | stored excerpt bytes per citation | 4 KiB |

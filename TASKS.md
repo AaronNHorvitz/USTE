@@ -28,8 +28,9 @@ DB-R02 progress: [Decision 0275](docs/decisions/0275-research-memory-record-spec
 accepts the [research memory record specification](docs/research-memory-records.md) and splits the
 package into DB-R02.1 specification, DB-R02.2 codec and golden vectors, DB-R02.3 reducer, budgets
 and reference model, DB-R02.4 bounded authorized queries, and DB-R02.5 pilot mapping fixtures.
-[Decision 0276](docs/decisions/0276-research-memory-record-codec.md) implements DB-R02.2 in
-`uste-memory`. DB-R02.3–DB-R02.5 remain open, so DB-R02 stays unchecked.
+[Decision 0276](docs/decisions/0276-research-memory-record-codec.md) implements DB-R02.2 and
+[Decision 0277](docs/decisions/0277-research-memory-reducer.md) implements DB-R02.3 in
+`uste-memory`. DB-R02.4 and DB-R02.5 remain open, so DB-R02 stays unchecked.
 
 Database design draft 1.4 · 2026-09-17
 

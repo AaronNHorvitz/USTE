@@ -16,10 +16,13 @@ pub use query::{
     MemoryReadRequest, SearchResults,
 };
 pub use research::{
-    ArtifactInput, CitationInput, ClaimInput, EdgeInput, EdgeKind, FetchOutcome, Freshness,
-    ProducerIdentity, RESEARCH_HEADER_BYTES, RESEARCH_PROFILE, ResearchCodecError, ResearchProfile,
-    ResearchRecord, RetainedContent, SourceKind, SourceRecordInput, SupportKind,
-    decode_research_record, encode_research_record,
+    ArtifactInput, CitationInput, ClaimInput, ClaimStatus, EdgeInput, EdgeKind, FetchOutcome,
+    Freshness, ProducerIdentity, RESEARCH_HEADER_BYTES, RESEARCH_PROFILE,
+    RESEARCH_TRANSACTION_HEADER_BYTES, ResearchArtifactEntry, ResearchClaimEntry,
+    ResearchCodecError, ResearchEdgeEntry, ResearchMutation, ResearchProfile, ResearchRecord,
+    ResearchSourceEntry, ResearchState, ResearchTransaction, RetainedContent, SourceKind,
+    SourceRecordInput, SupportKind, decode_research_record, decode_research_transaction,
+    encode_research_record, encode_research_transaction,
 };
 pub use state::{
     FactInput, FactRecord, FactTerminal, MemoryCodecError, MemoryMutation, MemoryState,
