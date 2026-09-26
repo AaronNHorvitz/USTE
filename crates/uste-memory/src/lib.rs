@@ -18,14 +18,15 @@ pub use query::{
 pub use research::{
     ArtifactInput, CitationInput, CitationView, ClaimInput, ClaimStatus, ClaimView, EdgeInput,
     EdgeKind, EffectiveSupport, FetchOutcome, Freshness, FreshnessState,
-    MAXIMUM_RESEARCH_QUERY_TERM_BYTES, MAXIMUM_RESEARCH_QUERY_TERMS, ProducerIdentity,
-    RESEARCH_HEADER_BYTES, RESEARCH_PROFILE, RESEARCH_TRANSACTION_HEADER_BYTES,
+    MAXIMUM_RESEARCH_QUERY_TERM_BYTES, MAXIMUM_RESEARCH_QUERY_TERMS, PILOT_MAPPING_LICENSE,
+    PILOT_MAPPING_ROUTE, PilotMappedMutation, PilotMapping, PilotMappingContext, PilotMappingError,
+    ProducerIdentity, RESEARCH_HEADER_BYTES, RESEARCH_PROFILE, RESEARCH_TRANSACTION_HEADER_BYTES,
     ResearchArtifactEntry, ResearchClaimEntry, ResearchCodecError, ResearchEdgeEntry,
     ResearchKnowledge, ResearchMutation, ResearchProfile, ResearchReadError, ResearchReadOutput,
     ResearchReadRequest, ResearchReadResults, ResearchRecord, ResearchSourceEntry, ResearchState,
     ResearchTransaction, RetainedContent, SourceKind, SourceRecordInput, SourceVersionView,
     SupportKind, decode_research_record, decode_research_transaction, encode_research_record,
-    encode_research_transaction,
+    encode_research_transaction, map_memory_pilot, pilot_link_edge_id,
 };
 pub use state::{
     FactInput, FactRecord, FactTerminal, MemoryCodecError, MemoryMutation, MemoryState,

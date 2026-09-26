@@ -14,7 +14,9 @@ the research transaction codec and bounded `ResearchState` reducer (DB-R02.3), c
 independent reference model and a durable journal reopen test, and adds a frozen artifact-count
 limit the specification lacked. Decision 0278 adds bounded authorized queries (DB-R02.4) with
 effective support after revocation, freshness at an explicit instant and no hidden counts.
-DB-R02.5 (pilot mapping) remains open, as do DB-R01, T-20 and T-19.
+Decision 0279 adds the read-only pilot-to-research mapping (DB-R02.5) with record-by-record
+equivalence fixtures; it refuses what it cannot state exactly. DB-R02 awaits a full gate and
+review; DB-R01, DB-R03, T-20 and T-19 remain open.
 
 ## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
 

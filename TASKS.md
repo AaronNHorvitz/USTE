@@ -30,8 +30,10 @@ package into DB-R02.1 specification, DB-R02.2 codec and golden vectors, DB-R02.3
 and reference model, DB-R02.4 bounded authorized queries, and DB-R02.5 pilot mapping fixtures.
 [Decision 0276](docs/decisions/0276-research-memory-record-codec.md) implements DB-R02.2 and
 [Decision 0277](docs/decisions/0277-research-memory-reducer.md) implements DB-R02.3 and
-[Decision 0278](docs/decisions/0278-research-memory-queries.md) implements DB-R02.4 in
-`uste-memory`. DB-R02.5 remains open, so DB-R02 stays unchecked.
+[Decision 0278](docs/decisions/0278-research-memory-queries.md) implements DB-R02.4 and
+[Decision 0279](docs/decisions/0279-memory-pilot-to-research-mapping.md) implements DB-R02.5 in
+`uste-memory`, each with focused verification. DB-R02 stays unchecked until a full gate and review
+cover the package; migration of pilot data is not part of it.
 
 Database design draft 1.4 · 2026-09-17
 

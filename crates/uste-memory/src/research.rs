@@ -983,9 +983,14 @@ impl<'a> Cursor<'a> {
     }
 }
 
+mod pilot;
 mod query;
 mod state;
 
+pub use pilot::{
+    PILOT_MAPPING_LICENSE, PILOT_MAPPING_ROUTE, PilotMappedMutation, PilotMapping,
+    PilotMappingContext, PilotMappingError, map_memory_pilot, pilot_link_edge_id,
+};
 pub use query::{
     CitationView, ClaimView, EffectiveSupport, FreshnessState, MAXIMUM_RESEARCH_QUERY_TERM_BYTES,
     MAXIMUM_RESEARCH_QUERY_TERMS, ResearchKnowledge, ResearchReadError, ResearchReadOutput,
