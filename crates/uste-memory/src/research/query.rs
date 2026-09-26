@@ -146,6 +146,8 @@ pub enum ResearchReadOutput {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ResearchReadError {
+    /// The read view predates a newer commit; take a fresh view.
+    StaleView,
     StaleGeneration,
     Rebuilding,
     HistoryUnavailable,
@@ -422,6 +424,9 @@ fn claim_view_bytes(view: &ClaimView) -> usize {
 
 impl ResearchState {
     fn ensure_queryable(&self, generation: u64) -> Result<(), ResearchReadError> {
+        if !self.is_runtime_current() {
+            return Err(ResearchReadError::StaleView);
+        }
         if self.generation() != Some(generation) {
             return Err(ResearchReadError::StaleGeneration);
         }

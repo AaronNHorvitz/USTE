@@ -34,6 +34,10 @@ and reference model, DB-R02.4 bounded authorized queries, and DB-R02.5 pilot map
 [Decision 0279](docs/decisions/0279-memory-pilot-to-research-mapping.md) implements DB-R02.5 in
 `uste-memory`, each with focused verification. DB-R02 stays unchecked until a full gate and review
 cover the package; migration of pilot data is not part of it.
+DB-R03 progress: [Decision 0280](docs/decisions/0280-research-stale-views-and-lifecycle-matrix.md)
+fixes stale research read views and adds the authorized durable lifecycle matrix (contradictions,
+correction chains, revocation, cross-scope and per-record denial, stale generations, rebuild across
+restart). Source deletion and purge remain T-34, so DB-R03 stays unchecked.
 
 Database design draft 1.4 · 2026-09-17
 

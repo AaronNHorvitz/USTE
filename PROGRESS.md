@@ -15,8 +15,11 @@ independent reference model and a durable journal reopen test, and adds a frozen
 limit the specification lacked. Decision 0278 adds bounded authorized queries (DB-R02.4) with
 effective support after revocation, freshness at an explicit instant and no hidden counts.
 Decision 0279 adds the read-only pilot-to-research mapping (DB-R02.5) with record-by-record
-equivalence fixtures; it refuses what it cannot state exactly. DB-R02 awaits a full gate and
-review; DB-R01, DB-R03, T-20 and T-19 remain open.
+equivalence fixtures; it refuses what it cannot state exactly. Decision 0280 fixes a Decision
+0278 defect (read views taken before a newer commit, including a revocation, kept answering) with
+the pilot's shared runtime revision and adds the DB-R03 authorized durable lifecycle matrix. The
+full gate started on `7c607e3` was interrupted and has no result; reconciled stages are recorded in
+Decision 0280. DB-R02 and DB-R03 await review; DB-R01, T-20 and T-19 remain open.
 
 ## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
 

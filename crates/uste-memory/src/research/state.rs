@@ -5,7 +5,13 @@
 //! budget before a change becomes visible. It never fetches, resolves, executes or authorizes
 //! anything a record describes.
 
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use sha2::{Digest, Sha256};
 use uste_policy::{Action, AuthorizationRequirement, AuthorizationRequirements, Target};
@@ -238,7 +244,11 @@ pub struct ResearchEdgeEntry {
 
 /// Bounded in-memory research reducer for one namespace. It is a rebuildable derived index,
 /// never a permission or the sole source of truth.
-#[derive(Clone, Debug, Eq, PartialEq)]
+///
+/// Snapshots share a process-local runtime revision with the live state, so a read through a
+/// snapshot taken before a newer commit (for example a revocation) fails as stale instead of
+/// returning superseded authority. Equality compares logical state only.
+#[derive(Clone, Debug)]
 pub struct ResearchState {
     scope: NamespaceRef,
     generation: Option<u64>,
@@ -252,11 +262,32 @@ pub struct ResearchState {
     claims: BTreeMap<RecordRef, ResearchClaimEntry>,
     edges: BTreeMap<RecordRef, ResearchEdgeEntry>,
     fan_out: BTreeMap<RecordRef, usize>,
+    /// Latest published revision, shared by every snapshot; zero before any commit.
+    runtime_revision: Arc<AtomicU64>,
 }
+
+impl PartialEq for ResearchState {
+    fn eq(&self, other: &Self) -> bool {
+        self.scope == other.scope
+            && self.generation == other.generation
+            && self.ready == other.ready
+            && self.retained_from == other.retained_from
+            && self.current_revision == other.current_revision
+            && self.sources == other.sources
+            && self.distinct_sources == other.distinct_sources
+            && self.retained_bytes == other.retained_bytes
+            && self.artifacts == other.artifacts
+            && self.claims == other.claims
+            && self.edges == other.edges
+            && self.fan_out == other.fan_out
+    }
+}
+
+impl Eq for ResearchState {}
 
 impl ResearchState {
     #[must_use]
-    pub const fn new(scope: NamespaceRef) -> Self {
+    pub fn new(scope: NamespaceRef) -> Self {
         Self {
             scope,
             generation: None,
@@ -270,7 +301,14 @@ impl ResearchState {
             claims: BTreeMap::new(),
             edges: BTreeMap::new(),
             fan_out: BTreeMap::new(),
+            runtime_revision: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Whether this value (typically a snapshot) still reflects the latest published revision.
+    pub(crate) fn is_runtime_current(&self) -> bool {
+        self.runtime_revision.load(Ordering::Acquire)
+            == self.current_revision.map_or(0, CommitRevision::get)
     }
 
     #[must_use]
@@ -439,8 +477,9 @@ impl ResearchState {
                 {
                     return Err(ApplyError::Conflict);
                 }
-                let scope = self.scope;
-                *self = Self::new(scope);
+                let runtime_revision = Arc::clone(&self.runtime_revision);
+                *self = Self::new(self.scope);
+                self.runtime_revision = runtime_revision;
                 self.generation = Some(next_generation);
                 self.retained_from = Some(revision);
             }
@@ -723,6 +762,10 @@ impl TransactionState for ResearchState {
 
     fn publish(&mut self, prepared: Self::Prepared) {
         *self = prepared;
+        self.runtime_revision.store(
+            self.current_revision.map_or(0, CommitRevision::get),
+            Ordering::Release,
+        );
     }
 
     fn snapshot(&self) -> Self::Snapshot {
