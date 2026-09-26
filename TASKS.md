@@ -40,9 +40,11 @@ correction chains, revocation, cross-scope and per-record denial, stale generati
 restart). Source deletion and purge remain T-34, so DB-R03 stays unchecked.
 DB-R04 dependency clarification: [Decision 0281](docs/decisions/0281-producer-owned-memory-consumer-contract-delegation.md)
 records the owner's delegation of the producer-owned contract design to USTE. The contract,
-producer adapter and synthetic conformance fixtures are dependency-ready; consumer review,
-consumer implementations and an authorized integration run remain open, so DB-R04 stays
-unchecked. DB-R02/DB-R03 reviewer acceptance is also outstanding.
+producer adapter and synthetic conformance fixtures are dependency-ready.
+[Decision 0282](docs/decisions/0282-memory-consumer-contract-1-0.md) pins the candidate
+[`uste-memory-consumer` 1.0 contract](docs/memory-consumer-contract.md) (fixture digest
+`b145b45e…ef034`) and its producer passes all 34 conformance steps; consumer review, consumer
+implementations and an authorized integration run remain open, so DB-R04 stays unchecked. DB-R02/DB-R03 reviewer acceptance is also outstanding.
 
 Database design draft 1.4 · 2026-09-17
 

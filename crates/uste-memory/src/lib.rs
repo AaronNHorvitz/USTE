@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod contract;
 mod profile;
 mod query;
 mod research;

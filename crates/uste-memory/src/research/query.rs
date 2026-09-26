@@ -45,6 +45,13 @@ pub enum ResearchReadRequest {
         evaluated_at: UtcInstant,
         maximum_results: usize,
     },
+    /// Confirm one exact source version in the current generation. Unlike other reads this is
+    /// served while the generation is rebuilding, because it only confirms what a write stored.
+    SourceVersion {
+        authority_generation: u64,
+        id: SourceVersionId,
+        evaluated_at: UtcInstant,
+    },
     /// Edges leaving one record, optionally of one kind, in edge-identity order.
     EdgesFrom {
         authority_generation: u64,
@@ -116,10 +123,17 @@ pub struct ClaimView {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SourceVersionView {
     pub id: SourceVersionId,
+    pub kind: super::SourceKind,
     pub locator_text: String,
     pub version_label: String,
     pub retrieved_at: UtcInstant,
+    pub run_identity: [u8; 16],
+    pub route_label: String,
     pub outcome: FetchOutcome,
+    pub license_label: String,
+    pub redistributable: bool,
+    pub freshness_policy: Freshness,
+    pub media_type: Option<String>,
     pub retained_bytes: Option<u64>,
     pub content_digest: Option<[u8; 32]>,
     pub recorded_revision: CommitRevision,
@@ -139,6 +153,7 @@ pub struct ResearchReadResults<T> {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResearchReadOutput {
     Claim(ClaimView),
+    SourceVersion(SourceVersionView),
     SourceVersions(ResearchReadResults<SourceVersionView>),
     Edges(ResearchReadResults<EdgeInput>),
     Search(ResearchReadResults<ClaimView>),
@@ -176,6 +191,9 @@ impl AuthorizedReadState for ResearchState {
                 record(Action::ReadRecord, *source),
                 record(Action::ReadHistory, *source),
             ],
+            ResearchReadRequest::SourceVersion { id, .. } => {
+                vec![record(Action::ReadRecord, id.source)]
+            }
             ResearchReadRequest::EdgesFrom { from, .. } => vec![
                 record(Action::ReadRecord, *from),
                 record(Action::ExpandGraph, *from),
@@ -254,6 +272,31 @@ impl AuthorizedReadState for ResearchState {
                     visited_candidates: visited,
                     truncated,
                 }))
+            }
+            ResearchReadRequest::SourceVersion {
+                authority_generation,
+                id,
+                evaluated_at,
+            } => {
+                if !snapshot.is_runtime_current() {
+                    return Err(ResearchReadError::StaleView);
+                }
+                if snapshot.generation() != Some(*authority_generation) {
+                    return Err(ResearchReadError::StaleGeneration);
+                }
+                let revision = snapshot
+                    .current_revision()
+                    .ok_or(ResearchReadError::NotFound)?;
+                let entry = snapshot
+                    .sources()
+                    .get(id)
+                    .ok_or(ResearchReadError::NotFound)?;
+                Ok(ResearchReadOutput::SourceVersion(source_view(
+                    *id,
+                    entry,
+                    revision,
+                    *evaluated_at,
+                )))
             }
             ResearchReadRequest::EdgesFrom {
                 authority_generation,
@@ -377,10 +420,20 @@ fn source_view(
     let input = &entry.input;
     SourceVersionView {
         id,
+        kind: input.kind,
         locator_text: input.locator_text.clone(),
         version_label: input.version_label.clone(),
         retrieved_at: input.retrieved_at,
+        run_identity: input.run_identity,
+        route_label: input.route_label.clone(),
         outcome: input.outcome.clone(),
+        license_label: input.license_label.clone(),
+        redistributable: input.redistributable,
+        freshness_policy: input.freshness,
+        media_type: input
+            .content
+            .as_ref()
+            .map(|content| content.media_type.clone()),
         retained_bytes: input
             .content
             .as_ref()

@@ -3,6 +3,15 @@
 Updated: 2026-09-23 · Branch: `build/uste-t20` (standalone lane branched from
 `codex/uste-implementation` at `2263dc5`; merged back by the owner after review)
 
+## Latest implementation — candidate memory consumer contract (Decisions 0281–0282)
+
+Decision 0281 records the owner's delegation of the producer-owned contract design. Decision 0282
+pins `uste-memory-consumer` 1.0 (`docs/memory-consumer-contract.md`): a synchronous Rust trait in
+`uste_memory::contract`, a producer over the authorized durable coordinator in
+`uste_memory_adapter::research`, and a 34-step synthetic conformance fixture pinned at
+`b145b45e…ef034`. The producer passes every step and survives restart and reopen. Consumer review
+and integration are not USTE's to perform; DB-R04 stays unchecked.
+
 ## Latest implementation — DB-R02 research memory records (Decisions 0275–0276)
 
 Decision 0275 accepts `docs/research-memory-records.md` as the `research-memory-v1` contract for

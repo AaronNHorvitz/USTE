@@ -36,6 +36,8 @@ use uste_txn::{
 };
 use uste_types::{IdempotencyKey, NamespaceRef, TransactionId, UtcInstant};
 
+pub mod research;
+
 const CHECKPOINT_SCHEMA_VERSION: u16 = 1;
 const RETENTION_DAYS: u16 = 30;
 const SOURCE_READ_CHUNK_BYTES: usize = 64 * 1024;

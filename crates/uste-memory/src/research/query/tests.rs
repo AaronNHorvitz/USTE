@@ -605,3 +605,60 @@ fn read_requirements_authorize_the_requested_record_or_namespace() {
         ]
     );
 }
+
+#[test]
+fn source_version_confirmation_is_served_while_rebuilding_but_not_across_generations() {
+    let mut state = ResearchState::new(scope());
+    for (index, mutation) in [
+        ResearchMutation::BeginRebuild { next_generation: 1 },
+        put(ResearchRecord::Source(source(10, 1, Freshness::Pinned))),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let inventory = match &mutation {
+            ResearchMutation::Put(record) => match &**record {
+                ResearchRecord::Source(source) => source
+                    .content
+                    .as_ref()
+                    .map(|content| BlobInventory::new(scope(), [content.blob]).unwrap()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let bytes = encode_research_transaction(&ResearchTransaction {
+            scope: scope(),
+            generation: 1,
+            mutation,
+        })
+        .unwrap();
+        let revision = CommitRevision::new(u64::try_from(index).unwrap() + 1).unwrap();
+        let prepared = state.prepare(&bytes, inventory.as_ref(), revision).unwrap();
+        state.publish(prepared);
+    }
+    assert!(!state.is_ready());
+    let confirm = |generation, version| {
+        ResearchState::read_authorized(
+            &state,
+            &ResearchReadRequest::SourceVersion {
+                authority_generation: generation,
+                id: SourceVersionId {
+                    source: id(10),
+                    version,
+                },
+                evaluated_at: at(RETRIEVED),
+            },
+            &mut allow_all(),
+        )
+    };
+    let ResearchReadOutput::SourceVersion(view) = confirm(1, 1).unwrap() else {
+        panic!("expected a source version");
+    };
+    assert_eq!(
+        view.retained_bytes,
+        Some(u64::try_from(PAGE.len()).unwrap())
+    );
+    assert_eq!(view.media_type.as_deref(), Some("text/plain"));
+    assert_eq!(confirm(2, 1), Err(ResearchReadError::StaleGeneration));
+    assert_eq!(confirm(1, 2), Err(ResearchReadError::NotFound));
+}
