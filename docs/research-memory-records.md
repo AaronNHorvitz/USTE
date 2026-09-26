@@ -2,8 +2,9 @@
 
 Accepted specification · 2026-09-25 · Package DB-R02 (CAP-20, CAP-22, CAP-27, CAP-29) ·
 [Decision 0275](decisions/0275-research-memory-record-specification.md); canonical codec only
-([Decision 0276](decisions/0276-research-memory-record-codec.md)) and reducer
-([Decision 0277](decisions/0277-research-memory-reducer.md)); queries not implemented
+([Decision 0276](decisions/0276-research-memory-record-codec.md)), reducer
+([Decision 0277](decisions/0277-research-memory-reducer.md)) and queries
+([Decision 0278](decisions/0278-research-memory-queries.md)); pilot mapping not implemented
 
 This document specifies versioned, scoped records that a consumer uses to retain what it learned
 from web research, documentation packs and repositories, with exact provenance. It extends the

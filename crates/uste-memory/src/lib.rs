@@ -16,13 +16,16 @@ pub use query::{
     MemoryReadRequest, SearchResults,
 };
 pub use research::{
-    ArtifactInput, CitationInput, ClaimInput, ClaimStatus, EdgeInput, EdgeKind, FetchOutcome,
-    Freshness, ProducerIdentity, RESEARCH_HEADER_BYTES, RESEARCH_PROFILE,
-    RESEARCH_TRANSACTION_HEADER_BYTES, ResearchArtifactEntry, ResearchClaimEntry,
-    ResearchCodecError, ResearchEdgeEntry, ResearchMutation, ResearchProfile, ResearchRecord,
-    ResearchSourceEntry, ResearchState, ResearchTransaction, RetainedContent, SourceKind,
-    SourceRecordInput, SupportKind, decode_research_record, decode_research_transaction,
-    encode_research_record, encode_research_transaction,
+    ArtifactInput, CitationInput, CitationView, ClaimInput, ClaimStatus, ClaimView, EdgeInput,
+    EdgeKind, EffectiveSupport, FetchOutcome, Freshness, FreshnessState,
+    MAXIMUM_RESEARCH_QUERY_TERM_BYTES, MAXIMUM_RESEARCH_QUERY_TERMS, ProducerIdentity,
+    RESEARCH_HEADER_BYTES, RESEARCH_PROFILE, RESEARCH_TRANSACTION_HEADER_BYTES,
+    ResearchArtifactEntry, ResearchClaimEntry, ResearchCodecError, ResearchEdgeEntry,
+    ResearchKnowledge, ResearchMutation, ResearchProfile, ResearchReadError, ResearchReadOutput,
+    ResearchReadRequest, ResearchReadResults, ResearchRecord, ResearchSourceEntry, ResearchState,
+    ResearchTransaction, RetainedContent, SourceKind, SourceRecordInput, SourceVersionView,
+    SupportKind, decode_research_record, decode_research_transaction, encode_research_record,
+    encode_research_transaction,
 };
 pub use state::{
     FactInput, FactRecord, FactTerminal, MemoryCodecError, MemoryMutation, MemoryState,

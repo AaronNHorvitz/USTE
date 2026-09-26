@@ -983,8 +983,14 @@ impl<'a> Cursor<'a> {
     }
 }
 
+mod query;
 mod state;
 
+pub use query::{
+    CitationView, ClaimView, EffectiveSupport, FreshnessState, MAXIMUM_RESEARCH_QUERY_TERM_BYTES,
+    MAXIMUM_RESEARCH_QUERY_TERMS, ResearchKnowledge, ResearchReadError, ResearchReadOutput,
+    ResearchReadRequest, ResearchReadResults, SourceVersionView,
+};
 pub use state::{
     ClaimStatus, RESEARCH_TRANSACTION_HEADER_BYTES, ResearchArtifactEntry, ResearchClaimEntry,
     ResearchEdgeEntry, ResearchMutation, ResearchSourceEntry, ResearchState, ResearchTransaction,

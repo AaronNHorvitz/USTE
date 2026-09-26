@@ -12,8 +12,9 @@ Decision 0276 implements its canonical fail-closed codec in `uste-memory` (DB-R0
 focused verification; the full gate was not rerun for this additive module. Decision 0277 adds
 the research transaction codec and bounded `ResearchState` reducer (DB-R02.3), checked against an
 independent reference model and a durable journal reopen test, and adds a frozen artifact-count
-limit the specification lacked. DB-R02.4–DB-R02.5 (queries, pilot mapping) remain open, as do
-DB-R01, T-20 and T-19.
+limit the specification lacked. Decision 0278 adds bounded authorized queries (DB-R02.4) with
+effective support after revocation, freshness at an explicit instant and no hidden counts.
+DB-R02.5 (pilot mapping) remains open, as do DB-R01, T-20 and T-19.
 
 ## Latest development observations — harness bitsets and range cache (Decisions 0271–0274)
 
