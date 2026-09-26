@@ -38,9 +38,11 @@ DB-R03 progress: [Decision 0280](docs/decisions/0280-research-stale-views-and-li
 fixes stale research read views and adds the authorized durable lifecycle matrix (contradictions,
 correction chains, revocation, cross-scope and per-record denial, stale generations, rebuild across
 restart). Source deletion and purge remain T-34, so DB-R03 stays unchecked.
-DB-R04 hold: its "pinned generic consumer contract" does not exist in this repository and is owned
-by the runtime and coordinator consumers; the adapter and conformance fixtures wait for that pinned
-contract rather than inventing one. DB-R02/DB-R03 reviewer acceptance is also outstanding.
+DB-R04 dependency clarification: [Decision 0281](docs/decisions/0281-producer-owned-memory-consumer-contract-delegation.md)
+records the owner's delegation of the producer-owned contract design to USTE. The contract,
+producer adapter and synthetic conformance fixtures are dependency-ready; consumer review,
+consumer implementations and an authorized integration run remain open, so DB-R04 stays
+unchecked. DB-R02/DB-R03 reviewer acceptance is also outstanding.
 
 Database design draft 1.4 · 2026-09-17
 
