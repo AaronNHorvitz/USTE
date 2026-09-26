@@ -76,7 +76,7 @@ R1 requires BM-01, BM-02, BM-04 and BM-06 to genuinely pass. None does today.
 | benchmark | target | status | blocker |
 |---|---|---|---|
 | BM-01 | 1-hop ≤ 20 ms, 4-hop ≤ 250 ms p99 at 100k/1m, five samples | development pass at 20k in lane only | exact sampler needs the 24 GiB reserved host; the native packed engine refuses profiles above 20,000 entities (`USTE_BM01_DISK_DEVELOPMENT_LIMIT`) until a decision raises the ceiling with scale evidence |
-| BM-02 | single durable commit p99 ≤ 50 ms, ≥ 2,000 events/s in batches | **unmeasured**; no runner exists | needs a BM-02 workload runner and reserved-host run |
+| BM-02 | single durable commit p99 ≤ 50 ms, ≥ 2,000 events/s in batches | **unqualified**; development runner (Decision 0285) observed 1.5–1.8 ms single-commit p99 and about 143,000 events/s wall-clock in 1,000-event batches (Decision 0286, single writer, same-thread reads) | the owner must pin the qualifying manifest (counts, reader concurrency, duration; only the seed and budget are pinned), then a reserved-host run with concurrent readers and queue/backpressure reporting |
 | BM-04 | ≥ 250 MiB/s streaming ingest, peak RSS ≤ 1 GiB above cache | **failed**: 95.923 MiB/s at 267,636 KiB peak RSS (T-15, Decision 0017 evidence) | throughput work on the encrypted chunk pipeline; target may not be lowered without a versioned decision |
 | BM-06 | 10,000,000 events recovered from a checkpoint ≤ 120 s | **unmeasured**; fixture pinned (`bm06-materialization-v1`), native development recovery controls pass at ≤ 8,192 records | exact-size native construction and 30 reserved-host recovery trials; packed native admission capped at 8,192 records |
 
@@ -111,8 +111,9 @@ BM-06: after the same kind of admission decision for records above 8,192, run
 `bm06-manifest`, `bm06-packed-linux-create --records 10000000`, then the 30 reserved-host
 `bm06-packed-linux-recover-checkpoint` trials with the fault/control scenarios from Decision 0114.
 
-BM-02 and BM-04 have no qualifying commands yet; BM-02 needs a runner and BM-04 needs pipeline
-work before a rerun of the T-15 12 GiB probe.
+BM-02 has a development runner (`linux-bm02-development`, Decision 0285) but no qualifying command
+until its manifest is pinned. BM-04 needs pipeline work (Decision 0283) before a rerun of the T-15
+12 GiB probe.
 
 ## 5. Runnable kernel instructions
 

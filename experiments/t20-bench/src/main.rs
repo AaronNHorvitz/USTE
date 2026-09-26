@@ -16,6 +16,51 @@ fn run() -> Result<(), String> {
         print_usage();
         return Ok(());
     }
+    if command == "linux-bm02-development" {
+        let mut root = None;
+        let mut password = None;
+        let mut counts = [None; 3];
+        while let Some(flag) = arguments.next() {
+            let value = arguments.next().ok_or("BM-02 flag requires a value")?;
+            let slot = match flag.to_str() {
+                Some("--root") if root.is_none() => {
+                    root = Some(PathBuf::from(value));
+                    continue;
+                }
+                Some("--password-file") if password.is_none() => {
+                    password = Some(PathBuf::from(value));
+                    continue;
+                }
+                Some("--single") => 0,
+                Some("--batches") => 1,
+                Some("--batch-events") => 2,
+                _ => return Err("unsupported or duplicate BM-02 flag".into()),
+            };
+            if counts[slot].is_some() {
+                return Err("unsupported or duplicate BM-02 flag".into());
+            }
+            counts[slot] = Some(
+                value
+                    .into_string()
+                    .map_err(|_| "BM-02 count must be UTF-8")?
+                    .parse::<u32>()
+                    .map_err(|_| "BM-02 count must be unsigned")?,
+            );
+        }
+        let plan = uste_t20_bench::linux_runner::bm02::Bm02Plan::new(
+            counts[0].ok_or("BM-02 requires --single")?,
+            counts[1].ok_or("BM-02 requires --batches")?,
+            counts[2].ok_or("BM-02 requires --batch-events")?,
+        )?;
+        let report = uste_t20_bench::linux_runner::bm02::development(
+            &root.ok_or("BM-02 requires --root")?,
+            &password.ok_or("BM-02 requires --password-file")?,
+            plan,
+        )
+        .map_err(|error| error.code().to_owned())?;
+        println!("{report}");
+        return Ok(());
+    }
     let packed_history = command.starts_with("bm06-packed-linux-");
     if let Some(phase) = command
         .strip_prefix("bm06-linux-")
@@ -620,6 +665,7 @@ fn print_usage() {
          uste-t20-bench bm06-packed-linux-create-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-packed-linux-tail-prefix-crash-probe --root ROOT --password-file PASSWORD --records COUNT --pause-after-revision REVISION (owned-child test control)\n\
          uste-t20-bench bm06-packed-linux-<create-prefix|resume-prefix> --root ROOT --password-file PASSWORD --records COUNT --through-revision REVISION (complete-generation construction step)\n\
+         uste-t20-bench linux-bm02-development --root ROOT --password-file PASSWORD --single COUNT --batches COUNT --batch-events COUNT (fresh root; at most 2000 single commits and 64 batches; nonqualifying)\n\
          uste-t20-bench linux-packed-<create|open|rebuild|resume|query> --root ROOT --password-file PASSWORD --entities COUNT [--oracle-file ORACLE] (nonqualifying)\n\
          uste-t20-bench linux-packed-lookup-query --root ROOT --password-file PASSWORD --entities COUNT --oracle-file ORACLE (nonqualifying; 48 MiB pages + 16 MiB positive lookups)\n\
          uste-t20-bench linux-packed-range-query --root ROOT --password-file PASSWORD --entities COUNT --oracle-file ORACLE (nonqualifying; 32 MiB pages + 16 MiB positive lookups + 16 MiB ranges)\n\

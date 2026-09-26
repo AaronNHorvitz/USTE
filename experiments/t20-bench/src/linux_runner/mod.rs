@@ -3,6 +3,7 @@
 //! This is qualification-candidate machinery, not a self-certifying benchmark. It intentionally
 //! emits content-free reports and keeps filesystem paths and recovery metadata out of errors.
 
+pub mod bm02;
 mod credential;
 pub mod disk;
 pub mod packed;
